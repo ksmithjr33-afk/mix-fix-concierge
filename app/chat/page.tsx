@@ -57,7 +57,7 @@ function ChatContent() {
         if (eventDate) parts.push(`Event date: ${eventDate}`);
         if (packageType) parts.push(`Package: ${packageType}`);
         if (guestCount) parts.push(`Guest count: ${guestCount}`);
-        if (eventName) parts.push(`Event: ${eventName}`);
+        if (eventName) parts.push(`Event type: ${eventName}`);
         if (hoursBooked) parts.push(`Hours of bar service booked: ${hoursBooked}`);
 
         const contextMsg: Message = {

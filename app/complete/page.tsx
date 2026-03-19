@@ -16,14 +16,17 @@ interface SignatureDrink {
 interface EventData {
   client_name: string;
   email: string;
+  event_type: string;
   event_name: string;
   event_date: string;
+  venue_type: string;
   bar_service_start: string;
   bar_service_end: string;
   event_address: string;
   indoor_outdoor: string;
   bar_on_site: string;
   bar_details?: string;
+  parking_info: string;
   guest_count: number;
   age_range: string;
   drinking_pace: string;
@@ -42,6 +45,7 @@ interface EventData {
   extra_bottles: string;
   beer: boolean;
   wine: boolean;
+  beer_and_wine_details: string | null;
   special_requests: string;
 }
 
@@ -151,8 +155,10 @@ export default function CompletePage() {
           <dl>
             <DetailRow label="Client" value={data.client_name} />
             <DetailRow label="Email" value={data.email} />
-            <DetailRow label="Event" value={data.event_name} />
+            <DetailRow label="Event Type" value={data.event_type} />
+            <DetailRow label="Event Name" value={data.event_name} />
             <DetailRow label="Date" value={data.event_date} />
+            <DetailRow label="Venue Type" value={data.venue_type} />
             <DetailRow
               label="Bar Service"
               value={`${data.bar_service_start} to ${data.bar_service_end}`}
@@ -163,6 +169,7 @@ export default function CompletePage() {
             {data.bar_details && (
               <DetailRow label="Bar Details" value={data.bar_details} />
             )}
+            <DetailRow label="Parking Info" value={data.parking_info} />
             <DetailRow
               label="Guest Count"
               value={String(data.guest_count)}
@@ -170,6 +177,9 @@ export default function CompletePage() {
             <DetailRow label="Age Range" value={data.age_range} />
             <DetailRow label="Drinking Pace" value={data.drinking_pace} />
             <DetailRow label="Package" value={data.package} />
+            {data.beer_and_wine_details && (
+              <DetailRow label="Beer & Wine Details" value={data.beer_and_wine_details} />
+            )}
           </dl>
         </section>
 
