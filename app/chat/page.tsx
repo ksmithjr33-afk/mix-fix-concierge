@@ -155,6 +155,28 @@ function ChatContent() {
             JSON.stringify(eventData)
           );
 
+          // Build conversation transcript from all messages including final response
+          const allMessages = [
+            ...hiddenPrefixRef.current,
+            ...currentMessages,
+            { role: "assistant" as const, content: closingMessage },
+          ];
+          const transcript = allMessages
+            .map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`)
+            .join("\n\n");
+
+          // Save event data to Supabase
+          fetch("/api/save-event", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              eventData,
+              shoppingList: null,
+              shoppingListText: null,
+              conversationTranscript: transcript,
+            }),
+          }).catch((err) => console.error("Failed to save event to Supabase:", err));
+
           // Brief delay so user can read the closing message
           setTimeout(() => {
             router.push("/complete");
