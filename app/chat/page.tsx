@@ -48,8 +48,9 @@ function ChatContent() {
       const packageType = searchParams.get("package_type");
       const guestCount = searchParams.get("guest_count");
       const eventName = searchParams.get("event_name");
+      const hoursBooked = searchParams.get("hours_booked");
 
-      if (name || email || eventDate || packageType || guestCount || eventName) {
+      if (name || email || eventDate || packageType || guestCount || eventName || hoursBooked) {
         const parts: string[] = [];
         if (name) parts.push(`Client name: ${name}`);
         if (email) parts.push(`Email: ${email}`);
@@ -57,6 +58,7 @@ function ChatContent() {
         if (packageType) parts.push(`Package: ${packageType}`);
         if (guestCount) parts.push(`Guest count: ${guestCount}`);
         if (eventName) parts.push(`Event: ${eventName}`);
+        if (hoursBooked) parts.push(`Hours of bar service booked: ${hoursBooked}`);
 
         const contextMsg: Message = {
           role: "user",
