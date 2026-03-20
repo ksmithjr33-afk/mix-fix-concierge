@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
+import { generateShoppingList, formatShoppingList } from "@/lib/shopping-list";
 
 export async function POST(request: Request) {
   try {
-    const { eventData, shoppingList, shoppingListText, conversationTranscript } =
+    const { eventData, conversationTranscript } =
       await request.json();
 
     if (!eventData) {
@@ -13,11 +14,14 @@ export async function POST(request: Request) {
       );
     }
 
+    const shoppingListItems = generateShoppingList(eventData);
+    const shoppingListText = formatShoppingList(shoppingListItems);
+
     const { data, error } = await supabase
       .from("events")
       .insert({
         ...eventData,
-        shopping_list: shoppingList || null,
+        shopping_list: shoppingListItems.length > 0 ? shoppingListItems : null,
         shopping_list_text: shoppingListText || null,
         conversation_transcript: conversationTranscript || null,
         status: "new",

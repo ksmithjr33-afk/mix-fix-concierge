@@ -1,7 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import Link from "next/link";
+import {
+  generateShoppingList,
+  type ShoppingListItem,
+} from "@/lib/shopping-list";
 
 interface SignatureDrink {
   name: string;
@@ -85,6 +89,21 @@ const timelineSteps = [
 
 export default function CompletePage() {
   const [data, setData] = useState<EventData | null>(null);
+
+  const shoppingListItems = useMemo(() => {
+    if (!data) return [];
+    return generateShoppingList(data);
+  }, [data]);
+
+  const groupedShoppingList = useMemo(() => {
+    const grouped = new Map<string, ShoppingListItem[]>();
+    for (const item of shoppingListItems) {
+      const list = grouped.get(item.category) ?? [];
+      list.push(item);
+      grouped.set(item.category, list);
+    }
+    return grouped;
+  }, [shoppingListItems]);
 
   useEffect(() => {
     const stored = localStorage.getItem("mixfix_event_data");
@@ -303,6 +322,46 @@ export default function CompletePage() {
                 <span className="text-[#A39585]">Garnish: </span>
                 <span className="text-[#2C2420]">{data.mocktail_garnish}</span>
               </div>
+            </div>
+          </section>
+        )}
+
+        {/* Shopping List */}
+        {shoppingListItems.length > 0 && (
+          <section className="bg-[#F5F0EB] rounded-2xl border border-[#DDD5CC] p-5 sm:p-6">
+            <h3 className="font-heading text-lg font-bold text-[#2C2420] mb-4">
+              Your Shopping List
+            </h3>
+            <div className="space-y-5">
+              {Array.from(groupedShoppingList).map(([category, items]) => (
+                <div key={category}>
+                  <h4 className="text-xs text-[#A39585] uppercase tracking-wide mb-2">
+                    {category}
+                  </h4>
+                  <ul className="space-y-2">
+                    {items.map((item, i) => (
+                      <li
+                        key={i}
+                        className="flex items-start justify-between gap-3 py-2 border-b border-[#DDD5CC] last:border-0"
+                      >
+                        <div>
+                          <span className="text-[15px] text-[#2C2420]">
+                            {item.item}
+                          </span>
+                          {item.notes && (
+                            <p className="text-xs text-[#A39585] mt-0.5">
+                              {item.notes}
+                            </p>
+                          )}
+                        </div>
+                        <span className="text-sm text-[#B5845A] font-medium whitespace-nowrap">
+                          {item.quantity}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
             </div>
           </section>
         )}

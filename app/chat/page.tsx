@@ -209,8 +209,6 @@ function ChatContent() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               eventData,
-              shoppingList: null,
-              shoppingListText: null,
               conversationTranscript: transcript,
             }),
           }).catch((err) => console.error("Failed to save event to Supabase:", err));
