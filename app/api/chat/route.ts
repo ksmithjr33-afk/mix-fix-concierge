@@ -8,7 +8,7 @@ export async function POST(request: Request) {
 
   const stream = anthropic.messages.stream({
     model: "claude-sonnet-4-20250514",
-    max_tokens: 2048,
+    max_tokens: 4096,
     system: SYSTEM_PROMPT,
     messages: messages.map((m: { role: string; content: string }) => ({
       role: m.role as "user" | "assistant",
