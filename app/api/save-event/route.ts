@@ -14,8 +14,14 @@ export async function POST(request: Request) {
       );
     }
 
-    const shoppingListItems = generateShoppingList(eventData);
-    const shoppingListText = formatShoppingList(shoppingListItems);
+    let shoppingListItems: ReturnType<typeof generateShoppingList> = [];
+    let shoppingListText = "";
+    try {
+      shoppingListItems = generateShoppingList(eventData);
+      shoppingListText = formatShoppingList(shoppingListItems);
+    } catch (e) {
+      console.error("Shopping list generation failed:", e);
+    }
 
     const { data, error } = await supabase
       .from("events")

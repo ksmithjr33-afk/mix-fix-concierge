@@ -49,6 +49,13 @@ interface EventData {
   special_requests?: string;
 }
 
+/** Safely coerce a value that should be an array but might be a string or other type */
+function toArray(val: unknown): string[] {
+  if (Array.isArray(val)) return val;
+  if (typeof val === "string" && val.trim()) return val.split(",").map((s) => s.trim());
+  return [];
+}
+
 function DetailRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="py-3 border-b border-[#DDD5CC] last:border-0">
@@ -93,7 +100,9 @@ export default function CompletePage() {
         guest_count: data.guest_count ?? 50,
         drinking_pace: data.drinking_pace ?? "moderate",
         package: data.package ?? "",
-        signature_drinks: Array.isArray(data.signature_drinks) ? data.signature_drinks : [],
+        signature_drinks: Array.isArray(data.signature_drinks)
+          ? data.signature_drinks.map((d) => ({ ...d, ingredients: toArray(d.ingredients) }))
+          : [],
         beer: data.beer ?? false,
         wine: data.wine ?? false,
         extra_bottles: data.extra_bottles,
@@ -223,8 +232,8 @@ export default function CompletePage() {
             <DetailRow
               label="Allergies / Avoid"
               value={
-                Array.isArray(data.allergies) && data.allergies.length > 0
-                  ? data.allergies.join(", ")
+                toArray(data.allergies).length > 0
+                  ? toArray(data.allergies).join(", ")
                   : "None"
               }
             />
@@ -293,7 +302,7 @@ export default function CompletePage() {
                   <div>
                     <span className="text-[#A39585]">Ingredients: </span>
                     <span className="text-[#2C2420]">
-                      {drink.ingredients?.join(", ")}
+                      {toArray(drink.ingredients).join(", ")}
                     </span>
                   </div>
                   <div>
