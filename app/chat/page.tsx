@@ -102,6 +102,7 @@ function ChatContent() {
 
       const decoder = new TextDecoder();
       let fullText = "";
+      let markerDetected = false;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -122,14 +123,45 @@ function ChatContent() {
                 continue;
               }
               fullText += parsed.text;
-              setMessages((prev) => {
-                const updated = [...prev];
-                updated[updated.length - 1] = {
-                  role: "assistant",
-                  content: fullText,
-                };
-                return updated;
-              });
+
+              // Check for the marker during streaming — once detected,
+              // freeze the displayed text to everything before the marker
+              if (!markerDetected) {
+                const jsonMarker = "EVENT_DATA_JSON:";
+                const jsonIndex = fullText.indexOf(jsonMarker);
+                if (jsonIndex !== -1) {
+                  markerDetected = true;
+                  const displayText = fullText.slice(0, jsonIndex).trim();
+                  setMessages((prev) => {
+                    const updated = [...prev];
+                    updated[updated.length - 1] = {
+                      role: "assistant",
+                      content: displayText,
+                    };
+                    return updated;
+                  });
+                } else {
+                  // Also hide partial marker at end of accumulated text
+                  // (e.g. "EVENT_DATA_" might be building up at the tail)
+                  const partialMarker = "EVENT_DATA_JSON:";
+                  let safeEnd = fullText.length;
+                  for (let len = Math.min(partialMarker.length - 1, fullText.length); len > 0; len--) {
+                    if (partialMarker.startsWith(fullText.slice(-len))) {
+                      safeEnd = fullText.length - len;
+                      break;
+                    }
+                  }
+                  setMessages((prev) => {
+                    const updated = [...prev];
+                    updated[updated.length - 1] = {
+                      role: "assistant",
+                      content: fullText.slice(0, safeEnd),
+                    };
+                    return updated;
+                  });
+                }
+              }
+              // If markerDetected, don't update displayed message — keep it frozen
             } catch {
               // skip malformed JSON
             }
@@ -137,10 +169,10 @@ function ChatContent() {
         }
       }
 
-      // Check for EVENT_DATA_JSON
+      // Process EVENT_DATA_JSON if marker was found during streaming
       const jsonMarker = "EVENT_DATA_JSON:";
       const jsonIndex = fullText.indexOf(jsonMarker);
-      if (jsonIndex !== -1) {
+      if (markerDetected && jsonIndex !== -1) {
         const closingMessage = fullText.slice(0, jsonIndex).trim();
         const jsonStr = fullText.slice(jsonIndex + jsonMarker.length).trim();
 
