@@ -3,6 +3,7 @@ interface SignatureDrink {
   base_spirit: string;
   ingredients: string[];
   garnish: string;
+  is_mocktail?: boolean;
 }
 
 interface EventData {
@@ -10,8 +11,6 @@ interface EventData {
   drinking_pace: string;
   package: string;
   signature_drinks: SignatureDrink[];
-  mocktail_ingredients?: string[];
-  mocktail_garnish?: string;
   beer: boolean;
   wine: boolean;
   extra_bottles?: string;
@@ -203,24 +202,6 @@ export function generateShoppingList(eventData: EventData): ShoppingListItem[] {
       ...getMixersAndIngredients(eventData.signature_drinks, eventData.guest_count)
     );
     items.push(...getGarnishes(eventData.signature_drinks));
-
-    // Mocktail ingredients
-    if (eventData.mocktail_ingredients?.length) {
-      for (const ing of eventData.mocktail_ingredients) {
-        items.push({
-          category: "Mixers & Ingredients",
-          item: `${ing} (mocktail)`,
-          quantity: eventData.guest_count <= 50 ? "1 unit" : "2 units",
-        });
-      }
-    }
-    if (eventData.mocktail_garnish) {
-      items.push({
-        category: "Garnishes",
-        item: `${eventData.mocktail_garnish} (mocktail)`,
-        quantity: "1 pack or bundle",
-      });
-    }
 
     items.push(...getSupplies(eventData.guest_count));
   }

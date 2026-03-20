@@ -15,6 +15,7 @@ interface SignatureDrink {
   ingredients: string[];
   method: string;
   garnish: string;
+  is_mocktail: boolean;
 }
 
 interface EventData {
@@ -41,11 +42,6 @@ interface EventData {
   day_of_contact_phone: string;
   package: string;
   signature_drinks: SignatureDrink[];
-  mocktail_name: string;
-  mocktail_description: string;
-  mocktail_ingredients: string[];
-  mocktail_method: string;
-  mocktail_garnish: string;
   extra_bottles: string;
   beer: boolean;
   wine: boolean;
@@ -250,7 +246,7 @@ export default function CompletePage() {
         {data.signature_drinks?.length > 0 && (
           <section className="space-y-4">
             <h3 className="font-heading text-lg font-bold text-[#2C2420]">
-              Your Signature Cocktails
+              Your Signature Drinks
             </h3>
             {data.signature_drinks.map((drink, i) => (
               <div
@@ -260,9 +256,14 @@ export default function CompletePage() {
                 <div className="flex items-start justify-between mb-3">
                   <h4 className="font-heading text-base font-bold text-[#B5845A]">
                     {drink.name}
+                    {drink.is_mocktail && (
+                      <span className="ml-2 text-xs text-[#6B5D52] bg-[#E8DDD5] px-2 py-0.5 rounded-full font-normal">
+                        Mocktail
+                      </span>
+                    )}
                   </h4>
                   <span className="text-xs text-[#A39585] bg-[#E8DDD5] px-2 py-1 rounded-full">
-                    {drink.base_spirit}
+                    {drink.is_mocktail ? "Non Alcoholic" : drink.base_spirit}
                   </span>
                 </div>
                 <p className="text-sm text-[#6B5D52] mb-3">
@@ -292,37 +293,6 @@ export default function CompletePage() {
                 </div>
               </div>
             ))}
-          </section>
-        )}
-
-        {/* Mocktail */}
-        {data.mocktail_name && (
-          <section className="bg-[#F5F0EB] rounded-2xl border border-[#DDD5CC] p-5 sm:p-6">
-            <h3 className="font-heading text-lg font-bold text-[#2C2420] mb-3">
-              Mocktail
-            </h3>
-            <h4 className="font-heading text-base font-bold text-[#B5845A] mb-2">
-              {data.mocktail_name}
-            </h4>
-            <p className="text-sm text-[#6B5D52] mb-3">
-              {data.mocktail_description}
-            </p>
-            <div className="space-y-2 text-sm">
-              <div>
-                <span className="text-[#A39585]">Ingredients: </span>
-                <span className="text-[#2C2420]">
-                  {data.mocktail_ingredients?.join(", ")}
-                </span>
-              </div>
-              <div>
-                <span className="text-[#A39585]">Method: </span>
-                <span className="text-[#2C2420]">{data.mocktail_method}</span>
-              </div>
-              <div>
-                <span className="text-[#A39585]">Garnish: </span>
-                <span className="text-[#2C2420]">{data.mocktail_garnish}</span>
-              </div>
-            </div>
           </section>
         )}
 
