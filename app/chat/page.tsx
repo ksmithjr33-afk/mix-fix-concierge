@@ -171,7 +171,7 @@ function ChatContent() {
             .map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`)
             .join("\n\n");
 
-          // Save event data to Supabase
+          // Save event data to Supabase (fire and forget)
           fetch("/api/save-event", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -182,6 +182,13 @@ function ChatContent() {
               conversationTranscript: transcript,
             }),
           }).catch((err) => console.error("Failed to save event to Supabase:", err));
+
+          // Send event data to GoHighLevel webhook (fire and forget)
+          fetch("/api/webhook", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ eventData, conversationTranscript: transcript }),
+          }).catch((err) => console.error("Failed to send webhook to GHL:", err));
 
           // Brief delay so user can read the closing message
           setTimeout(() => {
