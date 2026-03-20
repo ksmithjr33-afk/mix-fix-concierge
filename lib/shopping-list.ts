@@ -14,6 +14,7 @@ interface EventData {
   beer: boolean;
   wine: boolean;
   extra_bottles?: string;
+  age_range?: string;
 }
 
 export interface ShoppingListItem {
@@ -24,38 +25,31 @@ export interface ShoppingListItem {
 }
 
 /**
- * Calculates a drink multiplier based on guest count and drinking pace.
- * Assumes ~3 drinks per guest for moderate pace across the event.
+ * Returns the number of guests per bottle for a given pace.
+ * Moderate: ~1 bottle per 25 guests, Heavy: ~1 per 17, Light: ~1 per 30.
  */
-function getDrinkMultiplier(guestCount: number, pace: string): number {
-  const paceMultipliers: Record<string, number> = {
-    light: 2,
-    moderate: 3,
-    heavy: 4.5,
-    mixed: 3,
+function guestsPerBottle(pace: string): number {
+  const rates: Record<string, number> = {
+    light: 30,
+    moderate: 25,
+    heavy: 17,
+    mixed: 25,
   };
-  const perGuest = paceMultipliers[pace?.toLowerCase()] ?? 3;
-  return guestCount * perGuest;
-}
-
-function bottlesNeeded(totalDrinks: number, drinksPerBottle: number): number {
-  return Math.ceil(totalDrinks / drinksPerBottle);
+  return rates[pace?.toLowerCase()] ?? 25;
 }
 
 /** Collect unique spirits from all signature drinks */
 function getSpiritBottles(
   drinks: SignatureDrink[],
-  totalDrinks: number
+  guestCount: number,
+  pace: string,
+  ageRange?: string
 ): ShoppingListItem[] {
-  const spiritMap = new Map<string, number>();
-
-  // Count how many cocktails use each spirit — split evenly across drinks
-  const drinksPerCocktail = totalDrinks / (drinks.length || 1);
+  const spirits = new Set<string>();
 
   for (const drink of drinks) {
     const spirit = drink.base_spirit?.toLowerCase().trim();
-    if (!spirit) continue;
-    spiritMap.set(spirit, (spiritMap.get(spirit) ?? 0) + drinksPerCocktail);
+    if (spirit) spirits.add(spirit);
   }
 
   const brandRecs: Record<string, { top: string; moderate: string }> = {
@@ -68,14 +62,28 @@ function getSpiritBottles(
     "triple sec": { top: "Cointreau", moderate: "DeKuyper" },
   };
 
+  const perBottle = guestsPerBottle(pace);
+  const isYoungCrowd = ageRange?.includes("21") || ageRange?.includes("21-30") || ageRange?.toLowerCase().includes("young");
+  const isHeavy = pace?.toLowerCase() === "heavy";
+
   const items: ShoppingListItem[] = [];
-  for (const [spirit, count] of spiritMap) {
-    const bottles = bottlesNeeded(count, 16); // ~16 cocktails per 750ml bottle
-    const label = spirit.charAt(0).toUpperCase() + spirit.slice(1);
+  for (const spirit of Array.from(spirits)) {
+    let bottles = Math.max(1, Math.ceil(guestCount / perBottle));
+
+    // Tequila gets an extra bottle for shots if heavy pace or young crowd
+    const isTequila = spirit === "tequila";
+    let notes: string | undefined;
     const rec = brandRecs[spirit];
-    const notes = rec
+    notes = rec
       ? `Top shelf: ${rec.top} or Moderate: ${rec.moderate}`
       : "Mid-range brand recommended";
+
+    if (isTequila && (isHeavy || isYoungCrowd)) {
+      bottles += 1;
+      notes += " — Extra bottle for shots";
+    }
+
+    const label = spirit.charAt(0).toUpperCase() + spirit.slice(1);
     items.push({
       category: "Spirits",
       item: label,
@@ -176,16 +184,18 @@ export function generateShoppingList(eventData: EventData): ShoppingListItem[] {
     return [];
   }
 
-  const totalDrinks = getDrinkMultiplier(
-    eventData.guest_count ?? 50,
-    eventData.drinking_pace ?? "moderate"
-  );
-
   const items: ShoppingListItem[] = [];
 
   // Spirits from signature drinks
   if (eventData.signature_drinks?.length > 0) {
-    items.push(...getSpiritBottles(eventData.signature_drinks, totalDrinks));
+    items.push(
+      ...getSpiritBottles(
+        eventData.signature_drinks,
+        eventData.guest_count ?? 50,
+        eventData.drinking_pace ?? "moderate",
+        eventData.age_range
+      )
+    );
   }
 
   // Beer
