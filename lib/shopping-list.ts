@@ -1,7 +1,7 @@
 interface SignatureDrink {
   name: string;
   base_spirit: string;
-  ingredients: string[];
+  ingredients: string[] | string;
   garnish: string;
   method?: string;
   is_mocktail?: boolean;
@@ -11,11 +11,21 @@ interface EventData {
   guest_count: number;
   drinking_pace: string;
   package: string;
-  signature_drinks: SignatureDrink[];
+  signature_drinks: SignatureDrink[] | undefined;
   beer: boolean;
   wine: boolean;
   extra_bottles?: string;
   age_range?: string;
+}
+
+/** Normalize ingredients to always be a string array */
+function normalizeIngredients(ingredients: string[] | string | undefined): string[] {
+  if (!ingredients) return [];
+  if (Array.isArray(ingredients)) return ingredients;
+  if (typeof ingredients === "string") {
+    return ingredients.split(",").map((s) => s.trim()).filter(Boolean);
+  }
+  return [];
 }
 
 export interface ShoppingListItem {
@@ -49,7 +59,7 @@ function getSpiritBottles(
   const spirits = new Set<string>();
 
   for (const drink of drinks) {
-    const spirit = drink.base_spirit?.toLowerCase().trim();
+    const spirit = drink.base_spirit?.toLowerCase()?.trim();
     if (spirit) spirits.add(spirit);
   }
 
@@ -105,7 +115,8 @@ function getMixersAndIngredients(
   const items: ShoppingListItem[] = [];
 
   for (const drink of drinks) {
-    for (const ing of drink.ingredients ?? []) {
+    const ingredients = normalizeIngredients(drink.ingredients);
+    for (const ing of ingredients) {
       const key = ing.toLowerCase().trim();
       if (seen.has(key)) continue;
       // Skip the base spirit — it's already counted above
@@ -130,7 +141,7 @@ function getGarnishes(drinks: SignatureDrink[]): ShoppingListItem[] {
   const items: ShoppingListItem[] = [];
 
   for (const drink of drinks) {
-    const g = drink.garnish?.trim();
+    const g = typeof drink.garnish === "string" ? drink.garnish.trim() : "";
     if (!g || seen.has(g.toLowerCase())) continue;
     seen.add(g.toLowerCase());
     items.push({
@@ -187,11 +198,13 @@ export function generateShoppingList(eventData: EventData): ShoppingListItem[] {
 
   const items: ShoppingListItem[] = [];
 
+  const sigDrinks = Array.isArray(eventData.signature_drinks) ? eventData.signature_drinks : [];
+
   // Spirits from signature drinks
-  if (eventData.signature_drinks?.length > 0) {
+  if (sigDrinks.length > 0) {
     items.push(
       ...getSpiritBottles(
-        eventData.signature_drinks,
+        sigDrinks,
         eventData.guest_count ?? 50,
         eventData.drinking_pace ?? "moderate",
         eventData.age_range
@@ -222,11 +235,11 @@ export function generateShoppingList(eventData: EventData): ShoppingListItem[] {
   const isBartenderOnly = pkg.includes("bartender");
 
   // Bartender Only gets mixers, garnishes, and supplies too
-  if (isBartenderOnly && eventData.signature_drinks?.length > 0) {
+  if (isBartenderOnly && sigDrinks.length > 0) {
     items.push(
-      ...getMixersAndIngredients(eventData.signature_drinks, eventData.guest_count)
+      ...getMixersAndIngredients(sigDrinks, eventData.guest_count)
     );
-    items.push(...getGarnishes(eventData.signature_drinks));
+    items.push(...getGarnishes(sigDrinks));
 
     items.push(...getSupplies(eventData.guest_count));
   }
@@ -311,8 +324,10 @@ function getNatalieMixerQuantity(ingredient: string, guestCount: number): string
  * 5. Base spirits labeled as "Client is purchasing" with brand recommendations
  */
 export function generateNatalieSupplyList(eventData: EventData): string {
+  console.log("[generateNatalieSupplyList] eventData received:", JSON.stringify(eventData, null, 2));
+
   const guestCount = eventData.guest_count ?? 50;
-  const drinks = eventData.signature_drinks ?? [];
+  const drinks = Array.isArray(eventData.signature_drinks) ? eventData.signature_drinks : [];
   const pace = eventData.drinking_pace ?? "moderate";
 
   const lines: string[] = ["NATALIE'S SUPPLY LIST", ""];
@@ -321,8 +336,9 @@ export function generateNatalieSupplyList(eventData: EventData): string {
   if (drinks.length > 0) {
     lines.push("SIGNATURE DRINKS:");
     for (const drink of drinks) {
-      lines.push(`  ${drink.name} (Base Spirit: ${drink.base_spirit})`);
-      lines.push(`    Ingredients: ${drink.ingredients?.join(", ") ?? "N/A"}`);
+      const ingredients = normalizeIngredients(drink.ingredients);
+      lines.push(`  ${drink.name ?? "Unnamed Drink"} (Base Spirit: ${drink.base_spirit ?? "N/A"})`);
+      lines.push(`    Ingredients: ${ingredients.length > 0 ? ingredients.join(", ") : "N/A"}`);
       lines.push(`    Garnish: ${drink.garnish ?? "None"}`);
       lines.push(`    Method: ${drink.method ?? "Shake and strain"}`);
       lines.push("");
@@ -334,8 +350,10 @@ export function generateNatalieSupplyList(eventData: EventData): string {
   const mixerItems: { item: string; quantity: string }[] = [];
 
   for (const drink of drinks) {
-    for (const ing of drink.ingredients ?? []) {
+    const ingredients = normalizeIngredients(drink.ingredients);
+    for (const ing of ingredients) {
       const key = ing.toLowerCase().trim();
+      if (!key) continue;
       if (seenMixers.has(key)) continue;
       // Skip the base spirit — listed separately below
       if (key.includes(drink.base_spirit?.toLowerCase() ?? "__none__")) continue;
@@ -359,7 +377,7 @@ export function generateNatalieSupplyList(eventData: EventData): string {
   const seenGarnishes = new Set<string>();
   const garnishItems: string[] = [];
   for (const drink of drinks) {
-    const g = drink.garnish?.trim();
+    const g = typeof drink.garnish === "string" ? drink.garnish.trim() : "";
     if (!g || seenGarnishes.has(g.toLowerCase())) continue;
     seenGarnishes.add(g.toLowerCase());
     garnishItems.push(g);
