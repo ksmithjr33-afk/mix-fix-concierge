@@ -15,38 +15,38 @@ interface SignatureDrink {
   ingredients: string[];
   method: string;
   garnish: string;
-  is_mocktail: boolean;
+  is_mocktail?: boolean;
 }
 
 interface EventData {
   client_name: string;
   email: string;
   event_type: string;
-  event_name: string;
+  event_name?: string;
   event_date: string;
   venue_type: string;
-  bar_service_start: string;
-  bar_service_end: string;
-  event_address: string;
-  indoor_outdoor: string;
-  bar_on_site: string;
+  bar_service_start?: string;
+  bar_service_end?: string;
+  event_address?: string;
+  indoor_outdoor?: string;
+  bar_on_site?: string;
   bar_details?: string;
-  parking_info: string;
+  parking_info?: string;
   guest_count: number;
-  age_range: string;
-  drinking_pace: string;
-  theme: string;
-  event_colors: string;
-  allergies: string[];
-  day_of_contact_name: string;
-  day_of_contact_phone: string;
+  age_range?: string;
+  drinking_pace?: string;
+  theme?: string;
+  event_colors?: string;
+  allergies?: string[] | null;
+  day_of_contact_name?: string;
+  day_of_contact_phone?: string;
   package: string;
-  signature_drinks: SignatureDrink[];
-  extra_bottles: string;
-  beer: boolean;
-  wine: boolean;
-  beer_and_wine_details: string | null;
-  special_requests: string;
+  signature_drinks?: SignatureDrink[] | null;
+  extra_bottles?: string;
+  beer?: boolean;
+  wine?: boolean;
+  beer_and_wine_details?: string | null;
+  special_requests?: string;
 }
 
 function DetailRow({ label, value }: { label: string; value: string }) {
@@ -88,7 +88,19 @@ export default function CompletePage() {
 
   const shoppingListItems = useMemo(() => {
     if (!data) return [];
-    return generateShoppingList(data);
+    try {
+      return generateShoppingList({
+        guest_count: data.guest_count ?? 50,
+        drinking_pace: data.drinking_pace ?? "moderate",
+        package: data.package ?? "",
+        signature_drinks: Array.isArray(data.signature_drinks) ? data.signature_drinks : [],
+        beer: data.beer ?? false,
+        wine: data.wine ?? false,
+        extra_bottles: data.extra_bottles,
+      });
+    } catch {
+      return [];
+    }
   }, [data]);
 
   const groupedShoppingList = useMemo(() => {
@@ -171,27 +183,29 @@ export default function CompletePage() {
             <DetailRow label="Client" value={data.client_name} />
             <DetailRow label="Email" value={data.email} />
             <DetailRow label="Event Type" value={data.event_type} />
-            <DetailRow label="Event Name" value={data.event_name} />
+            <DetailRow label="Event Name" value={data.event_name ?? ""} />
             <DetailRow label="Date" value={data.event_date} />
             <DetailRow label="Venue Type" value={data.venue_type} />
-            <DetailRow
-              label="Bar Service"
-              value={`${data.bar_service_start} to ${data.bar_service_end}`}
-            />
-            <DetailRow label="Address" value={data.event_address} />
-            <DetailRow label="Setting" value={data.indoor_outdoor} />
-            <DetailRow label="Bar on Site" value={data.bar_on_site} />
+            {data.bar_service_start && data.bar_service_end && (
+              <DetailRow
+                label="Bar Service"
+                value={`${data.bar_service_start} to ${data.bar_service_end}`}
+              />
+            )}
+            <DetailRow label="Address" value={data.event_address ?? ""} />
+            <DetailRow label="Setting" value={data.indoor_outdoor ?? ""} />
+            <DetailRow label="Bar on Site" value={data.bar_on_site ?? ""} />
             {data.bar_details && (
               <DetailRow label="Bar Details" value={data.bar_details} />
             )}
-            <DetailRow label="Parking Info" value={data.parking_info} />
+            <DetailRow label="Parking Info" value={data.parking_info ?? ""} />
             <DetailRow
               label="Guest Count"
               value={String(data.guest_count)}
             />
-            <DetailRow label="Age Range" value={data.age_range} />
-            <DetailRow label="Drinking Pace" value={data.drinking_pace} />
-            <DetailRow label="Package" value={data.package} />
+            <DetailRow label="Age Range" value={data.age_range ?? ""} />
+            <DetailRow label="Drinking Pace" value={data.drinking_pace ?? ""} />
+            <DetailRow label="Package" value={data.package ?? ""} />
             {data.beer_and_wine_details && (
               <DetailRow label="Beer & Wine Details" value={data.beer_and_wine_details} />
             )}
@@ -204,12 +218,12 @@ export default function CompletePage() {
             Theme & Preferences
           </h3>
           <dl>
-            <DetailRow label="Theme / Vibe" value={data.theme} />
-            <DetailRow label="Event Colors" value={data.event_colors} />
+            <DetailRow label="Theme / Vibe" value={data.theme ?? ""} />
+            <DetailRow label="Event Colors" value={data.event_colors ?? ""} />
             <DetailRow
               label="Allergies / Avoid"
               value={
-                data.allergies?.length > 0
+                Array.isArray(data.allergies) && data.allergies.length > 0
                   ? data.allergies.join(", ")
                   : "None"
               }
@@ -243,7 +257,7 @@ export default function CompletePage() {
         </section>
 
         {/* Signature Drinks */}
-        {data.signature_drinks?.length > 0 && (
+        {Array.isArray(data.signature_drinks) && data.signature_drinks.length > 0 && (
           <section className="space-y-4">
             <h3 className="font-heading text-lg font-bold text-[#2C2420]">
               Your Signature Drinks
