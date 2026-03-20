@@ -433,7 +433,7 @@ export function generateNatalieSupplyList(eventData: EventData): string {
     lines.push("");
   }
 
-  return lines.join("\n").trim();
+  return lines.join("<br>").trim();
 }
 
 /**
@@ -461,5 +461,5 @@ export function formatShoppingList(items: ShoppingListItem[]): string {
     lines.push("");
   }
 
-  return lines.join("\n").trim();
+  return lines.join("<br>").trim();
 }
