@@ -187,7 +187,7 @@ function ChatContent() {
           fetch("/api/webhook", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ eventData, conversationTranscript: transcript, clientEmail: email }),
+            body: JSON.stringify({ eventData, conversationTranscript: transcript, clientEmail: searchParams.get("email") }),
           }).catch((err) => console.error("Failed to send webhook to GHL:", err));
 
           // Brief delay so user can read the closing message
