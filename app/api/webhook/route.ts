@@ -21,9 +21,20 @@ export async function POST(request: Request) {
       );
     }
 
-    const shoppingListItems = generateShoppingList(eventData);
-    const shoppingListText = formatShoppingList(shoppingListItems);
-    const natalieSupplyList = generateNatalieSupplyList(eventData);
+    let shoppingListText = "";
+    try {
+      const shoppingListItems = generateShoppingList(eventData);
+      shoppingListText = formatShoppingList(shoppingListItems);
+    } catch (err) {
+      console.log("generateShoppingList/formatShoppingList failed:", err);
+    }
+
+    let natalieSupplyList = "";
+    try {
+      natalieSupplyList = generateNatalieSupplyList(eventData);
+    } catch (err) {
+      console.log("generateNatalieSupplyList failed:", err);
+    }
 
     const payload = {
       ...eventData,
