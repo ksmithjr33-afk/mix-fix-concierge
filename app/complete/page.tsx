@@ -342,8 +342,14 @@ export default function CompletePage() {
           </p>
         </section>
 
-        {/* Back to Home */}
-        <div className="text-center pb-6 sm:pb-8">
+        {/* Contact & Back to Home */}
+        <div className="text-center pb-6 sm:pb-8 space-y-3">
+          <a
+            href="tel:4697548512"
+            className="block text-sm text-[#6B5D52] hover:text-[#B5845A] transition-colors"
+          >
+            Questions? Text us at (469) 754-8512
+          </a>
           <Link
             href="/"
             className="text-sm text-[#B5845A] hover:underline"

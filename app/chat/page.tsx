@@ -36,6 +36,12 @@ function ChatContent() {
   }, [messages]);
 
   useEffect(() => {
+    if (!isStreaming) {
+      inputRef.current?.focus();
+    }
+  }, [isStreaming]);
+
+  useEffect(() => {
     if (!started) {
       setStarted(true);
 
@@ -248,6 +254,12 @@ function ChatContent() {
           <span className="text-xs text-[#A39585] hidden sm:inline">
             AI Bar Concierge
           </span>
+          <a
+            href="tel:4697548512"
+            className="text-xs text-[#A39585] hover:text-[#B5845A] transition-colors hidden sm:inline"
+          >
+            (469) 754-8512
+          </a>
         </div>
         <div className="flex items-center gap-2 sm:gap-3">
           <button
