@@ -58,15 +58,29 @@ function getSpiritBottles(
     spiritMap.set(spirit, (spiritMap.get(spirit) ?? 0) + drinksPerCocktail);
   }
 
+  const brandRecs: Record<string, { top: string; moderate: string }> = {
+    tequila: { top: "Clase Azul Plata", moderate: "Espolon Blanco" },
+    vodka: { top: "Grey Goose", moderate: "Titos" },
+    bourbon: { top: "Woodford Reserve", moderate: "Bulleit" },
+    whiskey: { top: "Makers Mark", moderate: "Jack Daniels" },
+    rum: { top: "Diplomatico Reserva", moderate: "Bacardi Superior" },
+    gin: { top: "Hendricks", moderate: "Tanqueray" },
+    "triple sec": { top: "Cointreau", moderate: "DeKuyper" },
+  };
+
   const items: ShoppingListItem[] = [];
   for (const [spirit, count] of spiritMap) {
     const bottles = bottlesNeeded(count, 16); // ~16 cocktails per 750ml bottle
     const label = spirit.charAt(0).toUpperCase() + spirit.slice(1);
+    const rec = brandRecs[spirit];
+    const notes = rec
+      ? `Top shelf: ${rec.top} or Moderate: ${rec.moderate}`
+      : "Mid-range brand recommended";
     items.push({
       category: "Spirits",
       item: label,
       quantity: `${bottles} bottle${bottles === 1 ? "" : "s"} (750 ml)`,
-      notes: "Mid-range brand recommended",
+      notes,
     });
   }
 
