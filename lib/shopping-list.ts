@@ -3,6 +3,7 @@ interface SignatureDrink {
   base_spirit: string;
   ingredients: string[];
   garnish: string;
+  method?: string;
   is_mocktail?: boolean;
 }
 
@@ -241,6 +242,180 @@ export function generateShoppingList(eventData: EventData): ShoppingListItem[] {
   }
 
   return items;
+}
+
+/** Compute mixer quantities using Natalie's exact formulas */
+function getNatalieMixerQuantity(ingredient: string, guestCount: number): string {
+  const key = ingredient.toLowerCase().trim();
+
+  // Simple syrup: 1 liter bottle per 33 guests
+  if (key.includes("simple syrup")) {
+    const bottles = Math.max(1, Math.ceil(guestCount / 33));
+    return `${bottles} liter bottle${bottles === 1 ? "" : "s"}`;
+  }
+
+  // Lime juice: 2 x 32oz bottles per 50 guests
+  if (key.includes("lime juice")) {
+    const sets = Math.max(1, Math.ceil(guestCount / 50));
+    const bottles = sets * 2;
+    return `${bottles} x 32oz bottle${bottles === 1 ? "" : "s"}`;
+  }
+
+  // Lemon juice: 1 x 48oz bottle per 50 guests
+  if (key.includes("lemon juice")) {
+    const bottles = Math.max(1, Math.ceil(guestCount / 50));
+    return `${bottles} x 48oz bottle${bottles === 1 ? "" : "s"}`;
+  }
+
+  // Club soda / tonic / ginger beer: 2 liters per 20 guests
+  if (
+    key.includes("club soda") ||
+    key.includes("soda water") ||
+    key.includes("tonic") ||
+    key.includes("ginger beer") ||
+    key.includes("ginger ale")
+  ) {
+    const liters = Math.max(2, Math.ceil(guestCount / 20) * 2);
+    return `${liters} liters`;
+  }
+
+  // Cranberry / orange / pineapple juice: 1 bottle (64oz) per 25 guests
+  if (
+    key.includes("cranberry") ||
+    key.includes("orange juice") ||
+    key.includes("pineapple juice")
+  ) {
+    const bottles = Math.max(1, Math.ceil(guestCount / 25));
+    return `${bottles} bottle${bottles === 1 ? "" : "s"} (64oz)`;
+  }
+
+  // Coconut cream / coconut milk: 1 can per 25 guests
+  if (key.includes("coconut cream") || key.includes("coconut milk")) {
+    const cans = Math.max(1, Math.ceil(guestCount / 25));
+    return `${cans} can${cans === 1 ? "" : "s"}`;
+  }
+
+  // Any other mixer: 1 unit per 25 guests
+  const units = Math.max(1, Math.ceil(guestCount / 25));
+  return `${units} unit${units === 1 ? "" : "s"}`;
+}
+
+/**
+ * Generates Natalie's supply list — everything she needs to know to prep and shop.
+ *
+ * Includes:
+ * 1. Signature drink recipes (name, base spirit, ingredients, garnish, method)
+ * 2. Mixers & ingredients with exact quantity formulas
+ * 3. Garnishes
+ * 4. Supplies (cups, napkins, straws, ice)
+ * 5. Base spirits labeled as "Client is purchasing" with brand recommendations
+ */
+export function generateNatalieSupplyList(eventData: EventData): string {
+  const guestCount = eventData.guest_count ?? 50;
+  const drinks = eventData.signature_drinks ?? [];
+  const pace = eventData.drinking_pace ?? "moderate";
+
+  const lines: string[] = ["NATALIE'S SUPPLY LIST", ""];
+
+  // --- Section 1: Signature Drink Recipes ---
+  if (drinks.length > 0) {
+    lines.push("SIGNATURE DRINKS:");
+    for (const drink of drinks) {
+      lines.push(`  ${drink.name} (Base Spirit: ${drink.base_spirit})`);
+      lines.push(`    Ingredients: ${drink.ingredients?.join(", ") ?? "N/A"}`);
+      lines.push(`    Garnish: ${drink.garnish ?? "None"}`);
+      lines.push(`    Method: ${drink.method ?? "Shake and strain"}`);
+      lines.push("");
+    }
+  }
+
+  // --- Section 2: Mixers & Ingredients (with exact formulas) ---
+  const seenMixers = new Set<string>();
+  const mixerItems: { item: string; quantity: string }[] = [];
+
+  for (const drink of drinks) {
+    for (const ing of drink.ingredients ?? []) {
+      const key = ing.toLowerCase().trim();
+      if (seenMixers.has(key)) continue;
+      // Skip the base spirit — listed separately below
+      if (key.includes(drink.base_spirit?.toLowerCase() ?? "__none__")) continue;
+      seenMixers.add(key);
+      mixerItems.push({
+        item: ing,
+        quantity: getNatalieMixerQuantity(ing, guestCount),
+      });
+    }
+  }
+
+  if (mixerItems.length > 0) {
+    lines.push("MIXERS & INGREDIENTS:");
+    for (const m of mixerItems) {
+      lines.push(`  - ${m.item}: ${m.quantity}`);
+    }
+    lines.push("");
+  }
+
+  // --- Section 3: Garnishes ---
+  const seenGarnishes = new Set<string>();
+  const garnishItems: string[] = [];
+  for (const drink of drinks) {
+    const g = drink.garnish?.trim();
+    if (!g || seenGarnishes.has(g.toLowerCase())) continue;
+    seenGarnishes.add(g.toLowerCase());
+    garnishItems.push(g);
+  }
+  if (garnishItems.length > 0) {
+    lines.push("GARNISHES:");
+    for (const g of garnishItems) {
+      lines.push(`  - ${g}: 1 pack or bundle`);
+    }
+    lines.push("");
+  }
+
+  // --- Section 4: Supplies ---
+  const cups = Math.ceil(guestCount * 3);
+  lines.push("SUPPLIES:");
+  lines.push(`  - Plastic cups (16 oz): ${cups} cups`);
+  lines.push(`  - Napkins: ${Math.ceil(guestCount * 3)} napkins`);
+  lines.push(`  - Straws: ${cups} straws`);
+  lines.push(
+    `  - Ice: ${Math.ceil(guestCount * 1.5)} lbs (Bagged ice from grocery store)`
+  );
+  lines.push("");
+
+  // --- Section 5: Base Spirits (Client is purchasing) ---
+  const spiritItems = getSpiritBottles(drinks, guestCount, pace, eventData.age_range);
+  if (spiritItems.length > 0) {
+    lines.push("BASE SPIRITS (Client is purchasing — do NOT buy these):");
+    for (const s of spiritItems) {
+      let line = `  - ${s.item}: ${s.quantity}`;
+      if (s.notes) line += ` (${s.notes})`;
+      lines.push(line);
+    }
+    lines.push("");
+  }
+
+  // Beer & Wine if applicable
+  const beerWineLines: string[] = [];
+  if (eventData.beer) {
+    const cases = Math.ceil(guestCount / 10);
+    beerWineLines.push(
+      `  - Beer (variety pack or client preference): ${cases} case${cases === 1 ? "" : "s"}`
+    );
+  }
+  if (eventData.wine) {
+    const wineBottles = Math.ceil(guestCount / 5);
+    beerWineLines.push(
+      `  - Wine (mix of red and white): ${wineBottles} bottle${wineBottles === 1 ? "" : "s"}`
+    );
+  }
+  if (beerWineLines.length > 0) {
+    lines.push("BEER & WINE (Client is purchasing):");
+    lines.push(...beerWineLines);
+    lines.push("");
+  }
+
+  return lines.join("\n").trim();
 }
 
 /**
