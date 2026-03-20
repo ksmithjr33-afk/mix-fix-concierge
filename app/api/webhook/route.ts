@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { generateShoppingList, formatShoppingList } from "@/lib/shopping-list";
+import { generateShoppingList, formatShoppingList, generateNatalieSupplyList } from "@/lib/shopping-list";
 
 export async function POST(request: Request) {
   try {
@@ -23,11 +23,13 @@ export async function POST(request: Request) {
 
     const shoppingListItems = generateShoppingList(eventData);
     const shoppingListText = formatShoppingList(shoppingListItems);
+    const natalieSupplyList = generateNatalieSupplyList(eventData);
 
     const payload = {
       ...eventData,
       conversation_transcript: conversationTranscript || null,
       shopping_list: shoppingListText || null,
+      natalie_supply_list: natalieSupplyList || null,
     };
 
     // Ensure email is always present — use eventData.email if the AI included it,
