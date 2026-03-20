@@ -26,6 +26,7 @@ function ChatContent() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const hiddenPrefixRef = useRef<Message[]>([]);
+  const completedRef = useRef(false);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -87,6 +88,7 @@ function ChatContent() {
   }, []);
 
   const streamResponse = async (currentMessages: Message[]) => {
+    if (completedRef.current) return;
     setIsStreaming(true);
     setMessages((prev) => [...prev, { role: "assistant", content: "" }]);
 
@@ -188,6 +190,7 @@ function ChatContent() {
 
         try {
           const eventData = JSON.parse(jsonStr);
+          completedRef.current = true;
           localStorage.setItem(
             "mixfix_event_data",
             JSON.stringify(eventData)
@@ -237,7 +240,7 @@ function ChatContent() {
 
   const handleSend = async () => {
     const text = input.trim();
-    if (!text || isStreaming) return;
+    if (!text || isStreaming || completedRef.current) return;
 
     const userMessage: Message = { role: "user", content: text };
     const newMessages = [...messages, userMessage];
