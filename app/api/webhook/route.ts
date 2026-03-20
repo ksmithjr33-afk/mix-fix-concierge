@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 export async function POST(request: Request) {
   try {
-    const { eventData, conversationTranscript } = await request.json();
+    const { eventData, conversationTranscript, clientEmail } = await request.json();
 
     const webhookUrl = process.env.GHL_WEBHOOK_URL;
     if (!webhookUrl) {
@@ -20,13 +20,21 @@ export async function POST(request: Request) {
       );
     }
 
+    const payload = {
+      ...eventData,
+      conversation_transcript: conversationTranscript || null,
+    };
+
+    // Ensure email is always present — use eventData.email if the AI included it,
+    // otherwise fall back to the pre-filled email from the booking system URL params
+    if (!payload.email && clientEmail) {
+      payload.email = clientEmail;
+    }
+
     const res = await fetch(webhookUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        ...eventData,
-        conversation_transcript: conversationTranscript || null,
-      }),
+      body: JSON.stringify(payload),
     });
 
     if (!res.ok) {
