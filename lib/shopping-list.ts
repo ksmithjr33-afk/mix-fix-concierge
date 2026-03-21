@@ -91,7 +91,7 @@ function getSpiritBottles(
 
     if (isTequila && (isHeavy || isYoungCrowd)) {
       bottles += 1;
-      notes += " — Extra bottle for shots";
+      notes += " (Extra bottle for shots)";
     }
 
     const label = spirit.charAt(0).toUpperCase() + spirit.slice(1);
@@ -136,6 +136,19 @@ function getMixersAndIngredients(
   return items;
 }
 
+function getGarnishNotes(garnish: string): string | undefined {
+  const key = garnish.toLowerCase();
+  if (key.includes("lime")) return "Sam's Club (15 to 18 ct) or individual from Walmart";
+  if (key.includes("lemon")) return "Sam's Club (7 to 10 ct) or individual from Walmart";
+  if (key.includes("orange")) return "Sam's Club (8 to 12 ct) or individual from Walmart";
+  if (key.includes("mint")) return "Fresh mint 0.5 oz clamshell from Walmart";
+  if (key.includes("basil")) return "Fresh basil 0.5 oz clamshell from Walmart";
+  if (key.includes("rosemary")) return "Fresh rosemary 0.5 oz clamshell from Walmart";
+  if (key.includes("dried flower") || key.includes("dried lavender")) return "Specialty, order from Amazon";
+  if (key.includes("maraschino")) return "GV maraschino cherries 10 oz jar from Walmart";
+  return undefined;
+}
+
 function getGarnishes(drinks: SignatureDrink[]): ShoppingListItem[] {
   const seen = new Set<string>();
   const items: ShoppingListItem[] = [];
@@ -148,6 +161,7 @@ function getGarnishes(drinks: SignatureDrink[]): ShoppingListItem[] {
       category: "Garnishes",
       item: g,
       quantity: "1 pack or bundle",
+      notes: getGarnishNotes(g),
     });
   }
 
@@ -155,12 +169,13 @@ function getGarnishes(drinks: SignatureDrink[]): ShoppingListItem[] {
 }
 
 function getSupplies(guestCount: number): ShoppingListItem[] {
-  const cups = Math.ceil(guestCount * 3); // 3 cups per guest
+  const cups = Math.ceil(guestCount * 3);
   return [
     {
       category: "Supplies",
-      item: "Plastic cups (16 oz)",
+      item: "Tossware 12 oz round bottom cups",
       quantity: `${cups} cups`,
+      notes: "Buy from Tossware or Amazon",
     },
     {
       category: "Supplies",
@@ -169,14 +184,15 @@ function getSupplies(guestCount: number): ShoppingListItem[] {
     },
     {
       category: "Supplies",
-      item: "Straws",
+      item: "Agave cocktail straws",
       quantity: `${cups} straws`,
+      notes: "Buy in bulk (1,000 to 2,000 ct)",
     },
     {
       category: "Supplies",
       item: "Ice",
       quantity: `${Math.ceil(guestCount * 1.5)} lbs`,
-      notes: "Bagged ice from grocery store",
+      notes: "Twice the Ice or Polar Ice location recommended. Reimburse up to $20.",
     },
   ];
 }
@@ -261,54 +277,131 @@ export function generateShoppingList(eventData: EventData): ShoppingListItem[] {
 function getNatalieMixerQuantity(ingredient: string, guestCount: number): string {
   const key = ingredient.toLowerCase().trim();
 
-  // Simple syrup: 1 liter bottle per 33 guests
   if (key.includes("simple syrup")) {
     const bottles = Math.max(1, Math.ceil(guestCount / 33));
-    return `${bottles} liter bottle${bottles === 1 ? "" : "s"}`;
+    return `${bottles} liter bottle${bottles === 1 ? "" : "s"} (make from cane sugar, 10 lb bag from Sam's Club)`;
   }
 
-  // Lime juice: 2 x 32oz bottles per 50 guests
   if (key.includes("lime juice")) {
     const sets = Math.max(1, Math.ceil(guestCount / 50));
     const bottles = sets * 2;
-    return `${bottles} x 32oz bottle${bottles === 1 ? "" : "s"}`;
+    return `${bottles} x 32oz bottle${bottles === 1 ? "" : "s"} (RealLime from Sam's Club or Walmart)`;
   }
 
-  // Lemon juice: 1 x 48oz bottle per 50 guests
   if (key.includes("lemon juice")) {
     const bottles = Math.max(1, Math.ceil(guestCount / 50));
-    return `${bottles} x 48oz bottle${bottles === 1 ? "" : "s"}`;
+    return `${bottles} x 48oz bottle${bottles === 1 ? "" : "s"} (RealLemon from Sam's Club or Walmart)`;
   }
 
-  // Club soda / tonic / ginger beer: 2 liters per 20 guests
-  if (
-    key.includes("club soda") ||
-    key.includes("soda water") ||
-    key.includes("tonic") ||
-    key.includes("ginger beer") ||
-    key.includes("ginger ale")
-  ) {
+  if (key.includes("club soda") || key.includes("soda water")) {
+    const liters = Math.max(2, Math.ceil(guestCount / 20) * 2);
+    return `${liters} liters (GV soda water 1L from Walmart)`;
+  }
+
+  if (key.includes("tonic")) {
+    const liters = Math.max(2, Math.ceil(guestCount / 20) * 2);
+    return `${liters} liters (GV tonic water 1L from Walmart)`;
+  }
+
+  if (key.includes("ginger beer")) {
+    const cans = Math.max(12, Math.ceil(guestCount / 2));
+    return `${cans} cans (Goslings ginger beer 12 oz, Sam's Club 24 ct or Walmart 12 ct)`;
+  }
+
+  if (key.includes("ginger ale")) {
     const liters = Math.max(2, Math.ceil(guestCount / 20) * 2);
     return `${liters} liters`;
   }
 
-  // Cranberry / orange / pineapple juice: 1 bottle (64oz) per 25 guests
-  if (
-    key.includes("cranberry") ||
-    key.includes("orange juice") ||
-    key.includes("pineapple juice")
-  ) {
+  if (key.includes("cranberry")) {
     const bottles = Math.max(1, Math.ceil(guestCount / 25));
-    return `${bottles} bottle${bottles === 1 ? "" : "s"} (64oz)`;
+    return `${bottles} bottle${bottles === 1 ? "" : "s"} (2 x 96 oz from Sam's Club)`;
   }
 
-  // Coconut cream / coconut milk: 1 can per 25 guests
-  if (key.includes("coconut cream") || key.includes("coconut milk")) {
+  if (key.includes("orange juice")) {
+    const bottles = Math.max(1, Math.ceil(guestCount / 25));
+    return `${bottles} bottle${bottles === 1 ? "" : "s"} (2 x 54 oz from Sam's Club or Simply Orange 46 oz from Walmart)`;
+  }
+
+  if (key.includes("pineapple juice")) {
+    const bottles = Math.max(1, Math.ceil(guestCount / 25));
+    return `${bottles} bottle${bottles === 1 ? "" : "s"} (Dole 46 oz from Walmart)`;
+  }
+
+  if (key.includes("pomegranate")) {
+    const bottles = Math.max(1, Math.ceil(guestCount / 25));
+    return `${bottles} bottle${bottles === 1 ? "" : "s"} (POM Wonderful 60 oz from Sam's Club or 48 oz from Walmart)`;
+  }
+
+  if (key.includes("coconut cream") || key.includes("coconut milk") || key.includes("cream of coconut")) {
     const cans = Math.max(1, Math.ceil(guestCount / 25));
-    return `${cans} can${cans === 1 ? "" : "s"}`;
+    return `${cans} can${cans === 1 ? "" : "s"} (REAL Brand Cream of Coconut 16.9 oz from Specs)`;
   }
 
-  // Any other mixer: 1 unit per 25 guests
+  if (key.includes("grenadine")) {
+    return `1 bottle (Finest Call 1L from Specs)`;
+  }
+
+  if (key.includes("passion") || key.includes("passionfruit")) {
+    return `1 bottle (Finest Call Passionfruit Puree 1L from Specs)`;
+  }
+
+  if (key.includes("mango puree") || key.includes("mango")) {
+    return `1 bottle (Finest Call Mango Puree 1L from Specs or REAL Brand 16.9 oz)`;
+  }
+
+  if (key.includes("peach puree") || key.includes("peach")) {
+    return `1 bottle (Finest Call Peach Puree 1L from Specs or REAL Brand 16.9 oz)`;
+  }
+
+  if (key.includes("strawberry puree") || key.includes("strawberry")) {
+    return `1 bottle (Finest Call Strawberry Puree 1L from Specs)`;
+  }
+
+  if (key.includes("lychee")) {
+    return `1 bottle (REAL Brand Lychee Puree 16.9 oz from Specs)`;
+  }
+
+  if (key.includes("pumpkin")) {
+    return `1 bottle (REAL Brand Pumpkin Spice Puree 16.9 oz from Specs)`;
+  }
+
+  if (key.includes("prickly pear")) {
+    return `1 bottle (Finest Call Prickly Pear Syrup 1L or REAL Brand 16.9 oz from Specs)`;
+  }
+
+  if (key.includes("black cherry") || key.includes("cherry")) {
+    return `1 bottle (REAL Brand Black Cherry Puree 16.9 oz from Specs) plus GV cocktail cherries 11 oz from Walmart`;
+  }
+
+  if (key.includes("agave")) {
+    return `1 bottle (Kirkland agave 2 x 36 oz from Sam's Club or Wholesome 36 oz from Walmart)`;
+  }
+
+  if (key.includes("honey")) {
+    return `1 bottle (48 oz from Sam's Club or Bettergoods hot honey 12 oz from Walmart)`;
+  }
+
+  if (key.includes("lavender") && key.includes("syrup")) {
+    return `1 bottle (specialty, order from Amazon)`;
+  }
+
+  if (key.includes("butterscotch") && key.includes("syrup")) {
+    return `1 bottle (specialty, order from Amazon)`;
+  }
+
+  if (key.includes("elderflower")) {
+    return `1 bottle (specialty, order from Amazon or liquor store)`;
+  }
+
+  if (key.includes("bitters") || key.includes("angostura")) {
+    return `1 bottle (Angostura bitters 4 oz from Walmart)`;
+  }
+
+  if (key.includes("lemonade")) {
+    return `1 jug (Milo's lemonade 128 oz from Walmart)`;
+  }
+
   const units = Math.max(1, Math.ceil(guestCount / 25));
   return `${units} unit${units === 1 ? "" : "s"}`;
 }
@@ -385,7 +478,7 @@ export function generateNatalieSupplyList(eventData: EventData): string {
   if (garnishItems.length > 0) {
     lines.push("GARNISHES:");
     for (const g of garnishItems) {
-      lines.push(`  - ${g}: 1 pack or bundle`);
+      lines.push(`   ${g} (fresh from Sam's Club or Walmart, or specialty from Amazon)`);
     }
     lines.push("");
   }
@@ -393,11 +486,11 @@ export function generateNatalieSupplyList(eventData: EventData): string {
   // --- Section 4: Supplies ---
   const cups = Math.ceil(guestCount * 3);
   lines.push("SUPPLIES:");
-  lines.push(`  - Plastic cups (16 oz): ${cups} cups`);
+  lines.push(`  - Tossware 12 oz round bottom cups: ${cups} cups (Buy from Tossware or Amazon)`);
   lines.push(`  - Napkins: ${Math.ceil(guestCount * 3)} napkins`);
-  lines.push(`  - Straws: ${cups} straws`);
+  lines.push(`  - Agave cocktail straws: ${cups} straws (Buy in bulk, 1,000 to 2,000 ct)`);
   lines.push(
-    `  - Ice: ${Math.ceil(guestCount * 1.5)} lbs (Bagged ice from grocery store)`
+    `  - Ice: ${Math.ceil(guestCount * 1.5)} lbs (Twice the Ice or Polar Ice location recommended. Reimburse up to $20.)`
   );
   lines.push("");
 
