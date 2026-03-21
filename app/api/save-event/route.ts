@@ -33,6 +33,8 @@ export async function POST(request: Request) {
         status: "new",
         ghl_webhook_sent: false,
         ghl_webhook_response: null,
+        menu_style: eventData.menu_style || null,
+        menu_notes: eventData.menu_notes || null,
       })
       .select("id")
       .single();

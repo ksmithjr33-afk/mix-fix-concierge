@@ -41,6 +41,7 @@ export async function POST(request: Request) {
       conversation_transcript: conversationTranscript || null,
       shopping_list: shoppingListText || null,
       natalie_supply_list: natalieSupplyList || null,
+      menu_design_preference: `${eventData.menu_style || 'Not specified'}${eventData.menu_notes ? ' | ' + eventData.menu_notes : ''}`,
     };
 
     // Ensure email is always present — use eventData.email if the AI included it,

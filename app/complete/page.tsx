@@ -47,6 +47,8 @@ interface EventData {
   wine?: boolean;
   beer_and_wine_details?: string | null;
   special_requests?: string;
+  menu_style?: string;
+  menu_notes?: string;
 }
 
 /** Safely coerce a value that should be an array but might be a string or other type */
@@ -132,6 +134,44 @@ export default function CompletePage() {
       }
     }
   }, []);
+
+  useEffect(() => {
+    if (!data) return;
+    if (!Array.isArray(data.signature_drinks) || data.signature_drinks.length === 0) return;
+
+    const generateMenus = async () => {
+      try {
+        const response = await fetch('/api/generate-menu', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            eventName: data.event_name || 'Cocktail Menu',
+            eventType: data.event_type || '',
+            clientName: data.client_name || '',
+            eventColors: data.event_colors
+              ? (typeof data.event_colors === 'string'
+                  ? data.event_colors.split(',').map((c: string) => c.trim())
+                  : Array.isArray(data.event_colors) ? data.event_colors : ['#B5845A', '#8B9E7E', '#F5F0EB'])
+              : ['#B5845A', '#8B9E7E', '#F5F0EB'],
+            packageType: data.package || '',
+            drinks: data.signature_drinks.map((d: SignatureDrink) => ({
+              name: d.name,
+              ingredients: Array.isArray(d.ingredients) ? d.ingredients.join(', ') : d.description || '',
+              type: d.is_mocktail ? 'mocktail' : 'cocktail',
+            })),
+            menuStyle: data.menu_style || 'elegant',
+            menuNotes: data.menu_notes || '',
+          }),
+        });
+        if (response.ok) {
+          console.log('Menu generation triggered successfully');
+        }
+      } catch (err) {
+        console.error('Menu generation error:', err);
+      }
+    };
+    generateMenus();
+  }, [data]);
 
   if (!data) {
     return (
@@ -229,6 +269,10 @@ export default function CompletePage() {
           <dl>
             <DetailRow label="Theme / Vibe" value={data.theme ?? ""} />
             <DetailRow label="Event Colors" value={data.event_colors ?? ""} />
+            <DetailRow label="Menu Style" value={data.menu_style ?? ""} />
+            {data.menu_notes && (
+              <DetailRow label="Menu Design Notes" value={data.menu_notes} />
+            )}
             <DetailRow
               label="Allergies / Avoid"
               value={
