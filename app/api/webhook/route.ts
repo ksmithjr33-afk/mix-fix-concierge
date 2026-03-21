@@ -36,12 +36,18 @@ export async function POST(request: Request) {
       console.log("generateNatalieSupplyList failed:", err);
     }
 
+    const guestCount = Number(eventData.guest_count) || 50;
+    const iceLbs = guestCount * 1.5;
+    const iceBags = Math.ceil(iceLbs / 18);
+    const iceAmount = `${iceBags} x 18lb bags`;
+
     const payload = {
       ...eventData,
       conversation_transcript: conversationTranscript || null,
       shopping_list: shoppingListText || null,
       natalie_supply_list: natalieSupplyList || null,
       menu_design_preference: `${eventData.menu_style || 'Not specified'}${eventData.menu_notes ? ' | ' + eventData.menu_notes : ''}`,
+      ice_amount: iceAmount,
     };
 
     // Ensure email is always present — use eventData.email if the AI included it,
