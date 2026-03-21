@@ -41,6 +41,19 @@ export async function POST(request: Request) {
     const iceBags = Math.ceil(iceLbs / 18);
     const iceAmount = `${iceBags} x 18lb bags`;
 
+    function parseEventDate(dateStr: string): string {
+      if (!dateStr) return '';
+      const cleaned = dateStr.replace(/(st|nd|rd|th)/gi, '');
+      const parsed = new Date(cleaned);
+      if (!isNaN(parsed.getTime())) {
+        const year = parsed.getFullYear();
+        const month = String(parsed.getMonth() + 1).padStart(2, '0');
+        const day = String(parsed.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+      }
+      return dateStr;
+    }
+
     const payload = {
       ...eventData,
       conversation_transcript: conversationTranscript || null,
@@ -48,6 +61,7 @@ export async function POST(request: Request) {
       natalie_supply_list: natalieSupplyList || null,
       menu_design_preference: `${eventData.menu_style || 'Not specified'}${eventData.menu_notes ? ' | ' + eventData.menu_notes : ''}`,
       ice_amount: iceAmount,
+      actual_event_date: parseEventDate(eventData.event_date || ''),
     };
 
     // Ensure email is always present — use eventData.email if the AI included it,
