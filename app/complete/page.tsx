@@ -154,7 +154,7 @@ export default function CompletePage() {
                   : Array.isArray(data.event_colors) ? data.event_colors : ['#B5845A', '#8B9E7E', '#F5F0EB'])
               : ['#B5845A', '#8B9E7E', '#F5F0EB'],
             packageType: data.package || '',
-            drinks: data.signature_drinks.map((d: SignatureDrink) => ({
+            drinks: (data.signature_drinks || []).map((d: SignatureDrink) => ({
               name: d.name,
               ingredients: Array.isArray(d.ingredients) ? d.ingredients.join(', ') : d.description || '',
               type: d.is_mocktail ? 'mocktail' : 'cocktail',
