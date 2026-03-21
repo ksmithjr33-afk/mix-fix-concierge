@@ -43,13 +43,20 @@ export async function POST(request: Request) {
 
     function parseEventDate(dateStr: string): string {
       if (!dateStr) return '';
-      const cleaned = dateStr.replace(/(st|nd|rd|th)/gi, '');
-      const parsed = new Date(cleaned);
+      const cleaned = dateStr.replace(/(st|nd|rd|th)/gi, '').trim();
+      let parsed = new Date(cleaned);
+      if (isNaN(parsed.getTime())) {
+        const withYear = cleaned + ' ' + new Date().getFullYear();
+        parsed = new Date(withYear);
+      }
       if (!isNaN(parsed.getTime())) {
+        if (parsed.getFullYear() < 2000) {
+          parsed.setFullYear(new Date().getFullYear());
+        }
         const year = parsed.getFullYear();
         const month = String(parsed.getMonth() + 1).padStart(2, '0');
         const day = String(parsed.getDate()).padStart(2, '0');
-        return `${year}-${month}-${day}`;
+        return year + '-' + month + '-' + day;
       }
       return dateStr;
     }
