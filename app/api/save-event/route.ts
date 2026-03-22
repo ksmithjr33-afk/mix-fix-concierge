@@ -23,18 +23,21 @@ export async function POST(request: Request) {
       console.error("Shopping list generation failed:", e);
     }
 
+    // Remove age_range and old menu fields from eventData
+    const { age_range: _age, menu_style: _ms, menu_notes: _mn, menu_design_preference: _mdp, ...cleanEventData } = eventData;
+
     const { data, error } = await supabase
       .from("events")
       .insert({
-        ...eventData,
+        ...cleanEventData,
         shopping_list: shoppingListItems.length > 0 ? shoppingListItems : null,
         shopping_list_text: shoppingListText || null,
         conversation_transcript: conversationTranscript || null,
         status: "new",
         ghl_webhook_sent: false,
         ghl_webhook_response: null,
-        menu_style: eventData.menu_style || null,
-        menu_notes: eventData.menu_notes || null,
+        menu_colors: eventData.menu_colors || null,
+        menu_reference_photos: eventData.menu_reference_photos || null,
       })
       .select("id")
       .single();

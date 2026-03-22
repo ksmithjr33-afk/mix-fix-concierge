@@ -20,9 +20,8 @@ export default function Home() {
 
           {/* Description */}
           <p className="text-base sm:text-[17px] leading-relaxed text-[#6B5D52] max-w-md mx-auto px-2">
-            This quick chat replaces the planning call. By the time we are done,
-            your cocktail menu, shopping list, and every detail will be locked
-            in.
+            Let&apos;s walk through your event details, design your cocktail menu,
+            and get everything locked in.
           </p>
 
           {/* CTA */}

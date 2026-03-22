@@ -30,10 +30,15 @@ export async function POST(request: Request) {
     }
 
     let natalieSupplyList = "";
-    try {
-      natalieSupplyList = generateNatalieSupplyList(eventData);
-    } catch (err) {
-      console.log("generateNatalieSupplyList failed:", err);
+    const pkg = (eventData.package ?? "").toLowerCase();
+    const isBeerAndWine = pkg.includes("beer") && pkg.includes("wine") && !pkg.includes("essentials") && !pkg.includes("full") && !pkg.includes("premium");
+    const isBartenderOnly = pkg.includes("bartender");
+    if (!isBeerAndWine && !isBartenderOnly) {
+      try {
+        natalieSupplyList = generateNatalieSupplyList(eventData);
+      } catch (err) {
+        console.log("generateNatalieSupplyList failed:", err);
+      }
     }
 
     const guestCount = Number(eventData.guest_count) || 50;
@@ -61,12 +66,16 @@ export async function POST(request: Request) {
       return dateStr;
     }
 
+    // Remove age_range from payload
+    const { age_range: _age, menu_style: _ms, menu_notes: _mn, menu_design_preference: _mdp, ...cleanEventData } = eventData;
+
     const payload = {
-      ...eventData,
+      ...cleanEventData,
       conversation_transcript: conversationTranscript || null,
       shopping_list: shoppingListText || null,
       natalie_supply_list: natalieSupplyList || null,
-      menu_design_preference: `${eventData.menu_style || 'Not specified'}${eventData.menu_notes ? ' | ' + eventData.menu_notes : ''}`,
+      menu_colors: eventData.menu_colors || null,
+      menu_reference_photos: eventData.menu_reference_photos || null,
       ice_amount: iceAmount,
       actual_event_date: parseEventDate(eventData.event_date || ''),
     };

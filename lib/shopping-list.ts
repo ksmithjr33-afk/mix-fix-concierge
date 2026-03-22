@@ -15,7 +15,6 @@ interface EventData {
   beer: boolean;
   wine: boolean;
   extra_bottles?: string;
-  age_range?: string;
 }
 
 /** Normalize ingredients to always be a string array */
@@ -53,8 +52,7 @@ function guestsPerBottle(pace: string): number {
 function getSpiritBottles(
   drinks: SignatureDrink[],
   guestCount: number,
-  pace: string,
-  ageRange?: string
+  pace: string
 ): ShoppingListItem[] {
   const spirits = new Set<string>();
 
@@ -74,14 +72,13 @@ function getSpiritBottles(
   };
 
   const perBottle = guestsPerBottle(pace);
-  const isYoungCrowd = ageRange?.includes("21") || ageRange?.includes("21-30") || ageRange?.toLowerCase().includes("young");
   const isHeavy = pace?.toLowerCase() === "heavy";
 
   const items: ShoppingListItem[] = [];
   for (const spirit of Array.from(spirits)) {
     let bottles = Math.max(1, Math.ceil(guestCount / perBottle));
 
-    // Tequila gets an extra bottle for shots if heavy pace or young crowd
+    // Tequila gets an extra bottle for shots if heavy pace
     const isTequila = spirit === "tequila";
     let notes: string | undefined;
     const rec = brandRecs[spirit];
@@ -89,7 +86,7 @@ function getSpiritBottles(
       ? `Top shelf: ${rec.top} or Moderate: ${rec.moderate}`
       : "Mid-range brand recommended";
 
-    if (isTequila && (isHeavy || isYoungCrowd)) {
+    if (isTequila && isHeavy) {
       bottles += 1;
       notes += " (Extra bottle for shots)";
     }
@@ -128,12 +125,85 @@ function getMixersAndIngredients(
       items.push({
         category: "Mixers & Ingredients",
         item: ing,
-        quantity: guestCount <= 50 ? "1 to 2 units" : "2 to 3 units",
+        quantity: getClientMixerQuantity(ing, guestCount),
       });
     }
   }
 
   return items;
+}
+
+/** Return real-packaging quantities for the client shopping list (no store sourcing) */
+function getClientMixerQuantity(ingredient: string, guestCount: number): string {
+  const key = ingredient.toLowerCase().trim();
+
+  if (key.includes("simple syrup")) {
+    const bottles = Math.max(1, Math.ceil(guestCount / 33));
+    return `${bottles} x 1 liter bottle${bottles === 1 ? "" : "s"}`;
+  }
+  if (key.includes("lime juice")) {
+    const sets = Math.max(1, Math.ceil(guestCount / 50));
+    return `${sets * 2} x 32 oz bottle${sets * 2 === 1 ? "" : "s"}`;
+  }
+  if (key.includes("lemon juice")) {
+    const bottles = Math.max(1, Math.ceil(guestCount / 50));
+    return `${bottles} x 48 oz bottle${bottles === 1 ? "" : "s"}`;
+  }
+  if (key.includes("club soda") || key.includes("soda water")) {
+    const liters = Math.max(2, Math.ceil(guestCount / 20) * 2);
+    return `${liters} x 1 liter bottles`;
+  }
+  if (key.includes("tonic")) {
+    const liters = Math.max(2, Math.ceil(guestCount / 20) * 2);
+    return `${liters} x 1 liter bottles`;
+  }
+  if (key.includes("ginger beer")) {
+    const cans = Math.max(12, Math.ceil(guestCount / 2));
+    return `${cans} x 12 oz cans`;
+  }
+  if (key.includes("ginger ale")) {
+    const liters = Math.max(2, Math.ceil(guestCount / 20) * 2);
+    return `${liters} x 1 liter bottles`;
+  }
+  if (key.includes("cranberry")) {
+    const bottles = Math.max(1, Math.ceil(guestCount / 25));
+    return `${bottles} x 96 oz bottle${bottles === 1 ? "" : "s"}`;
+  }
+  if (key.includes("orange juice")) {
+    const bottles = Math.max(1, Math.ceil(guestCount / 25));
+    return `${bottles} x 46 oz bottle${bottles === 1 ? "" : "s"}`;
+  }
+  if (key.includes("pineapple juice")) {
+    const bottles = Math.max(1, Math.ceil(guestCount / 25));
+    return `${bottles} x 46 oz bottle${bottles === 1 ? "" : "s"}`;
+  }
+  if (key.includes("pomegranate")) {
+    const bottles = Math.max(1, Math.ceil(guestCount / 25));
+    return `${bottles} x 48 oz bottle${bottles === 1 ? "" : "s"}`;
+  }
+  if (key.includes("coconut cream") || key.includes("coconut milk") || key.includes("cream of coconut")) {
+    const cans = Math.max(1, Math.ceil(guestCount / 25));
+    return `${cans} x 16.9 oz can${cans === 1 ? "" : "s"}`;
+  }
+  if (key.includes("grenadine")) return "1 x 1 liter bottle";
+  if (key.includes("passion") || key.includes("passionfruit")) return "1 x 1 liter bottle";
+  if (key.includes("mango puree") || key.includes("mango")) return "1 x 1 liter bottle";
+  if (key.includes("peach puree") || key.includes("peach")) return "1 x 1 liter bottle";
+  if (key.includes("strawberry puree") || key.includes("strawberry")) return "1 x 1 liter bottle";
+  if (key.includes("lychee")) return "1 x 16.9 oz bottle";
+  if (key.includes("pumpkin")) return "1 x 16.9 oz bottle";
+  if (key.includes("prickly pear")) return "1 x 1 liter bottle";
+  if (key.includes("black cherry") || key.includes("cherry")) return "1 x 16.9 oz bottle plus 1 x 11 oz jar cocktail cherries";
+  if (key.includes("agave")) return "1 x 36 oz bottle";
+  if (key.includes("honey")) return "1 x 48 oz bottle";
+  if (key.includes("lavender") && key.includes("syrup")) return "1 bottle";
+  if (key.includes("butterscotch") && key.includes("syrup")) return "1 bottle";
+  if (key.includes("elderflower")) return "1 bottle";
+  if (key.includes("bitters") || key.includes("angostura")) return "1 x 4 oz bottle";
+  if (key.includes("lemonade")) return "1 x 128 oz jug";
+
+  const units = Math.max(1, Math.ceil(guestCount / 25));
+  return `${units} bottle${units === 1 ? "" : "s"}`;
 }
 
 function getGarnishNotes(garnish: string): string | undefined {
@@ -192,7 +262,6 @@ function getSupplies(guestCount: number): ShoppingListItem[] {
       category: "Supplies",
       item: "Ice",
       quantity: `${Math.ceil(guestCount * 1.5)} lbs`,
-      notes: "Twice the Ice or Polar Ice location recommended. Reimburse up to $20.",
     },
   ];
 }
@@ -222,29 +291,39 @@ export function generateShoppingList(eventData: EventData): ShoppingListItem[] {
       ...getSpiritBottles(
         sigDrinks,
         eventData.guest_count ?? 50,
-        eventData.drinking_pace ?? "moderate",
-        eventData.age_range
+        eventData.drinking_pace ?? "moderate"
       )
     );
   }
 
   // Beer
   if (eventData.beer) {
-    const cases = Math.ceil(eventData.guest_count / 10);
+    const totalBeers = Math.ceil(eventData.guest_count * 1.5);
+    const twentyFourPacks = Math.floor(totalBeers / 24);
+    const remainder = totalBeers - twentyFourPacks * 24;
+    const twelvePacks = Math.ceil(remainder / 12);
+    const parts: string[] = [];
+    if (twentyFourPacks > 0) parts.push(`${twentyFourPacks} x 24-pack${twentyFourPacks === 1 ? "" : "s"}`);
+    if (twelvePacks > 0) parts.push(`${twelvePacks} x 12-pack${twelvePacks === 1 ? "" : "s"}`);
     items.push({
       category: "Beer & Wine",
       item: "Beer (variety pack or client preference)",
-      quantity: `${cases} case${cases === 1 ? "" : "s"}`,
+      quantity: parts.join(" + ") || "1 x 24-pack",
     });
   }
 
   // Wine
   if (eventData.wine) {
     const wineBottles = Math.ceil(eventData.guest_count / 5);
+    const fullCases = Math.floor(wineBottles / 12);
+    const loosBottles = wineBottles - fullCases * 12;
+    const parts: string[] = [];
+    if (fullCases > 0) parts.push(`${fullCases} x 12-bottle case${fullCases === 1 ? "" : "s"}`);
+    if (loosBottles > 0) parts.push(`${loosBottles} x 750 ml bottle${loosBottles === 1 ? "" : "s"}`);
     items.push({
       category: "Beer & Wine",
       item: "Wine (mix of red and white)",
-      quantity: `${wineBottles} bottle${wineBottles === 1 ? "" : "s"}`,
+      quantity: parts.join(" + ") || "1 x 750 ml bottle",
     });
   }
 
@@ -419,6 +498,14 @@ function getNatalieMixerQuantity(ingredient: string, guestCount: number): string
 export function generateNatalieSupplyList(eventData: EventData): string {
   console.log("[generateNatalieSupplyList] eventData received:", JSON.stringify(eventData, null, 2));
 
+  // Only generate for Essentials Bar, Full Bar, and Premium Bar packages
+  const pkg = (eventData.package ?? "").toLowerCase();
+  const isBeerAndWine = pkg.includes("beer") && pkg.includes("wine") && !pkg.includes("essentials") && !pkg.includes("full") && !pkg.includes("premium");
+  const isBartenderOnly = pkg.includes("bartender");
+  if (isBeerAndWine || isBartenderOnly) {
+    return "";
+  }
+
   const guestCount = eventData.guest_count ?? 50;
   const drinks = Array.isArray(eventData.signature_drinks) ? eventData.signature_drinks : [];
   const pace = eventData.drinking_pace ?? "moderate";
@@ -490,12 +577,12 @@ export function generateNatalieSupplyList(eventData: EventData): string {
   lines.push(`  - Napkins: ${Math.ceil(guestCount * 3)} napkins`);
   lines.push(`  - Agave cocktail straws: ${cups} straws (Buy in bulk, 1,000 to 2,000 ct)`);
   lines.push(
-    `  - Ice: ${Math.ceil(guestCount * 1.5)} lbs (Twice the Ice or Polar Ice location recommended. Reimburse up to $20.)`
+    `  - Ice: ${Math.ceil(guestCount * 1.5)} lbs (Twice the Ice or Polar Ice location recommended)`
   );
   lines.push("");
 
   // --- Section 5: Base Spirits (Client is purchasing) ---
-  const spiritItems = getSpiritBottles(drinks, guestCount, pace, eventData.age_range);
+  const spiritItems = getSpiritBottles(drinks, guestCount, pace);
   if (spiritItems.length > 0) {
     lines.push("BASE SPIRITS (Client is purchasing — do NOT buy these):");
     for (const s of spiritItems) {
@@ -547,9 +634,7 @@ export function formatShoppingList(items: ShoppingListItem[]): string {
   for (const [category, categoryItems] of grouped) {
     lines.push(category.toUpperCase());
     for (const it of categoryItems) {
-      let line = `  - ${it.item}: ${it.quantity}`;
-      if (it.notes) line += ` (${it.notes})`;
-      lines.push(line);
+      lines.push(`  - ${it.item}: ${it.quantity}`);
     }
     lines.push("");
   }
