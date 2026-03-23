@@ -41,32 +41,71 @@ export interface ShoppingListItem {
 }
 
 /**
- * Returns the number of guests per bottle for a given pace.
- * Moderate: ~1 bottle per 25 guests, Heavy: ~1 per 17, Light: ~1 per 30.
+ * Returns drinks per guest based on drinking pace (over a 4-hour base).
  */
-function guestsPerBottle(pace: string): number {
+function drinksPerGuest(pace: string): number {
   const rates: Record<string, number> = {
-    light: 30,
-    moderate: 25,
-    heavy: 17,
-    mixed: 25,
+    light: 2,
+    moderate: 4,
+    heavy: 6,
+    mixed: 4,
   };
-  return rates[pace?.toLowerCase()] ?? 25;
+  return rates[pace?.toLowerCase()] ?? 4;
 }
 
-/** Collect unique spirits from all signature drinks */
+/**
+ * Returns a multiplier based on hours booked to adjust total drinks.
+ */
+function hoursMultiplier(hours: number): number {
+  if (hours <= 3) return 0.8;
+  if (hours === 4) return 1.0;
+  if (hours === 5) return 1.15;
+  if (hours === 6) return 1.3;
+  if (hours >= 7) return 1.45;
+  return 1.0;
+}
+
+/**
+ * Parse oz amount from an ingredient string like "2 oz vodka" or "0.75 oz lime juice".
+ * Returns the oz amount or 0 if not found.
+ */
+function parseOz(ingredient: string): number {
+  const match = ingredient.match(/^(\d+(?:\.\d+)?)\s*oz\b/i);
+  return match ? parseFloat(match[1]) : 0;
+}
+
+/**
+ * Check if an ingredient string refers to a specific spirit type.
+ */
+function ingredientMatchesSpirit(ingredient: string, spirit: string): boolean {
+  const ingLower = ingredient.toLowerCase();
+  const spiritLower = spirit.toLowerCase();
+  // Strip oz prefix for matching
+  const ingName = ingLower.replace(/^[\d.]+\s*oz\s*/i, "").trim();
+  return ingName.includes(spiritLower);
+}
+
+/** Recipe-based spirit bottle calculation from actual drink recipes */
 function getSpiritBottles(
   drinks: SignatureDrink[],
   guestCount: number,
-  pace: string
+  pace: string,
+  barHours?: number
 ): ShoppingListItem[] {
-  const spirits = new Set<string>();
+  const hours = barHours ?? 4;
+  const dpg = drinksPerGuest(pace);
+  const hMult = hoursMultiplier(hours);
+  const totalDrinks = guestCount * dpg * hMult;
 
-  for (const drink of drinks) {
-    const spirit = drink.base_spirit?.toLowerCase()?.trim();
-    // Skip empty, null, undefined, "none", "n/a", or mocktails with no spirit
-    if (spirit && spirit !== "none" && spirit !== "n/a" && !drink.is_mocktail) spirits.add(spirit);
-  }
+  // Count alcoholic drinks only for splitting
+  const alcoholicDrinks = drinks.filter(d => !d.is_mocktail);
+  const numAlcoholicDrinks = alcoholicDrinks.length || 1;
+  const drinksPerCocktail = totalDrinks / numAlcoholicDrinks;
+
+  // Accumulate total oz needed per spirit across all drinks
+  const spiritOzTotals = new Map<string, number>();
+  // Track which spirits we find
+  const spiritNames = new Map<string, string>(); // lowercase -> display name
 
   const brandRecs: Record<string, { top: string; moderate: string }> = {
     tequila: { top: "Clase Azul Plata", moderate: "Espolon Blanco" },
@@ -75,20 +114,55 @@ function getSpiritBottles(
     whiskey: { top: "Makers Mark", moderate: "Jack Daniels" },
     rum: { top: "Diplomatico Reserva", moderate: "Bacardi Superior" },
     gin: { top: "Hendricks", moderate: "Tanqueray" },
-    "triple sec": { top: "Cointreau", moderate: "DeKuyper" },
+    cognac: { top: "Hennessy VS", moderate: "Courvoisier VS" },
+    "spiced rum": { top: "Diplomatico Reserva", moderate: "Captain Morgan" },
+    "coconut rum": { top: "Malibu", moderate: "Malibu" },
+    "reposado": { top: "Clase Azul Reposado", moderate: "Espolon Reposado" },
+    "tequila reposado": { top: "Clase Azul Reposado", moderate: "Espolon Reposado" },
+    "tequila blanco": { top: "Clase Azul Plata", moderate: "Espolon Blanco" },
   };
 
-  const perBottle = guestsPerBottle(pace);
-  const isHeavy = pace?.toLowerCase() === "heavy";
+  for (const drink of alcoholicDrinks) {
+    const baseSpirit = drink.base_spirit?.toLowerCase()?.trim() || "";
+    if (!baseSpirit || baseSpirit === "none" || baseSpirit === "n/a") continue;
+
+    const ingredients = normalizeIngredients(drink.ingredients);
+
+    // Find spirit ingredients in the recipe and sum oz
+    for (const ing of ingredients) {
+      const oz = parseOz(ing);
+      if (oz <= 0) continue;
+
+      const ingName = ing.replace(/^[\d.]+\s*oz\s*/i, "").trim().toLowerCase();
+
+      // Check if this ingredient is a spirit (matches base spirit or known spirit names)
+      const isSpirit = isLikelySpirit(ingName, baseSpirit);
+      if (!isSpirit) continue;
+
+      // Normalize spirit name for grouping
+      const spiritKey = normalizeSpiritName(ingName, baseSpirit);
+      const currentOz = spiritOzTotals.get(spiritKey) ?? 0;
+      spiritOzTotals.set(spiritKey, currentOz + oz * drinksPerCocktail);
+
+      if (!spiritNames.has(spiritKey)) {
+        spiritNames.set(spiritKey, spiritKey.charAt(0).toUpperCase() + spiritKey.slice(1));
+      }
+    }
+  }
 
   const items: ShoppingListItem[] = [];
-  for (const spirit of Array.from(spirits)) {
-    let bottles = Math.max(1, Math.ceil(guestCount / perBottle));
+  const isHeavy = pace?.toLowerCase() === "heavy";
 
-    // Tequila gets an extra bottle for shots if heavy pace
-    const isTequila = spirit === "tequila";
+  for (const [spiritKey, totalOz] of spiritOzTotals) {
+    // Apply 0.65 factor (not all guests drink cocktails)
+    const adjustedOz = totalOz * 0.65;
+    let bottles = Math.ceil(adjustedOz / 25.4);
+    bottles = Math.max(1, bottles);
+
+    // Tequila gets extra bottle for shots if heavy pace
+    const isTequila = spiritKey.includes("tequila") || spiritKey === "reposado";
     let notes: string | undefined;
-    const rec = brandRecs[spirit];
+    const rec = brandRecs[spiritKey] ?? brandRecs[spiritKey.split(" ")[0]];
     notes = rec
       ? `Top shelf: ${rec.top} or Moderate: ${rec.moderate}`
       : "Mid-range brand recommended";
@@ -98,16 +172,49 @@ function getSpiritBottles(
       notes += " (Extra bottle for shots)";
     }
 
-    const label = spirit.charAt(0).toUpperCase() + spirit.slice(1);
+    const low = Math.max(1, bottles - 1);
+    const high = bottles;
+    const label = spiritNames.get(spiritKey) ?? spiritKey.charAt(0).toUpperCase() + spiritKey.slice(1);
     items.push({
       category: "Spirits",
       item: label,
-      quantity: `${bottles} bottle${bottles === 1 ? "" : "s"} (750 ml)`,
+      quantity: `${low} to ${high} bottles (750 ml)`,
       notes,
     });
   }
 
   return items;
+}
+
+/** Check if an ingredient name is likely a spirit (not a mixer/syrup/juice) */
+function isLikelySpirit(ingName: string, baseSpirit: string): boolean {
+  const spiritKeywords = [
+    "vodka", "tequila", "whiskey", "bourbon", "rum", "gin", "cognac", "brandy",
+    "reposado", "blanco", "mezcal", "scotch", "aperol", "campari",
+    "malibu", "spiced rum", "coconut rum", "gold rum", "dark rum",
+    "jamaican rum", "empress gin",
+  ];
+  // Check if it matches the base spirit
+  if (ingName.includes(baseSpirit.toLowerCase())) return true;
+  // Check if it's a known spirit
+  return spiritKeywords.some(kw => ingName.includes(kw));
+}
+
+/** Normalize spirit names so the same spirit from different drinks groups together */
+function normalizeSpiritName(ingName: string, baseSpirit: string): string {
+  const lower = ingName.toLowerCase();
+  // Map specific variants to base names
+  if (lower.includes("tequila blanco") || lower.includes("tequila reposado")) return lower;
+  if (lower.includes("reposado") && !lower.includes("tequila")) return "tequila reposado";
+  if (lower.includes("blanco") && !lower.includes("tequila")) return "tequila blanco";
+  if (lower.includes("spiced rum")) return "spiced rum";
+  if (lower.includes("coconut rum") || lower.includes("malibu")) return "coconut rum";
+  if (lower.includes("gold rum")) return "gold rum";
+  if (lower.includes("jamaican rum")) return "jamaican rum";
+  if (lower.includes("empress gin")) return "gin";
+  if (lower.includes("bourbon")) return "bourbon";
+  // Fall back to base spirit
+  return baseSpirit.toLowerCase();
 }
 
 /** Collect mixer/ingredient needs from all drinks */
@@ -291,46 +398,47 @@ export function generateShoppingList(eventData: EventData): ShoppingListItem[] {
   const items: ShoppingListItem[] = [];
 
   const sigDrinks = Array.isArray(eventData.signature_drinks) ? eventData.signature_drinks : [];
+  const barHours = calculateHours(eventData.bar_service_start, eventData.bar_service_end);
 
-  // Spirits from signature drinks
+  // Spirits from signature drinks (recipe-based calculation)
   if (sigDrinks.length > 0) {
     items.push(
       ...getSpiritBottles(
         sigDrinks,
         eventData.guest_count ?? 50,
-        eventData.drinking_pace ?? "moderate"
+        eventData.drinking_pace ?? "moderate",
+        barHours
       )
     );
   }
 
-  // Beer
+  // Beer (case-based guidelines)
   if (eventData.beer) {
-    const totalBeers = Math.ceil(eventData.guest_count * 1.5);
-    const twentyFourPacks = Math.floor(totalBeers / 24);
-    const remainder = totalBeers - twentyFourPacks * 24;
-    const twelvePacks = Math.ceil(remainder / 12);
-    const parts: string[] = [];
-    if (twentyFourPacks > 0) parts.push(`${twentyFourPacks} x 24-pack${twentyFourPacks === 1 ? "" : "s"}`);
-    if (twelvePacks > 0) parts.push(`${twelvePacks} x 12-pack${twelvePacks === 1 ? "" : "s"}`);
+    const gc = eventData.guest_count;
+    let beerQty: string;
+    if (gc <= 50) beerQty = "2 to 3 cases";
+    else if (gc <= 100) beerQty = "3 to 5 cases";
+    else if (gc <= 150) beerQty = "4 to 6 cases";
+    else beerQty = "5 to 8 cases";
     items.push({
       category: "Beer & Wine",
       item: "Beer (variety pack or client preference)",
-      quantity: parts.join(" + ") || "1 x 24-pack",
+      quantity: beerQty,
     });
   }
 
-  // Wine
+  // Wine (case-based guidelines)
   if (eventData.wine) {
-    const wineBottles = Math.ceil(eventData.guest_count / 5);
-    const fullCases = Math.floor(wineBottles / 12);
-    const loosBottles = wineBottles - fullCases * 12;
-    const parts: string[] = [];
-    if (fullCases > 0) parts.push(`${fullCases} x 12-bottle case${fullCases === 1 ? "" : "s"}`);
-    if (loosBottles > 0) parts.push(`${loosBottles} x 750 ml bottle${loosBottles === 1 ? "" : "s"}`);
+    const gc = eventData.guest_count;
+    let wineQty: string;
+    if (gc <= 50) wineQty = "1 to 2 cases";
+    else if (gc <= 100) wineQty = "2 to 3 cases";
+    else if (gc <= 150) wineQty = "3 to 4 cases";
+    else wineQty = "3 to 5 cases";
     items.push({
       category: "Beer & Wine",
       item: "Wine (mix of red and white)",
-      quantity: parts.join(" + ") || "1 x 750 ml bottle",
+      quantity: wineQty,
     });
   }
 
@@ -624,7 +732,7 @@ export function generateNatalieSupplyList(eventData: EventData): string {
   parts.push("");
 
   // --- SECTION 1: SPIRITS (client purchases, Natalie sees for reference) ---
-  const spiritItems = getSpiritBottles(drinks, guestCount, pace);
+  const spiritItems = getSpiritBottles(drinks, guestCount, pace, hours);
   if (spiritItems.length > 0) {
     parts.push("<b>SPIRITS</b>");
     for (const s of spiritItems) {

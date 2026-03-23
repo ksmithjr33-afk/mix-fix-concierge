@@ -58,6 +58,17 @@ function toArray(val: unknown): string[] {
   return [];
 }
 
+/** Strip oz measurements and "Top with" prefixes from ingredient strings for client display */
+function stripMeasurements(ingredient: string): string {
+  // Remove patterns like "2 oz ", "0.5 oz ", "1.5 oz "
+  let cleaned = ingredient.replace(/^\d+(\.\d+)?\s*oz\s+/i, "");
+  // Remove "Top with " prefix
+  cleaned = cleaned.replace(/^top with\s+/i, "");
+  // Remove "splash of " prefix
+  cleaned = cleaned.replace(/^splash of\s+/i, "");
+  return cleaned.trim();
+}
+
 function DetailRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="py-3 border-b border-[#DDD5CC] last:border-0">
@@ -309,6 +320,41 @@ export default function CompletePage() {
           </dl>
         </section>
 
+        {/* What Happens Next - Timeline */}
+        <section className="bg-[#F5F0EB] rounded-2xl border border-[#DDD5CC] p-5 sm:p-6">
+          <h3 className="font-heading text-lg font-bold text-[#2C2420] mb-6">
+            What Happens Next
+          </h3>
+          <div className="relative">
+            {timelineSteps.map((step, i) => (
+              <div key={i} className="flex gap-4 pb-6 last:pb-0">
+                {/* Timeline indicator */}
+                <div className="flex flex-col items-center">
+                  <div className="w-8 h-8 rounded-full bg-[#8B9E7E] text-white text-sm font-bold flex items-center justify-center shrink-0">
+                    {i + 1}
+                  </div>
+                  {i < timelineSteps.length - 1 && (
+                    <div className="w-0.5 flex-1 bg-[#8B9E7E]/30 mt-2" />
+                  )}
+                </div>
+                {/* Content */}
+                <div className="pt-1 pb-2">
+                  <h4 className="text-[15px] font-bold text-[#2C2420] mb-1">
+                    {step.title}
+                  </h4>
+                  <p className="text-sm text-[#6B5D52] leading-relaxed">
+                    {step.description}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+          <p className="text-sm text-[#6B5D52] mt-6 pt-4 border-t border-[#DDD5CC] leading-relaxed">
+            You can make adjustments to your plan anytime up to 2 weeks before
+            the event. Text us anytime with questions.
+          </p>
+        </section>
+
         {/* Signature Drinks */}
         {Array.isArray(data.signature_drinks) && data.signature_drinks.length > 0 && (
           <section className="space-y-4">
@@ -346,7 +392,7 @@ export default function CompletePage() {
                   <div>
                     <span className="text-[#A39585]">Ingredients: </span>
                     <span className="text-[#2C2420]">
-                      {toArray(drink.ingredients).join(", ")}
+                      {toArray(drink.ingredients).map(stripMeasurements).join(", ")}
                     </span>
                   </div>
                   <div>
@@ -402,41 +448,6 @@ export default function CompletePage() {
             </div>
           </section>
         )}
-
-        {/* What Happens Next - Timeline */}
-        <section className="bg-[#F5F0EB] rounded-2xl border border-[#DDD5CC] p-5 sm:p-6">
-          <h3 className="font-heading text-lg font-bold text-[#2C2420] mb-6">
-            What Happens Next
-          </h3>
-          <div className="relative">
-            {timelineSteps.map((step, i) => (
-              <div key={i} className="flex gap-4 pb-6 last:pb-0">
-                {/* Timeline indicator */}
-                <div className="flex flex-col items-center">
-                  <div className="w-8 h-8 rounded-full bg-[#8B9E7E] text-white text-sm font-bold flex items-center justify-center shrink-0">
-                    {i + 1}
-                  </div>
-                  {i < timelineSteps.length - 1 && (
-                    <div className="w-0.5 flex-1 bg-[#8B9E7E]/30 mt-2" />
-                  )}
-                </div>
-                {/* Content */}
-                <div className="pt-1 pb-2">
-                  <h4 className="text-[15px] font-bold text-[#2C2420] mb-1">
-                    {step.title}
-                  </h4>
-                  <p className="text-sm text-[#6B5D52] leading-relaxed">
-                    {step.description}
-                  </p>
-                </div>
-              </div>
-            ))}
-          </div>
-          <p className="text-sm text-[#6B5D52] mt-6 pt-4 border-t border-[#DDD5CC] leading-relaxed">
-            You can make adjustments to your plan anytime up to 2 weeks before
-            the event. Text us anytime with questions.
-          </p>
-        </section>
 
         {/* Contact & Back to Home */}
         <div className="text-center pb-6 sm:pb-8 space-y-3">
