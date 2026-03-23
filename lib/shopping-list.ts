@@ -272,7 +272,7 @@ function getClientMixerQuantity(ingredient: string, guestCount: number): string 
     return `${liters} x 1 liter bottles`;
   }
   if (key.includes("ginger beer")) {
-    const cans = Math.max(12, Math.ceil(guestCount / 2));
+    const cans = Math.max(12, Math.ceil(guestCount / 20) * 6);
     return `${cans} x 12 oz cans`;
   }
   if (key.includes("ginger ale")) {
@@ -498,7 +498,7 @@ function getNatalieMixerQuantity(ingredient: string, guestCount: number): string
   }
 
   if (key.includes("ginger beer")) {
-    const cans = Math.max(12, Math.ceil(guestCount / 2));
+    const cans = Math.max(12, Math.ceil(guestCount / 20) * 6);
     return `${cans} cans`;
   }
 
