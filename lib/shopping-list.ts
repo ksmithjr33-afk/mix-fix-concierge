@@ -217,6 +217,18 @@ function normalizeSpiritName(ingName: string, baseSpirit: string): string {
   return baseSpirit.toLowerCase();
 }
 
+/** Count how many signature drinks contain ginger beer */
+function countGingerBeerDrinks(drinks: SignatureDrink[]): number {
+  let count = 0;
+  for (const drink of drinks) {
+    const ingredients = normalizeIngredients(drink.ingredients);
+    if (ingredients.some(ing => ing.toLowerCase().includes("ginger beer"))) {
+      count++;
+    }
+  }
+  return count;
+}
+
 /** Collect mixer/ingredient needs from all drinks */
 function getMixersAndIngredients(
   drinks: SignatureDrink[],
@@ -224,6 +236,7 @@ function getMixersAndIngredients(
 ): ShoppingListItem[] {
   const seen = new Set<string>();
   const items: ShoppingListItem[] = [];
+  const gbDrinkCount = countGingerBeerDrinks(drinks);
 
   for (const drink of drinks) {
     const ingredients = normalizeIngredients(drink.ingredients);
@@ -239,7 +252,7 @@ function getMixersAndIngredients(
       items.push({
         category: "Mixers & Ingredients",
         item: ing,
-        quantity: getClientMixerQuantity(ing, guestCount),
+        quantity: getClientMixerQuantity(ing, guestCount, gbDrinkCount),
       });
     }
   }
@@ -248,7 +261,7 @@ function getMixersAndIngredients(
 }
 
 /** Return real-packaging quantities for the client shopping list (no store sourcing) */
-function getClientMixerQuantity(ingredient: string, guestCount: number): string {
+function getClientMixerQuantity(ingredient: string, guestCount: number, gingerBeerDrinkCount?: number): string {
   const key = ingredient.toLowerCase().trim();
 
   if (key.includes("simple syrup")) {
@@ -272,8 +285,9 @@ function getClientMixerQuantity(ingredient: string, guestCount: number): string 
     return `${liters} x 1 liter bottles`;
   }
   if (key.includes("ginger beer")) {
-    const cans = Math.max(12, Math.ceil(guestCount / 20) * 6);
-    return `${cans} x 12 oz cans`;
+    const drinkCount = gingerBeerDrinkCount ?? 1;
+    const cans = Math.max(12, Math.ceil((guestCount / 100) * 24 * drinkCount));
+    return `${cans} x Goslings ginger beer 12 oz cans`;
   }
   if (key.includes("ginger ale")) {
     const liters = Math.max(2, Math.ceil(guestCount / 20) * 2);
@@ -468,7 +482,7 @@ export function generateShoppingList(eventData: EventData): ShoppingListItem[] {
 }
 
 /** Compute mixer quantities for Natalie's supply list — clean format with sizes, no store sourcing */
-function getNatalieMixerQuantity(ingredient: string, guestCount: number): string {
+function getNatalieMixerQuantity(ingredient: string, guestCount: number, gingerBeerDrinkCount?: number): string {
   const key = ingredient.toLowerCase().trim();
 
   if (key.includes("simple syrup")) {
@@ -498,8 +512,9 @@ function getNatalieMixerQuantity(ingredient: string, guestCount: number): string
   }
 
   if (key.includes("ginger beer")) {
-    const cans = Math.max(12, Math.ceil(guestCount / 20) * 6);
-    return `${cans} cans`;
+    const drinkCount = gingerBeerDrinkCount ?? 1;
+    const cans = Math.max(12, Math.ceil((guestCount / 100) * 24 * drinkCount));
+    return `${cans} cans (Goslings 12 oz, Sam's Club 24 ct or Walmart 12 ct)`;
   }
 
   if (key.includes("ginger ale")) {
@@ -746,6 +761,7 @@ export function generateNatalieSupplyList(eventData: EventData): string {
   const pureeJuiceSyrupItems: { item: string; quantity: string }[] = [];
   const sodaItems: { item: string; quantity: string }[] = [];
   const seenMixers = new Set<string>();
+  const gbDrinkCount = countGingerBeerDrinks(drinks);
 
   for (const drink of drinks) {
     const ingredients = normalizeIngredients(drink.ingredients);
@@ -759,7 +775,7 @@ export function generateNatalieSupplyList(eventData: EventData): string {
       if (baseSpirit && key.includes(baseSpirit)) continue;
       seenMixers.add(key);
 
-      const quantity = getNatalieMixerQuantity(ingName, guestCount);
+      const quantity = getNatalieMixerQuantity(ingName, guestCount, gbDrinkCount);
 
       if (isSodaOrGingerBeer(key)) {
         sodaItems.push({ item: ingName, quantity });
