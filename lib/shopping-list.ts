@@ -15,6 +15,12 @@ interface EventData {
   beer: boolean;
   wine: boolean;
   extra_bottles?: string;
+  event_date?: string;
+  bar_service_start?: string;
+  bar_service_end?: string;
+  theme?: string;
+  event_colors?: string;
+  special_requests?: string;
 }
 
 /** Normalize ingredients to always be a string array */
@@ -510,24 +516,42 @@ export function generateNatalieSupplyList(eventData: EventData): string {
   const drinks = Array.isArray(eventData.signature_drinks) ? eventData.signature_drinks : [];
   const pace = eventData.drinking_pace ?? "moderate";
 
-  const lines: string[] = ["NATALIE'S SUPPLY LIST", ""];
+  const parts: string[] = [];
 
-  // --- Section 1: Signature Drink Recipes ---
-  if (drinks.length > 0) {
-    lines.push("SIGNATURE DRINKS:");
-    for (const drink of drinks) {
-      const ingredients = normalizeIngredients(drink.ingredients);
-      lines.push(`  ${drink.name ?? "Unnamed Drink"} (Base Spirit: ${drink.base_spirit ?? "N/A"})`);
-      lines.push(`    Ingredients: ${ingredients.length > 0 ? ingredients.join(", ") : "N/A"}`);
-      lines.push(`    Garnish: ${drink.garnish ?? "None"}`);
-      lines.push(`    Method: ${drink.method ?? "Shake and strain"}`);
-      lines.push("");
+  // --- LINE 1: Event header ---
+  const packageLabel = eventData.package ?? "Full Bar";
+  const eventDate = formatNatalieDate(eventData.event_date);
+  const hours = calculateHours(eventData.bar_service_start, eventData.bar_service_end);
+  parts.push(`<b style="color:#8B4513;">${eventDate} (${packageLabel}) ${guestCount} guests, ${hours} hours</b>`);
+
+  // --- LINE 2: Theme ---
+  const theme = eventData.theme || "No specific theme";
+  parts.push(`Theme: ${theme}`);
+
+  // --- LINE 3: Colors ---
+  const colors = eventData.event_colors || "No specific colors";
+  parts.push(`Colors: ${colors}`);
+
+  // Blank line
+  parts.push("");
+
+  // --- SECTION 1: SPIRITS (client purchases, Natalie sees for reference) ---
+  const spiritItems = getSpiritBottles(drinks, guestCount, pace);
+  if (spiritItems.length > 0) {
+    parts.push("<b>SPIRITS</b>");
+    for (const s of spiritItems) {
+      const brandNote = s.notes ? ` ${s.notes.replace(/Top shelf: /, "").replace(/ or Moderate: /, " or ")}` : "";
+      parts.push(`${s.item} — ${s.quantity}${brandNote}`);
     }
+    parts.push("");
   }
 
-  // --- Section 2: Mixers & Ingredients (with exact formulas) ---
+  // --- SECTION 2: PUREES JUICES AND SYRUPS ---
+  const pureeJuiceSyrupItems: { item: string; quantity: string }[] = [];
+  const sodaItems: { item: string; quantity: string }[] = [];
+  const garnishItems: { item: string; prep?: string }[] = [];
   const seenMixers = new Set<string>();
-  const mixerItems: { item: string; quantity: string }[] = [];
+  const seenGarnishes = new Set<string>();
 
   for (const drink of drinks) {
     const ingredients = normalizeIngredients(drink.ingredients);
@@ -535,85 +559,218 @@ export function generateNatalieSupplyList(eventData: EventData): string {
       const key = ing.toLowerCase().trim();
       if (!key) continue;
       if (seenMixers.has(key)) continue;
-      // Skip the base spirit — listed separately below
       if (key.includes(drink.base_spirit?.toLowerCase() ?? "__none__")) continue;
       seenMixers.add(key);
-      mixerItems.push({
-        item: ing,
-        quantity: getNatalieMixerQuantity(ing, guestCount),
-      });
-    }
-  }
 
-  if (mixerItems.length > 0) {
-    lines.push("MIXERS & INGREDIENTS:");
-    for (const m of mixerItems) {
-      lines.push(`  - ${m.item}: ${m.quantity}`);
-    }
-    lines.push("");
-  }
+      const quantity = getNatalieMixerQuantity(ing, guestCount);
 
-  // --- Section 3: Garnishes ---
-  const seenGarnishes = new Set<string>();
-  const garnishItems: string[] = [];
-  for (const drink of drinks) {
+      if (isSodaOrGingerBeer(key)) {
+        sodaItems.push({ item: ing, quantity });
+      } else if (isPureeJuiceOrSyrup(key)) {
+        pureeJuiceSyrupItems.push({ item: ing, quantity });
+      }
+    }
+
+    // Collect garnishes
     const g = typeof drink.garnish === "string" ? drink.garnish.trim() : "";
-    if (!g || seenGarnishes.has(g.toLowerCase())) continue;
-    seenGarnishes.add(g.toLowerCase());
-    garnishItems.push(g);
+    if (g && !seenGarnishes.has(g.toLowerCase())) {
+      seenGarnishes.add(g.toLowerCase());
+      garnishItems.push({ item: g });
+    }
   }
+
+  if (pureeJuiceSyrupItems.length > 0) {
+    parts.push("<b>PUREES JUICES AND SYRUPS</b>");
+    for (const m of pureeJuiceSyrupItems) {
+      const label = m.item.charAt(0).toUpperCase() + m.item.slice(1);
+      parts.push(`${label} — ${formatNatalieQuantity(m.item, m.quantity)}`);
+    }
+    parts.push("");
+  }
+
+  // --- SECTION 3: GINGER BEER AND SODA ---
+  // Add any extras requested by client (Diet Coke, Sprite, etc.)
+  const extraSodas = parseExtraSodas(eventData.special_requests);
+  for (const extra of extraSodas) {
+    if (!seenMixers.has(extra.toLowerCase())) {
+      seenMixers.add(extra.toLowerCase());
+      sodaItems.push({ item: extra, quantity: "1 case (24 pack cans) (requested extras)" });
+    }
+  }
+
+  if (sodaItems.length > 0) {
+    parts.push("<b>GINGER BEER AND SODA</b>");
+    for (const s of sodaItems) {
+      const label = s.item.charAt(0).toUpperCase() + s.item.slice(1);
+      parts.push(`${label} — ${formatNatalieQuantity(s.item, s.quantity)}`);
+    }
+    parts.push("");
+  }
+
+  // --- SECTION 4: PRODUCE AND GARNISH ---
   if (garnishItems.length > 0) {
-    lines.push("GARNISHES:");
+    parts.push("<b>PRODUCE AND GARNISH</b>");
     for (const g of garnishItems) {
-      lines.push(`   ${g} (fresh from Sam's Club or Walmart, or specialty from Amazon)`);
+      parts.push(`${g.item}`);
     }
-    lines.push("");
+    parts.push("");
   }
 
-  // --- Section 4: Supplies ---
-  const cups = Math.ceil(guestCount * 3);
-  lines.push("SUPPLIES:");
-  lines.push(`  - Tossware 12 oz round bottom cups: ${cups} cups (Buy from Tossware or Amazon)`);
-  lines.push(`  - Napkins: ${Math.ceil(guestCount * 3)} napkins`);
-  lines.push(`  - Agave cocktail straws: ${cups} straws (Buy in bulk, 1,000 to 2,000 ct)`);
-  lines.push(
-    `  - Ice: ${Math.ceil(guestCount * 1.5)} lbs (Twice the Ice or Polar Ice location recommended)`
+  // --- SECTION 5: ICE & BAR SUPPLIES ---
+  const iceLbs = guestCount * 1.5;
+  const iceBags = Math.ceil(iceLbs / 18);
+  const cups = Math.ceil(guestCount * 1.5);
+  parts.push("<b>ICE & BAR SUPPLIES</b>");
+  parts.push(`Ice — ${iceBags} x 18 lb bags`);
+  parts.push(`12 oz cups — ${cups}`);
+  parts.push("");
+
+  // --- SECTION 6: BASELINE MIXERS ---
+  parts.push("<b>BASELINE MIXERS</b>");
+  parts.push("Cranberry juice — 1 x 32 oz bottle");
+  parts.push("Pineapple juice — 1 x 32 oz bottle");
+  parts.push("Orange juice — 1 x 32 oz bottle");
+  parts.push("Tonic — 2 x 1 liter bottles");
+  parts.push("Club soda — 2 x 1 liter bottles");
+  parts.push("");
+
+  // --- SECTION 7: SIGNATURE DRINK RECIPES ---
+  if (drinks.length > 0) {
+    parts.push("<b>SIGNATURE DRINK RECIPES</b>");
+    parts.push("");
+    for (const drink of drinks) {
+      const mocktailLabel = drink.is_mocktail ? " (Mocktail)" : "";
+      const drinkTitle = drink.is_mocktail
+        ? `<b>${drink.name ?? "Unnamed Drink"}:</b> ${drink.name ?? ""}${mocktailLabel} - 12 oz cup`
+        : `<b>${drink.name ?? "Unnamed Drink"}</b> - 12 oz cup`;
+      parts.push(drinkTitle);
+
+      const ingredients = normalizeIngredients(drink.ingredients);
+      for (const ing of ingredients) {
+        parts.push(ing);
+      }
+
+      if (drink.garnish) {
+        parts.push(`<b>Garnish:</b> ${drink.garnish}`);
+      }
+      parts.push("");
+    }
+  }
+
+  return parts.join("<br>");
+}
+
+/** Format event date as M/D/YY */
+function formatNatalieDate(dateStr?: string): string {
+  if (!dateStr) return "TBD";
+  const cleaned = dateStr.replace(/(st|nd|rd|th)/gi, "").trim();
+  let parsed = new Date(cleaned);
+  if (isNaN(parsed.getTime())) {
+    const withYear = cleaned + " " + new Date().getFullYear();
+    parsed = new Date(withYear);
+  }
+  if (!isNaN(parsed.getTime())) {
+    const month = parsed.getMonth() + 1;
+    const day = parsed.getDate();
+    const year = String(parsed.getFullYear()).slice(-2);
+    return `${month}/${day}/${year}`;
+  }
+  return dateStr;
+}
+
+/** Calculate hours between start and end time strings */
+function calculateHours(start?: string, end?: string): number {
+  if (!start || !end) return 5; // default
+  try {
+    const startH = parseTimeToHours(start);
+    const endH = parseTimeToHours(end);
+    let diff = endH - startH;
+    if (diff <= 0) diff += 24;
+    return Math.round(diff);
+  } catch {
+    return 5;
+  }
+}
+
+function parseTimeToHours(time: string): number {
+  const cleaned = time.toLowerCase().replace(/\s+/g, "");
+  const pmMatch = cleaned.includes("pm");
+  const amMatch = cleaned.includes("am");
+  const nums = cleaned.replace(/[^\d:]/g, "");
+  const [hStr, mStr] = nums.split(":");
+  let h = parseInt(hStr, 10);
+  const m = mStr ? parseInt(mStr, 10) : 0;
+  if (pmMatch && h < 12) h += 12;
+  if (amMatch && h === 12) h = 0;
+  return h + m / 60;
+}
+
+/** Check if ingredient is a soda or ginger beer */
+function isSodaOrGingerBeer(key: string): boolean {
+  return (
+    key.includes("ginger beer") ||
+    key.includes("ginger ale") ||
+    key.includes("club soda") ||
+    key.includes("soda water") ||
+    key.includes("tonic") ||
+    key.includes("cola") ||
+    key.includes("coke") ||
+    key.includes("sprite") ||
+    key.includes("lemon lime") ||
+    key.includes("7up") ||
+    key.includes("dr pepper")
   );
-  lines.push("");
+}
 
-  // --- Section 5: Base Spirits (Client is purchasing) ---
-  const spiritItems = getSpiritBottles(drinks, guestCount, pace);
-  if (spiritItems.length > 0) {
-    lines.push("BASE SPIRITS (Client is purchasing — do NOT buy these):");
-    for (const s of spiritItems) {
-      let line = `  - ${s.item}: ${s.quantity}`;
-      if (s.notes) line += ` (${s.notes})`;
-      lines.push(line);
+/** Check if ingredient is a puree, juice, or syrup */
+function isPureeJuiceOrSyrup(key: string): boolean {
+  return (
+    key.includes("puree") ||
+    key.includes("juice") ||
+    key.includes("syrup") ||
+    key.includes("simple") ||
+    key.includes("grenadine") ||
+    key.includes("agave") ||
+    key.includes("honey") ||
+    key.includes("bitters") ||
+    key.includes("triple sec") ||
+    key.includes("elderflower") ||
+    key.includes("lemonade") ||
+    key.includes("cream of coconut") ||
+    key.includes("coconut cream") ||
+    key.includes("coconut milk")
+  );
+}
+
+/** Format Natalie quantity for cleaner display (strip store sourcing) */
+function formatNatalieQuantity(item: string, rawQuantity: string): string {
+  // Strip store sourcing info in parentheses for cleaner display
+  return rawQuantity.replace(/\s*\([^)]*\)/g, "").trim() || rawQuantity;
+}
+
+/** Parse special requests for extra sodas like Diet Coke, Sprite, etc. */
+function parseExtraSodas(specialRequests?: string): string[] {
+  if (!specialRequests) return [];
+  const extras: string[] = [];
+  const lower = specialRequests.toLowerCase();
+  const sodaKeywords = [
+    { match: "diet coke", label: "Diet Coke" },
+    { match: "diet cola", label: "Diet Coke" },
+    { match: "sprite", label: "Sprite" },
+    { match: "dr pepper", label: "Dr Pepper" },
+    { match: "ginger ale", label: "Ginger ale" },
+    { match: "lemon lime", label: "Lemon lime soda" },
+    { match: "7up", label: "7UP" },
+    { match: "coca cola", label: "Coca Cola" },
+    { match: "coke", label: "Coca Cola" },
+    { match: "root beer", label: "Root beer" },
+  ];
+  for (const soda of sodaKeywords) {
+    if (lower.includes(soda.match)) {
+      extras.push(soda.label);
     }
-    lines.push("");
   }
-
-  // Beer & Wine if applicable
-  const beerWineLines: string[] = [];
-  if (eventData.beer) {
-    const cases = Math.ceil(guestCount / 10);
-    beerWineLines.push(
-      `  - Beer (variety pack or client preference): ${cases} case${cases === 1 ? "" : "s"}`
-    );
-  }
-  if (eventData.wine) {
-    const wineBottles = Math.ceil(guestCount / 5);
-    beerWineLines.push(
-      `  - Wine (mix of red and white): ${wineBottles} bottle${wineBottles === 1 ? "" : "s"}`
-    );
-  }
-  if (beerWineLines.length > 0) {
-    lines.push("BEER & WINE (Client is purchasing):");
-    lines.push(...beerWineLines);
-    lines.push("");
-  }
-
-  return lines.join("<br>").trim();
+  return extras;
 }
 
 /**
