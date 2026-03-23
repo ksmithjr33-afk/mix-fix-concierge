@@ -278,7 +278,7 @@ export default function CompletePage() {
             Theme & Preferences
           </h3>
           <dl>
-            <DetailRow label="Theme / Vibe" value={data.theme ?? ""} />
+            <DetailRow label="Theme" value={data.theme ?? ""} />
             <DetailRow label="Event Colors" value={data.event_colors ?? ""} />
             <DetailRow label="Menu Style" value={data.menu_style ?? ""} />
             {data.menu_notes && (
