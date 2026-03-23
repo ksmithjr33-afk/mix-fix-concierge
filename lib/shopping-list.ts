@@ -64,7 +64,8 @@ function getSpiritBottles(
 
   for (const drink of drinks) {
     const spirit = drink.base_spirit?.toLowerCase()?.trim();
-    if (spirit) spirits.add(spirit);
+    // Skip empty, null, undefined, "none", "n/a", or mocktails with no spirit
+    if (spirit && spirit !== "none" && spirit !== "n/a" && !drink.is_mocktail) spirits.add(spirit);
   }
 
   const brandRecs: Record<string, { top: string; moderate: string }> = {
@@ -358,137 +359,224 @@ export function generateShoppingList(eventData: EventData): ShoppingListItem[] {
   return items;
 }
 
-/** Compute mixer quantities using Natalie's exact formulas */
+/** Compute mixer quantities for Natalie's supply list — clean format with sizes, no store sourcing */
 function getNatalieMixerQuantity(ingredient: string, guestCount: number): string {
   const key = ingredient.toLowerCase().trim();
 
   if (key.includes("simple syrup")) {
     const bottles = Math.max(1, Math.ceil(guestCount / 33));
-    return `${bottles} liter bottle${bottles === 1 ? "" : "s"} (make from cane sugar, 10 lb bag from Sam's Club)`;
+    return `${bottles} x 1 liter bottle${bottles === 1 ? "" : "s"}`;
   }
 
   if (key.includes("lime juice")) {
     const sets = Math.max(1, Math.ceil(guestCount / 50));
     const bottles = sets * 2;
-    return `${bottles} x 32oz bottle${bottles === 1 ? "" : "s"} (RealLime from Sam's Club or Walmart)`;
+    return `${bottles} x 32 oz bottle${bottles === 1 ? "" : "s"}`;
   }
 
   if (key.includes("lemon juice")) {
     const bottles = Math.max(1, Math.ceil(guestCount / 50));
-    return `${bottles} x 48oz bottle${bottles === 1 ? "" : "s"} (RealLemon from Sam's Club or Walmart)`;
+    return `${bottles} x 48 oz bottle${bottles === 1 ? "" : "s"}`;
   }
 
   if (key.includes("club soda") || key.includes("soda water")) {
     const liters = Math.max(2, Math.ceil(guestCount / 20) * 2);
-    return `${liters} liters (GV soda water 1L from Walmart)`;
+    return `${liters} x 1 liter bottles`;
   }
 
   if (key.includes("tonic")) {
     const liters = Math.max(2, Math.ceil(guestCount / 20) * 2);
-    return `${liters} liters (GV tonic water 1L from Walmart)`;
+    return `${liters} x 1 liter bottles`;
   }
 
   if (key.includes("ginger beer")) {
     const cans = Math.max(12, Math.ceil(guestCount / 2));
-    return `${cans} cans (Goslings ginger beer 12 oz, Sam's Club 24 ct or Walmart 12 ct)`;
+    return `${cans} cans`;
   }
 
   if (key.includes("ginger ale")) {
     const liters = Math.max(2, Math.ceil(guestCount / 20) * 2);
-    return `${liters} liters`;
+    return `${liters} x 1 liter bottles`;
   }
 
   if (key.includes("cranberry")) {
     const bottles = Math.max(1, Math.ceil(guestCount / 25));
-    return `${bottles} bottle${bottles === 1 ? "" : "s"} (2 x 96 oz from Sam's Club)`;
+    return `${bottles} x 96 oz bottle${bottles === 1 ? "" : "s"}`;
   }
 
   if (key.includes("orange juice")) {
     const bottles = Math.max(1, Math.ceil(guestCount / 25));
-    return `${bottles} bottle${bottles === 1 ? "" : "s"} (2 x 54 oz from Sam's Club or Simply Orange 46 oz from Walmart)`;
+    return `${bottles} x 46 oz bottle${bottles === 1 ? "" : "s"}`;
   }
 
   if (key.includes("pineapple juice")) {
     const bottles = Math.max(1, Math.ceil(guestCount / 25));
-    return `${bottles} bottle${bottles === 1 ? "" : "s"} (Dole 46 oz from Walmart)`;
+    return `${bottles} x 46 oz bottle${bottles === 1 ? "" : "s"}`;
   }
 
   if (key.includes("pomegranate")) {
     const bottles = Math.max(1, Math.ceil(guestCount / 25));
-    return `${bottles} bottle${bottles === 1 ? "" : "s"} (POM Wonderful 60 oz from Sam's Club or 48 oz from Walmart)`;
+    return `${bottles} x 48 oz bottle${bottles === 1 ? "" : "s"}`;
   }
 
   if (key.includes("coconut cream") || key.includes("coconut milk") || key.includes("cream of coconut")) {
     const cans = Math.max(1, Math.ceil(guestCount / 25));
-    return `${cans} can${cans === 1 ? "" : "s"} (REAL Brand Cream of Coconut 16.9 oz from Specs)`;
+    return `${cans} x 16.9 oz can${cans === 1 ? "" : "s"}`;
   }
 
-  if (key.includes("grenadine")) {
-    return `1 bottle (Finest Call 1L from Specs)`;
-  }
-
-  if (key.includes("passion") || key.includes("passionfruit")) {
-    return `1 bottle (Finest Call Passionfruit Puree 1L from Specs)`;
-  }
-
-  if (key.includes("mango puree") || key.includes("mango")) {
-    return `1 bottle (Finest Call Mango Puree 1L from Specs or REAL Brand 16.9 oz)`;
-  }
-
-  if (key.includes("peach puree") || key.includes("peach")) {
-    return `1 bottle (Finest Call Peach Puree 1L from Specs or REAL Brand 16.9 oz)`;
-  }
-
-  if (key.includes("strawberry puree") || key.includes("strawberry")) {
-    return `1 bottle (Finest Call Strawberry Puree 1L from Specs)`;
-  }
-
-  if (key.includes("lychee")) {
-    return `1 bottle (REAL Brand Lychee Puree 16.9 oz from Specs)`;
-  }
-
-  if (key.includes("pumpkin")) {
-    return `1 bottle (REAL Brand Pumpkin Spice Puree 16.9 oz from Specs)`;
-  }
-
-  if (key.includes("prickly pear")) {
-    return `1 bottle (Finest Call Prickly Pear Syrup 1L or REAL Brand 16.9 oz from Specs)`;
-  }
-
-  if (key.includes("black cherry") || key.includes("cherry")) {
-    return `1 bottle (REAL Brand Black Cherry Puree 16.9 oz from Specs) plus GV cocktail cherries 11 oz from Walmart`;
-  }
-
-  if (key.includes("agave")) {
-    return `1 bottle (Kirkland agave 2 x 36 oz from Sam's Club or Wholesome 36 oz from Walmart)`;
-  }
-
-  if (key.includes("honey")) {
-    return `1 bottle (48 oz from Sam's Club or Bettergoods hot honey 12 oz from Walmart)`;
-  }
-
-  if (key.includes("lavender") && key.includes("syrup")) {
-    return `1 bottle (specialty, order from Amazon)`;
-  }
-
-  if (key.includes("butterscotch") && key.includes("syrup")) {
-    return `1 bottle (specialty, order from Amazon)`;
-  }
-
-  if (key.includes("elderflower")) {
-    return `1 bottle (specialty, order from Amazon or liquor store)`;
-  }
-
-  if (key.includes("bitters") || key.includes("angostura")) {
-    return `1 bottle (Angostura bitters 4 oz from Walmart)`;
-  }
-
-  if (key.includes("lemonade")) {
-    return `1 jug (Milo's lemonade 128 oz from Walmart)`;
-  }
+  if (key.includes("grenadine")) return "1 x 1 liter bottle";
+  if (key.includes("passion") || key.includes("passionfruit")) return "1 x 1 liter bottle";
+  if (key.includes("mango puree") || key.includes("mango")) return "1 x 1 liter bottle";
+  if (key.includes("peach puree") || key.includes("peach")) return "1 x 1 liter bottle";
+  if (key.includes("strawberry puree") || key.includes("strawberry")) return "1 x 1 liter bottle";
+  if (key.includes("lychee")) return "1 x 16.9 oz bottle";
+  if (key.includes("pumpkin")) return "1 x 16.9 oz bottle";
+  if (key.includes("prickly pear")) return "1 x 1 liter bottle";
+  if (key.includes("black cherry") || key.includes("cherry")) return "1 x 16.9 oz bottle plus 1 x 11 oz jar cocktail cherries";
+  if (key.includes("agave")) return "1 x 36 oz bottle";
+  if (key.includes("honey")) return "1 x 48 oz bottle";
+  if (key.includes("lavender") && key.includes("syrup")) return "1 x 12.7 oz bottle";
+  if (key.includes("butterscotch") && key.includes("syrup")) return "1 x 12.7 oz bottle";
+  if (key.includes("elderflower")) return "1 x 750 ml bottle";
+  if (key.includes("bitters") || key.includes("angostura")) return "1 x 4 oz bottle";
+  if (key.includes("lemonade")) return "1 x 128 oz jug";
+  if (key.includes("triple sec")) return "1 x 750 ml bottle";
+  if (key.includes("gulkand")) return "1 x 16 oz jar";
 
   const units = Math.max(1, Math.ceil(guestCount / 25));
-  return `${units} unit${units === 1 ? "" : "s"}`;
+  return `${units} x 1 liter bottle${units === 1 ? "" : "s"}`;
+}
+
+/** Parse garnish descriptions from all drinks and calculate real produce quantities */
+function calculateProduceFromGarnishes(drinks: SignatureDrink[], guestCount: number): { item: string; quantity: string }[] {
+  // Count how many drinks use each type of garnish
+  const garnishCounts: Record<string, number> = {};
+
+  for (const drink of drinks) {
+    const g = typeof drink.garnish === "string" ? drink.garnish.toLowerCase().trim() : "";
+    if (!g) continue;
+
+    if (g.includes("lime")) garnishCounts["lime"] = (garnishCounts["lime"] || 0) + 1;
+    if (g.includes("lemon")) garnishCounts["lemon"] = (garnishCounts["lemon"] || 0) + 1;
+    if (g.includes("orange")) garnishCounts["orange"] = (garnishCounts["orange"] || 0) + 1;
+    if (g.includes("mint")) garnishCounts["mint"] = (garnishCounts["mint"] || 0) + 1;
+    if (g.includes("basil")) garnishCounts["basil"] = (garnishCounts["basil"] || 0) + 1;
+    if (g.includes("rosemary")) garnishCounts["rosemary"] = (garnishCounts["rosemary"] || 0) + 1;
+    if (g.includes("pineapple")) garnishCounts["pineapple"] = (garnishCounts["pineapple"] || 0) + 1;
+    if (g.includes("watermelon")) garnishCounts["watermelon"] = (garnishCounts["watermelon"] || 0) + 1;
+    if (g.includes("cucumber")) garnishCounts["cucumber"] = (garnishCounts["cucumber"] || 0) + 1;
+    if (g.includes("jalapeno") || g.includes("jalapeño")) garnishCounts["jalapeno"] = (garnishCounts["jalapeno"] || 0) + 1;
+    if (g.includes("habanero")) garnishCounts["habanero"] = (garnishCounts["habanero"] || 0) + 1;
+    if (g.includes("tajin") || g.includes("chili salt") || g.includes("chile salt")) garnishCounts["tajin"] = (garnishCounts["tajin"] || 0) + 1;
+    if (g.includes("cherry") || g.includes("cherries") || g.includes("maraschino")) garnishCounts["cherry"] = (garnishCounts["cherry"] || 0) + 1;
+    if (g.includes("blackberr")) garnishCounts["blackberry"] = (garnishCounts["blackberry"] || 0) + 1;
+    if (g.includes("strawberr")) garnishCounts["strawberry"] = (garnishCounts["strawberry"] || 0) + 1;
+    if (g.includes("dried flower") || g.includes("edible flower") || g.includes("dried lavender")) garnishCounts["dried flower"] = (garnishCounts["dried flower"] || 0) + 1;
+    if (g.includes("cinnamon")) garnishCounts["cinnamon"] = (garnishCounts["cinnamon"] || 0) + 1;
+    if (g.includes("star anise")) garnishCounts["star anise"] = (garnishCounts["star anise"] || 0) + 1;
+    if (g.includes("ginger") && !g.includes("ginger beer")) garnishCounts["ginger"] = (garnishCounts["ginger"] || 0) + 1;
+  }
+
+  const items: { item: string; quantity: string }[] = [];
+  // Servings per item: assume each drink serves ~1/3 of guests (3 drinks split evenly)
+  const numDrinks = drinks.filter(d => !d.is_mocktail).length || 1;
+
+  for (const [garnish, drinkCount] of Object.entries(garnishCounts)) {
+    // Portion of guests likely to order drinks with this garnish
+    const servings = Math.ceil((guestCount * drinkCount) / numDrinks);
+
+    switch (garnish) {
+      case "lime": {
+        // ~5 wheels per lime
+        const limes = Math.max(10, Math.ceil(servings / 5));
+        items.push({ item: "Limes", quantity: `${limes} (wheels)` });
+        break;
+      }
+      case "lemon": {
+        const lemons = Math.max(8, Math.ceil(servings / 5));
+        items.push({ item: "Lemons", quantity: `${lemons} (wheels)` });
+        break;
+      }
+      case "orange": {
+        const oranges = Math.max(6, Math.ceil(servings / 4));
+        items.push({ item: "Oranges", quantity: `${oranges} (wheels or slices)` });
+        break;
+      }
+      case "mint": {
+        // ~10 sprigs per bunch, ~2 leaves per drink
+        const bunches = Math.max(3, Math.ceil(servings / 15));
+        items.push({ item: "Mint", quantity: `${bunches} bunches` });
+        break;
+      }
+      case "basil": {
+        const bunches = Math.max(2, Math.ceil(servings / 20));
+        items.push({ item: "Basil", quantity: `${bunches} bunches` });
+        break;
+      }
+      case "rosemary": {
+        const bunches = Math.max(2, Math.ceil(servings / 20));
+        items.push({ item: "Rosemary", quantity: `${bunches} bunches` });
+        break;
+      }
+      case "pineapple": {
+        const pineapples = Math.max(2, Math.ceil(servings / 30));
+        items.push({ item: "Pineapple", quantity: `${pineapples} whole (wedges)` });
+        break;
+      }
+      case "watermelon": {
+        const melons = Math.max(1, Math.ceil(servings / 50));
+        items.push({ item: "Watermelon", quantity: `${melons} whole (wedges)` });
+        break;
+      }
+      case "cucumber": {
+        const cukes = Math.max(3, Math.ceil(servings / 15));
+        items.push({ item: "Cucumbers", quantity: `${cukes} (sliced)` });
+        break;
+      }
+      case "jalapeno": {
+        const peppers = Math.max(5, Math.ceil(servings / 10));
+        items.push({ item: "Jalapeno peppers", quantity: `${peppers} peppers (sliced)` });
+        break;
+      }
+      case "habanero": {
+        const peppers = Math.max(5, Math.ceil(servings / 10));
+        items.push({ item: "Habanero peppers", quantity: `${peppers} peppers (sliced)` });
+        break;
+      }
+      case "tajin":
+        items.push({ item: "Tajin or chili salt", quantity: "1 large container" });
+        break;
+      case "cherry":
+        items.push({ item: "Cocktail cherries", quantity: "1 x 10 oz jar" });
+        break;
+      case "blackberry": {
+        const pints = Math.max(2, Math.ceil(servings / 30));
+        items.push({ item: "Blackberries", quantity: `${pints} pints` });
+        break;
+      }
+      case "strawberry": {
+        const pints = Math.max(2, Math.ceil(servings / 20));
+        items.push({ item: "Strawberries", quantity: `${pints} pints` });
+        break;
+      }
+      case "dried flower":
+        items.push({ item: "Dried edible flowers", quantity: "1 pack" });
+        break;
+      case "cinnamon":
+        items.push({ item: "Cinnamon sticks", quantity: "1 container" });
+        break;
+      case "star anise":
+        items.push({ item: "Star anise", quantity: "1 pack" });
+        break;
+      case "ginger": {
+        const roots = Math.max(2, Math.ceil(servings / 30));
+        items.push({ item: "Fresh ginger", quantity: `${roots} roots` });
+        break;
+      }
+    }
+  }
+
+  return items;
 }
 
 /**
@@ -549,33 +637,27 @@ export function generateNatalieSupplyList(eventData: EventData): string {
   // --- SECTION 2: PUREES JUICES AND SYRUPS ---
   const pureeJuiceSyrupItems: { item: string; quantity: string }[] = [];
   const sodaItems: { item: string; quantity: string }[] = [];
-  const garnishItems: { item: string; prep?: string }[] = [];
   const seenMixers = new Set<string>();
-  const seenGarnishes = new Set<string>();
 
   for (const drink of drinks) {
     const ingredients = normalizeIngredients(drink.ingredients);
     for (const ing of ingredients) {
-      const key = ing.toLowerCase().trim();
+      // Strip oz amounts to get the ingredient name for categorization
+      const ingName = ing.replace(/^[\d.]+\s*oz\s*/i, "").trim();
+      const key = ingName.toLowerCase();
       if (!key) continue;
       if (seenMixers.has(key)) continue;
-      if (key.includes(drink.base_spirit?.toLowerCase() ?? "__none__")) continue;
+      const baseSpirit = drink.base_spirit?.toLowerCase() ?? "__none__";
+      if (baseSpirit && key.includes(baseSpirit)) continue;
       seenMixers.add(key);
 
-      const quantity = getNatalieMixerQuantity(ing, guestCount);
+      const quantity = getNatalieMixerQuantity(ingName, guestCount);
 
       if (isSodaOrGingerBeer(key)) {
-        sodaItems.push({ item: ing, quantity });
+        sodaItems.push({ item: ingName, quantity });
       } else if (isPureeJuiceOrSyrup(key)) {
-        pureeJuiceSyrupItems.push({ item: ing, quantity });
+        pureeJuiceSyrupItems.push({ item: ingName, quantity });
       }
-    }
-
-    // Collect garnishes
-    const g = typeof drink.garnish === "string" ? drink.garnish.trim() : "";
-    if (g && !seenGarnishes.has(g.toLowerCase())) {
-      seenGarnishes.add(g.toLowerCase());
-      garnishItems.push({ item: g });
     }
   }
 
@@ -583,7 +665,7 @@ export function generateNatalieSupplyList(eventData: EventData): string {
     parts.push("<b>PUREES JUICES AND SYRUPS</b>");
     for (const m of pureeJuiceSyrupItems) {
       const label = m.item.charAt(0).toUpperCase() + m.item.slice(1);
-      parts.push(`${label} — ${formatNatalieQuantity(m.item, m.quantity)}`);
+      parts.push(`${label} — ${m.quantity}`);
     }
     parts.push("");
   }
@@ -602,16 +684,17 @@ export function generateNatalieSupplyList(eventData: EventData): string {
     parts.push("<b>GINGER BEER AND SODA</b>");
     for (const s of sodaItems) {
       const label = s.item.charAt(0).toUpperCase() + s.item.slice(1);
-      parts.push(`${label} — ${formatNatalieQuantity(s.item, s.quantity)}`);
+      parts.push(`${label} — ${s.quantity}`);
     }
     parts.push("");
   }
 
   // --- SECTION 4: PRODUCE AND GARNISH ---
-  if (garnishItems.length > 0) {
+  const produceItems = calculateProduceFromGarnishes(drinks, guestCount);
+  if (produceItems.length > 0) {
     parts.push("<b>PRODUCE AND GARNISH</b>");
-    for (const g of garnishItems) {
-      parts.push(`${g.item}`);
+    for (const p of produceItems) {
+      parts.push(`${p.item} — ${p.quantity}`);
     }
     parts.push("");
   }
@@ -740,12 +823,6 @@ function isPureeJuiceOrSyrup(key: string): boolean {
     key.includes("coconut cream") ||
     key.includes("coconut milk")
   );
-}
-
-/** Format Natalie quantity for cleaner display (strip store sourcing) */
-function formatNatalieQuantity(item: string, rawQuantity: string): string {
-  // Strip store sourcing info in parentheses for cleaner display
-  return rawQuantity.replace(/\s*\([^)]*\)/g, "").trim() || rawQuantity;
 }
 
 /** Parse special requests for extra sodas like Diet Coke, Sprite, etc. */

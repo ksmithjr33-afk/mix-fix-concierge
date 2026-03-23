@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { generateShoppingList, formatShoppingList, generateNatalieSupplyList } from "@/lib/shopping-list";
+import { generateNatalieSupplyList } from "@/lib/shopping-list";
 
 export async function POST(request: Request) {
   try {
@@ -19,14 +19,6 @@ export async function POST(request: Request) {
         { error: "eventData is required" },
         { status: 400 }
       );
-    }
-
-    let shoppingListText = "";
-    try {
-      const shoppingListItems = generateShoppingList(eventData);
-      shoppingListText = formatShoppingList(shoppingListItems);
-    } catch (err) {
-      console.log("generateShoppingList/formatShoppingList failed:", err);
     }
 
     let natalieSupplyList = "";
@@ -72,7 +64,6 @@ export async function POST(request: Request) {
     const payload = {
       ...cleanEventData,
       conversation_transcript: conversationTranscript || null,
-      shopping_list: shoppingListText || null,
       natalie_supply_list: natalieSupplyList || null,
       menu_colors: eventData.menu_colors || null,
       menu_reference_photos: eventData.menu_reference_photos || null,
