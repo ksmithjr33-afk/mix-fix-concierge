@@ -73,7 +73,7 @@ const timelineSteps = [
   {
     title: "Shopping List",
     description:
-      "We will build your custom alcohol shopping list with quantities and brand suggestions. Expect it by email within 7 to 10 days.",
+      "We will build your custom alcohol shopping list with quantities and brand suggestions and send it to you as soon as possible.",
   },
   {
     title: "Menu Design",
