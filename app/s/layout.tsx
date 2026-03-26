@@ -1,18 +1,4 @@
-import type { Metadata, Viewport } from "next";
-import { Playfair_Display, DM_Sans } from "next/font/google";
-import "./globals.css";
-
-const playfair = Playfair_Display({
-  variable: "--font-heading",
-  subsets: ["latin"],
-  display: "swap",
-});
-
-const dmSans = DM_Sans({
-  variable: "--font-body",
-  subsets: ["latin"],
-  display: "swap",
-});
+import type { Metadata } from "next";
 
 export const metadata: Metadata = {
   title: "The Mix Fix | Bar Planning Concierge",
@@ -34,26 +20,10 @@ export const metadata: Metadata = {
   },
 };
 
-export const viewport: Viewport = {
-  width: "device-width",
-  initialScale: 1,
-  maximumScale: 1,
-  userScalable: false,
-};
-
-export default function RootLayout({
+export default function ShortUrlLayout({
   children,
-}: Readonly<{
+}: {
   children: React.ReactNode;
-}>) {
-  return (
-    <html
-      lang="en"
-      className={`${playfair.variable} ${dmSans.variable} h-full antialiased`}
-    >
-      <body className="min-h-full flex flex-col bg-[#E8DDD5] text-[#2C2420]">
-        {children}
-      </body>
-    </html>
-  );
+}) {
+  return children;
 }
