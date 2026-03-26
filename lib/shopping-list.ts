@@ -975,11 +975,18 @@ function parseExtraSodas(specialRequests?: string): string[] {
 }
 
 /**
- * Formats the shopping list into a human-readable text string grouped by category.
+ * Formats the shopping list into an HTML string matching Isabel's style.
+ *
+ * - Essentials / Full / Premium Bar (client buys alcohol only):
+ *   Single "Liquor" section with spirits, beer, and wine as bullet points.
+ *
+ * - Bartender Only (client buys everything):
+ *   Sections: Liquor, Mixers, Extras, Ice & Bar Supplies.
  */
 export function formatShoppingList(items: ShoppingListItem[]): string {
   if (items.length === 0) return "";
 
+  // Group items by category
   const grouped = new Map<string, ShoppingListItem[]>();
   for (const item of items) {
     const list = grouped.get(item.category) ?? [];
@@ -987,15 +994,81 @@ export function formatShoppingList(items: ShoppingListItem[]): string {
     grouped.set(item.category, list);
   }
 
-  const lines: string[] = ["SHOPPING LIST", ""];
+  const isBartenderOnly =
+    grouped.has("Mixers & Ingredients") ||
+    grouped.has("Garnishes") ||
+    grouped.has("Supplies");
 
-  for (const [category, categoryItems] of grouped) {
-    lines.push(category.toUpperCase());
-    for (const it of categoryItems) {
-      lines.push(`  - ${it.item}: ${it.quantity}`);
+  const lines: string[] = [];
+
+  // --- Format a single item line ---
+  function formatItem(it: ShoppingListItem): string {
+    let brandRec = "";
+    if (it.notes) {
+      // Convert "Top shelf: X or Moderate: Y" to "X or Y"
+      const match = it.notes.match(/Top shelf:\s*(.+?)\s+or\s+Moderate:\s*(.+?)(?:\s*\(|$)/);
+      if (match) {
+        brandRec = ` ${match[1]} or ${match[2]}`;
+      } else if (it.notes === "Mid-range brand recommended") {
+        // skip generic note
+      } else if (it.notes.includes("Extra bottle requested")) {
+        brandRec = ` (${it.notes})`;
+      }
     }
+    return `• ${it.item} — ${it.quantity}${brandRec}`;
+  }
+
+  if (isBartenderOnly) {
+    // --- LIQUOR ---
+    const spirits = grouped.get("Spirits") ?? [];
+    const beerWine = grouped.get("Beer & Wine") ?? [];
+    if (spirits.length > 0 || beerWine.length > 0) {
+      lines.push("<b>Liquor</b>");
+      for (const it of spirits) lines.push(formatItem(it));
+      for (const it of beerWine) lines.push(formatItem(it));
+      lines.push("");
+    }
+
+    // --- MIXERS ---
+    const mixers = grouped.get("Mixers & Ingredients") ?? [];
+    if (mixers.length > 0) {
+      lines.push("<b>Mixers</b>");
+      for (const it of mixers) {
+        lines.push(`• ${it.item.replace(/^[\d.]+\s*oz\s*/i, "").trim()} — ${it.quantity}`);
+      }
+      lines.push("");
+    }
+
+    // --- EXTRAS ---
+    const garnishes = grouped.get("Garnishes") ?? [];
+    if (garnishes.length > 0) {
+      lines.push("<b>Extras</b>");
+      for (const it of garnishes) {
+        const note = it.notes ? ` ${it.notes}` : "";
+        lines.push(`• ${it.item} — ${it.quantity}${note}`);
+      }
+      lines.push("");
+    }
+
+    // --- ICE & BAR SUPPLIES ---
+    const supplies = grouped.get("Supplies") ?? [];
+    if (supplies.length > 0) {
+      lines.push("<b>Ice & Bar Supplies</b>");
+      for (const it of supplies) {
+        lines.push(`• ${it.item} — ${it.quantity}`);
+      }
+      lines.push("");
+    }
+  } else {
+    // Essentials / Full / Premium — alcohol only
+    const spirits = grouped.get("Spirits") ?? [];
+    const beerWine = grouped.get("Beer & Wine") ?? [];
+    lines.push("<b>Liquor</b>");
+    for (const it of spirits) lines.push(formatItem(it));
+    for (const it of beerWine) lines.push(formatItem(it));
     lines.push("");
   }
 
-  return lines.join("<br>").trim();
+  // Join with <br>, trim trailing breaks
+  return lines.join("<br>").replace(/(<br>)+$/, "");
 }
