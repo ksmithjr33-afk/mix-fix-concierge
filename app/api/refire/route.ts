@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { generateShoppingList, formatShoppingList, generateNatalieSupplyList } from "@/lib/shopping-list";
 
 export async function POST(request: Request) {
   try {
@@ -10,7 +11,106 @@ export async function POST(request: Request) {
       );
     }
 
-    const payload = await request.json();
+    const { eventData, conversationTranscript, clientEmail } = await request.json();
+
+    if (!eventData) {
+      return NextResponse.json(
+        { error: "eventData is required" },
+        { status: 400 }
+      );
+    }
+
+    // Generate client shopping list
+    let shoppingListText = "";
+    try {
+      const shoppingListItems = generateShoppingList(eventData);
+      shoppingListText = formatShoppingList(shoppingListItems);
+    } catch (err) {
+      console.log("generateShoppingList/formatShoppingList failed:", err);
+    }
+
+    // Generate Natalie supply list
+    let natalieSupplyList = "";
+    const pkg = (eventData.package ?? "").toLowerCase();
+    const isBeerAndWine = pkg.includes("beer") && pkg.includes("wine") && !pkg.includes("essentials") && !pkg.includes("full") && !pkg.includes("premium");
+    const isBartenderOnly = pkg.includes("bartender");
+    if (!isBeerAndWine && !isBartenderOnly) {
+      try {
+        natalieSupplyList = generateNatalieSupplyList(eventData);
+      } catch (err) {
+        console.log("generateNatalieSupplyList failed:", err);
+      }
+    }
+
+    const guestCount = Number(eventData.guest_count) || 50;
+    const iceLbs = guestCount * 1.5;
+    const iceBags = Math.ceil(iceLbs / 18);
+    const iceAmount = `${iceBags} x 18lb bags`;
+
+    function parseEventDate(dateStr: string): string {
+      if (!dateStr) return '';
+      const cleaned = dateStr.replace(/(st|nd|rd|th)/gi, '').trim();
+      let parsed = new Date(cleaned);
+      if (isNaN(parsed.getTime())) {
+        const withYear = cleaned + ' ' + new Date().getFullYear();
+        parsed = new Date(withYear);
+      }
+      if (!isNaN(parsed.getTime())) {
+        if (parsed.getFullYear() < 2000) {
+          parsed.setFullYear(new Date().getFullYear());
+        }
+        const year = parsed.getFullYear();
+        const month = String(parsed.getMonth() + 1).padStart(2, '0');
+        const day = String(parsed.getDate()).padStart(2, '0');
+        return year + '-' + month + '-' + day;
+      }
+      return dateStr;
+    }
+
+    // Build signature drink summary (drink names and brief descriptions)
+    let signatureDrinkSummary = "";
+    if (Array.isArray(eventData.signature_drinks) && eventData.signature_drinks.length > 0) {
+      signatureDrinkSummary = eventData.signature_drinks
+        .map((drink: { name?: string; base_spirit?: string; description?: string; flavor_profile?: string; is_mocktail?: boolean }) => {
+          const name = drink.name || "Unnamed Drink";
+          const desc = drink.description || drink.flavor_profile || "";
+          const mocktail = drink.is_mocktail ? " (Mocktail)" : "";
+          return desc ? `${name}${mocktail}: ${desc}` : `${name}${mocktail}`;
+        })
+        .join(" | ");
+    }
+
+    // Remove fields that GHL does not need
+    const { age_range: _age, menu_style: _ms, menu_notes: _mn, menu_design_preference: _mdp, ...cleanEventData } = eventData;
+
+    const payload = {
+      ...cleanEventData,
+      conversation_transcript: conversationTranscript || null,
+      shopping_list: shoppingListText || null,
+      natalie_supply_list: natalieSupplyList || null,
+      signature_drink_summary: signatureDrinkSummary || null,
+      menu_colors: eventData.menu_colors || null,
+      menu_reference_photos: eventData.menu_reference_photos || null,
+      ice_amount: iceAmount,
+      actual_event_date: parseEventDate(eventData.event_date || ''),
+      event_start_time: eventData.bar_service_start || null,
+      event_end_time: eventData.bar_service_end || null,
+    };
+
+    // Ensure email is always present
+    if (!payload.email && clientEmail) {
+      payload.email = clientEmail;
+    }
+
+    // Debug: log every field name and value in the webhook payload
+    console.log("=== REFIRE PAYLOAD FIELDS ===");
+    for (const [key, value] of Object.entries(payload)) {
+      const display = typeof value === "string" && value.length > 200
+        ? value.substring(0, 200) + "... [truncated]"
+        : JSON.stringify(value);
+      console.log(`  ${key}: ${display}`);
+    }
+    console.log("=== END REFIRE PAYLOAD ===");
 
     const res = await fetch(webhookUrl, {
       method: "POST",
