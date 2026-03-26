@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { generateNatalieSupplyList } from "@/lib/shopping-list";
+import { generateShoppingList, formatShoppingList, generateNatalieSupplyList } from "@/lib/shopping-list";
 
 export async function POST(request: Request) {
   try {
@@ -21,6 +21,16 @@ export async function POST(request: Request) {
       );
     }
 
+    // Generate client shopping list
+    let shoppingListText = "";
+    try {
+      const shoppingListItems = generateShoppingList(eventData);
+      shoppingListText = formatShoppingList(shoppingListItems);
+    } catch (err) {
+      console.log("generateShoppingList/formatShoppingList failed:", err);
+    }
+
+    // Generate Natalie supply list
     let natalieSupplyList = "";
     const pkg = (eventData.package ?? "").toLowerCase();
     const isBeerAndWine = pkg.includes("beer") && pkg.includes("wine") && !pkg.includes("essentials") && !pkg.includes("full") && !pkg.includes("premium");
@@ -58,17 +68,34 @@ export async function POST(request: Request) {
       return dateStr;
     }
 
-    // Remove age_range from payload
+    // Build signature drink summary (drink names and brief descriptions)
+    let signatureDrinkSummary = "";
+    if (Array.isArray(eventData.signature_drinks) && eventData.signature_drinks.length > 0) {
+      signatureDrinkSummary = eventData.signature_drinks
+        .map((drink: { name?: string; base_spirit?: string; description?: string; flavor_profile?: string; is_mocktail?: boolean }) => {
+          const name = drink.name || "Unnamed Drink";
+          const desc = drink.description || drink.flavor_profile || "";
+          const mocktail = drink.is_mocktail ? " (Mocktail)" : "";
+          return desc ? `${name}${mocktail}: ${desc}` : `${name}${mocktail}`;
+        })
+        .join(" | ");
+    }
+
+    // Remove fields that GHL does not need
     const { age_range: _age, menu_style: _ms, menu_notes: _mn, menu_design_preference: _mdp, ...cleanEventData } = eventData;
 
     const payload = {
       ...cleanEventData,
       conversation_transcript: conversationTranscript || null,
+      shopping_list: shoppingListText || null,
       natalie_supply_list: natalieSupplyList || null,
+      signature_drink_summary: signatureDrinkSummary || null,
       menu_colors: eventData.menu_colors || null,
       menu_reference_photos: eventData.menu_reference_photos || null,
       ice_amount: iceAmount,
       actual_event_date: parseEventDate(eventData.event_date || ''),
+      event_start_time: eventData.bar_service_start || null,
+      event_end_time: eventData.bar_service_end || null,
     };
 
     // Ensure email is always present — use eventData.email if the AI included it,
@@ -76,6 +103,16 @@ export async function POST(request: Request) {
     if (!payload.email && clientEmail) {
       payload.email = clientEmail;
     }
+
+    // Debug: log every field name and value in the webhook payload
+    console.log("=== WEBHOOK PAYLOAD FIELDS ===");
+    for (const [key, value] of Object.entries(payload)) {
+      const display = typeof value === "string" && value.length > 200
+        ? value.substring(0, 200) + "... [truncated]"
+        : JSON.stringify(value);
+      console.log(`  ${key}: ${display}`);
+    }
+    console.log("=== END WEBHOOK PAYLOAD ===");
 
     const res = await fetch(webhookUrl, {
       method: "POST",
