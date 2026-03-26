@@ -19,12 +19,41 @@ function RedirectHandler() {
   const router = useRouter();
 
   useEffect(() => {
-    const chatParams = new URLSearchParams();
+    const sessionId = searchParams.get("id");
 
+    if (sessionId) {
+      // Session-based lookup
+      fetch(`/api/get-session?id=${encodeURIComponent(sessionId)}`)
+        .then((res) => {
+          if (!res.ok) throw new Error("Session not found");
+          return res.json();
+        })
+        .then((data) => {
+          const chatParams = new URLSearchParams();
+          for (const [key, value] of Object.entries(data)) {
+            if (value) {
+              chatParams.set(key, String(value));
+            }
+          }
+          router.replace(`/chat?${chatParams.toString()}`);
+        })
+        .catch(() => {
+          // Session not found, redirect to chat without params
+          router.replace("/chat");
+        });
+      return;
+    }
+
+    // Fallback: short parameter keys in URL
+    const chatParams = new URLSearchParams();
     for (const [shortKey, longKey] of Object.entries(PARAM_MAP)) {
-      const value = searchParams.get(shortKey);
-      if (value) {
-        chatParams.set(longKey, value);
+      const raw = searchParams.get(shortKey);
+      if (raw) {
+        try {
+          chatParams.set(longKey, decodeURIComponent(raw));
+        } catch {
+          chatParams.set(longKey, raw);
+        }
       }
     }
 
