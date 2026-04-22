@@ -67,6 +67,7 @@ export default async function ShortRedirectPage({
 
   // Build redirect URL with all session parameters
   const chatParams = new URLSearchParams();
+  chatParams.set("session_id", sessionId);
   for (const [key, value] of Object.entries(data)) {
     if (value != null && value !== "") {
       chatParams.set(key, String(value));

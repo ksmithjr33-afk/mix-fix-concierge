@@ -29,10 +29,15 @@ function ChatContent() {
   const completedRef = useRef(false);
   const sessionIdRef = useRef<string | null>(null);
   if (!sessionIdRef.current) {
-    sessionIdRef.current =
-      typeof crypto !== "undefined" && "randomUUID" in crypto
-        ? crypto.randomUUID()
-        : `sess_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    const fromUrl = searchParams.get("session_id");
+    if (fromUrl) {
+      sessionIdRef.current = fromUrl;
+    } else {
+      sessionIdRef.current =
+        typeof crypto !== "undefined" && "randomUUID" in crypto
+          ? crypto.randomUUID()
+          : `sess_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    }
   }
 
   const scrollToBottom = () => {
