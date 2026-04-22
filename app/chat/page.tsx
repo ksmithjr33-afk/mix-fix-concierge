@@ -27,6 +27,13 @@ function ChatContent() {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const hiddenPrefixRef = useRef<Message[]>([]);
   const completedRef = useRef(false);
+  const sessionIdRef = useRef<string | null>(null);
+  if (!sessionIdRef.current) {
+    sessionIdRef.current =
+      typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : `sess_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  }
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -96,7 +103,12 @@ function ChatContent() {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: currentMessages }),
+        body: JSON.stringify({
+          messages: currentMessages,
+          sessionId: sessionIdRef.current,
+          clientName: searchParams.get("name"),
+          email: searchParams.get("email"),
+        }),
       });
 
       const reader = res.body?.getReader();
@@ -213,6 +225,7 @@ function ChatContent() {
             body: JSON.stringify({
               eventData,
               conversationTranscript: transcript,
+              sessionId: sessionIdRef.current,
             }),
           }).catch((err) => console.error("Failed to save event to Supabase:", err));
 

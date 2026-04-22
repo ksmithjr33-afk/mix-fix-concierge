@@ -4,7 +4,7 @@ import { generateShoppingList, formatShoppingList } from "@/lib/shopping-list";
 
 export async function POST(request: Request) {
   try {
-    const { eventData, conversationTranscript } =
+    const { eventData, conversationTranscript, sessionId } =
       await request.json();
 
     if (!eventData) {
@@ -48,6 +48,20 @@ export async function POST(request: Request) {
         { error: error.message },
         { status: 500 }
       );
+    }
+
+    if (sessionId) {
+      const { error: logError } = await supabase
+        .from("conversation_logs")
+        .update({
+          status: "completed",
+          event_data: cleanEventData,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("session_id", sessionId);
+      if (logError) {
+        console.error("conversation_logs completion update error:", logError);
+      }
     }
 
     return NextResponse.json({ id: data.id });
