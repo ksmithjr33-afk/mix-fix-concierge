@@ -1,11 +1,7 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
-import {
-  generateShoppingList,
-  type ShoppingListItem,
-} from "@/lib/shopping-list";
 
 interface SignatureDrink {
   name: string;
@@ -105,35 +101,6 @@ const timelineSteps = [
 
 export default function CompletePage() {
   const [data, setData] = useState<EventData | null>(null);
-
-  const shoppingListItems = useMemo(() => {
-    if (!data) return [];
-    try {
-      return generateShoppingList({
-        guest_count: data.guest_count ?? 50,
-        drinking_pace: data.drinking_pace ?? "moderate",
-        package: data.package ?? "",
-        signature_drinks: Array.isArray(data.signature_drinks)
-          ? data.signature_drinks.map((d) => ({ ...d, ingredients: toArray(d.ingredients) }))
-          : [],
-        beer: data.beer ?? false,
-        wine: data.wine ?? false,
-        extra_bottles: data.extra_bottles,
-      });
-    } catch {
-      return [];
-    }
-  }, [data]);
-
-  const groupedShoppingList = useMemo(() => {
-    const grouped = new Map<string, ShoppingListItem[]>();
-    for (const item of shoppingListItems) {
-      const list = grouped.get(item.category) ?? [];
-      list.push(item);
-      grouped.set(item.category, list);
-    }
-    return grouped;
-  }, [shoppingListItems]);
 
   useEffect(() => {
     const stored = localStorage.getItem("mixfix_event_data");
@@ -272,54 +239,6 @@ export default function CompletePage() {
           </dl>
         </section>
 
-        {/* Theme & Preferences */}
-        <section className="bg-[#F5F0EB] rounded-2xl border border-[#DDD5CC] p-5 sm:p-6">
-          <h3 className="font-heading text-lg font-bold text-[#2C2420] mb-4">
-            Theme & Preferences
-          </h3>
-          <dl>
-            <DetailRow label="Theme" value={data.theme ?? ""} />
-            <DetailRow label="Event Colors" value={data.event_colors ?? ""} />
-            <DetailRow label="Menu Style" value={data.menu_style ?? ""} />
-            {data.menu_notes && (
-              <DetailRow label="Menu Design Notes" value={data.menu_notes} />
-            )}
-            <DetailRow
-              label="Allergies / Avoid"
-              value={
-                toArray(data.allergies).length > 0
-                  ? toArray(data.allergies).join(", ")
-                  : "None"
-              }
-            />
-            <DetailRow
-              label="Day of Contact"
-              value={
-                data.day_of_contact_name
-                  ? `${data.day_of_contact_name} ${data.day_of_contact_phone || ""}`
-                  : "TBD"
-              }
-            />
-            <DetailRow
-              label="Beer"
-              value={data.beer ? "Yes" : "No"}
-            />
-            <DetailRow
-              label="Wine"
-              value={data.wine ? "Yes" : "No"}
-            />
-            {data.extra_bottles && (
-              <DetailRow label="Extra Bottles" value={data.extra_bottles} />
-            )}
-            {data.special_requests && (
-              <DetailRow
-                label="Special Requests"
-                value={data.special_requests}
-              />
-            )}
-          </dl>
-        </section>
-
         {/* What Happens Next - Timeline */}
         <section className="bg-[#F5F0EB] rounded-2xl border border-[#DDD5CC] p-5 sm:p-6">
           <h3 className="font-heading text-lg font-bold text-[#2C2420] mb-6">
@@ -406,46 +325,6 @@ export default function CompletePage() {
                 </div>
               </div>
             ))}
-          </section>
-        )}
-
-        {/* Shopping List */}
-        {shoppingListItems.length > 0 && (
-          <section className="bg-[#F5F0EB] rounded-2xl border border-[#DDD5CC] p-5 sm:p-6">
-            <h3 className="font-heading text-lg font-bold text-[#2C2420] mb-4">
-              Your Shopping List
-            </h3>
-            <div className="space-y-5">
-              {Array.from(groupedShoppingList).map(([category, items]) => (
-                <div key={category}>
-                  <h4 className="text-xs text-[#A39585] uppercase tracking-wide mb-2">
-                    {category}
-                  </h4>
-                  <ul className="space-y-2">
-                    {items.map((item, i) => (
-                      <li
-                        key={i}
-                        className="flex items-start justify-between gap-3 py-2 border-b border-[#DDD5CC] last:border-0"
-                      >
-                        <div>
-                          <span className="text-[15px] text-[#2C2420]">
-                            {item.item}
-                          </span>
-                          {item.notes && (
-                            <p className="text-xs text-[#A39585] mt-0.5">
-                              {item.notes}
-                            </p>
-                          )}
-                        </div>
-                        <span className="text-sm text-[#B5845A] font-medium whitespace-nowrap">
-                          {item.quantity}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ))}
-            </div>
           </section>
         )}
 
