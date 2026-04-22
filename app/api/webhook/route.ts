@@ -1,5 +1,61 @@
 import { NextResponse } from "next/server";
+import Anthropic from "@anthropic-ai/sdk";
 import { generateShoppingList, formatShoppingList, generateNatalieSupplyList } from "@/lib/shopping-list";
+
+const anthropic = new Anthropic();
+
+async function generateConversationSummary(
+  transcript: string,
+  eventData: Record<string, unknown>
+): Promise<string | null> {
+  if (!transcript || transcript.trim().length === 0) return null;
+
+  const structured = JSON.stringify(
+    {
+      package: eventData.package ?? null,
+      signature_drinks: eventData.signature_drinks ?? null,
+      special_requests: eventData.special_requests ?? null,
+      event_name: eventData.event_name ?? null,
+      event_type: eventData.event_type ?? null,
+      guest_count: eventData.guest_count ?? null,
+      theme: eventData.theme ?? null,
+    },
+    null,
+    2
+  );
+
+  try {
+    const res = await anthropic.messages.create({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 400,
+      messages: [
+        {
+          role: "user",
+          content: `Summarize this bar service planning conversation for internal team handoff. Focus on the key decisions: the package chosen, the 3 signature drinks (names only), any special requests, key preferences, and anything notable the client mentioned.
+
+Write a clean short paragraph (not bullet points), 3 to 5 sentences max. Do not use hyphens, en dashes, or em dashes anywhere. Use commas or periods instead.
+
+Structured event data:
+${structured}
+
+Full transcript:
+${transcript}
+
+Return only the summary paragraph, no preamble or labels.`,
+        },
+      ],
+    });
+
+    const block = res.content[0];
+    if (block && block.type === "text") {
+      return block.text.trim();
+    }
+    return null;
+  } catch (err) {
+    console.error("Conversation summary generation failed:", err);
+    return null;
+  }
+}
 
 export async function POST(request: Request) {
   try {
@@ -84,9 +140,15 @@ export async function POST(request: Request) {
     // Remove fields that GHL does not need
     const { age_range: _age, menu_style: _ms, menu_notes: _mn, menu_design_preference: _mdp, ...cleanEventData } = eventData;
 
+    const conversationSummary = await generateConversationSummary(
+      conversationTranscript || "",
+      eventData
+    );
+
     const payload = {
       ...cleanEventData,
       conversation_transcript: conversationTranscript || null,
+      conversation_summary: conversationSummary,
       shopping_list: shoppingListText || null,
       natalie_supply_list: natalieSupplyList || null,
       signature_drink_summary: signatureDrinkSummary || null,
