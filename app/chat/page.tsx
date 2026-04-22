@@ -55,9 +55,13 @@ function ChatContent() {
   }, [isStreaming]);
 
   useEffect(() => {
-    if (!started) {
-      setStarted(true);
+    if (started) return;
+    setStarted(true);
 
+    const CONTEXT_PREFIX = "CONTEXT - Pre-filled from booking system:";
+    const sessionIdFromUrl = searchParams.get("session_id");
+
+    const startFresh = () => {
       const initialMessages: Message[] = [];
 
       // Build context message from URL query parameters
@@ -81,7 +85,7 @@ function ChatContent() {
 
         const contextMsg: Message = {
           role: "user",
-          content: `CONTEXT - Pre-filled from booking system: ${parts.join(", ")}. Use this info and do not re-ask for it.`,
+          content: `${CONTEXT_PREFIX} ${parts.join(", ")}. Use this info and do not re-ask for it.`,
         };
         hiddenPrefixRef.current = [contextMsg];
         initialMessages.push(contextMsg);
@@ -95,7 +99,53 @@ function ChatContent() {
       initialMessages.push(greeting);
 
       streamResponse(initialMessages);
-    }
+    };
+
+    const restoreOrStart = async () => {
+      if (!sessionIdFromUrl) {
+        startFresh();
+        return;
+      }
+
+      try {
+        const res = await fetch(
+          `/api/get-conversation?session_id=${encodeURIComponent(sessionIdFromUrl)}`
+        );
+        const data = await res.json();
+
+        if (data?.status === "completed") {
+          completedRef.current = true;
+          router.push("/complete");
+          return;
+        }
+
+        if (
+          data?.status === "in_progress" &&
+          Array.isArray(data.messages) &&
+          data.messages.length > 0
+        ) {
+          const saved: Message[] = data.messages;
+          const first = saved[0];
+          if (
+            first?.role === "user" &&
+            typeof first.content === "string" &&
+            first.content.startsWith(CONTEXT_PREFIX)
+          ) {
+            hiddenPrefixRef.current = [first];
+            setMessages(saved.slice(1));
+          } else {
+            setMessages(saved);
+          }
+          return;
+        }
+      } catch (err) {
+        console.error("Failed to restore conversation:", err);
+      }
+
+      startFresh();
+    };
+
+    restoreOrStart();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
