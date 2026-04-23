@@ -166,6 +166,14 @@ export async function POST(request: Request) {
       payload.email = clientEmail;
     }
 
+    // Debug: log the conversation summary and transcript in full before sending
+    console.log("=== CONVERSATION SUMMARY (sent to GHL) ===");
+    console.log(conversationSummary ?? "(null)");
+    console.log("=== END CONVERSATION SUMMARY ===");
+    console.log("=== CONVERSATION TRANSCRIPT (sent to GHL) ===");
+    console.log(conversationTranscript ?? "(null)");
+    console.log("=== END CONVERSATION TRANSCRIPT ===");
+
     // Debug: log every field name and value in the webhook payload
     console.log("=== WEBHOOK PAYLOAD FIELDS ===");
     for (const [key, value] of Object.entries(payload)) {
