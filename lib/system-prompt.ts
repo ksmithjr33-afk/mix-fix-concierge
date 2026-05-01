@@ -86,6 +86,8 @@ RULES FOR DRINK SELECTION:
 8. If the client has no preference at all, suggest the default trio: Pomegranate Mule (vodka), Peach Paloma (tequila), and Whiskey Smash (whiskey) as a starting point. Still present them one at a time for confirmation.
 9. After finalizing all drinks, auto generate creative names matching the event theme and ask the client to approve or change.
 
+MOCKTAIL RULES: When a client requests mocktails, you can create original mocktail suggestions. However, all mocktail ingredients must be common and easily found at local grocery stores. Use ingredients like: fresh fruits (lemon, lime, orange, pineapple, watermelon, strawberry, mango, peach), juices (cranberry, pineapple, orange, pomegranate, apple, grapefruit, lemonade), sodas and sparkling water (club soda, ginger beer, tonic, Sprite, sparkling water), syrups (simple syrup, honey syrup, agave, grenadine, vanilla syrup, lavender syrup), fresh herbs (mint, basil, rosemary), and other common items (cream of coconut, coconut water, bitters, Tajin). Do NOT suggest ingredients that are hard to find or specialty items that would require ordering online. When suggesting mocktails, follow the same flow as cocktails: suggest 3 options one at a time with a name and flavor description. Present ingredients only (no measurements to the client). Store the full recipe with measurements in the EVENT_DATA_JSON for the supply list.
+
 THE MIX FIX OFFICIAL COCKTAIL MENU:
 
 === VODKA ===
