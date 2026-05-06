@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { generateShoppingList, formatShoppingList, generateNatalieSupplyList } from "@/lib/shopping-list";
+import { generateIsabelSummary } from "@/lib/isabel-summary";
+import { createNoteByEmail } from "@/lib/ghl-api";
 
 const anthropic = new Anthropic();
 
@@ -145,6 +147,14 @@ export async function POST(request: Request) {
       eventData
     );
 
+    // Generate Isabel-style event summary (skip Beer and Wine package)
+    let isabelSummary: string | null = null;
+    try {
+      isabelSummary = generateIsabelSummary(eventData);
+    } catch (err) {
+      console.error("generateIsabelSummary failed:", err);
+    }
+
     const payload = {
       ...cleanEventData,
       conversation_transcript: conversationTranscript || null,
@@ -158,6 +168,8 @@ export async function POST(request: Request) {
       actual_event_date: parseEventDate(eventData.event_date || ''),
       event_start_time: eventData.bar_service_start || null,
       event_end_time: eventData.bar_service_end || null,
+      event_notes: isabelSummary,
+      isabel_summary: isabelSummary,
     };
 
     // Ensure email is always present — use eventData.email if the AI included it,
@@ -184,12 +196,54 @@ export async function POST(request: Request) {
     }
     console.log("=== END WEBHOOK PAYLOAD ===");
 
-    const res = await fetch(webhookUrl, {
+    // Fire both GHL webhook AND GHL Notes API in parallel.
+    // The webhook triggers the existing intake workflow.
+    // The Notes API creates an actual note on the contact in GHL Notes section.
+    // Either can succeed/fail independently.
+
+    const webhookPromise = fetch(webhookUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
 
+    const targetEmail = (payload.email as string) || clientEmail || "";
+    const notePromise: Promise<{ success: boolean; contactId: string | null; reason?: string }> =
+      isabelSummary && targetEmail
+        ? createNoteByEmail(targetEmail, isabelSummary)
+        : Promise.resolve({
+            success: false,
+            contactId: null,
+            reason: !isabelSummary ? "no isabel summary (likely Beer and Wine package)" : "no email",
+          });
+
+    const [webhookResult, noteResult] = await Promise.allSettled([
+      webhookPromise,
+      notePromise,
+    ]);
+
+    // Log note result for debugging
+    if (noteResult.status === "fulfilled") {
+      const r = noteResult.value;
+      if (r.success) {
+        console.log(`✓ GHL Note created on contact ${r.contactId}`);
+      } else {
+        console.log(`✗ GHL Note skipped: ${r.reason}`);
+      }
+    } else {
+      console.error("GHL Note promise rejected:", noteResult.reason);
+    }
+
+    // Check webhook result
+    if (webhookResult.status === "rejected") {
+      console.error("GHL webhook fetch rejected:", webhookResult.reason);
+      return NextResponse.json(
+        { error: "Webhook request failed" },
+        { status: 502 }
+      );
+    }
+
+    const res = webhookResult.value;
     if (!res.ok) {
       const text = await res.text();
       console.error("GHL webhook error:", res.status, text);
@@ -199,7 +253,10 @@ export async function POST(request: Request) {
       );
     }
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({
+      success: true,
+      note_created: noteResult.status === "fulfilled" ? noteResult.value.success : false,
+    });
   } catch (err) {
     console.error("Webhook error:", err);
     return NextResponse.json(
