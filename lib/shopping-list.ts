@@ -1132,22 +1132,24 @@ export function formatShoppingListForNote(
   }
 
   const lines: string[] = [];
+  const guestCount = eventData.guest_count ?? 50;
+  const drinks = Array.isArray(eventData.signature_drinks) ? eventData.signature_drinks : [];
+  const pace = eventData.drinking_pace ?? "moderate";
+  const hours = calculateHours(eventData.bar_service_start, eventData.bar_service_end);
 
   // ===== HEADER LINE =====
   // Format: "5/7/26 (Full Bar) 50 guests, 4 hours"
   const dateStr = formatHeaderDate(eventData.event_date);
   const pkgLabel = formatPackageLabel(eventData.package);
-  const guests = eventData.guest_count;
-  const hours = calculateHours(eventData.bar_service_start, eventData.bar_service_end);
 
   const headerParts: string[] = [];
   if (dateStr) headerParts.push(dateStr);
   if (pkgLabel) headerParts.push(`(${pkgLabel})`);
-  if (guests) {
+  if (guestCount) {
     if (hours) {
-      headerParts.push(`${guests} guests, ${hours} hours`);
+      headerParts.push(`${guestCount} guests, ${hours} hours`);
     } else {
-      headerParts.push(`${guests} guests`);
+      headerParts.push(`${guestCount} guests`);
     }
   } else if (hours) {
     headerParts.push(`${hours} hours`);
@@ -1164,83 +1166,116 @@ export function formatShoppingListForNote(
     lines.push(`Colors: ${eventData.event_colors}`);
   }
 
-  // ===== SHOPPING LIST SECTIONS =====
-  // Group items by category
+  // ===== LIQUOR =====
+  // Always show, regardless of package
+  const spiritItems = getSpiritBottles(drinks, guestCount, pace, hours);
   const grouped = new Map<string, ShoppingListItem[]>();
   for (const item of items) {
     const list = grouped.get(item.category) ?? [];
     list.push(item);
     grouped.set(item.category, list);
   }
-
-  const isBartenderOnly = pkg.includes("bartender") && !pkg.includes("essentials") && !pkg.includes("full") && !pkg.includes("premium");
-
-  // Helper to format a single item line in Isabel's style
-  function formatItemLine(it: ShoppingListItem): string {
-    let brandRec = "";
-    if (it.notes) {
-      const match = it.notes.match(/Top shelf:\s*(.+?)\s+or\s+Moderate:\s*(.+?)(?:\s*\(|$)/);
-      if (match) {
-        brandRec = ` — ${match[1]} or ${match[2]}`;
-      } else if (it.notes === "Mid-range brand recommended") {
-        // skip generic note
-      } else if (it.notes.includes("Extra bottle requested")) {
-        brandRec = ` (${it.notes})`;
-      } else if (!it.notes.toLowerCase().includes("top shelf")) {
-        brandRec = ` — ${it.notes}`;
-      }
-    }
-    return `- ${it.item} — ${it.quantity}${brandRec}`;
-  }
-
-  // ===== LIQUOR =====
-  const spirits = grouped.get("Spirits") ?? [];
   const beerWine = grouped.get("Beer & Wine") ?? [];
-  if (spirits.length > 0 || beerWine.length > 0) {
-    lines.push(""); // blank line before section
-    lines.push("Liquor");
-    lines.push(""); // blank line after section header
-    for (const it of spirits) lines.push(formatItemLine(it));
-    for (const it of beerWine) lines.push(formatItemLine(it));
-  }
 
-  // ===== JUICES AND MIXERS / FRESH PRODUCE / ICE & BAR SUPPLIES (Bartender Only) =====
-  if (isBartenderOnly) {
-    const mixers = grouped.get("Mixers & Ingredients") ?? [];
-    if (mixers.length > 0) {
-      lines.push("");
-      lines.push("Juices and Mixers");
-      lines.push("");
-      for (const it of mixers) {
-        const cleanItem = it.item.replace(/^[\d.]+\s*oz\s*/i, "").trim();
-        lines.push(`- ${cleanItem} — ${it.quantity}`);
-      }
+  if (spiritItems.length > 0 || beerWine.length > 0) {
+    lines.push("");
+    lines.push("LIQUOR");
+    lines.push("");
+    for (const it of spiritItems) {
+      lines.push(formatNoteItemLine(it));
     }
-
-    const garnishes = grouped.get("Garnishes") ?? [];
-    if (garnishes.length > 0) {
-      lines.push("");
-      lines.push("Fresh Produce");
-      lines.push("");
-      for (const it of garnishes) {
-        const note = it.notes ? ` ${it.notes}` : "";
-        lines.push(`- ${it.item} — ${it.quantity}${note}`);
-      }
-    }
-
-    const supplies = grouped.get("Supplies") ?? [];
-    if (supplies.length > 0) {
-      lines.push("");
-      lines.push("Ice & Bar Supplies");
-      lines.push("");
-      for (const it of supplies) {
-        lines.push(`- ${it.item} — ${it.quantity}`);
-      }
+    for (const it of beerWine) {
+      lines.push(formatNoteItemLine(it));
     }
   }
+
+  // ===== MIXERS AND JUICES =====
+  // Always show, pulled from Natalie's logic
+  const pureeJuiceSyrupItems: { item: string; quantity: string }[] = [];
+  const sodaItems: { item: string; quantity: string }[] = [];
+  const seenMixers = new Set<string>();
+  const gbDrinkCount = countGingerBeerDrinks(drinks);
+
+  for (const drink of drinks) {
+    const ingredients = normalizeIngredients(drink.ingredients);
+    for (const ing of ingredients) {
+      const ingName = ing.replace(/^[\d.]+\s*oz\s*/i, "").replace(/^top\s+with\s+/i, "").trim();
+      const key = ingName.toLowerCase();
+      if (!key) continue;
+      if (seenMixers.has(key)) continue;
+      const baseSpirit = drink.base_spirit?.toLowerCase() ?? "__none__";
+      if (baseSpirit && key.includes(baseSpirit)) continue;
+      seenMixers.add(key);
+
+      const quantity = getNatalieMixerQuantity(ingName, guestCount, gbDrinkCount);
+
+      if (isSodaOrGingerBeer(key)) {
+        sodaItems.push({ item: ingName, quantity });
+      } else if (isPureeJuiceOrSyrup(key)) {
+        pureeJuiceSyrupItems.push({ item: ingName, quantity });
+      }
+    }
+  }
+
+  if (pureeJuiceSyrupItems.length > 0 || sodaItems.length > 0) {
+    lines.push("");
+    lines.push("MIXERS AND JUICES");
+    lines.push("");
+    for (const m of pureeJuiceSyrupItems) {
+      const label = m.item.charAt(0).toUpperCase() + m.item.slice(1);
+      lines.push(`- ${label} — ${m.quantity}`);
+    }
+    // Add ginger beer / soda items here too (they go under mixers in Isabel's style)
+    const extraSodas = parseExtraSodas(eventData.special_requests);
+    for (const extra of extraSodas) {
+      if (!seenMixers.has(extra.toLowerCase())) {
+        seenMixers.add(extra.toLowerCase());
+        sodaItems.push({ item: extra, quantity: "1 case (24 pack cans) (requested extras)" });
+      }
+    }
+    for (const s of sodaItems) {
+      const label = s.item.charAt(0).toUpperCase() + s.item.slice(1);
+      lines.push(`- ${label} — ${s.quantity}`);
+    }
+  }
+
+  // ===== PRODUCE AND GARNISHES =====
+  // Always show, pulled from Natalie's calculation
+  const produceItems = calculateProduceFromGarnishes(drinks, guestCount);
+  if (produceItems.length > 0) {
+    lines.push("");
+    lines.push("PRODUCE AND GARNISHES");
+    lines.push("");
+    for (const p of produceItems) {
+      lines.push(`- ${p.item} — ${p.quantity}`);
+    }
+  }
+
+  // ===== ICE & BAR SUPPLIES =====
+  // Always show
+  const iceLbs = guestCount * 1.5;
+  const iceBags = Math.ceil(iceLbs / 18);
+  const cups = Math.ceil(guestCount * 1.5);
+  lines.push("");
+  lines.push("ICE & BAR SUPPLIES");
+  lines.push("");
+  lines.push(`- Ice — ${iceBags} x 18 lb bags (estimated for mixing only)`);
+  lines.push(`- 12 oz cups — ${cups} count`);
+  lines.push(`- Cocktail napkins — ${cups} count`);
+  lines.push(`- Straws — ${cups} count`);
+
+  // ===== BASELINE MIXERS =====
+  // Always show
+  lines.push("");
+  lines.push("BASELINE MIXERS");
+  lines.push("");
+  lines.push("- Cranberry juice — 1 x 32 oz bottle");
+  lines.push("- Pineapple juice — 1 x 32 oz bottle");
+  lines.push("- Orange juice — 1 x 32 oz bottle");
+  lines.push("- Tonic — 2 x 1 liter bottles");
+  lines.push("- Club soda — 2 x 1 liter bottles");
 
   // ===== RECIPES =====
-  const drinks = Array.isArray(eventData.signature_drinks) ? eventData.signature_drinks : [];
   if (drinks.length > 0) {
     lines.push("");
     lines.push("***Names subject to change by client***");
@@ -1248,7 +1283,8 @@ export function formatShoppingListForNote(
     for (const drink of drinks) {
       if (!drink) continue;
       lines.push("");
-      lines.push(drink.name);
+      const mocktailLabel = drink.is_mocktail ? " (Mocktail)" : "";
+      lines.push(`${drink.name}${mocktailLabel}`);
       lines.push("");
       const ings = normalizeIngredients(drink.ingredients);
       for (const ing of ings) {
@@ -1261,6 +1297,26 @@ export function formatShoppingListForNote(
   }
 
   return lines.join("\n");
+}
+
+/**
+ * Format a single shopping list item in note style: "- Item — Qty — Brand or Brand"
+ */
+function formatNoteItemLine(it: ShoppingListItem): string {
+  let brandRec = "";
+  if (it.notes) {
+    const match = it.notes.match(/Top shelf:\s*(.+?)\s+or\s+Moderate:\s*(.+?)(?:\s*\(|$)/);
+    if (match) {
+      brandRec = ` — ${match[1]} or ${match[2]}`;
+    } else if (it.notes === "Mid-range brand recommended") {
+      // skip generic note
+    } else if (it.notes.includes("Extra bottle requested")) {
+      brandRec = ` (${it.notes})`;
+    } else if (!it.notes.toLowerCase().includes("top shelf")) {
+      brandRec = ` — ${it.notes}`;
+    }
+  }
+  return `- ${it.item} — ${it.quantity}${brandRec}`;
 }
 
 /**
@@ -1288,4 +1344,198 @@ function formatPackageLabel(pkg: string | undefined): string {
   if (lower.includes("bartender")) return "Bartender Only";
   if (lower.includes("beer") && lower.includes("wine")) return "Beer and Wine";
   return pkg;
+}
+
+/**
+ * Generate the client-facing shopping list email body.
+ *
+ * For Essentials/Full/Premium: only LIQUOR + BEER & WINE sections (client only buys alcohol)
+ * For Bartender Only: LIQUOR + MIXERS AND JUICES + PRODUCE AND GARNISHES + ICE & BAR SUPPLIES
+ * For Beer and Wine: returns empty string (no email)
+ *
+ * @param items All shopping list items (same as for note)
+ * @param eventData Event data
+ * @param clientFirstName Client's first name for greeting
+ */
+export function generateClientShoppingListEmail(
+  items: ShoppingListItem[],
+  eventData: EventData,
+  clientFirstName: string
+): string {
+  const pkg = (eventData.package ?? "").toLowerCase();
+  const isBeerAndWinePackage =
+    pkg.includes("beer") &&
+    pkg.includes("wine") &&
+    !pkg.includes("bartender") &&
+    !pkg.includes("essentials") &&
+    !pkg.includes("full") &&
+    !pkg.includes("premium");
+
+  if (isBeerAndWinePackage) return "";
+
+  const isBartenderOnly =
+    pkg.includes("bartender") &&
+    !pkg.includes("essentials") &&
+    !pkg.includes("full") &&
+    !pkg.includes("premium");
+
+  const guestCount = eventData.guest_count ?? 50;
+  const drinks = Array.isArray(eventData.signature_drinks) ? eventData.signature_drinks : [];
+  const pace = eventData.drinking_pace ?? "moderate";
+  const hours = calculateHours(eventData.bar_service_start, eventData.bar_service_end);
+
+  const dateLong = formatLongDate(eventData.event_date);
+  const greeting = clientFirstName ? `Hey ${clientFirstName},` : "Hey,";
+
+  const lines: string[] = [];
+
+  // ===== EMAIL OPENING =====
+  lines.push(greeting);
+  lines.push("");
+  lines.push(
+    `We are very excited to bartend your upcoming celebration! Here is your shopping list for your event on <b>${dateLong}</b>, for <b>${guestCount} guests, ${hours} hours</b>:`
+  );
+  lines.push("");
+
+  // ===== LIQUOR SECTION =====
+  const spiritItems = getSpiritBottles(drinks, guestCount, pace, hours);
+  const grouped = new Map<string, ShoppingListItem[]>();
+  for (const item of items) {
+    const list = grouped.get(item.category) ?? [];
+    list.push(item);
+    grouped.set(item.category, list);
+  }
+  const beerWineItems = grouped.get("Beer & Wine") ?? [];
+
+  if (spiritItems.length > 0) {
+    lines.push("LIQUOR");
+    lines.push("");
+    for (const it of spiritItems) {
+      lines.push(formatNoteItemLine(it));
+    }
+    lines.push("");
+  }
+
+  // ===== BEER & WINE SECTION =====
+  if (beerWineItems.length > 0) {
+    lines.push("BEER & WINE");
+    lines.push("");
+    for (const it of beerWineItems) {
+      lines.push(formatNoteItemLine(it));
+    }
+    lines.push("");
+  }
+
+  // ===== If Bartender Only, add MIXERS / PRODUCE / ICE sections =====
+  if (isBartenderOnly) {
+    // Mixers and Juices
+    const pureeJuiceSyrupItems: { item: string; quantity: string }[] = [];
+    const sodaItems: { item: string; quantity: string }[] = [];
+    const seenMixers = new Set<string>();
+    const gbDrinkCount = countGingerBeerDrinks(drinks);
+
+    for (const drink of drinks) {
+      const ingredients = normalizeIngredients(drink.ingredients);
+      for (const ing of ingredients) {
+        const ingName = ing.replace(/^[\d.]+\s*oz\s*/i, "").replace(/^top\s+with\s+/i, "").trim();
+        const key = ingName.toLowerCase();
+        if (!key) continue;
+        if (seenMixers.has(key)) continue;
+        const baseSpirit = drink.base_spirit?.toLowerCase() ?? "__none__";
+        if (baseSpirit && key.includes(baseSpirit)) continue;
+        seenMixers.add(key);
+
+        const quantity = getNatalieMixerQuantity(ingName, guestCount, gbDrinkCount);
+
+        if (isSodaOrGingerBeer(key)) {
+          sodaItems.push({ item: ingName, quantity });
+        } else if (isPureeJuiceOrSyrup(key)) {
+          pureeJuiceSyrupItems.push({ item: ingName, quantity });
+        }
+      }
+    }
+
+    if (pureeJuiceSyrupItems.length > 0 || sodaItems.length > 0) {
+      lines.push("MIXERS AND JUICES");
+      lines.push("");
+      for (const m of pureeJuiceSyrupItems) {
+        const label = m.item.charAt(0).toUpperCase() + m.item.slice(1);
+        lines.push(`- ${label} — ${m.quantity}`);
+      }
+      for (const s of sodaItems) {
+        const label = s.item.charAt(0).toUpperCase() + s.item.slice(1);
+        lines.push(`- ${label} — ${s.quantity}`);
+      }
+      lines.push("");
+    }
+
+    // Produce and Garnishes
+    const produceItems = calculateProduceFromGarnishes(drinks, guestCount);
+    if (produceItems.length > 0) {
+      lines.push("PRODUCE AND GARNISHES");
+      lines.push("");
+      for (const p of produceItems) {
+        lines.push(`- ${p.item} — ${p.quantity}`);
+      }
+      lines.push("");
+    }
+
+    // Ice & Bar Supplies
+    const iceLbs = guestCount * 1.5;
+    const iceBags = Math.ceil(iceLbs / 18);
+    const cups = Math.ceil(guestCount * 1.5);
+    lines.push("ICE & BAR SUPPLIES");
+    lines.push("");
+    lines.push(`- Ice — ${iceBags} x 18 lb bags <i>(estimated for mixing only)</i>`);
+    lines.push(`- 12 oz Cups — ${cups} count`);
+    lines.push(`- Cocktail Napkins — ${cups} count`);
+    lines.push(`- Straws — ${cups} count`);
+    lines.push("");
+  }
+
+  // ===== CLOSING =====
+  lines.push(
+    "You are welcome to substitute any of these brands for others you prefer, as long as it is the same type of spirit. The options listed above are our recommendations based on quality and pricing. We only open what we use during the event, so any unopened bottles can be returned if you wish. You may choose the lesser amount suggested, but to ensure we do not run out of anything, I recommend going with the greater amount."
+  );
+  lines.push("");
+  lines.push("Please let us know if you have any questions!");
+  lines.push("");
+  lines.push("Best regards,");
+
+  // Convert to HTML with <br> for line breaks (GHL email body uses HTML)
+  return lines.join("<br>");
+}
+
+/**
+ * Format a date string into long format with ordinal suffix:
+ * "2026-05-09" → "May 9th, 2026"
+ */
+function formatLongDate(dateStr: string | undefined): string {
+  if (!dateStr) return "TBD";
+  const cleaned = String(dateStr).replace(/(st|nd|rd|th)/gi, "").trim();
+  let parsed = new Date(cleaned);
+  if (isNaN(parsed.getTime())) {
+    const withYear = cleaned + " " + new Date().getFullYear();
+    parsed = new Date(withYear);
+  }
+  if (isNaN(parsed.getTime())) return dateStr;
+
+  const months = [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+  ];
+  const month = months[parsed.getMonth()];
+  const day = parsed.getDate();
+  const year = parsed.getFullYear();
+  const suffix = getOrdinalSuffix(day);
+  return `${month} ${day}${suffix}, ${year}`;
+}
+
+function getOrdinalSuffix(day: number): string {
+  if (day >= 11 && day <= 13) return "th";
+  const lastDigit = day % 10;
+  if (lastDigit === 1) return "st";
+  if (lastDigit === 2) return "nd";
+  if (lastDigit === 3) return "rd";
+  return "th";
 }

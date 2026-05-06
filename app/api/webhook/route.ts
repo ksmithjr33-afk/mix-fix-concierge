@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
-import { generateShoppingList, formatShoppingList, generateNatalieSupplyList, formatShoppingListForNote } from "@/lib/shopping-list";
+import { generateShoppingList, formatShoppingList, generateNatalieSupplyList, formatShoppingListForNote, generateClientShoppingListEmail } from "@/lib/shopping-list";
 import { generateIsabelSummary } from "@/lib/isabel-summary";
 import { createNoteByEmail } from "@/lib/ghl-api";
 
@@ -82,10 +82,16 @@ export async function POST(request: Request) {
     // Generate client shopping list
     let shoppingListText = "";
     let shoppingListNote = "";
+    let shoppingListEmail = "";
     try {
       const shoppingListItems = generateShoppingList(eventData);
       shoppingListText = formatShoppingList(shoppingListItems);
       shoppingListNote = formatShoppingListForNote(shoppingListItems, eventData);
+
+      // Extract client first name for email greeting
+      const fullName = (eventData.client_name as string) || (eventData.name as string) || "";
+      const firstName = fullName.split(" ")[0] || "";
+      shoppingListEmail = generateClientShoppingListEmail(shoppingListItems, eventData, firstName);
     } catch (err) {
       console.log("generateShoppingList/formatShoppingList failed:", err);
     }
@@ -162,6 +168,7 @@ export async function POST(request: Request) {
       conversation_transcript: conversationTranscript || null,
       conversation_summary: conversationSummary,
       shopping_list: shoppingListNote || null,
+      shopping_list_email: shoppingListEmail || null,
       natalie_supply_list: natalieSupplyList || null,
       signature_drink_summary: signatureDrinkSummary || null,
       menu_colors: eventData.menu_colors || null,
