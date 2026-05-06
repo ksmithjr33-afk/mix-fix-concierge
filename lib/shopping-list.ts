@@ -1072,3 +1072,220 @@ export function formatShoppingList(items: ShoppingListItem[]): string {
   // Join with <br>, trim trailing breaks
   return lines.join("<br>").replace(/(<br>)+$/, "");
 }
+
+/**
+ * Format the shopping list as a plain text note in Isabel's exact style for GHL Notes.
+ *
+ * Format example:
+ *
+ * 5/7/26 (Full Bar) 50 guests, 4 hours
+ * Theme: memorial dinner for grandmother
+ * Colors: TBD
+ *
+ * Liquor
+ *
+ * - Vodka — 3 bottles (750 ml) — Tito's Handmade Vodka or Absolut Vodka
+ * - Triple Sec — 2 bottles (750 ml) — Cointreau or DeKuyper Triple Sec
+ *
+ * Juices and Mixers
+ *
+ * - Lemon Juice — 2 x 48 oz bottle (large)
+ *
+ * Fresh Produce
+ *
+ * - Lemons — 20 (wheels)
+ *
+ * Ice & Bar Supplies
+ *
+ * - Ice — 5 x 18 lb bags
+ *
+ * Baseline Mixers
+ *
+ * - Coke — 8 cans
+ *
+ * ***Names subject to change by client***
+ *
+ * Lulu Lemon Drop
+ *
+ * - 2 oz Vodka
+ * - 0.75 oz Triple Sec
+ * Garnish: Lemon Wheel
+ *
+ * Returns empty string for Beer and Wine package (no shopping list).
+ */
+export function formatShoppingListForNote(
+  items: ShoppingListItem[],
+  eventData: EventData
+): string {
+  const pkg = (eventData.package ?? "").toLowerCase();
+  const isBeerAndWinePackage =
+    pkg.includes("beer") &&
+    pkg.includes("wine") &&
+    !pkg.includes("bartender") &&
+    !pkg.includes("essentials") &&
+    !pkg.includes("full") &&
+    !pkg.includes("premium");
+
+  if (isBeerAndWinePackage) return "";
+  if (items.length === 0 && (!eventData.signature_drinks || eventData.signature_drinks.length === 0)) {
+    return "";
+  }
+
+  const lines: string[] = [];
+
+  // ===== HEADER LINE =====
+  // Format: "5/7/26 (Full Bar) 50 guests, 4 hours"
+  const dateStr = formatHeaderDate(eventData.event_date);
+  const pkgLabel = formatPackageLabel(eventData.package);
+  const guests = eventData.guest_count;
+  const hours = calculateHours(eventData.bar_service_start, eventData.bar_service_end);
+
+  const headerParts: string[] = [];
+  if (dateStr) headerParts.push(dateStr);
+  if (pkgLabel) headerParts.push(`(${pkgLabel})`);
+  if (guests) {
+    if (hours) {
+      headerParts.push(`${guests} guests, ${hours} hours`);
+    } else {
+      headerParts.push(`${guests} guests`);
+    }
+  } else if (hours) {
+    headerParts.push(`${hours} hours`);
+  }
+  if (headerParts.length > 0) {
+    lines.push(headerParts.join(" "));
+  }
+
+  // ===== THEME & COLORS =====
+  if (eventData.theme) {
+    lines.push(`Theme: ${eventData.theme}`);
+  }
+  if (eventData.event_colors) {
+    lines.push(`Colors: ${eventData.event_colors}`);
+  }
+
+  // ===== SHOPPING LIST SECTIONS =====
+  // Group items by category
+  const grouped = new Map<string, ShoppingListItem[]>();
+  for (const item of items) {
+    const list = grouped.get(item.category) ?? [];
+    list.push(item);
+    grouped.set(item.category, list);
+  }
+
+  const isBartenderOnly = pkg.includes("bartender") && !pkg.includes("essentials") && !pkg.includes("full") && !pkg.includes("premium");
+
+  // Helper to format a single item line in Isabel's style
+  function formatItemLine(it: ShoppingListItem): string {
+    let brandRec = "";
+    if (it.notes) {
+      const match = it.notes.match(/Top shelf:\s*(.+?)\s+or\s+Moderate:\s*(.+?)(?:\s*\(|$)/);
+      if (match) {
+        brandRec = ` — ${match[1]} or ${match[2]}`;
+      } else if (it.notes === "Mid-range brand recommended") {
+        // skip generic note
+      } else if (it.notes.includes("Extra bottle requested")) {
+        brandRec = ` (${it.notes})`;
+      } else if (!it.notes.toLowerCase().includes("top shelf")) {
+        brandRec = ` — ${it.notes}`;
+      }
+    }
+    return `- ${it.item} — ${it.quantity}${brandRec}`;
+  }
+
+  // ===== LIQUOR =====
+  const spirits = grouped.get("Spirits") ?? [];
+  const beerWine = grouped.get("Beer & Wine") ?? [];
+  if (spirits.length > 0 || beerWine.length > 0) {
+    lines.push(""); // blank line before section
+    lines.push("Liquor");
+    lines.push(""); // blank line after section header
+    for (const it of spirits) lines.push(formatItemLine(it));
+    for (const it of beerWine) lines.push(formatItemLine(it));
+  }
+
+  // ===== JUICES AND MIXERS / FRESH PRODUCE / ICE & BAR SUPPLIES (Bartender Only) =====
+  if (isBartenderOnly) {
+    const mixers = grouped.get("Mixers & Ingredients") ?? [];
+    if (mixers.length > 0) {
+      lines.push("");
+      lines.push("Juices and Mixers");
+      lines.push("");
+      for (const it of mixers) {
+        const cleanItem = it.item.replace(/^[\d.]+\s*oz\s*/i, "").trim();
+        lines.push(`- ${cleanItem} — ${it.quantity}`);
+      }
+    }
+
+    const garnishes = grouped.get("Garnishes") ?? [];
+    if (garnishes.length > 0) {
+      lines.push("");
+      lines.push("Fresh Produce");
+      lines.push("");
+      for (const it of garnishes) {
+        const note = it.notes ? ` ${it.notes}` : "";
+        lines.push(`- ${it.item} — ${it.quantity}${note}`);
+      }
+    }
+
+    const supplies = grouped.get("Supplies") ?? [];
+    if (supplies.length > 0) {
+      lines.push("");
+      lines.push("Ice & Bar Supplies");
+      lines.push("");
+      for (const it of supplies) {
+        lines.push(`- ${it.item} — ${it.quantity}`);
+      }
+    }
+  }
+
+  // ===== RECIPES =====
+  const drinks = Array.isArray(eventData.signature_drinks) ? eventData.signature_drinks : [];
+  if (drinks.length > 0) {
+    lines.push("");
+    lines.push("***Names subject to change by client***");
+
+    for (const drink of drinks) {
+      if (!drink) continue;
+      lines.push("");
+      lines.push(drink.name);
+      lines.push("");
+      const ings = normalizeIngredients(drink.ingredients);
+      for (const ing of ings) {
+        lines.push(`- ${ing}`);
+      }
+      if (drink.garnish && drink.garnish.toLowerCase() !== "none" && drink.garnish.toLowerCase() !== "no garnish") {
+        lines.push(`Garnish: ${drink.garnish}`);
+      }
+    }
+  }
+
+  return lines.join("\n");
+}
+
+/**
+ * Format an ISO date or YYYY-MM-DD into M/D/YY format like "5/7/26".
+ */
+function formatHeaderDate(eventDate: string | undefined): string {
+  if (!eventDate) return "";
+  const d = new Date(eventDate);
+  if (isNaN(d.getTime())) return eventDate; // fallback to whatever was provided
+  const month = d.getMonth() + 1;
+  const day = d.getDate();
+  const year = d.getFullYear() % 100;
+  return `${month}/${day}/${year}`;
+}
+
+/**
+ * Format the package name in title case as Isabel writes them.
+ */
+function formatPackageLabel(pkg: string | undefined): string {
+  if (!pkg) return "";
+  const lower = pkg.toLowerCase();
+  if (lower.includes("essentials")) return "Essentials Bar";
+  if (lower.includes("premium")) return "Premium Bar";
+  if (lower.includes("full")) return "Full Bar";
+  if (lower.includes("bartender")) return "Bartender Only";
+  if (lower.includes("beer") && lower.includes("wine")) return "Beer and Wine";
+  return pkg;
+}
