@@ -108,6 +108,7 @@ function getSpiritBottles(
   const spiritNames = new Map<string, string>(); // lowercase -> display name
 
   const brandRecs: Record<string, { top: string; moderate: string }> = {
+    // Base spirits
     tequila: { top: "Clase Azul Plata", moderate: "Espolon Blanco" },
     vodka: { top: "Grey Goose", moderate: "Titos" },
     bourbon: { top: "Woodford Reserve", moderate: "Bulleit" },
@@ -120,6 +121,33 @@ function getSpiritBottles(
     "reposado": { top: "Clase Azul Reposado", moderate: "Espolon Reposado" },
     "tequila reposado": { top: "Clase Azul Reposado", moderate: "Espolon Reposado" },
     "tequila blanco": { top: "Clase Azul Plata", moderate: "Espolon Blanco" },
+    // Modifier liqueurs
+    "triple sec": { top: "Cointreau", moderate: "DeKuyper Triple Sec" },
+    "grand marnier": { top: "Grand Marnier", moderate: "Grand Marnier" },
+    "dry curacao": { top: "Pierre Ferrand Dry Curacao", moderate: "DeKuyper" },
+    "blue curacao": { top: "DeKuyper", moderate: "DeKuyper" },
+    "aperol": { top: "Aperol", moderate: "Aperol" },
+    "campari": { top: "Campari", moderate: "Campari" },
+    "coffee liqueur": { top: "Mr Black", moderate: "Kahlua" },
+    "raspberry liqueur": { top: "Chambord", moderate: "Giffard" },
+    "elderflower liqueur": { top: "St-Germain", moderate: "St-Germain" },
+    "amaretto": { top: "Disaronno", moderate: "Disaronno" },
+    "lillet blanc": { top: "Lillet Blanc", moderate: "Cocchi Americano" },
+    "hibiscus liqueur": { top: "Sorel", moderate: "Sorel" },
+    "peach schnapps": { top: "DeKuyper Peachtree", moderate: "DeKuyper Peachtree" },
+    "limoncello": { top: "Limoncello di Capri", moderate: "Caravella Limoncello" },
+    "irish cream": { top: "Baileys", moderate: "Baileys" },
+    "drambuie": { top: "Drambuie", moderate: "Drambuie" },
+    "fireball": { top: "Fireball", moderate: "Fireball" },
+    "jagermeister": { top: "Jagermeister", moderate: "Jagermeister" },
+    "midori": { top: "Midori", moderate: "Midori" },
+    "sweet vermouth": { top: "Carpano Antica", moderate: "Martini & Rossi" },
+    "dry vermouth": { top: "Dolin Dry", moderate: "Martini & Rossi" },
+    "absinthe": { top: "St. George Absinthe Verte", moderate: "Pernod" },
+    "viuda de sanchez": { top: "Viuda de Sanchez", moderate: "Viuda de Sanchez" },
+    "jack daniels blackberry": { top: "Jack Daniel's Tennessee Blackberry", moderate: "Jack Daniel's Tennessee Blackberry" },
+    "frangelico": { top: "Frangelico", moderate: "Frangelico" },
+    "sambuca": { top: "Romana Sambuca", moderate: "Romana Sambuca" },
   };
 
   for (const drink of alcoholicDrinks) {
@@ -189,21 +217,76 @@ function getSpiritBottles(
 /** Check if an ingredient name is likely a spirit (not a mixer/syrup/juice) */
 function isLikelySpirit(ingName: string, baseSpirit: string): boolean {
   const spiritKeywords = [
+    // Base spirits
     "vodka", "tequila", "whiskey", "bourbon", "rum", "gin", "cognac", "brandy",
-    "reposado", "blanco", "mezcal", "scotch", "aperol", "campari",
+    "reposado", "blanco", "mezcal", "scotch",
     "malibu", "spiced rum", "coconut rum", "gold rum", "dark rum",
     "jamaican rum", "empress gin",
+    // Modifier liqueurs (still alcohol, must be counted in LIQUOR section, not Mixers)
+    "triple sec", "cointreau", "grand marnier", "dry curacao", "dry curaçao", "curaçao", "curacao",
+    "aperol", "campari",
+    "kahlua", "kahlúa", "mr black", "coffee liqueur",
+    "raspberry liqueur", "chambord", "framboise",
+    "elderflower", "st-germain", "st germain",
+    "amaretto", "disaronno",
+    "lillet", "lillet blanc",
+    "hibiscus liqueur", "hibiscus",
+    "peach schnapps", "schnapps",
+    "blue curacao", "blue curaçao",
+    "creme de", "crème de",
+    "limoncello",
+    "sambuca",
+    "frangelico",
+    "baileys", "irish cream",
+    "drambuie",
+    "fireball",
+    "jagermeister", "jägermeister",
+    "midori",
+    "sake",
+    "vermouth", "sweet vermouth", "dry vermouth",
+    "absinthe",
+    "viuda de sanchez",
+    "jack daniel's", "jack daniels", "jack daniel",
   ];
   // Check if it matches the base spirit
-  if (ingName.includes(baseSpirit.toLowerCase())) return true;
-  // Check if it's a known spirit
+  if (baseSpirit && ingName.includes(baseSpirit.toLowerCase())) return true;
+  // Check if it's a known spirit or modifier liqueur
   return spiritKeywords.some(kw => ingName.includes(kw));
 }
 
 /** Normalize spirit names so the same spirit from different drinks groups together */
 function normalizeSpiritName(ingName: string, baseSpirit: string): string {
   const lower = ingName.toLowerCase();
-  // Map specific variants to base names
+
+  // Modifier liqueurs - keep as separate line items (don't merge with base spirit)
+  if (lower.includes("triple sec") || lower.includes("cointreau")) return "triple sec";
+  if (lower.includes("grand marnier")) return "grand marnier";
+  if (lower.includes("dry curacao") || lower.includes("dry curaçao")) return "dry curacao";
+  if (lower.includes("blue curacao") || lower.includes("blue curaçao")) return "blue curacao";
+  if (lower.includes("aperol")) return "aperol";
+  if (lower.includes("campari")) return "campari";
+  if (lower.includes("kahlua") || lower.includes("kahlúa") || lower.includes("mr black") || lower.includes("coffee liqueur")) return "coffee liqueur";
+  if (lower.includes("chambord") || lower.includes("raspberry liqueur") || lower.includes("framboise")) return "raspberry liqueur";
+  if (lower.includes("elderflower") || lower.includes("st-germain") || lower.includes("st germain")) return "elderflower liqueur";
+  if (lower.includes("amaretto") || lower.includes("disaronno")) return "amaretto";
+  if (lower.includes("lillet")) return "lillet blanc";
+  if (lower.includes("hibiscus liqueur") || (lower.includes("hibiscus") && !lower.includes("syrup") && !lower.includes("agave"))) return "hibiscus liqueur";
+  if (lower.includes("peach schnapps")) return "peach schnapps";
+  if (lower.includes("limoncello")) return "limoncello";
+  if (lower.includes("sambuca")) return "sambuca";
+  if (lower.includes("frangelico")) return "frangelico";
+  if (lower.includes("baileys") || lower.includes("irish cream")) return "irish cream";
+  if (lower.includes("drambuie")) return "drambuie";
+  if (lower.includes("fireball")) return "fireball";
+  if (lower.includes("jagermeister") || lower.includes("jägermeister")) return "jagermeister";
+  if (lower.includes("midori")) return "midori";
+  if (lower.includes("sweet vermouth")) return "sweet vermouth";
+  if (lower.includes("dry vermouth")) return "dry vermouth";
+  if (lower.includes("absinthe")) return "absinthe";
+  if (lower.includes("viuda de sanchez")) return "viuda de sanchez";
+  if (lower.includes("jack daniel")) return "jack daniels blackberry";
+
+  // Base spirit variants
   if (lower.includes("tequila blanco") || lower.includes("tequila reposado")) return lower;
   if (lower.includes("reposado") && !lower.includes("tequila")) return "tequila reposado";
   if (lower.includes("blanco") && !lower.includes("tequila")) return "tequila blanco";
@@ -213,6 +296,7 @@ function normalizeSpiritName(ingName: string, baseSpirit: string): string {
   if (lower.includes("jamaican rum")) return "jamaican rum";
   if (lower.includes("empress gin")) return "gin";
   if (lower.includes("bourbon")) return "bourbon";
+
   // Fall back to base spirit
   return baseSpirit.toLowerCase();
 }
@@ -940,8 +1024,6 @@ function isPureeJuiceOrSyrup(key: string): boolean {
     key.includes("agave") ||
     key.includes("honey") ||
     key.includes("bitters") ||
-    key.includes("triple sec") ||
-    key.includes("elderflower") ||
     key.includes("lemonade") ||
     key.includes("cream of coconut") ||
     key.includes("coconut cream") ||
