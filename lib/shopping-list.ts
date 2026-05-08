@@ -1475,7 +1475,7 @@ export function generateClientShoppingListEmail(
   lines.push(greeting);
   lines.push("");
   lines.push(
-    `We are very excited to bartend your upcoming celebration! Here is your shopping list for your event on <b>${dateLong}</b>, for <b>${guestCount} guests, ${hours} hours</b>:`
+    `We are very excited to bartend your upcoming celebration! Here is your shopping list for your event on ${dateLong}, for ${guestCount} guests, ${hours} hours:`
   );
   lines.push("");
 
@@ -1568,7 +1568,7 @@ export function generateClientShoppingListEmail(
     const cups = Math.ceil(guestCount * 1.5);
     lines.push("ICE & BAR SUPPLIES");
     lines.push("");
-    lines.push(`- Ice — ${iceBags} x 18 lb bags <i>(estimated for mixing only)</i>`);
+    lines.push(`- Ice — ${iceBags} x 18 lb bags (estimated for mixing only)`);
     lines.push(`- 12 oz Cups — ${cups} count`);
     lines.push(`- Cocktail Napkins — ${cups} count`);
     lines.push(`- Straws — ${cups} count`);
@@ -1584,8 +1584,8 @@ export function generateClientShoppingListEmail(
   lines.push("");
   lines.push("Best regards,");
 
-  // Convert to HTML with <br> for line breaks (GHL email body uses HTML)
-  return lines.join("<br>");
+  // Use plain text line breaks - GHL handles email formatting on send
+  return lines.join("\n");
 }
 
 /**
