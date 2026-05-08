@@ -1705,3 +1705,333 @@ export function generateGraphicDesignerBrief(eventData: EventData): string {
   return lines.join("\n");
 }
 
+/**
+ * Generate the Order Team Email body for Natalie.
+ * Lists ONLY items the Mix Fix orders (mixers, juices, syrups, sodas, produce, ice, supplies).
+ * Items are grouped by source store: Specs, Sam's Club, Walmart, Amazon, Tossware.
+ *
+ * Returns empty string for Beer and Wine and Bartender Only packages
+ * (we don't order anything for those).
+ *
+ * NOTE: This intentionally does NOT use the items array because that array only
+ * contains spirits + beer/wine. The mixers/produce/supplies are calculated inline
+ * the same way formatShoppingListForNote does it.
+ */
+export function generateOrderTeamEmail(
+  _items: ShoppingListItem[],
+  eventData: EventData
+): string {
+  if (!eventData) return "";
+  const pkg = (eventData.package ?? "").toLowerCase();
+
+  const isBeerAndWine =
+    pkg.includes("beer") &&
+    pkg.includes("wine") &&
+    !pkg.includes("essentials") &&
+    !pkg.includes("full") &&
+    !pkg.includes("premium");
+  const isBartenderOnly = pkg.includes("bartender");
+
+  // Skip entirely for Beer and Wine and Bartender Only
+  if (isBeerAndWine || isBartenderOnly) return "";
+
+  const drinks = Array.isArray(eventData.signature_drinks) ? eventData.signature_drinks : [];
+  const guestCount = Number(eventData.guest_count) || 50;
+
+  // Calculate "order by" date (6 days before event)
+  let orderByLong = "TBD";
+  if (eventData.event_date) {
+    try {
+      const d = new Date(eventData.event_date + "T12:00:00");
+      if (!isNaN(d.getTime())) {
+        d.setDate(d.getDate() - 6);
+        orderByLong = formatDateOnly(d);
+      }
+    } catch {
+      orderByLong = "TBD";
+    }
+  }
+
+  // Bucket items by store
+  const buckets: Record<string, string[]> = {
+    Specs: [],
+    "Sam's Club": [],
+    Walmart: [],
+    Amazon: [],
+    Tossware: [],
+    Crew: [],
+  };
+
+  // ===== Build the item list (same logic as formatShoppingListForNote) =====
+
+  // Mixers, juices, syrups, sodas
+  const seenMixers = new Set<string>();
+  const gbDrinkCount = countGingerBeerDrinks(drinks);
+
+  for (const drink of drinks) {
+    const ingredients = normalizeIngredients(drink.ingredients);
+    for (const ing of ingredients) {
+      const ingName = ing.replace(/^[\d.]+\s*oz\s*/i, "").replace(/^top\s+with\s+/i, "").trim();
+      const key = ingName.toLowerCase();
+      if (!key) continue;
+      if (seenMixers.has(key)) continue;
+      const baseSpirit = drink.base_spirit?.toLowerCase() ?? "__none__";
+      if (baseSpirit && key.includes(baseSpirit)) continue;
+      // Skip spirits and modifier liqueurs (client buys those)
+      if (isLikelySpirit(key, baseSpirit)) continue;
+      seenMixers.add(key);
+
+      const quantity = getNatalieMixerQuantity(ingName, guestCount, gbDrinkCount);
+      const label = ingName.charAt(0).toUpperCase() + ingName.slice(1);
+
+      if (isSodaOrGingerBeer(key)) {
+        const store = routeMixerToStore(label);
+        const brand = brandPreferenceForItem(label);
+        let line = `- ${label} — ${quantity}`;
+        if (brand) line += ` (${brand})`;
+        buckets[store].push(line);
+      } else if (isPureeJuiceOrSyrup(key)) {
+        const store = routeMixerToStore(label);
+        const brand = brandPreferenceForItem(label);
+        let line = `- ${label} — ${quantity}`;
+        if (brand) line += ` (${brand})`;
+        buckets[store].push(line);
+      }
+    }
+  }
+
+  // Produce and garnishes
+  const produceItems = calculateProduceFromGarnishes(drinks, guestCount);
+  for (const p of produceItems) {
+    const store = routeMixerToStore(p.item);
+    buckets[store].push(`- ${p.item} — ${p.quantity}`);
+  }
+
+  // Ice and bar supplies
+  const iceLbs = guestCount * 1.5;
+  const iceBags = Math.ceil(iceLbs / 18);
+  const cups = Math.ceil(guestCount * 1.5);
+  buckets["Sam's Club"].push(`- Ice — ${iceBags} x 18 lb bags`);
+  buckets["Tossware"].push(`- 12 oz cups — ${cups} count`);
+  buckets["Amazon"].push(`- Cocktail napkins — ${cups} count`);
+  buckets["Crew"].push(`- Agave cocktail straws — ${cups} count`);
+
+  // Baseline mixers (always include)
+  buckets["Sam's Club"].push("- Cranberry juice — 1 x 32 oz bottle (Kirkland or GV)");
+  buckets["Sam's Club"].push("- Pineapple juice — 1 x 32 oz bottle (Kirkland or GV)");
+  buckets["Sam's Club"].push("- Orange juice — 1 x 32 oz bottle (Kirkland or GV)");
+  buckets["Sam's Club"].push("- Tonic — 2 x 1 liter bottles (Kirkland or GV)");
+  buckets["Sam's Club"].push("- Club soda — 2 x 1 liter bottles (Kirkland or GV)");
+
+  // ===== Build the email =====
+  const lines: string[] = [];
+
+  // Header
+  lines.push("ORDER LIST FOR NATALIE");
+  lines.push("======================");
+  lines.push("");
+
+  // Event details
+  if (eventData.event_name || eventData.event_type) {
+    lines.push(`Event: ${eventData.event_name || eventData.event_type}`);
+  }
+  const fullName = (eventData.client_name as string) || "";
+  if (fullName) {
+    lines.push(`Client: ${fullName}`);
+  }
+  const dateLong = formatLongDate(eventData.event_date);
+  if (dateLong && dateLong !== "TBD") {
+    lines.push(`Date: ${dateLong}`);
+  }
+  if (eventData.package) {
+    lines.push(`Package: ${eventData.package}`);
+  }
+  if (guestCount > 0) {
+    const hrs = eventData.bar_service_start && eventData.bar_service_end
+      ? calcHoursFromTimes(eventData.bar_service_start, eventData.bar_service_end)
+      : 0;
+    const hrsStr = hrs > 0 ? `, ${hrs} hours` : "";
+    lines.push(`Guests: ${guestCount} guests${hrsStr}`);
+  }
+
+  lines.push("");
+  lines.push(`ORDER BY: ${orderByLong} (6 days before the event)`);
+
+  // Sections per store (only print sections that have items)
+  const order: string[] = ["Specs", "Sam's Club", "Walmart", "Amazon", "Tossware", "Crew"];
+  for (const store of order) {
+    const arr = buckets[store];
+    if (!arr || arr.length === 0) continue;
+    lines.push("");
+    lines.push("------------");
+    lines.push(store.toUpperCase());
+    lines.push("------------");
+    for (const l of arr) {
+      lines.push(l);
+    }
+  }
+
+  lines.push("");
+  lines.push("Let us know if anything is unclear or out of stock so we can adjust!");
+  lines.push("");
+  lines.push("Thanks!");
+  lines.push("The Mix Fix Team");
+
+  return lines.join("\n");
+}
+
+/**
+ * Route a single ingredient name (mixer/produce/supply) to a store.
+ * Based on Natalie's actual sourcing notes:
+ *
+ * AMAZON: barware on short notice (cups, shot glasses, napkins, straws),
+ *         specialty syrups (lavender, butterscotch, gulkand),
+ *         specialty garnishes (dried flowers, dried lavender)
+ *
+ * SAM'S CLUB: bulk items for larger events
+ *         9oz cups in 264 ct, fresh garnishes (limes, lemons, oranges, pineapple,
+ *         watermelon, blackberries), bulk juices (orange, RealLime, RealLemon,
+ *         POM, cranberry), bulk sodas (Coke, Coke Zero, Sprite, Squirt, Dr Pepper,
+ *         Goslings ginger beer), syrups (cane sugar, honey, Kirkland agave),
+ *         bottled water
+ *
+ * WALMART: small quantities (less than bulk amount needed)
+ *         small soda packs, juices/lemonade in smaller bottles, individual produce,
+ *         small clamshells of herbs (mint, basil, rosemary), cocktail cherries,
+ *         maraschino cherries, Angostura bitters, agave nectar
+ *
+ * SPECS: specific syrups and purees
+ *         Finest Call brand purees (mango, passionfruit, strawberry, peach,
+ *         grenadine, prickly pear), REAL brand purees (prickly pear, pumpkin spice,
+ *         mango, cream of coconut, black cherry, peach, lychee)
+ *
+ * TOSSWARE: 12oz round bottom bulk cups
+ *
+ * CREW: bulk straws (1000-2000 agave cocktail straws)
+ */
+function routeMixerToStore(itemName: string): string {
+  const name = itemName.toLowerCase();
+
+  // --- CREW (bulk straws) ---
+  if (name.includes("straw")) return "Crew";
+
+  // --- TOSSWARE (12 oz bulk cups specifically) ---
+  if (name.includes("12 oz cup") || name.includes("12oz cup")) return "Tossware";
+
+  // --- AMAZON (short notice barware, specialty items) ---
+  // Other cups (9oz, shot glasses) when not 12oz bulk go to Amazon for short notice
+  if (name.includes("9 oz cup") || name.includes("9oz cup") || name.includes("shot glass")) return "Amazon";
+  if (name.includes("napkin")) return "Amazon";
+  // Specialty syrups
+  if (name.includes("lavender syrup") || name.includes("butterscotch") || name.includes("gulkand")) return "Amazon";
+  // Specialty garnishes
+  if (name.includes("dried flower") || name.includes("dried lavender") || name.includes("edible flower") || name.includes("edible glitter")) return "Amazon";
+  // Other specialty items
+  if (name.includes("smoked salt") || name.includes("rim sugar") || name.includes("cocktail rim")) return "Amazon";
+
+  // --- SPECS (Finest Call and REAL brand purees) ---
+  if (name.includes("finest call")) return "Specs";
+  if (name.includes("real brand") || name.includes("real ")) return "Specs";
+  // Common purees that typically come from Specs (Finest Call or REAL brand)
+  if (name.includes("mango puree")) return "Specs";
+  if (name.includes("passionfruit puree") || name.includes("passion fruit puree")) return "Specs";
+  if (name.includes("strawberry puree")) return "Specs";
+  if (name.includes("peach puree")) return "Specs";
+  if (name.includes("prickly pear")) return "Specs";
+  if (name.includes("pumpkin spice")) return "Specs";
+  if (name.includes("black cherry puree") || name.includes("dark cherry puree")) return "Specs";
+  if (name.includes("lychee")) return "Specs";
+  if (name.includes("cream of coconut")) return "Specs";
+  if (name.includes("grenadine")) return "Specs";
+  if (name.includes("hibiscus") && (name.includes("syrup") || name.includes("agave"))) return "Specs";
+  if (name.includes("orgeat")) return "Specs";
+  if (name.includes("falernum")) return "Specs";
+  if (name.includes("ginger syrup")) return "Specs";
+
+  // --- WALMART (small quantities, individual items, small clamshells) ---
+  if (name.includes("bitters") || name.includes("angostura")) return "Walmart";
+  if (name.includes("cocktail cherr") || name.includes("maraschino")) return "Walmart";
+  if (name.includes("toothpick") || name.includes("pick")) return "Walmart";
+  if (name.includes("stir stick") || name.includes("stirrer")) return "Walmart";
+  // Fresh herbs come in small clamshells from Walmart
+  if (name === "mint" || name.includes("fresh mint")) return "Walmart";
+  if (name === "basil" || name.includes("fresh basil")) return "Walmart";
+  if (name === "rosemary" || name.includes("fresh rosemary")) return "Walmart";
+  if (name === "thyme" || name.includes("fresh thyme")) return "Walmart";
+  // Bunches of mint can stay at Sam's, but Walmart for small quantity
+
+  // --- SAM'S CLUB (default for bulk juices, sodas, fresh produce, ice) ---
+  // Large produce items
+  if (name.includes("watermelon")) return "Sam's Club";
+  if (name.includes("pineapple") && !name.includes("juice")) return "Sam's Club";
+  if (name.includes("blackberr")) return "Sam's Club";
+  // Bulk juices (default for any juice)
+  if (name.includes("juice") || name.includes("lemonade")) return "Sam's Club";
+  // Sodas, ginger beer
+  if (name.includes("soda") || name.includes("ginger beer") || name.includes("tonic") || name.includes("sprite") || name.includes("coke") || name.includes("dr pepper") || name.includes("squirt") || name.includes("club soda")) return "Sam's Club";
+  // Bulk syrups
+  if (name.includes("simple syrup") || name.includes("honey syrup") || name.includes("agave")) return "Sam's Club";
+  // Water
+  if (name.includes("water") && !name.includes("watermelon")) return "Sam's Club";
+  // Ice
+  if (name.includes("ice")) return "Sam's Club";
+  // Fresh produce
+  if (name.includes("lime") || name.includes("lemon") || name.includes("orange") || name.includes("strawberr") || name.includes("apple") || name.includes("grapefruit") || name.includes("peach") || name.includes("mango") || name.includes("kiwi")) return "Sam's Club";
+
+  // Default to Sam's Club if unsure (bulk default)
+  return "Sam's Club";
+}
+
+/**
+ * Returns Natalie's preferred brand for an item if we have one on file.
+ * Pulled from Kenny's notes on supplier preferences.
+ */
+function brandPreferenceForItem(itemName: string): string | null {
+  const n = itemName.toLowerCase();
+
+  if (n.includes("lime juice")) return "RealLime brand";
+  if (n.includes("lemon juice")) return "RealLemon brand";
+  if (n.includes("pomegranate juice")) return "POM Wonderful";
+  if (n.includes("ginger beer")) return "Goslings";
+  if (n.includes("cranberry juice") || n.includes("orange juice") || n.includes("pineapple juice") || n.includes("grapefruit juice")) {
+    return "Kirkland or GV";
+  }
+  if (n.includes("club soda") || n.includes("tonic")) return "Kirkland or GV";
+  if (n.includes("simple syrup") || n.includes("honey syrup")) return "Kirkland or GV";
+
+  return null;
+}
+
+/**
+ * Calculate hours between two time strings like "5pm" and "10pm".
+ * Returns 0 if it cannot parse.
+ */
+function calcHoursFromTimes(start: string, end: string): number {
+  const parse = (s: string): number | null => {
+    const m = s.toLowerCase().match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/);
+    if (!m) return null;
+    let h = parseInt(m[1]);
+    const ampm = m[3];
+    if (ampm === "pm" && h !== 12) h += 12;
+    if (ampm === "am" && h === 12) h = 0;
+    return h;
+  };
+  const a = parse(start);
+  const b = parse(end);
+  if (a === null || b === null) return 0;
+  let diff = b - a;
+  if (diff < 0) diff += 24;
+  return diff;
+}
+
+/**
+ * Format a Date object to long format like "November 29th, 2026"
+ */
+function formatDateOnly(d: Date): string {
+  const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+  const day = d.getDate();
+  const suffix = getOrdinalSuffix(day);
+  return `${months[d.getMonth()]} ${day}${suffix}, ${d.getFullYear()}`;
+}
+
+
