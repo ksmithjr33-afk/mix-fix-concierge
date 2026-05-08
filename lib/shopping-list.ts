@@ -1580,6 +1580,10 @@ export function generateClientShoppingListEmail(
     "You are welcome to substitute any of these brands for others you prefer, as long as it is the same type of spirit. The options listed above are our recommendations based on quality and pricing. We only open what we use during the event, so any unopened bottles can be returned if you wish. You may choose the lesser amount suggested, but to ensure we do not run out of anything, I recommend going with the greater amount."
   );
   lines.push("");
+  lines.push(
+    "Please note that the estimated ice quantity provided is intended for mixing drinks only. We do not calculate or supply additional ice needed for chilling beer, wine, sodas, or other beverages. Our coolers and ice supply are reserved strictly for cocktail preparation and bar service use only."
+  );
+  lines.push("");
   lines.push("Please let us know if you have any questions!");
   lines.push("");
   lines.push("Best regards,");
