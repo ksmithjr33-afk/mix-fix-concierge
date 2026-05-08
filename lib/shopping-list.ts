@@ -21,6 +21,10 @@ interface EventData {
   theme?: string;
   event_colors?: string;
   special_requests?: string;
+  event_type?: string;
+  event_name?: string;
+  client_name?: string;
+  menu_colors?: string;
 }
 
 /** Normalize ingredients to always be a string array */
@@ -1625,3 +1629,79 @@ function getOrdinalSuffix(day: number): string {
   if (lastDigit === 3) return "rd";
   return "th";
 }
+
+/**
+ * Generate the Graphic Designer Menu Brief.
+ * This goes to Shaira (graphic designer) so she can design the cocktail menu.
+ *
+ * Includes:
+ * - Event name, client, date
+ * - Theme and colors (so design matches event aesthetic)
+ * - Cocktail names with full ingredients (with oz measurements) and garnishes
+ *
+ * Returns empty string for Beer and Wine package (no cocktails to design).
+ */
+export function generateGraphicDesignerBrief(eventData: EventData): string {
+  if (!eventData) return "";
+
+  const pkg = (eventData.package ?? "").toLowerCase();
+  const isBeerAndWinePackage =
+    pkg.includes("beer") &&
+    pkg.includes("wine") &&
+    !pkg.includes("bartender") &&
+    !pkg.includes("essentials") &&
+    !pkg.includes("full") &&
+    !pkg.includes("premium");
+
+  // Skip entirely for Beer and Wine package (no cocktails)
+  if (isBeerAndWinePackage) return "";
+
+  const drinks = Array.isArray(eventData.signature_drinks) ? eventData.signature_drinks : [];
+  if (drinks.length === 0) return "";
+
+  const lines: string[] = [];
+
+  // ===== HEADER =====
+  if (eventData.event_type || eventData.event_name) {
+    lines.push(`Event: ${eventData.event_name || eventData.event_type}`);
+  }
+  const fullName = (eventData.client_name as string) || "";
+  if (fullName) {
+    lines.push(`Client: ${fullName}`);
+  }
+  const dateLong = formatLongDate(eventData.event_date);
+  if (dateLong && dateLong !== "TBD") {
+    lines.push(`Date: ${dateLong}`);
+  }
+  if (eventData.theme) {
+    lines.push(`Theme: ${eventData.theme}`);
+  }
+  if (eventData.event_colors) {
+    lines.push(`Colors: ${eventData.event_colors}`);
+  }
+  if (eventData.menu_colors) {
+    lines.push(`Menu Colors: ${eventData.menu_colors}`);
+  }
+
+  // ===== COCKTAILS =====
+  lines.push("");
+  lines.push("Cocktails:");
+
+  for (const drink of drinks) {
+    if (!drink) continue;
+    const mocktailLabel = drink.is_mocktail ? " (Mocktail)" : "";
+    lines.push("");
+    lines.push(`${drink.name}${mocktailLabel}`);
+    lines.push("");
+    const ings = normalizeIngredients(drink.ingredients);
+    for (const ing of ings) {
+      lines.push(`- ${ing}`);
+    }
+    if (drink.garnish && drink.garnish.toLowerCase() !== "none" && drink.garnish.toLowerCase() !== "no garnish") {
+      lines.push(`Garnish: ${drink.garnish}`);
+    }
+  }
+
+  return lines.join("\n");
+}
+

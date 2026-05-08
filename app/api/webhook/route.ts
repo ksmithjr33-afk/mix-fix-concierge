@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
-import { generateShoppingList, formatShoppingList, generateNatalieSupplyList, formatShoppingListForNote, generateClientShoppingListEmail } from "@/lib/shopping-list";
+import { generateShoppingList, formatShoppingList, generateNatalieSupplyList, formatShoppingListForNote, generateClientShoppingListEmail, generateGraphicDesignerBrief } from "@/lib/shopping-list";
 import { generateIsabelSummary } from "@/lib/isabel-summary";
 import { createNoteByEmail } from "@/lib/ghl-api";
 
@@ -83,6 +83,7 @@ export async function POST(request: Request) {
     let shoppingListText = "";
     let shoppingListNote = "";
     let shoppingListEmail = "";
+    let graphicDesignerBrief = "";
     try {
       const shoppingListItems = generateShoppingList(eventData);
       shoppingListText = formatShoppingList(shoppingListItems);
@@ -92,6 +93,9 @@ export async function POST(request: Request) {
       const fullName = (eventData.client_name as string) || (eventData.name as string) || "";
       const firstName = fullName.split(" ")[0] || "";
       shoppingListEmail = generateClientShoppingListEmail(shoppingListItems, eventData, firstName);
+
+      // Generate graphic designer menu brief (skipped for Beer and Wine package)
+      graphicDesignerBrief = generateGraphicDesignerBrief(eventData);
     } catch (err) {
       console.log("generateShoppingList/formatShoppingList failed:", err);
     }
@@ -169,6 +173,7 @@ export async function POST(request: Request) {
       conversation_summary: conversationSummary,
       shopping_list: shoppingListNote || null,
       shopping_list_email: shoppingListEmail || null,
+      graphic_designer_brief: graphicDesignerBrief || null,
       natalie_supply_list: natalieSupplyList || null,
       signature_drink_summary: signatureDrinkSummary || null,
       menu_colors: eventData.menu_colors || null,
