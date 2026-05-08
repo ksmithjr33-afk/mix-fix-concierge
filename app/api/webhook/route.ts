@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
-import { generateShoppingList, formatShoppingList, generateNatalieSupplyList, formatShoppingListForNote, generateClientShoppingListEmail, generateGraphicDesignerBrief, generateOrderTeamEmail } from "@/lib/shopping-list";
+import { generateShoppingList, formatShoppingList, formatShoppingListForNote, generateClientShoppingListEmail, generateGraphicDesignerBrief, generateOrderTeamEmail } from "@/lib/shopping-list";
 import { generateIsabelSummary } from "@/lib/isabel-summary";
 import { createNoteByEmail } from "@/lib/ghl-api";
 
@@ -104,19 +104,6 @@ export async function POST(request: Request) {
       console.log("generateShoppingList/formatShoppingList failed:", err);
     }
 
-    // Generate Natalie supply list
-    let natalieSupplyList = "";
-    const pkg = (eventData.package ?? "").toLowerCase();
-    const isBeerAndWine = pkg.includes("beer") && pkg.includes("wine") && !pkg.includes("essentials") && !pkg.includes("full") && !pkg.includes("premium");
-    const isBartenderOnly = pkg.includes("bartender");
-    if (!isBeerAndWine && !isBartenderOnly) {
-      try {
-        natalieSupplyList = generateNatalieSupplyList(eventData);
-      } catch (err) {
-        console.log("generateNatalieSupplyList failed:", err);
-      }
-    }
-
     const guestCount = Number(eventData.guest_count) || 50;
     const iceLbs = guestCount * 1.5;
     const iceBags = Math.ceil(iceLbs / 18);
@@ -179,7 +166,6 @@ export async function POST(request: Request) {
       shopping_list_email: shoppingListEmail || null,
       graphic_designer_brief: graphicDesignerBrief || null,
       order_team_email: orderTeamEmail || null,
-      natalie_supply_list: natalieSupplyList || null,
       signature_drink_summary: signatureDrinkSummary || null,
       menu_colors: eventData.menu_colors || null,
       menu_reference_photos: eventData.menu_reference_photos || null,
