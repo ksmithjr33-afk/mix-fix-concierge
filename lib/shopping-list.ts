@@ -26,6 +26,7 @@ interface EventData {
   client_name?: string;
   menu_colors?: string;
   event_location?: string;
+  venue_type?: string;
   client_providing_beer_wine?: boolean;
 }
 
@@ -56,8 +57,12 @@ function parseGuestCount(input: number | string | undefined | null): number {
 
 /** Check if event is at a private residence (triggers tequila +2 rule) */
 function isResidentialEvent(eventData: EventData): boolean {
+  // Bot stores this as venue_type ("venue" or "private_residence")
+  // but legacy code/older sessions may have it as event_location
+  const venueType = (eventData.venue_type ?? "").toLowerCase();
   const loc = (eventData.event_location ?? "").toLowerCase();
-  return loc.includes("residence") || loc.includes("residential") || loc.includes("home") || loc.includes("house");
+  const combined = venueType + " " + loc;
+  return combined.includes("residence") || combined.includes("residential") || combined.includes("home") || combined.includes("house");
 }
 
 /** Normalize ingredients to always be a string array */
@@ -197,7 +202,10 @@ function getSpiritBottles(
       const spiritKey = normalizeSpiritName(ingName, baseSpirit);
       // For the new formula: store oz per single drink (not multiplied by guests yet)
       const currentOz = spiritOzTotals.get(spiritKey) ?? 0;
-      spiritOzTotals.set(spiritKey, currentOz + oz);
+      // Use MAX oz, not sum. When two drinks share a spirit, guests pick one
+      // or the other, not both. Sizing should reflect the highest pour, not
+      // the cumulative total across drinks.
+      spiritOzTotals.set(spiritKey, Math.max(currentOz, oz));
 
       if (!spiritNames.has(spiritKey)) {
         spiritNames.set(spiritKey, spiritKey.charAt(0).toUpperCase() + spiritKey.slice(1));
@@ -208,6 +216,23 @@ function getSpiritBottles(
   const items: ShoppingListItem[] = [];
   const residential = isResidentialEvent(eventData);
 
+  // Post-processing: merge generic "tequila" into a specific variant if one exists.
+  // This handles the case where one drink says "2 oz tequila" and another says
+  // "1.5 oz tequila blanco" - they should be one line item, not two.
+  if (spiritOzTotals.has("tequila")) {
+    const genericOz = spiritOzTotals.get("tequila")!;
+    // Prefer reposado over blanco if both somehow exist, otherwise use whichever specific variant is present
+    let mergeTarget: string | null = null;
+    if (spiritOzTotals.has("tequila reposado")) mergeTarget = "tequila reposado";
+    else if (spiritOzTotals.has("tequila blanco")) mergeTarget = "tequila blanco";
+    if (mergeTarget) {
+      const targetOz = spiritOzTotals.get(mergeTarget) ?? 0;
+      spiritOzTotals.set(mergeTarget, Math.max(targetOz, genericOz));
+      spiritOzTotals.delete("tequila");
+      spiritNames.delete("tequila");
+    }
+  }
+
   for (const [spiritKey, ozPerDrink] of spiritOzTotals) {
     // NEW FORMULA: bottles = ceil(guests * scaleFactor * oz_per_drink * SAFETY / 25.4)
     let bottles = Math.ceil((guestCount * sf * ozPerDrink * SAFETY) / ML_PER_BOTTLE);
@@ -215,22 +240,26 @@ function getSpiritBottles(
 
     let notes: string | undefined;
     const rec = brandRecs[spiritKey] ?? brandRecs[spiritKey.split(" ")[0]];
-    notes = rec
-      ? `Top shelf: ${rec.top} or Moderate: ${rec.moderate}`
-      : "Mid-range brand recommended";
+    if (rec) {
+      // Fix: if top shelf and moderate are the same brand, only show one
+      notes = rec.top === rec.moderate ? `${rec.top}` : `Top shelf: ${rec.top} or Moderate: ${rec.moderate}`;
+    } else {
+      notes = "Mid-range brand recommended";
+    }
 
-    // Tequila +2 bottles for residential events (shots rule)
+    // Tequila +1 bottle for residential events (shots rule)
     const isTequila = spiritKey === "tequila" || spiritKey.includes("tequila") || spiritKey === "reposado";
     if (isTequila && residential) {
-      bottles += 2;
-      notes += " (Extra 2 bottles for residential event shots)";
+      bottles += 1;
+      notes += " (Extra 1 bottle for residential event shots)";
     }
 
     const label = spiritNames.get(spiritKey) ?? spiritKey.charAt(0).toUpperCase() + spiritKey.slice(1);
+    // Output single number, never a range
     items.push({
       category: "Spirits",
       item: label,
-      quantity: `${bottles} bottles (750 ml)`,
+      quantity: `${bottles} bottle${bottles === 1 ? "" : "s"} (750 ml)`,
       notes,
     });
   }
@@ -305,9 +334,15 @@ function normalizeSpiritName(ingName: string, baseSpirit: string): string {
   if (lower.includes("viuda de sanchez")) return "viuda de sanchez";
   if (lower.includes("jack daniel")) return "jack daniels blackberry";
 
-  if (lower.includes("tequila blanco") || lower.includes("tequila reposado")) return lower;
+  // Tequila variants: keep blanco and reposado as separate IF both are specified.
+  // If recipe just says "tequila" with no qualifier, normalize to base "tequila"
+  // so it merges with one specific variant. Post-processing will handle the merge.
+  if (lower === "tequila") return "tequila";
+  if (lower.includes("tequila blanco")) return "tequila blanco";
+  if (lower.includes("tequila reposado")) return "tequila reposado";
   if (lower.includes("reposado") && !lower.includes("tequila")) return "tequila reposado";
   if (lower.includes("blanco") && !lower.includes("tequila")) return "tequila blanco";
+  if (lower.includes("tequila")) return "tequila";
   if (lower.includes("spiced rum")) return "spiced rum";
   if (lower.includes("coconut rum") || lower.includes("malibu")) return "coconut rum";
   if (lower.includes("coconut liqueur")) return "coconut liqueur";
@@ -453,7 +488,7 @@ function getMixerQuantity(
   if (key.includes("lemonade")) {
     // Scales with use: 1 gallon per 18 guests when central
     const gallons = Math.max(1, Math.ceil(guestCount / 18));
-    return `${gallons} x 128 oz jug${gallons === 1 ? "" : "s"}`;
+    return `${gallons} gallon${gallons === 1 ? "" : "s"}`;
   }
 
   // ===== PUREES =====
@@ -552,6 +587,11 @@ function getMixerQuantity(
   if (key.includes("coconut cream") || key.includes("coconut milk") || key.includes("cream of coconut")) {
     const cans = Math.max(1, Math.ceil(guestCount / 25));
     return `${cans} x 16.9 oz can${cans === 1 ? "" : "s"}`;
+  }
+  if (key.includes("olive brine") || key.includes("olive juice")) {
+    // Olive brine comes from a jar of olives, not a separate bottle
+    const jars = Math.max(1, Math.ceil(guestCount / 25));
+    return `${jars} jar${jars === 1 ? "" : "s"} (olives)`;
   }
   if (key.includes("elderflower")) return "1 x 750 ml bottle";
   if (key.includes("bitters") || key.includes("angostura")) return "1 x 4 oz bottle";
@@ -715,7 +755,7 @@ function getSupplies(guestCount: number, hours: number, pace: string): ShoppingL
  */
 function getBeerQuantity(guestCount: number): string {
   const cases = Math.max(1, Math.ceil(guestCount / 30));
-  return `${cases} cases (24 packs)`;
+  return `${cases} case${cases === 1 ? "" : "s"} (24 pack${cases === 1 ? "" : "s"})`;
 }
 
 /**
@@ -723,7 +763,7 @@ function getBeerQuantity(guestCount: number): string {
  */
 function getWineQuantity(guestCount: number): string {
   const bottles = Math.max(2, Math.ceil(guestCount / 25));
-  return `${bottles} bottles`;
+  return `${bottles} bottle${bottles === 1 ? "" : "s"}`;
 }
 
 /**
@@ -777,15 +817,18 @@ export function generateShoppingList(eventData: EventData): ShoppingListItem[] {
 
   const isBartenderOnly = pkg.includes("bartender");
 
-  // Bartender Only gets mixers, garnishes, rim ingredients
+  // Bartender Only gets mixers, garnishes, rim ingredients, AND supplies
   if (isBartenderOnly && sigDrinks.length > 0) {
     items.push(...getMixersAndIngredients(sigDrinks, guestCount));
     items.push(...getGarnishes(sigDrinks));
     items.push(...getRimIngredients(sigDrinks));
   }
 
-  // Supplies (cups, napkins, straws, ice) render for ALL packages except Beer and Wine
-  items.push(...getSupplies(guestCount, barHours, pace));
+  // Supplies (cups, napkins, straws, ice) ONLY for Bartender Only
+  // Essentials/Full/Premium: The Mix Fix provides supplies
+  if (isBartenderOnly) {
+    items.push(...getSupplies(guestCount, barHours, pace));
+  }
 
   // Extra bottles
   if (eventData.extra_bottles) {
@@ -1531,16 +1574,19 @@ export function generateClientShoppingListEmail(
     }
   }
 
-  // ICE & BAR SUPPLIES — now renders for ALL packages, not just Bartender Only
-  const iceBags = getIceBags(guestCount);
-  const { cups, napkins, straws } = getSupplyCounts(guestCount, hours, pace);
-  lines.push("ICE & BAR SUPPLIES");
-  lines.push("");
-  lines.push(`- Ice — ${iceBags} x 16 lb bags (estimated for mixing only)`);
-  lines.push(`- 12 oz Cups — ${cups} count`);
-  lines.push(`- Cocktail Napkins — ${napkins} count`);
-  lines.push(`- Straws — ${straws} count`);
-  lines.push("");
+  // ICE & BAR SUPPLIES — ONLY for Bartender Only package
+  // Essentials, Full, and Premium packages: The Mix Fix provides supplies, client only buys alcohol
+  if (isBartenderOnly) {
+    const iceBags = getIceBags(guestCount);
+    const { cups, napkins, straws } = getSupplyCounts(guestCount, hours, pace);
+    lines.push("ICE & BAR SUPPLIES");
+    lines.push("");
+    lines.push(`- Ice — ${iceBags} x 16 lb bags (estimated for mixing only)`);
+    lines.push(`- 12 oz Cups — ${cups} count`);
+    lines.push(`- Cocktail Napkins — ${napkins} count`);
+    lines.push(`- Straws — ${straws} count`);
+    lines.push("");
+  }
 
   lines.push(
     "You are welcome to substitute any of these brands for others you prefer, as long as it is the same type of spirit. The options listed above are our recommendations based on quality and pricing. We only open what we use during the event, so any unopened bottles can be returned if you wish. You may choose the lesser amount suggested, but to ensure we do not run out of anything, I recommend going with the greater amount."
