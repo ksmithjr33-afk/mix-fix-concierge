@@ -397,12 +397,35 @@ function getMixersAndIngredients(
       // Skip the base spirit and modifier liqueurs (covered in spirits section)
       const ingNameOnly = ing.replace(/^[\d.]+\s*oz\s*/i, "").trim().toLowerCase();
       if (isLikelySpirit(ingNameOnly, baseSpirit)) continue;
+
+      // Skip prep-only instructions that have no measurable ingredient
+      // ("pinch of salt", "dash of bitters", "muddled basil" are aromatics/garnishes)
+      const stripped = ingNameOnly
+        .replace(/^(splash of|pinch of|dash of|drop of|squeeze of|muddled?|top with|topped with|garnish with|garnished with|float of)\s+/i, "")
+        .trim();
+
+      // If after stripping the prep modifier we are left with very small things (salt, pepper, bitters),
+      // skip them - they get covered by the bartender's kit
+      const aromaticsOnly = ["salt", "pepper", "bitters", "kosher salt", "sea salt", "black pepper", "white pepper"];
+      if (aromaticsOnly.some(a => stripped === a)) continue;
+
+      // Garnish-only items in the ingredients list (mint, basil leaves) should be skipped here
+      // since they will be handled by getGarnishes()
+      const garnishOnly = ["mint", "basil", "rosemary", "thyme", "cilantro", "mint leaves", "basil leaves", "thyme sprig", "rosemary sprig", "lime wheel", "lemon wheel", "orange peel", "lemon peel"];
+      if (garnishOnly.some(g => stripped === g)) continue;
+
+      // Strip prep prefix from the display name and use the cleaned version
+      const cleanedIng = ing.replace(/^(splash of|pinch of|dash of|drop of|squeeze of|muddled?|top with|topped with|garnish with|garnished with|float of)\s+/i, "").trim();
+      const cleanedKey = cleanedIng.toLowerCase().trim();
+      if (seen.has(cleanedKey)) continue;
       seen.add(key);
+      seen.add(cleanedKey);
+
       const drinkCountForThis = countDrinksUsingMixer(drinks, ingNameOnly);
       items.push({
         category: "Mixers & Ingredients",
-        item: ing,
-        quantity: getMixerQuantity(ing, guestCount, gbDrinkCount, drinkCountForThis),
+        item: cleanedIng,
+        quantity: getMixerQuantity(cleanedIng, guestCount, gbDrinkCount, drinkCountForThis),
       });
     }
   }
@@ -449,9 +472,9 @@ function getMixerQuantity(
   // ===== JUICES =====
   if (key.includes("lime juice")) {
     // Scales with drink count: heavier divisor when used in more drinks
-    const divisor = drinkCount >= 3 ? 25 : drinkCount === 2 ? 30 : 50;
-    const sets = Math.max(1, Math.ceil(guestCount / divisor));
-    const bottles = sets * 2;
+    // 100 guests, 3 drinks should give ~4 bottles (not 8)
+    const divisor = drinkCount >= 3 ? 25 : drinkCount === 2 ? 33 : 50;
+    const bottles = Math.max(2, Math.ceil(guestCount / divisor));
     return `${bottles} x 32 oz bottle${bottles === 1 ? "" : "s"}`;
   }
   if (key.includes("lemon juice")) {
@@ -556,23 +579,23 @@ function getMixerQuantity(
   }
   if (key.includes("squirt") || key.includes("grapefruit soda")) {
     const cases = Math.max(1, Math.ceil(guestCount / 125));
-    return `${cases} x 24 pack case${cases === 1 ? "" : "s"}`;
+    return `${cases} case${cases === 1 ? "" : "s"} (24 pack${cases === 1 ? "" : "s"})`;
   }
   if (key.includes("sprite") || key.includes("7up") || key.includes("lemon lime soda")) {
     const cases = Math.max(1, Math.ceil(guestCount / 125));
-    return `${cases} x 24 pack case${cases === 1 ? "" : "s"}`;
+    return `${cases} case${cases === 1 ? "" : "s"} (24 pack${cases === 1 ? "" : "s"})`;
   }
   if (key.includes("coke") || key.includes("coca cola") || key.includes("cola")) {
     const cases = Math.max(1, Math.ceil(guestCount / 125));
-    return `${cases} x 24 pack case${cases === 1 ? "" : "s"}`;
+    return `${cases} case${cases === 1 ? "" : "s"} (24 pack${cases === 1 ? "" : "s"})`;
   }
   if (key.includes("dr pepper")) {
     const cases = Math.max(1, Math.ceil(guestCount / 125));
-    return `${cases} x 24 pack case${cases === 1 ? "" : "s"}`;
+    return `${cases} case${cases === 1 ? "" : "s"} (24 pack${cases === 1 ? "" : "s"})`;
   }
   if (key.includes("root beer")) {
     const cases = Math.max(1, Math.ceil(guestCount / 125));
-    return `${cases} x 24 pack case${cases === 1 ? "" : "s"}`;
+    return `${cases} case${cases === 1 ? "" : "s"} (24 pack${cases === 1 ? "" : "s"})`;
   }
 
   // ===== OTHER =====
@@ -1309,11 +1332,24 @@ export function formatShoppingListForNote(
   for (const drink of drinks) {
     const ingredients = normalizeIngredients(drink.ingredients);
     for (const ing of ingredients) {
-      const ingName = ing.replace(/^[\d.]+\s*oz\s*/i, "").replace(/^top\s+with\s+/i, "").trim();
+      // Strip oz prefix and prep modifiers ("splash of", "muddled", "top with", "pinch of", etc.)
+      const ingName = ing
+        .replace(/^[\d.]+\s*oz\s*/i, "")
+        .replace(/^(splash of|pinch of|dash of|drop of|squeeze of|muddled?|top with|topped with|garnish with|garnished with|float of)\s+/i, "")
+        .trim();
       const key = ingName.toLowerCase();
       if (!key) continue;
       if (seenMixers.has(key)) continue;
       if (isLikelySpirit(key, drink.base_spirit?.toLowerCase() ?? "")) continue;
+
+      // Skip aromatics that don't need shopping list quantities
+      const aromaticsOnly = ["salt", "pepper", "bitters", "kosher salt", "sea salt", "black pepper", "white pepper"];
+      if (aromaticsOnly.includes(key)) continue;
+
+      // Skip garnish-only items (handled by getGarnishes/produce section)
+      const garnishOnly = ["mint", "basil", "rosemary", "thyme", "cilantro", "mint leaves", "basil leaves", "thyme sprig", "rosemary sprig", "lime wheel", "lemon wheel", "orange peel", "lemon peel"];
+      if (garnishOnly.includes(key)) continue;
+
       seenMixers.add(key);
 
       const drinkCountForThis = countDrinksUsingMixer(drinks, key);
@@ -1376,15 +1412,22 @@ export function formatShoppingListForNote(
   lines.push(`- Cocktail napkins — ${napkins} count`);
   lines.push(`- Straws — ${straws} count`);
 
-  // BASELINE
+  // BASELINE - only include items not already in the specific mixer list
   lines.push("");
   lines.push("BASELINE MIXERS");
   lines.push("");
-  lines.push("- Cranberry juice — 1 x 32 oz bottle");
-  lines.push("- Pineapple juice — 1 x 32 oz bottle");
-  lines.push("- Orange juice — 1 x 32 oz bottle");
-  lines.push("- Tonic — 2 x 1 liter bottles");
-  lines.push("- Club soda — 2 x 1 liter bottles");
+  const baseline = [
+    { key: "cranberry juice", line: "- Cranberry juice — 1 x 32 oz bottle" },
+    { key: "pineapple juice", line: "- Pineapple juice — 1 x 32 oz bottle" },
+    { key: "orange juice", line: "- Orange juice — 1 x 32 oz bottle" },
+    { key: "tonic", line: "- Tonic — 2 x 1 liter bottles" },
+    { key: "club soda", line: "- Club soda — 2 x 1 liter bottles" },
+  ];
+  for (const b of baseline) {
+    if (!seenMixers.has(b.key)) {
+      lines.push(b.line);
+    }
+  }
 
   // RECIPES
   if (drinks.length > 0) {
