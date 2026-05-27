@@ -415,6 +415,8 @@ function getMixersAndIngredients(
       if (garnishOnly.some(g => stripped === g)) continue;
 
       // Strip prep prefix from the display name and use the cleaned version
+      // Detect splash/dash usage to scale quantities down
+      const isSplash = /^(splash of|pinch of|dash of|drop of|squeeze of)\s+/i.test(ing);
       const cleanedIng = ing.replace(/^(splash of|pinch of|dash of|drop of|squeeze of|muddled?|top with|topped with|garnish with|garnished with|float of)\s+/i, "").trim();
       const cleanedKey = cleanedIng.toLowerCase().trim();
       if (seen.has(cleanedKey)) continue;
@@ -425,7 +427,7 @@ function getMixersAndIngredients(
       items.push({
         category: "Mixers & Ingredients",
         item: cleanedIng,
-        quantity: getMixerQuantity(cleanedIng, guestCount, gbDrinkCount, drinkCountForThis),
+        quantity: getMixerQuantity(cleanedIng, guestCount, gbDrinkCount, drinkCountForThis, isSplash),
       });
     }
   }
@@ -446,7 +448,8 @@ function getMixerQuantity(
   ingredient: string,
   guestCount: number,
   gingerBeerDrinkCount?: number,
-  drinkCountForThis?: number
+  drinkCountForThis?: number,
+  isSplash?: boolean
 ): string {
   const key = ingredient.toLowerCase().trim();
   const drinkCount = drinkCountForThis ?? 1;
@@ -509,7 +512,12 @@ function getMixerQuantity(
     return `${bottles} x 32 oz bottle${bottles === 1 ? "" : "s"}`;
   }
   if (key.includes("lemonade")) {
-    // Scales with use: 1 gallon per 18 guests when central
+    // Splash use = small amount only. Central use = scales with guest count.
+    if (isSplash) {
+      const bottles = Math.max(1, Math.ceil(guestCount / 100));
+      return `${bottles} x 64 oz bottle${bottles === 1 ? "" : "s"}`;
+    }
+    // Central scaling: 1 gallon per 18 guests
     const gallons = Math.max(1, Math.ceil(guestCount / 18));
     return `${gallons} gallon${gallons === 1 ? "" : "s"}`;
   }
@@ -636,14 +644,14 @@ function getClientMixerQuantity(ingredient: string, guestCount: number, gingerBe
 /**
  * Natalie supply mixer quantity (same formula, slightly different ginger beer label).
  */
-function getNatalieMixerQuantity(ingredient: string, guestCount: number, gingerBeerDrinkCount?: number, drinkCountForThis?: number): string {
+function getNatalieMixerQuantity(ingredient: string, guestCount: number, gingerBeerDrinkCount?: number, drinkCountForThis?: number, isSplash?: boolean): string {
   const key = ingredient.toLowerCase().trim();
   if (key.includes("ginger beer")) {
     const drinks = gingerBeerDrinkCount ?? 1;
     const cans = Math.max(12, Math.ceil((guestCount / 100) * 24 * drinks));
     return `${cans} cans (Goslings 12 oz, Sam's Club 24 ct or Walmart 12 ct)`;
   }
-  return getMixerQuantity(ingredient, guestCount, gingerBeerDrinkCount, drinkCountForThis);
+  return getMixerQuantity(ingredient, guestCount, gingerBeerDrinkCount, drinkCountForThis, isSplash);
 }
 
 function getGarnishNotes(garnish: string): string | undefined {
@@ -1332,6 +1340,8 @@ export function formatShoppingListForNote(
   for (const drink of drinks) {
     const ingredients = normalizeIngredients(drink.ingredients);
     for (const ing of ingredients) {
+      // Detect splash/dash usage BEFORE stripping modifiers
+      const isSplash = /^(splash of|pinch of|dash of|drop of|squeeze of)\s+/i.test(ing.replace(/^[\d.]+\s*oz\s*/i, ""));
       // Strip oz prefix and prep modifiers ("splash of", "muddled", "top with", "pinch of", etc.)
       const ingName = ing
         .replace(/^[\d.]+\s*oz\s*/i, "")
@@ -1353,7 +1363,7 @@ export function formatShoppingListForNote(
       seenMixers.add(key);
 
       const drinkCountForThis = countDrinksUsingMixer(drinks, key);
-      const quantity = getNatalieMixerQuantity(ingName, guestCount, gbDrinkCount, drinkCountForThis);
+      const quantity = getNatalieMixerQuantity(ingName, guestCount, gbDrinkCount, drinkCountForThis, isSplash);
 
       if (isSodaOrGingerBeer(key)) {
         sodaItems.push({ item: ingName, quantity });
