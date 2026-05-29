@@ -628,6 +628,28 @@ function getMixerQuantity(
   if (key.includes("bitters") || key.includes("angostura")) return "1 x 4 oz bottle";
   if (key.includes("gulkand")) return "1 x 16 oz jar";
 
+  // ===== SPICES & CHILIES =====
+  // Handle "X or Y" combo case (client picks one)
+  if (key.includes("cayenne") && key.includes("jalape")) {
+    return "1 x 2.25 oz container cayenne OR 10 whole jalapeños (your choice)";
+  }
+  if (key.includes("cayenne")) {
+    return "1 x 2.25 oz container";
+  }
+  if (key.includes("jalape")) {
+    const count = Math.max(5, Math.ceil(guestCount / 4));
+    return `${count} whole jalapeños`;
+  }
+  if (key.includes("tajin") || key.includes("chili salt") || key.includes("chili lime")) {
+    return "1 x 4.94 oz container";
+  }
+  if (key.includes("cinnamon") && !key.includes("syrup")) {
+    return "1 x 1.5 oz container";
+  }
+  if (key.includes("nutmeg") && !key.includes("syrup")) {
+    return "1 x 1.1 oz container";
+  }
+
   // ===== FALLBACK: don't drop the ingredient, render a default =====
   const units = Math.max(1, Math.ceil(guestCount / 25));
   return `${units} x 1 liter bottle${units === 1 ? "" : "s"}`;
@@ -1017,16 +1039,30 @@ export function generateNatalieSupplyList(eventData: EventData): string {
   for (const drink of drinks) {
     const ingredients = normalizeIngredients(drink.ingredients);
     for (const ing of ingredients) {
-      const ingName = ing.replace(/^[\d.]+\s*oz\s*/i, "").trim();
+      // Detect splash usage BEFORE stripping modifiers
+      const isSplash = /^(splash of|pinch of|dash of|drop of|squeeze of)\s+/i.test(ing.replace(/^[\d.]+\s*oz\s*/i, ""));
+      const ingName = ing
+        .replace(/^[\d.]+\s*oz\s*/i, "")
+        .replace(/^(splash of|pinch of|dash of|drop of|squeeze of|muddled?|top with|topped with|garnish with|garnished with|float of)\s+/i, "")
+        .trim();
       const key = ingName.toLowerCase();
       if (!key) continue;
       if (seenMixers.has(key)) continue;
       // Skip spirits and modifier liqueurs (in SPIRITS section)
       if (isLikelySpirit(key, drink.base_spirit?.toLowerCase() ?? "")) continue;
+
+      // Skip aromatics
+      const aromaticsOnly = ["salt", "pepper", "bitters", "kosher salt", "sea salt", "black pepper", "white pepper"];
+      if (aromaticsOnly.includes(key)) continue;
+
+      // Skip garnish-only items
+      const garnishOnly = ["mint", "basil", "rosemary", "thyme", "cilantro", "mint leaves", "basil leaves", "thyme sprig", "rosemary sprig", "lime wheel", "lemon wheel", "orange peel", "lemon peel"];
+      if (garnishOnly.includes(key)) continue;
+
       seenMixers.add(key);
 
       const drinkCountForThis = countDrinksUsingMixer(drinks, key);
-      const quantity = getNatalieMixerQuantity(ingName, guestCount, gbDrinkCount, drinkCountForThis);
+      const quantity = getNatalieMixerQuantity(ingName, guestCount, gbDrinkCount, drinkCountForThis, isSplash);
 
       if (isSodaOrGingerBeer(key)) {
         sodaItems.push({ item: ingName, quantity });
@@ -1578,15 +1614,30 @@ export function generateClientShoppingListEmail(
     for (const drink of drinks) {
       const ingredients = normalizeIngredients(drink.ingredients);
       for (const ing of ingredients) {
-        const ingName = ing.replace(/^[\d.]+\s*oz\s*/i, "").replace(/^top\s+with\s+/i, "").trim();
+        // Detect splash usage BEFORE stripping modifiers
+        const isSplash = /^(splash of|pinch of|dash of|drop of|squeeze of)\s+/i.test(ing.replace(/^[\d.]+\s*oz\s*/i, ""));
+        // Strip oz prefix AND prep modifiers
+        const ingName = ing
+          .replace(/^[\d.]+\s*oz\s*/i, "")
+          .replace(/^(splash of|pinch of|dash of|drop of|squeeze of|muddled?|top with|topped with|garnish with|garnished with|float of)\s+/i, "")
+          .trim();
         const key = ingName.toLowerCase();
         if (!key) continue;
         if (seenMixers.has(key)) continue;
         if (isLikelySpirit(key, drink.base_spirit?.toLowerCase() ?? "")) continue;
+
+        // Skip aromatics (covered by bartender kit)
+        const aromaticsOnly = ["salt", "pepper", "bitters", "kosher salt", "sea salt", "black pepper", "white pepper"];
+        if (aromaticsOnly.includes(key)) continue;
+
+        // Skip garnish-only items (handled by produce section)
+        const garnishOnly = ["mint", "basil", "rosemary", "thyme", "cilantro", "mint leaves", "basil leaves", "thyme sprig", "rosemary sprig", "lime wheel", "lemon wheel", "orange peel", "lemon peel"];
+        if (garnishOnly.includes(key)) continue;
+
         seenMixers.add(key);
 
         const drinkCountForThis = countDrinksUsingMixer(drinks, key);
-        const quantity = getNatalieMixerQuantity(ingName, guestCount, gbDrinkCount, drinkCountForThis);
+        const quantity = getNatalieMixerQuantity(ingName, guestCount, gbDrinkCount, drinkCountForThis, isSplash);
 
         if (isSodaOrGingerBeer(key)) {
           sodaItems.push({ item: ingName, quantity });
@@ -1791,15 +1842,26 @@ export function generateOrderTeamEmail(
   for (const drink of drinks) {
     const ingredients = normalizeIngredients(drink.ingredients);
     for (const ing of ingredients) {
-      const ingName = ing.replace(/^[\d.]+\s*oz\s*/i, "").replace(/^top\s+with\s+/i, "").trim();
+      const isSplash = /^(splash of|pinch of|dash of|drop of|squeeze of)\s+/i.test(ing.replace(/^[\d.]+\s*oz\s*/i, ""));
+      const ingName = ing
+        .replace(/^[\d.]+\s*oz\s*/i, "")
+        .replace(/^(splash of|pinch of|dash of|drop of|squeeze of|muddled?|top with|topped with|garnish with|garnished with|float of)\s+/i, "")
+        .trim();
       const key = ingName.toLowerCase();
       if (!key) continue;
       if (seenMixers.has(key)) continue;
       if (isLikelySpirit(key, drink.base_spirit?.toLowerCase() ?? "")) continue;
+
+      const aromaticsOnly = ["salt", "pepper", "bitters", "kosher salt", "sea salt", "black pepper", "white pepper"];
+      if (aromaticsOnly.includes(key)) continue;
+
+      const garnishOnly = ["mint", "basil", "rosemary", "thyme", "cilantro", "mint leaves", "basil leaves", "thyme sprig", "rosemary sprig", "lime wheel", "lemon wheel", "orange peel", "lemon peel"];
+      if (garnishOnly.includes(key)) continue;
+
       seenMixers.add(key);
 
       const drinkCountForThis = countDrinksUsingMixer(drinks, key);
-      const quantity = getNatalieMixerQuantity(ingName, guestCount, gbDrinkCount, drinkCountForThis);
+      const quantity = getNatalieMixerQuantity(ingName, guestCount, gbDrinkCount, drinkCountForThis, isSplash);
       const label = ingName.charAt(0).toUpperCase() + ingName.slice(1);
 
       const store = routeMixerToStore(label);
