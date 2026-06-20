@@ -399,7 +399,8 @@ function isGarnishOnlyKey(key: string): boolean {
 /** Collect mixer/ingredient needs from all drinks. Used by Bartender Only package. */
 function getMixersAndIngredients(
   drinks: SignatureDrink[],
-  guestCount: number
+  guestCount: number,
+  hours?: number
 ): ShoppingListItem[] {
   const seen = new Set<string>();
   const items: ShoppingListItem[] = [];
@@ -443,7 +444,7 @@ function getMixersAndIngredients(
       items.push({
         category: "Mixers & Ingredients",
         item: cleanedIng,
-        quantity: getMixerQuantity(cleanedIng, guestCount, gbDrinkCount, drinkCountForThis, isSplash),
+        quantity: getMixerQuantity(cleanedIng, guestCount, gbDrinkCount, drinkCountForThis, isSplash, hours),
       });
     }
   }
@@ -465,22 +466,26 @@ function getMixerQuantity(
   guestCount: number,
   gingerBeerDrinkCount?: number,
   drinkCountForThis?: number,
-  isSplash?: boolean
+  isSplash?: boolean,
+  hours?: number
 ): string {
   const key = ingredient.toLowerCase().trim();
   const drinkCount = drinkCountForThis ?? 1;
+  // Hours factor: scale relative to 4-hour baseline. 4 hours = 1.0x, 6 hours = 1.5x, 8 hours = 2.0x.
+  // Capped at 0.75x minimum (very short events still need a baseline minimum).
+  const hoursFactor = Math.max(0.75, (hours && hours > 0 ? hours : 4) / 4);
 
   // ===== SYRUPS =====
   if (key.includes("simple syrup")) {
-    const bottles = Math.max(1, Math.ceil(guestCount / 33));
+    const bottles = Math.max(1, Math.ceil((guestCount * hoursFactor) / 33));
     return `${bottles} x 1 liter bottle${bottles === 1 ? "" : "s"}`;
   }
   if (key.includes("agave")) {
-    const bottles = Math.max(1, Math.ceil(guestCount / 60));
+    const bottles = Math.max(1, Math.ceil((guestCount * hoursFactor) / 60));
     return `${bottles} x 36 oz bottle${bottles === 1 ? "" : "s"}`;
   }
   if (key.includes("honey")) {
-    const bottles = Math.max(1, Math.ceil(guestCount / 60));
+    const bottles = Math.max(1, Math.ceil((guestCount * hoursFactor) / 60));
     return `${bottles} x 48 oz bottle${bottles === 1 ? "" : "s"}`;
   }
   if (key.includes("grenadine")) return "1 x 1 liter bottle";
@@ -491,193 +496,192 @@ function getMixerQuantity(
   // ===== JUICES =====
   if (key.includes("lime juice")) {
     // Scales with drink count: heavier divisor when used in more drinks
-    // 100 guests, 3 drinks should give ~4 bottles (not 8)
     const divisor = drinkCount >= 3 ? 25 : drinkCount === 2 ? 33 : 50;
-    const bottles = Math.max(2, Math.ceil(guestCount / divisor));
+    const bottles = Math.max(2, Math.ceil((guestCount * hoursFactor) / divisor));
     return `${bottles} x 32 oz bottle${bottles === 1 ? "" : "s"}`;
   }
   if (key.includes("lemon juice")) {
     const divisor = drinkCount >= 3 ? 25 : drinkCount === 2 ? 33 : 50;
-    const bottles = Math.max(1, Math.ceil(guestCount / divisor));
+    const bottles = Math.max(1, Math.ceil((guestCount * hoursFactor) / divisor));
     return `${bottles} x 48 oz bottle${bottles === 1 ? "" : "s"}`;
   }
   if (key.includes("cranberry")) {
-    const bottles = Math.max(1, Math.ceil(guestCount / 37));
+    const bottles = Math.max(1, Math.ceil((guestCount * hoursFactor) / 37));
     return `${bottles} x 64 oz bottle${bottles === 1 ? "" : "s"}`;
   }
   if (key.includes("orange juice")) {
-    const bottles = Math.max(1, Math.ceil(guestCount / 20));
+    const bottles = Math.max(1, Math.ceil((guestCount * hoursFactor) / 20));
     return `${bottles} x 64 oz bottle${bottles === 1 ? "" : "s"}`;
   }
   if (key.includes("pineapple juice")) {
     // Central (in 2+ drinks): heavier scaling. Accent: lighter.
-    const divisor = drinkCount >= 2 ? 17 : 35;
-    const cans = Math.max(1, Math.ceil(guestCount / divisor));
+    const divisor = drinkCount >= 2 ? 17 : 25;
+    const cans = Math.max(1, Math.ceil((guestCount * hoursFactor) / divisor));
     return `${cans} x 46 oz can${cans === 1 ? "" : "s"}`;
   }
   if (key.includes("pomegranate")) {
-    const bottles = Math.max(1, Math.ceil(guestCount / 25));
+    const bottles = Math.max(1, Math.ceil((guestCount * hoursFactor) / 25));
     return `${bottles} x 48 oz bottle${bottles === 1 ? "" : "s"}`;
   }
   if (key.includes("grapefruit juice")) {
-    const bottles = Math.max(1, Math.ceil(guestCount / 25));
+    const bottles = Math.max(1, Math.ceil((guestCount * hoursFactor) / 25));
     return `${bottles} x 64 oz bottle${bottles === 1 ? "" : "s"}`;
   }
   if (key.includes("blackberry juice")) {
-    const bottles = Math.max(1, Math.ceil(guestCount / 15));
+    const bottles = Math.max(1, Math.ceil((guestCount * hoursFactor) / 15));
     return `${bottles} x 32 oz bottle${bottles === 1 ? "" : "s"}`;
   }
   if (key.includes("watermelon juice") || key.includes("watermelon puree")) {
     if (isSplash) return "1 x 64 oz bottle";
-    const bottles = Math.max(2, Math.ceil((guestCount * drinkCount) / 8));
+    const bottles = Math.max(2, Math.ceil((guestCount * drinkCount * hoursFactor) / 8));
     return `${bottles} x 1 liter bottle${bottles === 1 ? "" : "s"}`;
   }
   if (key.includes("mango juice") || key.includes("mango puree") || key.includes("mango nectar")) {
     if (isSplash) return "1 x 32 oz bottle";
-    const bottles = Math.max(1, Math.ceil((guestCount * drinkCount) / 12));
+    const bottles = Math.max(1, Math.ceil((guestCount * drinkCount * hoursFactor) / 12));
     return `${bottles} x 1 liter bottle${bottles === 1 ? "" : "s"}`;
   }
   if (key.includes("strawberry juice") || key.includes("strawberry puree")) {
     if (isSplash) return "1 x 32 oz bottle";
-    const bottles = Math.max(1, Math.ceil((guestCount * drinkCount) / 12));
+    const bottles = Math.max(1, Math.ceil((guestCount * drinkCount * hoursFactor) / 12));
     return `${bottles} x 1 liter bottle${bottles === 1 ? "" : "s"}`;
   }
   if (key.includes("blueberry juice") || key.includes("blueberry puree")) {
     if (isSplash) return "1 x 32 oz bottle";
-    const bottles = Math.max(1, Math.ceil((guestCount * drinkCount) / 12));
+    const bottles = Math.max(1, Math.ceil((guestCount * drinkCount * hoursFactor) / 12));
     return `${bottles} x 1 liter bottle${bottles === 1 ? "" : "s"}`;
   }
   if (key.includes("guava juice") || key.includes("guava puree") || key.includes("guava nectar")) {
     if (isSplash) return "1 x 32 oz bottle";
-    const bottles = Math.max(1, Math.ceil((guestCount * drinkCount) / 12));
+    const bottles = Math.max(1, Math.ceil((guestCount * drinkCount * hoursFactor) / 12));
     return `${bottles} x 1 liter bottle${bottles === 1 ? "" : "s"}`;
   }
   if (key.includes("passionfruit") || key.includes("passion fruit")) {
     if (isSplash) return "1 x 32 oz bottle";
-    const bottles = Math.max(1, Math.ceil((guestCount * drinkCount) / 12));
+    const bottles = Math.max(1, Math.ceil((guestCount * drinkCount * hoursFactor) / 12));
     return `${bottles} x 1 liter bottle${bottles === 1 ? "" : "s"}`;
   }
   if (key.includes("sparkling water") || key.includes("seltzer")) {
     if (isSplash) return "2 x 1 liter bottles";
-    const bottles = Math.max(2, Math.ceil((guestCount * drinkCount) / 6));
+    const bottles = Math.max(2, Math.ceil((guestCount * drinkCount * hoursFactor) / 6));
     return `${bottles} x 1 liter bottle${bottles === 1 ? "" : "s"}`;
   }
   if (key.includes("club soda") || key.includes("soda water")) {
     if (isSplash) return "2 x 1 liter bottles";
-    const bottles = Math.max(2, Math.ceil((guestCount * drinkCount) / 6));
+    const bottles = Math.max(2, Math.ceil((guestCount * drinkCount * hoursFactor) / 6));
     return `${bottles} x 1 liter bottle${bottles === 1 ? "" : "s"}`;
   }
   if (key.includes("lemonade")) {
     // Splash use = small amount only. Central use = scales with guest count.
     if (isSplash) {
-      const bottles = Math.max(1, Math.ceil(guestCount / 100));
+      const bottles = Math.max(1, Math.ceil((guestCount * hoursFactor) / 100));
       return `${bottles} x 64 oz bottle${bottles === 1 ? "" : "s"}`;
     }
     // Central scaling: 1 gallon per 18 guests
-    const gallons = Math.max(1, Math.ceil(guestCount / 18));
+    const gallons = Math.max(1, Math.ceil((guestCount * hoursFactor) / 18));
     return `${gallons} gallon${gallons === 1 ? "" : "s"}`;
   }
 
   // ===== PUREES =====
   if (key.includes("peach puree") || (key.includes("peach") && !key.includes("schnapps"))) {
-    const bottles = Math.max(1, Math.ceil(guestCount / 60));
+    const bottles = Math.max(1, Math.ceil((guestCount * hoursFactor) / 60));
     return `${bottles} x 1 liter bottle${bottles === 1 ? "" : "s"}`;
   }
   if (key.includes("strawberry puree") || key.includes("strawberry")) {
-    const bottles = Math.max(1, Math.ceil(guestCount / 15));
+    const bottles = Math.max(1, Math.ceil((guestCount * hoursFactor) / 15));
     return `${bottles} x 16.9 oz bottle${bottles === 1 ? "" : "s"}`;
   }
   if (key.includes("dark cherry puree") || key.includes("black cherry puree")) {
-    const bottles = Math.max(1, Math.ceil(guestCount / 50));
+    const bottles = Math.max(1, Math.ceil((guestCount * hoursFactor) / 50));
     return `${bottles} x 16.9 oz bottle${bottles === 1 ? "" : "s"}`;
   }
   if (key.includes("mango puree") || key.includes("mango")) {
-    const bottles = Math.max(1, Math.ceil(guestCount / 60));
+    const bottles = Math.max(1, Math.ceil((guestCount * hoursFactor) / 60));
     return `${bottles} x 1 liter bottle${bottles === 1 ? "" : "s"}`;
   }
   if (key.includes("passion") || key.includes("passionfruit")) {
-    const bottles = Math.max(1, Math.ceil(guestCount / 60));
+    const bottles = Math.max(1, Math.ceil((guestCount * hoursFactor) / 60));
     return `${bottles} x 1 liter bottle${bottles === 1 ? "" : "s"}`;
   }
   if (key.includes("prickly pear")) {
-    const bottles = Math.max(1, Math.ceil(guestCount / 60));
+    const bottles = Math.max(1, Math.ceil((guestCount * hoursFactor) / 60));
     return `${bottles} x 1 liter bottle${bottles === 1 ? "" : "s"}`;
   }
   if (key.includes("lychee")) {
-    const bottles = Math.max(1, Math.ceil(guestCount / 60));
+    const bottles = Math.max(1, Math.ceil((guestCount * hoursFactor) / 60));
     return `${bottles} x 16.9 oz bottle${bottles === 1 ? "" : "s"}`;
   }
   if (key.includes("pumpkin")) {
-    const bottles = Math.max(1, Math.ceil(guestCount / 60));
+    const bottles = Math.max(1, Math.ceil((guestCount * hoursFactor) / 60));
     return `${bottles} x 16.9 oz bottle${bottles === 1 ? "" : "s"}`;
   }
 
   // ===== CHERRIES (separate from purees) =====
   if (key.includes("cocktail cherr") || key.includes("maraschino")) {
-    const jars = Math.max(1, Math.ceil(guestCount / 60));
+    const jars = Math.max(1, Math.ceil((guestCount * hoursFactor) / 60));
     return `${jars} x 11 oz jar${jars === 1 ? "" : "s"}`;
   }
 
   // ===== SODAS / FIZZY =====
   if (key.includes("club soda") || key.includes("soda water")) {
     // Flat 2 liters when used as accent. Scales when in multiple drinks.
-    const liters = drinkCount >= 2 ? Math.max(2, Math.ceil(guestCount / 30) * 2) : 2;
+    const liters = drinkCount >= 2 ? Math.max(2, Math.ceil((guestCount * hoursFactor) / 30) * 2) : 2;
     return `${liters} x 1 liter bottle${liters === 1 ? "" : "s"}`;
   }
   if (key.includes("sparkling water")) {
-    const liters = Math.max(2, Math.ceil(guestCount / 30) * 2);
+    const liters = Math.max(2, Math.ceil((guestCount * hoursFactor) / 30) * 2);
     return `${liters} x 1 liter bottle${liters === 1 ? "" : "s"}`;
   }
   if (key.includes("tonic")) {
-    const liters = drinkCount >= 2 ? Math.max(2, Math.ceil(guestCount / 30) * 2) : 2;
+    const liters = drinkCount >= 2 ? Math.max(2, Math.ceil((guestCount * hoursFactor) / 30) * 2) : 2;
     return `${liters} x 1 liter bottle${liters === 1 ? "" : "s"}`;
   }
   if (key.includes("ginger beer")) {
     const drinks = gingerBeerDrinkCount ?? 1;
-    const cans = Math.max(12, Math.ceil((guestCount / 100) * 24 * drinks));
+    const cans = Math.max(12, Math.ceil(((guestCount * hoursFactor) / 100) * 24 * drinks));
     return `${cans} x Goslings ginger beer 12 oz cans`;
   }
   if (key.includes("ginger ale")) {
-    const cans = Math.max(12, Math.ceil(guestCount / 4));
+    const cans = Math.max(12, Math.ceil((guestCount * hoursFactor) / 4));
     return `${cans} x 12 oz cans`;
   }
   if (key.includes("squirt") || key.includes("grapefruit soda")) {
-    const cases = Math.max(1, Math.ceil(guestCount / 125));
+    const cases = Math.max(1, Math.ceil((guestCount * hoursFactor) / 125));
     return `${cases} case${cases === 1 ? "" : "s"} (24 pack${cases === 1 ? "" : "s"})`;
   }
   if (key.includes("sprite") || key.includes("7up") || key.includes("lemon lime soda")) {
-    const cases = Math.max(1, Math.ceil(guestCount / 125));
+    const cases = Math.max(1, Math.ceil((guestCount * hoursFactor) / 125));
     return `${cases} case${cases === 1 ? "" : "s"} (24 pack${cases === 1 ? "" : "s"})`;
   }
   if (key.includes("coke") || key.includes("coca cola") || key.includes("cola")) {
-    const cases = Math.max(1, Math.ceil(guestCount / 125));
+    const cases = Math.max(1, Math.ceil((guestCount * hoursFactor) / 125));
     return `${cases} case${cases === 1 ? "" : "s"} (24 pack${cases === 1 ? "" : "s"})`;
   }
   if (key.includes("dr pepper")) {
-    const cases = Math.max(1, Math.ceil(guestCount / 125));
+    const cases = Math.max(1, Math.ceil((guestCount * hoursFactor) / 125));
     return `${cases} case${cases === 1 ? "" : "s"} (24 pack${cases === 1 ? "" : "s"})`;
   }
   if (key.includes("root beer")) {
-    const cases = Math.max(1, Math.ceil(guestCount / 125));
+    const cases = Math.max(1, Math.ceil((guestCount * hoursFactor) / 125));
     return `${cases} case${cases === 1 ? "" : "s"} (24 pack${cases === 1 ? "" : "s"})`;
   }
 
   // ===== OTHER =====
   if (key.includes("coconut water")) {
-    const bottles = Math.max(2, Math.ceil(guestCount / 20));
+    const bottles = Math.max(2, Math.ceil((guestCount * hoursFactor) / 20));
     return `${bottles} x 1 liter bottle${bottles === 1 ? "" : "s"}`;
   }
   if (key.includes("rose water")) {
-    const bottles = Math.max(1, Math.ceil(guestCount / 15));
+    const bottles = Math.max(1, Math.ceil((guestCount * hoursFactor) / 15));
     return `${bottles} x 8 oz bottle${bottles === 1 ? "" : "s"}`;
   }
   if (key.includes("coconut cream") || key.includes("coconut milk") || key.includes("cream of coconut")) {
-    const cans = Math.max(1, Math.ceil(guestCount / 25));
+    const cans = Math.max(1, Math.ceil((guestCount * hoursFactor) / 25));
     return `${cans} x 16.9 oz can${cans === 1 ? "" : "s"}`;
   }
   if (key.includes("olive brine") || key.includes("olive juice")) {
     // Olive brine comes from a jar of olives, not a separate bottle
-    const jars = Math.max(1, Math.ceil(guestCount / 25));
+    const jars = Math.max(1, Math.ceil((guestCount * hoursFactor) / 25));
     return `${jars} jar${jars === 1 ? "" : "s"} (olives)`;
   }
   if (key.includes("elderflower")) return "1 x 750 ml bottle";
@@ -693,7 +697,7 @@ function getMixerQuantity(
     return "1 x 2.25 oz container";
   }
   if (key.includes("jalape")) {
-    const count = Math.max(5, Math.ceil(guestCount / 4));
+    const count = Math.max(5, Math.ceil((guestCount * hoursFactor) / 4));
     return `${count} whole jalapeños`;
   }
   if (key.includes("tajin") || key.includes("chili salt") || key.includes("chili lime")) {
@@ -707,7 +711,7 @@ function getMixerQuantity(
   }
 
   // ===== FALLBACK: don't drop the ingredient, render a default =====
-  const units = Math.max(1, Math.ceil(guestCount / 25));
+  const units = Math.max(1, Math.ceil((guestCount * hoursFactor) / 25));
   return `${units} x 1 liter bottle${units === 1 ? "" : "s"}`;
 }
 
@@ -715,21 +719,22 @@ function getMixerQuantity(
  * Backward-compat: client-facing mixer quantities (no store sourcing).
  * Just calls the unified getMixerQuantity now.
  */
-function getClientMixerQuantity(ingredient: string, guestCount: number, gingerBeerDrinkCount?: number, drinkCountForThis?: number): string {
-  return getMixerQuantity(ingredient, guestCount, gingerBeerDrinkCount, drinkCountForThis);
+function getClientMixerQuantity(ingredient: string, guestCount: number, gingerBeerDrinkCount?: number, drinkCountForThis?: number, hours?: number): string {
+  return getMixerQuantity(ingredient, guestCount, gingerBeerDrinkCount, drinkCountForThis, undefined, hours);
 }
 
 /**
  * Natalie supply mixer quantity (same formula, slightly different ginger beer label).
  */
-function getNatalieMixerQuantity(ingredient: string, guestCount: number, gingerBeerDrinkCount?: number, drinkCountForThis?: number, isSplash?: boolean): string {
+function getNatalieMixerQuantity(ingredient: string, guestCount: number, gingerBeerDrinkCount?: number, drinkCountForThis?: number, isSplash?: boolean, hours?: number): string {
   const key = ingredient.toLowerCase().trim();
+  const hoursFactor = Math.max(0.75, (hours && hours > 0 ? hours : 4) / 4);
   if (key.includes("ginger beer")) {
     const drinks = gingerBeerDrinkCount ?? 1;
-    const cans = Math.max(12, Math.ceil((guestCount / 100) * 24 * drinks));
+    const cans = Math.max(12, Math.ceil(((guestCount * hoursFactor) / 100) * 24 * drinks));
     return `${cans} cans (Goslings 12 oz, Sam's Club 24 ct or Walmart 12 ct)`;
   }
-  return getMixerQuantity(ingredient, guestCount, gingerBeerDrinkCount, drinkCountForThis, isSplash);
+  return getMixerQuantity(ingredient, guestCount, gingerBeerDrinkCount, drinkCountForThis, isSplash, hours);
 }
 
 function getGarnishNotes(garnish: string): string | undefined {
@@ -969,7 +974,7 @@ export function generateShoppingList(eventData: EventData): ShoppingListItem[] {
 
   // Bartender Only gets mixers, garnishes, rim ingredients, AND supplies
   if (isBartenderOnly && sigDrinks.length > 0) {
-    items.push(...getMixersAndIngredients(sigDrinks, guestCount));
+    items.push(...getMixersAndIngredients(sigDrinks, guestCount, barHours));
     items.push(...getGarnishes(sigDrinks));
     items.push(...getRimIngredients(sigDrinks));
   }
@@ -1158,7 +1163,7 @@ export function generateNatalieSupplyList(eventData: EventData): string {
       seenMixers.add(key);
 
       const drinkCountForThis = countDrinksUsingMixer(drinks, key);
-      const quantity = getNatalieMixerQuantity(ingName, guestCount, gbDrinkCount, drinkCountForThis, isSplash);
+      const quantity = getNatalieMixerQuantity(ingName, guestCount, gbDrinkCount, drinkCountForThis, isSplash, hours);
 
       if (isSodaOrGingerBeer(key)) {
         sodaItems.push({ item: ingName, quantity });
@@ -1496,7 +1501,7 @@ export function formatShoppingListForNote(
       seenMixers.add(key);
 
       const drinkCountForThis = countDrinksUsingMixer(drinks, key);
-      const quantity = getNatalieMixerQuantity(ingName, guestCount, gbDrinkCount, drinkCountForThis, isSplash);
+      const quantity = getNatalieMixerQuantity(ingName, guestCount, gbDrinkCount, drinkCountForThis, isSplash, hours);
 
       if (isSodaOrGingerBeer(key)) {
         sodaItems.push({ item: ingName, quantity });
@@ -1735,7 +1740,7 @@ export function generateClientShoppingListEmail(
         seenMixers.add(key);
 
         const drinkCountForThis = countDrinksUsingMixer(drinks, key);
-        const quantity = getNatalieMixerQuantity(ingName, guestCount, gbDrinkCount, drinkCountForThis, isSplash);
+        const quantity = getNatalieMixerQuantity(ingName, guestCount, gbDrinkCount, drinkCountForThis, isSplash, hours);
 
         if (isSodaOrGingerBeer(key)) {
           sodaItems.push({ item: ingName, quantity });
@@ -1958,7 +1963,7 @@ export function generateOrderTeamEmail(
       seenMixers.add(key);
 
       const drinkCountForThis = countDrinksUsingMixer(drinks, key);
-      const quantity = getNatalieMixerQuantity(ingName, guestCount, gbDrinkCount, drinkCountForThis, isSplash);
+      const quantity = getNatalieMixerQuantity(ingName, guestCount, gbDrinkCount, drinkCountForThis, isSplash, hours);
       const label = ingName.charAt(0).toUpperCase() + ingName.slice(1);
 
       const store = routeMixerToStore(label);
