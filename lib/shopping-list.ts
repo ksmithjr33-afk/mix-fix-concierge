@@ -379,6 +379,23 @@ function countDrinksUsingMixer(drinks: SignatureDrink[], mixerKeyword: string): 
   return count;
 }
 
+/**
+ * Detect if an ingredient key is garnish-only (mint, basil, peels, etc.)
+ * Returns true if the key contains an herb/peel word and is not a syrup/liqueur.
+ * Use this BEFORE adding to mixers list.
+ */
+function isGarnishOnlyKey(key: string): boolean {
+  const k = (key ?? "").toLowerCase().trim();
+  if (!k) return false;
+  const herbWords = ["mint", "basil", "rosemary", "thyme", "cilantro"];
+  const peelWords = ["lime wheel", "lemon wheel", "orange peel", "lemon peel", "lime peel"];
+  const isHerb = herbWords.some(h =>
+    k.includes(h) && !k.includes("syrup") && !k.includes("liqueur")
+  );
+  const isPeel = peelWords.some(p => k.includes(p));
+  return isHerb || isPeel;
+}
+
 /** Collect mixer/ingredient needs from all drinks. Used by Bartender Only package. */
 function getMixersAndIngredients(
   drinks: SignatureDrink[],
@@ -410,9 +427,8 @@ function getMixersAndIngredients(
       if (aromaticsOnly.some(a => stripped === a)) continue;
 
       // Garnish-only items in the ingredients list (mint, basil leaves) should be skipped here
-      // since they will be handled by getGarnishes()
-      const garnishOnly = ["mint", "basil", "rosemary", "thyme", "cilantro", "mint leaves", "basil leaves", "thyme sprig", "rosemary sprig", "lime wheel", "lemon wheel", "orange peel", "lemon peel"];
-      if (garnishOnly.some(g => stripped === g)) continue;
+      // since they will be handled by getGarnishes() / calculateProduceFromGarnishes()
+      if (isGarnishOnlyKey(stripped)) continue;
 
       // Strip prep prefix from the display name and use the cleaned version
       // Detect splash/dash usage to scale quantities down
@@ -510,6 +526,46 @@ function getMixerQuantity(
   if (key.includes("blackberry juice")) {
     const bottles = Math.max(1, Math.ceil(guestCount / 15));
     return `${bottles} x 32 oz bottle${bottles === 1 ? "" : "s"}`;
+  }
+  if (key.includes("watermelon juice") || key.includes("watermelon puree")) {
+    if (isSplash) return "1 x 64 oz bottle";
+    const bottles = Math.max(2, Math.ceil((guestCount * drinkCount) / 8));
+    return `${bottles} x 1 liter bottle${bottles === 1 ? "" : "s"}`;
+  }
+  if (key.includes("mango juice") || key.includes("mango puree") || key.includes("mango nectar")) {
+    if (isSplash) return "1 x 32 oz bottle";
+    const bottles = Math.max(1, Math.ceil((guestCount * drinkCount) / 12));
+    return `${bottles} x 1 liter bottle${bottles === 1 ? "" : "s"}`;
+  }
+  if (key.includes("strawberry juice") || key.includes("strawberry puree")) {
+    if (isSplash) return "1 x 32 oz bottle";
+    const bottles = Math.max(1, Math.ceil((guestCount * drinkCount) / 12));
+    return `${bottles} x 1 liter bottle${bottles === 1 ? "" : "s"}`;
+  }
+  if (key.includes("blueberry juice") || key.includes("blueberry puree")) {
+    if (isSplash) return "1 x 32 oz bottle";
+    const bottles = Math.max(1, Math.ceil((guestCount * drinkCount) / 12));
+    return `${bottles} x 1 liter bottle${bottles === 1 ? "" : "s"}`;
+  }
+  if (key.includes("guava juice") || key.includes("guava puree") || key.includes("guava nectar")) {
+    if (isSplash) return "1 x 32 oz bottle";
+    const bottles = Math.max(1, Math.ceil((guestCount * drinkCount) / 12));
+    return `${bottles} x 1 liter bottle${bottles === 1 ? "" : "s"}`;
+  }
+  if (key.includes("passionfruit") || key.includes("passion fruit")) {
+    if (isSplash) return "1 x 32 oz bottle";
+    const bottles = Math.max(1, Math.ceil((guestCount * drinkCount) / 12));
+    return `${bottles} x 1 liter bottle${bottles === 1 ? "" : "s"}`;
+  }
+  if (key.includes("sparkling water") || key.includes("seltzer")) {
+    if (isSplash) return "2 x 1 liter bottles";
+    const bottles = Math.max(2, Math.ceil((guestCount * drinkCount) / 6));
+    return `${bottles} x 1 liter bottle${bottles === 1 ? "" : "s"}`;
+  }
+  if (key.includes("club soda") || key.includes("soda water")) {
+    if (isSplash) return "2 x 1 liter bottles";
+    const bottles = Math.max(2, Math.ceil((guestCount * drinkCount) / 6));
+    return `${bottles} x 1 liter bottle${bottles === 1 ? "" : "s"}`;
   }
   if (key.includes("lemonade")) {
     // Splash use = small amount only. Central use = scales with guest count.
@@ -843,10 +899,20 @@ function getBeerQuantity(guestCount: number): string {
 }
 
 /**
- * Wine formula: bottles, not cases. 1 bottle per 25 guests, min 2.
+ * Wine formula: bottles, not cases. Scales with guests AND hours.
+ * Roughly accounts for wine being one of several drink options (beer, cocktails),
+ * with ~25% of total drink demand going to wine.
+ *
+ * Examples:
+ *   30 guests, 3 hours  →  3 bottles
+ *   50 guests, 4 hours  →  7 bottles
+ *   100 guests, 4 hours → 14 bottles
+ *   100 guests, 6 hours → 20 bottles
+ *   200 guests, 5 hours → 34 bottles
  */
-function getWineQuantity(guestCount: number): string {
-  const bottles = Math.max(2, Math.ceil(guestCount / 25));
+function getWineQuantity(guestCount: number, hours: number): string {
+  const safeHours = Math.max(1, hours || 3);
+  const bottles = Math.max(3, Math.ceil((guestCount * safeHours) / 30));
   return `${bottles} bottle${bottles === 1 ? "" : "s"}`;
 }
 
@@ -894,7 +960,7 @@ export function generateShoppingList(eventData: EventData): ShoppingListItem[] {
     items.push({
       category: "Beer & Wine",
       item: "Wine (mix of red and white)",
-      quantity: getWineQuantity(guestCount),
+      quantity: getWineQuantity(guestCount, barHours),
       notes: eventData.client_providing_beer_wine ? "You mentioned providing your own; recommended amount above" : undefined,
     });
   }
@@ -1086,9 +1152,8 @@ export function generateNatalieSupplyList(eventData: EventData): string {
       const aromaticsOnly = ["salt", "pepper", "bitters", "kosher salt", "sea salt", "black pepper", "white pepper"];
       if (aromaticsOnly.includes(key)) continue;
 
-      // Skip garnish-only items
-      const garnishOnly = ["mint", "basil", "rosemary", "thyme", "cilantro", "mint leaves", "basil leaves", "thyme sprig", "rosemary sprig", "lime wheel", "lemon wheel", "orange peel", "lemon peel"];
-      if (garnishOnly.includes(key)) continue;
+      // Skip garnish-only items (mint, basil, peels) - handled by getGarnishes() / calculateProduceFromGarnishes()
+      if (isGarnishOnlyKey(key)) continue;
 
       seenMixers.add(key);
 
@@ -1423,9 +1488,10 @@ export function formatShoppingListForNote(
       const aromaticsOnly = ["salt", "pepper", "bitters", "kosher salt", "sea salt", "black pepper", "white pepper"];
       if (aromaticsOnly.includes(key)) continue;
 
-      // Skip garnish-only items (handled by getGarnishes/produce section)
-      const garnishOnly = ["mint", "basil", "rosemary", "thyme", "cilantro", "mint leaves", "basil leaves", "thyme sprig", "rosemary sprig", "lime wheel", "lemon wheel", "orange peel", "lemon peel"];
-      if (garnishOnly.includes(key)) continue;
+      // Skip garnish-only items - handled by getGarnishes() / calculateProduceFromGarnishes()
+
+
+      if (isGarnishOnlyKey(key)) continue;
 
       seenMixers.add(key);
 
@@ -1661,9 +1727,10 @@ export function generateClientShoppingListEmail(
         const aromaticsOnly = ["salt", "pepper", "bitters", "kosher salt", "sea salt", "black pepper", "white pepper"];
         if (aromaticsOnly.includes(key)) continue;
 
-        // Skip garnish-only items (handled by produce section)
-        const garnishOnly = ["mint", "basil", "rosemary", "thyme", "cilantro", "mint leaves", "basil leaves", "thyme sprig", "rosemary sprig", "lime wheel", "lemon wheel", "orange peel", "lemon peel"];
-        if (garnishOnly.includes(key)) continue;
+        // Skip garnish-only items - handled by getGarnishes() / calculateProduceFromGarnishes()
+
+
+        if (isGarnishOnlyKey(key)) continue;
 
         seenMixers.add(key);
 
@@ -1886,8 +1953,7 @@ export function generateOrderTeamEmail(
       const aromaticsOnly = ["salt", "pepper", "bitters", "kosher salt", "sea salt", "black pepper", "white pepper"];
       if (aromaticsOnly.includes(key)) continue;
 
-      const garnishOnly = ["mint", "basil", "rosemary", "thyme", "cilantro", "mint leaves", "basil leaves", "thyme sprig", "rosemary sprig", "lime wheel", "lemon wheel", "orange peel", "lemon peel"];
-      if (garnishOnly.includes(key)) continue;
+      if (isGarnishOnlyKey(key)) continue;
 
       seenMixers.add(key);
 
