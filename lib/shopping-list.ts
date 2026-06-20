@@ -709,28 +709,59 @@ function getGarnishes(drinks: SignatureDrink[]): ShoppingListItem[] {
 }
 
 /**
- * Detect rim ingredients from garnish strings and return as line items.
- * Looks for "salt rim", "sugar rim", "tajin rim", "chili rim".
+ * Detect rim/seasoning ingredients from BOTH ingredient arrays and garnish strings.
+ * Looks for salt, sugar, tajin/chili salt mentions anywhere in the recipe.
+ *
+ * Fixes the "missing salt" bug: when recipes say "pinch of salt" in ingredients[],
+ * the aromatic filter drops it. We need to detect it here and add a single line item.
  */
 function getRimIngredients(drinks: SignatureDrink[]): ShoppingListItem[] {
   const seen = new Set<string>();
   const items: ShoppingListItem[] = [];
 
   for (const drink of drinks) {
-    const g = (typeof drink.garnish === "string" ? drink.garnish : "").toLowerCase();
-    if (!g) continue;
+    // Build a single searchable text blob from garnish + all ingredients
+    const garnishText = (typeof drink.garnish === "string" ? drink.garnish : "").toLowerCase();
+    const ingredientsArr = Array.isArray(drink.ingredients) ? drink.ingredients : [];
+    const ingredientsText = ingredientsArr
+      .map(i => (typeof i === "string" ? i : ""))
+      .join(" | ")
+      .toLowerCase();
+    const combined = `${garnishText} | ${ingredientsText}`;
 
-    if ((g.includes("salt rim") || g.includes("salted rim") || g.includes("rim of salt")) && !seen.has("salt")) {
+    if (!combined.trim()) continue;
+
+    // TAJIN: check first because "tajin rim" or "chili salt" would also match salt below
+    if ((combined.includes("tajin") || combined.includes("tajín") ||
+         combined.includes("chili salt") || combined.includes("chile salt") ||
+         combined.includes("chili lime") || combined.includes("chili-lime")) && !seen.has("tajin")) {
+      seen.add("tajin");
+      items.push({ category: "Rim", item: "Tajin or chili salt", quantity: "1 large container (for rims)" });
+    }
+
+    // SALT: match many phrasings.
+    // "salt rim", "salted rim", "rim of salt", "rim with salt",
+    // "pinch of salt", "dash of salt", "salt to taste", "kosher salt", "sea salt", "black salt"
+    // Plain "salt" as its own ingredient is also caught.
+    const saltPatterns = [
+      /\bsalt rim\b/, /\bsalted rim\b/, /\brim of salt\b/, /\brim with salt\b/,
+      /\bpinch of salt\b/, /\bdash of salt\b/, /\bsalt to taste\b/,
+      /\bkosher salt\b/, /\bsea salt\b/, /\bblack salt\b/,
+      /(^|[|\s])salt([\s|]|$)/  // standalone "salt" token
+    ];
+    if (saltPatterns.some(p => p.test(combined)) && !seen.has("salt")) {
       seen.add("salt");
       items.push({ category: "Rim", item: "Salt", quantity: "1 large container (for rims)" });
     }
-    if ((g.includes("sugar rim") || g.includes("rim of sugar")) && !seen.has("sugar")) {
+
+    // SUGAR: rim and "sugared rim" variations
+    const sugarPatterns = [
+      /\bsugar rim\b/, /\bsugared rim\b/, /\brim of sugar\b/, /\brim with sugar\b/,
+      /\bsugar to taste\b/
+    ];
+    if (sugarPatterns.some(p => p.test(combined)) && !seen.has("sugar")) {
       seen.add("sugar");
       items.push({ category: "Rim", item: "Sugar", quantity: "1 small container (for rims)" });
-    }
-    if ((g.includes("tajin") || g.includes("tajín") || g.includes("chili salt") || g.includes("chile salt")) && !seen.has("tajin")) {
-      seen.add("tajin");
-      items.push({ category: "Rim", item: "Tajin or chili salt", quantity: "1 large container (for rims)" });
     }
   }
 
