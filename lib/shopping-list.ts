@@ -105,6 +105,34 @@ function scaleFactor(guests: number): number {
 }
 
 /**
+ * Event type demand multiplier. Different event types drink at different rates.
+ * Wedding is the baseline (1.0). Bachelor/bachelorette parties go harder (1.2).
+ * Corporate, baby showers, and religious events drink less.
+ *
+ * Applied as a multiplier on hoursFactor inside mixer and beer/wine calculations.
+ */
+function getEventTypeMultiplier(eventType?: string): number {
+  const t = (eventType ?? "").toLowerCase().trim();
+  if (!t) return 1.0;
+  if (t.includes("bachelor") || t.includes("bachelorette")) return 1.2;
+  if (t.includes("wedding")) return 1.0;
+  if (t.includes("birthday")) return 1.0;
+  if (t.includes("anniversary")) return 1.0;
+  if (t.includes("graduation")) return 1.0;
+  if (t.includes("engagement")) return 1.0;
+  if (t.includes("holiday")) return 1.0;
+  if (t.includes("reunion")) return 1.0;
+  if (t.includes("housewarm") || t.includes("house warm")) return 1.0;
+  if (t.includes("corporate") || t.includes("company") || t.includes("office") ||
+      t.includes("work event") || t.includes("networking") || t.includes("client")) return 0.8;
+  if (t.includes("baby shower") || t.includes("bridal shower") || t.includes("shower")) return 0.8;
+  if (t.includes("religious") || t.includes("church") || t.includes("communion") ||
+      t.includes("baptism") || t.includes("quinceañera") || t.includes("quinceanera")) return 0.7;
+  if (t.includes("funeral") || t.includes("memorial") || t.includes("celebration of life")) return 0.7;
+  return 1.0;
+}
+
+/**
  * Count how many alcoholic signature drinks use a given spirit key.
  */
 function countDrinksUsingSpirit(drinks: SignatureDrink[], spiritKey: string): number {
@@ -234,8 +262,9 @@ function getSpiritBottles(
   }
 
   for (const [spiritKey, ozPerDrink] of spiritOzTotals) {
-    // NEW FORMULA: bottles = ceil(guests * scaleFactor * oz_per_drink * SAFETY / 25.4)
-    let bottles = Math.ceil((guestCount * sf * ozPerDrink * SAFETY) / ML_PER_BOTTLE);
+    // NEW FORMULA: bottles = ceil(guests * scaleFactor * eventMult * oz_per_drink * SAFETY / 25.4)
+    const eventMult = getEventTypeMultiplier(eventData.event_type);
+    let bottles = Math.ceil((guestCount * sf * eventMult * ozPerDrink * SAFETY) / ML_PER_BOTTLE);
     bottles = Math.max(1, bottles);
 
     let notes: string | undefined;
@@ -400,7 +429,8 @@ function isGarnishOnlyKey(key: string): boolean {
 function getMixersAndIngredients(
   drinks: SignatureDrink[],
   guestCount: number,
-  hours?: number
+  hours?: number,
+  eventType?: string
 ): ShoppingListItem[] {
   const seen = new Set<string>();
   const items: ShoppingListItem[] = [];
@@ -444,7 +474,7 @@ function getMixersAndIngredients(
       items.push({
         category: "Mixers & Ingredients",
         item: cleanedIng,
-        quantity: getMixerQuantity(cleanedIng, guestCount, gbDrinkCount, drinkCountForThis, isSplash, hours),
+        quantity: getMixerQuantity(cleanedIng, guestCount, gbDrinkCount, drinkCountForThis, isSplash, hours, eventType),
       });
     }
   }
@@ -467,13 +497,16 @@ function getMixerQuantity(
   gingerBeerDrinkCount?: number,
   drinkCountForThis?: number,
   isSplash?: boolean,
-  hours?: number
+  hours?: number,
+  eventType?: string
 ): string {
   const key = ingredient.toLowerCase().trim();
   const drinkCount = drinkCountForThis ?? 1;
   // Hours factor: scale relative to 4-hour baseline. 4 hours = 1.0x, 6 hours = 1.5x, 8 hours = 2.0x.
   // Capped at 0.75x minimum (very short events still need a baseline minimum).
-  const hoursFactor = Math.max(0.75, (hours && hours > 0 ? hours : 4) / 4);
+  // Event type multiplier folded in: weddings 1.0x, bachelor/ette 1.2x, baby showers 0.8x, etc.
+  const eventMult = getEventTypeMultiplier(eventType);
+  const hoursFactor = Math.max(0.75, (hours && hours > 0 ? hours : 4) / 4) * eventMult;
 
   // ===== SYRUPS =====
   if (key.includes("simple syrup")) {
@@ -719,22 +752,23 @@ function getMixerQuantity(
  * Backward-compat: client-facing mixer quantities (no store sourcing).
  * Just calls the unified getMixerQuantity now.
  */
-function getClientMixerQuantity(ingredient: string, guestCount: number, gingerBeerDrinkCount?: number, drinkCountForThis?: number, hours?: number): string {
-  return getMixerQuantity(ingredient, guestCount, gingerBeerDrinkCount, drinkCountForThis, undefined, hours);
+function getClientMixerQuantity(ingredient: string, guestCount: number, gingerBeerDrinkCount?: number, drinkCountForThis?: number, hours?: number, eventType?: string): string {
+  return getMixerQuantity(ingredient, guestCount, gingerBeerDrinkCount, drinkCountForThis, undefined, hours, eventType);
 }
 
 /**
  * Natalie supply mixer quantity (same formula, slightly different ginger beer label).
  */
-function getNatalieMixerQuantity(ingredient: string, guestCount: number, gingerBeerDrinkCount?: number, drinkCountForThis?: number, isSplash?: boolean, hours?: number): string {
+function getNatalieMixerQuantity(ingredient: string, guestCount: number, gingerBeerDrinkCount?: number, drinkCountForThis?: number, isSplash?: boolean, hours?: number, eventType?: string): string {
   const key = ingredient.toLowerCase().trim();
-  const hoursFactor = Math.max(0.75, (hours && hours > 0 ? hours : 4) / 4);
+  const eventMult = getEventTypeMultiplier(eventType);
+  const hoursFactor = Math.max(0.75, (hours && hours > 0 ? hours : 4) / 4) * eventMult;
   if (key.includes("ginger beer")) {
     const drinks = gingerBeerDrinkCount ?? 1;
     const cans = Math.max(12, Math.ceil(((guestCount * hoursFactor) / 100) * 24 * drinks));
     return `${cans} cans (Goslings 12 oz, Sam's Club 24 ct or Walmart 12 ct)`;
   }
-  return getMixerQuantity(ingredient, guestCount, gingerBeerDrinkCount, drinkCountForThis, isSplash, hours);
+  return getMixerQuantity(ingredient, guestCount, gingerBeerDrinkCount, drinkCountForThis, isSplash, hours, eventType);
 }
 
 function getGarnishNotes(garnish: string): string | undefined {
@@ -896,28 +930,24 @@ function getSupplies(guestCount: number, hours: number, pace: string): ShoppingL
 }
 
 /**
- * Beer formula: single number, 1 case (24 pack) per 30 guests.
+ * Beer formula: single number of cases (24 pack each). Scales with guests, hours, and event type.
+ * Baseline: 1 case per 30 guests for a 4-hour wedding-style event.
  */
-function getBeerQuantity(guestCount: number): string {
-  const cases = Math.max(1, Math.ceil(guestCount / 30));
+function getBeerQuantity(guestCount: number, hours: number, eventType?: string): string {
+  const safeHours = Math.max(1, hours || 3);
+  const eventMult = getEventTypeMultiplier(eventType);
+  const cases = Math.max(1, Math.ceil((guestCount * safeHours * eventMult) / 120));
   return `${cases} case${cases === 1 ? "" : "s"} (24 pack${cases === 1 ? "" : "s"})`;
 }
 
 /**
- * Wine formula: bottles, not cases. Scales with guests AND hours.
- * Roughly accounts for wine being one of several drink options (beer, cocktails),
- * with ~25% of total drink demand going to wine.
- *
- * Examples:
- *   30 guests, 3 hours  →  3 bottles
- *   50 guests, 4 hours  →  7 bottles
- *   100 guests, 4 hours → 14 bottles
- *   100 guests, 6 hours → 20 bottles
- *   200 guests, 5 hours → 34 bottles
+ * Wine formula: bottles, not cases. Scales with guests, hours, and event type.
+ * Baseline: weddings 1.0x demand. Baby showers, religious events lower.
  */
-function getWineQuantity(guestCount: number, hours: number): string {
+function getWineQuantity(guestCount: number, hours: number, eventType?: string): string {
   const safeHours = Math.max(1, hours || 3);
-  const bottles = Math.max(3, Math.ceil((guestCount * safeHours) / 30));
+  const eventMult = getEventTypeMultiplier(eventType);
+  const bottles = Math.max(3, Math.ceil((guestCount * safeHours * eventMult) / 30));
   return `${bottles} bottle${bottles === 1 ? "" : "s"}`;
 }
 
@@ -955,7 +985,7 @@ export function generateShoppingList(eventData: EventData): ShoppingListItem[] {
     items.push({
       category: "Beer & Wine",
       item: "Beer (variety pack or client preference)",
-      quantity: getBeerQuantity(guestCount),
+      quantity: getBeerQuantity(guestCount, barHours, eventData.event_type),
       notes: eventData.client_providing_beer_wine ? "You mentioned providing your own; recommended amount above" : undefined,
     });
   }
@@ -965,7 +995,7 @@ export function generateShoppingList(eventData: EventData): ShoppingListItem[] {
     items.push({
       category: "Beer & Wine",
       item: "Wine (mix of red and white)",
-      quantity: getWineQuantity(guestCount, barHours),
+      quantity: getWineQuantity(guestCount, barHours, eventData.event_type),
       notes: eventData.client_providing_beer_wine ? "You mentioned providing your own; recommended amount above" : undefined,
     });
   }
@@ -974,7 +1004,7 @@ export function generateShoppingList(eventData: EventData): ShoppingListItem[] {
 
   // Bartender Only gets mixers, garnishes, rim ingredients, AND supplies
   if (isBartenderOnly && sigDrinks.length > 0) {
-    items.push(...getMixersAndIngredients(sigDrinks, guestCount, barHours));
+    items.push(...getMixersAndIngredients(sigDrinks, guestCount, barHours, eventData.event_type));
     items.push(...getGarnishes(sigDrinks));
     items.push(...getRimIngredients(sigDrinks));
   }
@@ -1163,7 +1193,7 @@ export function generateNatalieSupplyList(eventData: EventData): string {
       seenMixers.add(key);
 
       const drinkCountForThis = countDrinksUsingMixer(drinks, key);
-      const quantity = getNatalieMixerQuantity(ingName, guestCount, gbDrinkCount, drinkCountForThis, isSplash, hours);
+      const quantity = getNatalieMixerQuantity(ingName, guestCount, gbDrinkCount, drinkCountForThis, isSplash, hours, eventData.event_type);
 
       if (isSodaOrGingerBeer(key)) {
         sodaItems.push({ item: ingName, quantity });
@@ -1501,7 +1531,7 @@ export function formatShoppingListForNote(
       seenMixers.add(key);
 
       const drinkCountForThis = countDrinksUsingMixer(drinks, key);
-      const quantity = getNatalieMixerQuantity(ingName, guestCount, gbDrinkCount, drinkCountForThis, isSplash, hours);
+      const quantity = getNatalieMixerQuantity(ingName, guestCount, gbDrinkCount, drinkCountForThis, isSplash, hours, eventData.event_type);
 
       if (isSodaOrGingerBeer(key)) {
         sodaItems.push({ item: ingName, quantity });
@@ -1740,7 +1770,7 @@ export function generateClientShoppingListEmail(
         seenMixers.add(key);
 
         const drinkCountForThis = countDrinksUsingMixer(drinks, key);
-        const quantity = getNatalieMixerQuantity(ingName, guestCount, gbDrinkCount, drinkCountForThis, isSplash, hours);
+        const quantity = getNatalieMixerQuantity(ingName, guestCount, gbDrinkCount, drinkCountForThis, isSplash, hours, eventData.event_type);
 
         if (isSodaOrGingerBeer(key)) {
           sodaItems.push({ item: ingName, quantity });
@@ -1963,7 +1993,7 @@ export function generateOrderTeamEmail(
       seenMixers.add(key);
 
       const drinkCountForThis = countDrinksUsingMixer(drinks, key);
-      const quantity = getNatalieMixerQuantity(ingName, guestCount, gbDrinkCount, drinkCountForThis, isSplash, hours);
+      const quantity = getNatalieMixerQuantity(ingName, guestCount, gbDrinkCount, drinkCountForThis, isSplash, hours, eventData.event_type);
       const label = ingName.charAt(0).toUpperCase() + ingName.slice(1);
 
       const store = routeMixerToStore(label);
