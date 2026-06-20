@@ -149,6 +149,22 @@ function ChatContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const handleCompletion = (eventData: unknown) => {
+    if (completedRef.current) return;
+    completedRef.current = true;
+    try {
+      localStorage.setItem("mixfix_event_data", JSON.stringify(eventData));
+    } catch (e) {
+      console.error("Failed to store event data:", e);
+    }
+    // The server already fired the GHL webhook and marked the session complete
+    // before sending this event. Brief delay so the client can read the closing
+    // message, then move to the confirmation page.
+    setTimeout(() => {
+      router.push("/complete");
+    }, 3000);
+  };
+
   const streamResponse = async (currentMessages: Message[]) => {
     if (completedRef.current) return;
     setIsStreaming(true);
@@ -171,134 +187,69 @@ function ChatContent() {
 
       const decoder = new TextDecoder();
       let fullText = "";
-      let markerDetected = false;
+      let buffer = "";
+
+      const processFrame = (data: string) => {
+        if (data === "[DONE]") return;
+        let parsed: {
+          text?: string;
+          error?: string;
+          event?: string;
+          eventData?: unknown;
+        };
+        try {
+          parsed = JSON.parse(data);
+        } catch {
+          return; // skip malformed frame
+        }
+
+        if (parsed.error) {
+          console.error("Stream error:", parsed.error);
+          return;
+        }
+
+        // Completion is now driven by the server: it has already fired the GHL
+        // webhook and marked the session complete, then sends this event with
+        // the structured data so the client can show the confirmation page.
+        if (parsed.event === "complete") {
+          handleCompletion(parsed.eventData);
+          return;
+        }
+
+        if (typeof parsed.text === "string") {
+          fullText += parsed.text;
+          setMessages((prev) => {
+            const updated = [...prev];
+            updated[updated.length - 1] = {
+              role: "assistant",
+              content: fullText,
+            };
+            return updated;
+          });
+        }
+      };
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
 
-        const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split("\n");
-
-        for (const line of lines) {
-          if (line.startsWith("data: ")) {
-            const data = line.slice(6);
-            if (data === "[DONE]") continue;
-
-            try {
-              const parsed = JSON.parse(data);
-              if (parsed.error) {
-                console.error("Stream error:", parsed.error);
-                continue;
-              }
-              fullText += parsed.text;
-
-              // Check for the marker during streaming — once detected,
-              // freeze the displayed text to everything before the marker
-              if (!markerDetected) {
-                const jsonMarker = "EVENT_DATA_JSON:";
-                const jsonIndex = fullText.indexOf(jsonMarker);
-                if (jsonIndex !== -1) {
-                  markerDetected = true;
-                  const displayText = fullText.slice(0, jsonIndex).trim();
-                  setMessages((prev) => {
-                    const updated = [...prev];
-                    updated[updated.length - 1] = {
-                      role: "assistant",
-                      content: displayText,
-                    };
-                    return updated;
-                  });
-                } else {
-                  // Also hide partial marker at end of accumulated text
-                  // (e.g. "EVENT_DATA_" might be building up at the tail)
-                  const partialMarker = "EVENT_DATA_JSON:";
-                  let safeEnd = fullText.length;
-                  for (let len = Math.min(partialMarker.length - 1, fullText.length); len > 0; len--) {
-                    if (partialMarker.startsWith(fullText.slice(-len))) {
-                      safeEnd = fullText.length - len;
-                      break;
-                    }
-                  }
-                  setMessages((prev) => {
-                    const updated = [...prev];
-                    updated[updated.length - 1] = {
-                      role: "assistant",
-                      content: fullText.slice(0, safeEnd),
-                    };
-                    return updated;
-                  });
-                }
-              }
-              // If markerDetected, don't update displayed message — keep it frozen
-            } catch {
-              // skip malformed JSON
-            }
-          }
+        buffer += decoder.decode(value, { stream: true });
+        // SSE frames are delimited by a blank line. Keep the trailing partial
+        // frame in the buffer so a payload split across network chunks (e.g.
+        // the large completion event) is reassembled, not dropped.
+        const frames = buffer.split("\n\n");
+        buffer = frames.pop() ?? "";
+        for (const frame of frames) {
+          const dataLine = frame
+            .split("\n")
+            .find((l) => l.startsWith("data: "));
+          if (dataLine) processFrame(dataLine.slice(6));
         }
       }
 
-      // Process EVENT_DATA_JSON if marker was found during streaming
-      const jsonMarker = "EVENT_DATA_JSON:";
-      const jsonIndex = fullText.indexOf(jsonMarker);
-      if (markerDetected && jsonIndex !== -1) {
-        const closingMessage = fullText.slice(0, jsonIndex).trim();
-        const jsonStr = fullText.slice(jsonIndex + jsonMarker.length).trim();
-
-        // Update the displayed message to hide the JSON
-        setMessages((prev) => {
-          const updated = [...prev];
-          updated[updated.length - 1] = {
-            role: "assistant",
-            content: closingMessage,
-          };
-          return updated;
-        });
-
-        try {
-          const eventData = JSON.parse(jsonStr);
-          completedRef.current = true;
-          localStorage.setItem(
-            "mixfix_event_data",
-            JSON.stringify(eventData)
-          );
-
-          // Build conversation transcript from all messages including final response
-          const allMessages = [
-            ...hiddenPrefixRef.current,
-            ...currentMessages,
-            { role: "assistant" as const, content: closingMessage },
-          ];
-          const transcript = allMessages
-            .map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`)
-            .join("\n\n");
-
-          // Save event data to Supabase (fire and forget)
-          fetch("/api/save-event", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              eventData,
-              conversationTranscript: transcript,
-              sessionId: sessionIdRef.current,
-            }),
-          }).catch((err) => console.error("Failed to save event to Supabase:", err));
-
-          // Send event data to GoHighLevel webhook (fire and forget)
-          fetch("/api/webhook", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ eventData, conversationTranscript: transcript, clientEmail: searchParams.get("email") }),
-          }).catch((err) => console.error("Failed to send webhook to GHL:", err));
-
-          // Brief delay so user can read the closing message
-          setTimeout(() => {
-            router.push("/complete");
-          }, 3000);
-        } catch (e) {
-          console.warn("Could not parse event data JSON (may be incomplete):", e);
-        }
-      }
+      // Flush any complete frame left in the buffer at stream end.
+      const lastLine = buffer.split("\n").find((l) => l.startsWith("data: "));
+      if (lastLine) processFrame(lastLine.slice(6));
     } catch (error) {
       console.error("Fetch error:", error);
     } finally {
