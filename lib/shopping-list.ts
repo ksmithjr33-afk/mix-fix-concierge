@@ -1265,11 +1265,20 @@ export function generateNatalieSupplyList(eventData: EventData): string {
   parts.push("");
 
   parts.push("<b>BASELINE MIXERS</b>");
+  const cokeCases = Math.max(1, Math.ceil(guestCount / 40));
+  const dietCokeCases = Math.max(1, Math.ceil(guestCount / 60));
+  const spriteCases = Math.max(1, Math.ceil(guestCount / 50));
+  const waterCases = Math.max(1, Math.ceil(guestCount / 25));
   parts.push("Cranberry juice — 1 x 32 oz bottle");
   parts.push("Pineapple juice — 1 x 32 oz bottle");
   parts.push("Orange juice — 1 x 32 oz bottle");
   parts.push("Tonic — 2 x 1 liter bottles");
   parts.push("Club soda — 2 x 1 liter bottles");
+  parts.push(`Coke — ${cokeCases} case${cokeCases === 1 ? "" : "s"} (24 pack)`);
+  parts.push(`Diet Coke — ${dietCokeCases} case${dietCokeCases === 1 ? "" : "s"} (24 pack)`);
+  parts.push(`Sprite — ${spriteCases} case${spriteCases === 1 ? "" : "s"} (24 pack)`);
+  parts.push("Ginger ale — 1 x 1 liter bottle");
+  parts.push(`Bottled water — ${waterCases} case${waterCases === 1 ? "" : "s"} (24 pack)`);
   parts.push("");
 
   if (drinks.length > 0) {
@@ -1594,12 +1603,22 @@ export function formatShoppingListForNote(
   lines.push("");
   lines.push("BASELINE MIXERS");
   lines.push("");
+  // Scale sodas and water with guest count
+  const cokeCases = Math.max(1, Math.ceil(guestCount / 40));
+  const dietCokeCases = Math.max(1, Math.ceil(guestCount / 60));
+  const spriteCases = Math.max(1, Math.ceil(guestCount / 50));
+  const waterCases = Math.max(1, Math.ceil(guestCount / 25));
   const baseline = [
     { key: "cranberry juice", line: "- Cranberry juice — 1 x 32 oz bottle" },
     { key: "pineapple juice", line: "- Pineapple juice — 1 x 32 oz bottle" },
     { key: "orange juice", line: "- Orange juice — 1 x 32 oz bottle" },
     { key: "tonic", line: "- Tonic — 2 x 1 liter bottles" },
     { key: "club soda", line: "- Club soda — 2 x 1 liter bottles" },
+    { key: "coke", line: `- Coke — ${cokeCases} case${cokeCases === 1 ? "" : "s"} (24 pack)` },
+    { key: "diet coke", line: `- Diet Coke — ${dietCokeCases} case${dietCokeCases === 1 ? "" : "s"} (24 pack)` },
+    { key: "sprite", line: `- Sprite — ${spriteCases} case${spriteCases === 1 ? "" : "s"} (24 pack)` },
+    { key: "ginger ale", line: "- Ginger ale — 1 x 1 liter bottle" },
+    { key: "bottled water", line: `- Bottled water — ${waterCases} case${waterCases === 1 ? "" : "s"} (24 pack)` },
   ];
   for (const b of baseline) {
     if (!seenMixers.has(b.key)) {
