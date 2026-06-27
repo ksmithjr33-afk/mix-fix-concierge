@@ -28,6 +28,35 @@ interface EventData {
   event_location?: string;
   venue_type?: string;
   client_providing_beer_wine?: boolean;
+  build_a_bar_summary?: string;
+}
+
+/**
+ * Tailored Bar is the new name for what used to be Bartender Only.
+ * Both names refer to the SAME package: client supplies everything,
+ * we provide bartender, setup, tools, menu, and shopping list.
+ * Legacy bookings may say "Bartender Only", current bookings say "Tailored Bar".
+ */
+function isTailoredBar(pkg: string | undefined | null): boolean {
+  const p = (pkg ?? "").toLowerCase();
+  return p.includes("bartender") || p.includes("tailored");
+}
+
+/**
+ * Build a Bar is a customizable package. By default we assume it does NOT include
+ * the signature menu or shopping list unless add-ons say otherwise.
+ */
+function isBuildABar(pkg: string | undefined | null): boolean {
+  const p = (pkg ?? "").toLowerCase();
+  return p.includes("build a bar") || p.includes("build-a-bar") || p.includes("build your");
+}
+
+function isBeerAndWineOnly(pkg: string | undefined | null): boolean {
+  const p = (pkg ?? "").toLowerCase();
+  return p.includes("beer") && p.includes("wine") &&
+    !p.includes("bartender") && !p.includes("tailored") &&
+    !p.includes("essentials") && !p.includes("full") && !p.includes("premium") &&
+    !p.includes("build");
 }
 
 /**
@@ -963,7 +992,13 @@ export function generateShoppingList(eventData: EventData): ShoppingListItem[] {
   const guestCount = parseGuestCount(eventData.guest_count);
 
   // Beer and Wine — no shopping list
-  if (pkg.includes("beer") && pkg.includes("wine") && !pkg.includes("bartender") && !pkg.includes("essentials") && !pkg.includes("full") && !pkg.includes("premium")) {
+  if (isBeerAndWineOnly(pkg)) {
+    return [];
+  }
+
+  // Build a Bar — by default, no menu and no shopping list.
+  // Will need to branch on add-on selections once those data fields are available.
+  if (isBuildABar(pkg)) {
     return [];
   }
 
@@ -1000,7 +1035,7 @@ export function generateShoppingList(eventData: EventData): ShoppingListItem[] {
     });
   }
 
-  const isBartenderOnly = pkg.includes("bartender");
+  const isBartenderOnly = isTailoredBar(pkg);
 
   // Bartender Only gets mixers, garnishes, rim ingredients, AND supplies
   if (isBartenderOnly && sigDrinks.length > 0) {
@@ -1128,9 +1163,7 @@ export function generateNatalieSupplyList(eventData: EventData): string {
   console.log("[generateNatalieSupplyList] eventData received:", JSON.stringify(eventData, null, 2));
 
   const pkg = (eventData.package ?? "").toLowerCase();
-  const isBeerAndWine = pkg.includes("beer") && pkg.includes("wine") && !pkg.includes("essentials") && !pkg.includes("full") && !pkg.includes("premium");
-  const isBartenderOnly = pkg.includes("bartender");
-  if (isBeerAndWine || isBartenderOnly) {
+  if (isBeerAndWineOnly(pkg) || isTailoredBar(pkg) || isBuildABar(pkg)) {
     return "";
   }
 
@@ -1457,15 +1490,12 @@ export function formatShoppingListForNote(
   eventData: EventData
 ): string {
   const pkg = (eventData.package ?? "").toLowerCase();
-  const isBeerAndWinePackage =
-    pkg.includes("beer") &&
-    pkg.includes("wine") &&
-    !pkg.includes("bartender") &&
-    !pkg.includes("essentials") &&
-    !pkg.includes("full") &&
-    !pkg.includes("premium");
 
-  if (isBeerAndWinePackage) return "";
+  if (isBeerAndWineOnly(pkg)) return "";
+
+  // Build a Bar without the shopping list add-on: skip the full list.
+  // TODO: branch on add-on fields once available.
+  if (isBuildABar(pkg)) return "";
 
   const guestCount = parseGuestCount(eventData.guest_count);
   const drinks = Array.isArray(eventData.signature_drinks) ? eventData.signature_drinks : [];
@@ -1682,7 +1712,9 @@ function formatPackageLabel(pkg: string | undefined): string {
   if (lower.includes("essentials")) return "Essentials Bar";
   if (lower.includes("premium")) return "Premium Bar";
   if (lower.includes("full")) return "Full Bar";
-  if (lower.includes("bartender")) return "Bartender Only";
+  // Tailored Bar is the new name. Both "Bartender Only" (legacy) and "Tailored Bar" map here.
+  if (isTailoredBar(lower)) return "Tailored Bar";
+  if (isBuildABar(lower)) return "Build a Bar";
   if (lower.includes("beer") && lower.includes("wine")) return "Beer and Wine";
   return pkg;
 }
@@ -1697,18 +1729,14 @@ export function generateClientShoppingListEmail(
   clientFirstName: string
 ): string {
   const pkg = (eventData.package ?? "").toLowerCase();
-  const isBeerAndWinePackage =
-    pkg.includes("beer") &&
-    pkg.includes("wine") &&
-    !pkg.includes("bartender") &&
-    !pkg.includes("essentials") &&
-    !pkg.includes("full") &&
-    !pkg.includes("premium");
 
-  if (isBeerAndWinePackage) return "";
+  if (isBeerAndWineOnly(pkg)) return "";
+
+  // Build a Bar without shopping list add-on: skip the client email.
+  if (isBuildABar(pkg)) return "";
 
   const isBartenderOnly =
-    pkg.includes("bartender") &&
+    isTailoredBar(pkg) &&
     !pkg.includes("essentials") &&
     !pkg.includes("full") &&
     !pkg.includes("premium");
@@ -1899,7 +1927,7 @@ export function generateGraphicDesignerBrief(eventData: EventData): string {
   const isBeerAndWinePackage =
     pkg.includes("beer") &&
     pkg.includes("wine") &&
-    !pkg.includes("bartender") &&
+    !isTailoredBar(pkg) &&
     !pkg.includes("essentials") &&
     !pkg.includes("full") &&
     !pkg.includes("premium");
@@ -1957,7 +1985,7 @@ export function generateOrderTeamEmail(
     !pkg.includes("essentials") &&
     !pkg.includes("full") &&
     !pkg.includes("premium");
-  const isBartenderOnly = pkg.includes("bartender");
+  const isBartenderOnly = isTailoredBar(pkg);
 
   if (isBeerAndWine || isBartenderOnly) return "";
 
