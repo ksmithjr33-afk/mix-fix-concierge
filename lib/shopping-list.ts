@@ -223,6 +223,7 @@ function getSpiritBottles(
     "coffee liqueur": { top: "Mr Black", moderate: "Kahlua" },
     "raspberry liqueur": { top: "Chambord", moderate: "Giffard" },
     "elderflower liqueur": { top: "St-Germain", moderate: "St-Germain" },
+    "coconut liqueur": { top: "Kalani", moderate: "Malibu" },
     "amaretto": { top: "Disaronno", moderate: "Disaronno" },
     "lillet blanc": { top: "Lillet Blanc", moderate: "Cocchi Americano" },
     "hibiscus liqueur": { top: "Sorel", moderate: "Sorel" },
@@ -337,6 +338,7 @@ function isLikelySpirit(ingName: string, baseSpirit: string): boolean {
     "kahlua", "kahlúa", "mr black", "coffee liqueur",
     "raspberry liqueur", "chambord", "framboise",
     "elderflower", "st-germain", "st germain",
+    "coconut liqueur", "kalani",
     "amaretto", "disaronno",
     "lillet", "lillet blanc",
     "hibiscus liqueur",
@@ -356,6 +358,9 @@ function isLikelySpirit(ingName: string, baseSpirit: string): boolean {
     "absinthe",
     "viuda de sanchez",
     "jack daniel's", "jack daniels", "jack daniel",
+    // Generic catch-all: any ingredient containing "liqueur" is alcohol.
+    // Bot recipes write things like "1 oz pear liqueur", "1 oz banana liqueur" etc.
+    "liqueur",
   ];
   if (baseSpirit && ingName.includes(baseSpirit.toLowerCase())) return true;
   return spiritKeywords.some(kw => ingName.includes(kw));
