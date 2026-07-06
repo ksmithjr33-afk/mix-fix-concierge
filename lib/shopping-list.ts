@@ -1682,6 +1682,41 @@ export function formatShoppingListForNote(
   return lines.join("\n");
 }
 
+/**
+ * Build a Bar recipe list: just the drink recipes, NO shopping quantities.
+ * Used when a Build a Bar client provides exact recipes but did not buy the shopping list.
+ * Returns empty string if no drinks were captured.
+ */
+export function generateBuildABarRecipeList(eventData: EventData): string {
+  const drinks = Array.isArray(eventData.signature_drinks) ? eventData.signature_drinks : [];
+  if (drinks.length === 0) return "";
+
+  const lines: string[] = [];
+  const dateLong = formatHeaderDate(eventData.event_date);
+  const guestCount = parseGuestCount(eventData.guest_count);
+  const header = `${dateLong} (Build a Bar) ${guestCount} guests`;
+  lines.push(header);
+  lines.push("");
+  lines.push("CLIENT PROVIDED RECIPES");
+  lines.push("");
+  lines.push("***Names subject to change by client***");
+
+  for (const drink of drinks) {
+    if (!drink) continue;
+    lines.push("");
+    const mocktailLabel = drink.is_mocktail ? " (Mocktail)" : "";
+    lines.push(`${drink.name}${mocktailLabel}`);
+    lines.push("");
+    const ings = normalizeIngredients(drink.ingredients);
+    for (const ing of ings) lines.push(`- ${ing}`);
+    if (drink.garnish && drink.garnish.toLowerCase() !== "none" && drink.garnish.toLowerCase() !== "no garnish") {
+      lines.push(`Garnish: ${drink.garnish}`);
+    }
+  }
+
+  return lines.join("\n");
+}
+
 function formatNoteItemLine(it: ShoppingListItem): string {
   let brandRec = "";
   if (it.notes) {
