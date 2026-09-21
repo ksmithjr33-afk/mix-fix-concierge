@@ -67,7 +67,8 @@ function isDiveBar(pkg: string | undefined | null): boolean {
  */
 function isBigDayBar(pkg: string | undefined | null): boolean {
   const p = (pkg ?? "").toLowerCase();
-  return p.includes("big day");
+  // "wedding bar" is the older GHL name for the same package.
+  return p.includes("big day") || p.includes("wedding bar");
 }
 
 function isBeerAndWineOnly(pkg: string | undefined | null): boolean {
@@ -1447,6 +1448,45 @@ function generateDiveBarSupplyList(eventData: EventData): string {
   parts.push("Ginger ale — 1 x 1 liter bottle");
   parts.push(`Bottled water — ${waterCases} case${waterCases === 1 ? "" : "s"} (24 pack)`);
   parts.push("");
+
+  // RECIPE MIXERS: pull the mixers the chosen classics actually need from their
+  // recipes using the existing mixer path (skips spirits, aromatics, garnishes),
+  // deduped against the baseline mixers above so we do not list them twice.
+  // e.g. a margarita adds lime juice, a lemon drop adds lemon juice and simple syrup,
+  // an old fashioned adds bitters and simple syrup.
+  const baselineMixerKeys = [
+    "cranberry juice", "pineapple juice", "orange juice", "tonic",
+    "club soda", "coke", "diet coke", "sprite", "ginger ale", "bottled water",
+  ];
+  // The shared mixer path returns labels that may still carry the oz/dash prefix
+  // ("1 oz lime juice", "2 dashes bitters"). Clean those to plain ingredient names
+  // for display, drop rim entries (rims are not mixers), dedupe by cleaned name, and
+  // drop anything already covered by the baseline block above.
+  const cleanMixerLabel = (raw: string): string =>
+    raw
+      .replace(/^[\d.\/]+\s*oz\s*/i, "")
+      .replace(/^[\d.\/]+\s+(dash(es)?|drop(s)?|splash|pinch|part(s)?)\s+(of\s+)?/i, "")
+      .replace(/^(top with|topped with|muddled|garnish with|garnished with|float of|splash of|pinch of|dash of|drop of|squeeze of)\s+/i, "")
+      .trim();
+  const seenRecipeMixers = new Set<string>();
+  const recipeMixers: ShoppingListItem[] = [];
+  for (const m of getMixersAndIngredients(drinks, guestCount, hours, eventData.event_type)) {
+    const label = cleanMixerLabel(m.item);
+    const key = label.toLowerCase();
+    if (!key || key.endsWith(" rim")) continue;
+    if (baselineMixerKeys.some((b) => key === b || key.includes(b))) continue;
+    if (seenRecipeMixers.has(key)) continue;
+    seenRecipeMixers.add(key);
+    recipeMixers.push({ ...m, item: label });
+  }
+  if (recipeMixers.length > 0) {
+    parts.push("<b>RECIPE MIXERS</b>");
+    for (const m of recipeMixers) {
+      const label = m.item.charAt(0).toUpperCase() + m.item.slice(1);
+      parts.push(`${label} — ${m.quantity}`);
+    }
+    parts.push("");
+  }
 
   // CITRUS GARNISH (lemon, lime, orange)
   const limes = Math.max(10, Math.ceil(guestCount / 5));
