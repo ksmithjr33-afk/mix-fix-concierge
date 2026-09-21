@@ -43,6 +43,7 @@ interface EventData {
   event_address?: string;
   venue_type?: string;
   bar_details?: string;
+  bar_floor_access?: string;
   bar_on_site?: boolean | string;
   parking_info?: string;
   theme?: string;
@@ -245,6 +246,10 @@ export function generateIsabelSummary(eventData: EventData): string | null {
   }
 
   lines.push(`Bar: ${formatBar(eventData)}`);
+
+  if (eventData.bar_floor_access) {
+    lines.push(`Bar floor: ${eventData.bar_floor_access}`);
+  }
 
   if (eventData.parking_info) {
     lines.push(`Parking: ${eventData.parking_info}`);

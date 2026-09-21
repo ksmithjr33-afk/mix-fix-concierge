@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
-import { generateShoppingList, formatShoppingList, formatShoppingListForNote, generateClientShoppingListEmail, generateGraphicDesignerBrief, generateOrderTeamEmail } from "@/lib/shopping-list";
+import { generateShoppingList, formatShoppingList, formatShoppingListForNote, generateClientShoppingListEmail, generateGraphicDesignerBrief, generateOrderTeamEmail, generateBuildABarRecipeList } from "@/lib/shopping-list";
 import { generateIsabelSummary } from "@/lib/isabel-summary";
 import { createNoteByEmail } from "@/lib/ghl-api";
 
@@ -85,6 +85,7 @@ export async function POST(request: Request) {
     let shoppingListEmail = "";
     let graphicDesignerBrief = "";
     let orderTeamEmail = "";
+    let buildABarRecipeList = "";
     try {
       const shoppingListItems = generateShoppingList(eventData);
       shoppingListText = formatShoppingList(shoppingListItems);
@@ -100,6 +101,12 @@ export async function POST(request: Request) {
 
       // Generate order team email for Natalie (skipped for Beer and Wine and Bartender Only)
       orderTeamEmail = generateOrderTeamEmail(shoppingListItems, eventData);
+
+      // Build a Bar bookings: generate the client provided recipe list for the bartender.
+      const pkgLower = ((eventData.package as string) ?? "").toLowerCase();
+      if (pkgLower.includes("build a bar") || pkgLower.includes("build-a-bar") || pkgLower.includes("build your")) {
+        buildABarRecipeList = generateBuildABarRecipeList(eventData);
+      }
     } catch (err) {
       console.log("generateShoppingList/formatShoppingList failed:", err);
     }
@@ -166,6 +173,8 @@ export async function POST(request: Request) {
       shopping_list_email: shoppingListEmail || null,
       graphic_designer_brief: graphicDesignerBrief || null,
       order_team_email: orderTeamEmail || null,
+      build_a_bar_recipe_list: buildABarRecipeList || null,
+      bar_floor_access: eventData.bar_floor_access || null,
       signature_drink_summary: signatureDrinkSummary || null,
       menu_colors: eventData.menu_colors || null,
       menu_reference_photos: eventData.menu_reference_photos || null,

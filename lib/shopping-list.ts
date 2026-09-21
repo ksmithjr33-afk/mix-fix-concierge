@@ -51,6 +51,25 @@ function isBuildABar(pkg: string | undefined | null): boolean {
   return p.includes("build a bar") || p.includes("build-a-bar") || p.includes("build your");
 }
 
+/**
+ * Dive Bar is the entry level current package: simple classic cocktails, client
+ * supplies alcohol, we supply baseline mixers/sodas/juices, citrus garnish,
+ * bottled water, ice, cooler, cups, napkins, and straws. Alcohol only shopping list.
+ */
+function isDiveBar(pkg: string | undefined | null): boolean {
+  const p = (pkg ?? "").toLowerCase();
+  return p.includes("dive");
+}
+
+/**
+ * The Big Day Bar is the wedding package. Full Essentials style flow plus a coffee
+ * station and sodas/bottled water for every guest. Alcohol only shopping list.
+ */
+function isBigDayBar(pkg: string | undefined | null): boolean {
+  const p = (pkg ?? "").toLowerCase();
+  return p.includes("big day");
+}
+
 function isBeerAndWineOnly(pkg: string | undefined | null): boolean {
   const p = (pkg ?? "").toLowerCase();
   return p.includes("beer") && p.includes("wine") &&
@@ -1172,6 +1191,12 @@ export function generateNatalieSupplyList(eventData: EventData): string {
     return "";
   }
 
+  // Dive Bar gets a simplified fixed supply list: baseline mixers, sodas, juices,
+  // citrus garnish, bottled water, ice, cups, napkins, straws. Client supplies alcohol.
+  if (isDiveBar(pkg)) {
+    return generateDiveBarSupplyList(eventData);
+  }
+
   const guestCount = parseGuestCount(eventData.guest_count);
   const drinks = Array.isArray(eventData.signature_drinks) ? eventData.signature_drinks : [];
   const pace = eventData.drinking_pace ?? "moderate";
@@ -1319,6 +1344,18 @@ export function generateNatalieSupplyList(eventData: EventData): string {
   parts.push(`Bottled water — ${waterCases} case${waterCases === 1 ? "" : "s"} (24 pack)`);
   parts.push("");
 
+  // The Big Day Bar (wedding package) includes a coffee station plus sodas and
+  // bottled water for every guest. The baseline block above covers the sodas and water,
+  // scaled to guest count. Add the coffee station supplies here.
+  if (isBigDayBar(pkg)) {
+    parts.push("<b>COFFEE STATION</b>");
+    const coffee = getCoffeeStationSupplies(guestCount);
+    for (const c of coffee) {
+      parts.push(`${c.item} — ${c.quantity}`);
+    }
+    parts.push("");
+  }
+
   if (drinks.length > 0) {
     parts.push("<b>SIGNATURE DRINK RECIPES</b>");
     parts.push("");
@@ -1337,6 +1374,101 @@ export function generateNatalieSupplyList(eventData: EventData): string {
       if (drink.garnish) {
         parts.push(`<b>Garnish:</b> ${drink.garnish}`);
       }
+      parts.push("");
+    }
+  }
+
+  return parts.join("<br>");
+}
+
+/**
+ * Coffee station supplies scaled to guest count. Used by The Big Day Bar (included)
+ * and available as a Premium/add on coffee station. Regular and decaf, cups, cream, sugar.
+ */
+function getCoffeeStationSupplies(guestCount: number): { item: string; quantity: string }[] {
+  const regularLbs = Math.max(1, Math.ceil(guestCount / 40));
+  const decafLbs = Math.max(1, Math.ceil(guestCount / 80));
+  const coffeeCups = Math.ceil(guestCount * 1.5);
+  const creamQuarts = Math.max(1, Math.ceil(guestCount / 50));
+  const sugarBoxes = Math.max(1, Math.ceil(guestCount / 100));
+  return [
+    { item: "Regular ground coffee", quantity: `${regularLbs} lb` },
+    { item: "Decaf ground coffee", quantity: `${decafLbs} lb` },
+    { item: "Hot coffee cups (with lids)", quantity: `${coffeeCups} count` },
+    { item: "Cream (half and half)", quantity: `${creamQuarts} quart${creamQuarts === 1 ? "" : "s"}` },
+    { item: "Sugar and sweetener", quantity: `${sugarBoxes} box${sugarBoxes === 1 ? "" : "es"}` },
+  ];
+}
+
+/**
+ * Dive Bar supply list for Natalie. Fixed simple list scaled to guest count:
+ * baseline mixers, sodas, juices, citrus garnish, bottled water, ice, cups,
+ * napkins, straws. Client supplies alcohol, so no spirits section. Includes the
+ * classic cocktail recipes for the bartender when present.
+ */
+function generateDiveBarSupplyList(eventData: EventData): string {
+  const guestCount = parseGuestCount(eventData.guest_count);
+  const drinks = Array.isArray(eventData.signature_drinks) ? eventData.signature_drinks : [];
+  const pace = eventData.drinking_pace ?? "moderate";
+  const hours = calculateHours(eventData.bar_service_start, eventData.bar_service_end);
+
+  const parts: string[] = [];
+
+  const eventDate = formatNatalieDate(eventData.event_date);
+  parts.push(`<b style="color:#8B4513;">${eventDate} (Dive Bar) ${guestCount} guests, ${hours} hours</b>`);
+  if (eventData.theme) parts.push(`Theme: ${eventData.theme}`);
+  if (eventData.event_colors) parts.push(`Colors: ${eventData.event_colors}`);
+  parts.push("");
+
+  // ICE & BAR SUPPLIES
+  const iceBags = getIceBags(guestCount);
+  const { cups, napkins, straws } = getSupplyCounts(guestCount, hours, pace);
+  parts.push("<b>ICE & BAR SUPPLIES</b>");
+  parts.push(`Ice — ${iceBags} x 16 lb bags`);
+  parts.push(`12 oz cups — ${cups} count`);
+  parts.push(`Cocktail napkins — ${napkins} count`);
+  parts.push(`Straws — ${straws} count`);
+  parts.push("");
+
+  // BASELINE MIXERS (sodas, juices, water)
+  const cokeCases = Math.max(1, Math.ceil(guestCount / 40));
+  const dietCokeCases = Math.max(1, Math.ceil(guestCount / 60));
+  const spriteCases = Math.max(1, Math.ceil(guestCount / 50));
+  const waterCases = Math.max(1, Math.ceil(guestCount / 25));
+  parts.push("<b>BASELINE MIXERS</b>");
+  parts.push("Cranberry juice — 1 x 32 oz bottle");
+  parts.push("Pineapple juice — 1 x 32 oz bottle");
+  parts.push("Orange juice — 1 x 32 oz bottle");
+  parts.push("Tonic — 2 x 1 liter bottles");
+  parts.push("Club soda — 2 x 1 liter bottles");
+  parts.push(`Coke — ${cokeCases} case${cokeCases === 1 ? "" : "s"} (24 pack)`);
+  parts.push(`Diet Coke — ${dietCokeCases} case${dietCokeCases === 1 ? "" : "s"} (24 pack)`);
+  parts.push(`Sprite — ${spriteCases} case${spriteCases === 1 ? "" : "s"} (24 pack)`);
+  parts.push("Ginger ale — 1 x 1 liter bottle");
+  parts.push(`Bottled water — ${waterCases} case${waterCases === 1 ? "" : "s"} (24 pack)`);
+  parts.push("");
+
+  // CITRUS GARNISH (lemon, lime, orange)
+  const limes = Math.max(10, Math.ceil(guestCount / 5));
+  const lemons = Math.max(8, Math.ceil(guestCount / 5));
+  const oranges = Math.max(6, Math.ceil(guestCount / 12));
+  parts.push("<b>PRODUCE AND GARNISH</b>");
+  parts.push(`Limes — ${limes} count`);
+  parts.push(`Lemons — ${lemons} count`);
+  parts.push(`Oranges — ${oranges} count`);
+  parts.push("");
+
+  // Classic cocktail recipes for the bartender (auto filled standard recipes)
+  if (drinks.length > 0) {
+    parts.push("<b>SIGNATURE DRINK RECIPES</b>");
+    parts.push("");
+    for (const drink of drinks) {
+      if (!drink) continue;
+      const mocktailLabel = drink.is_mocktail ? " (Mocktail)" : "";
+      parts.push(`<b>${drink.name ?? "Unnamed Drink"}${mocktailLabel}</b> - 12 oz cup`);
+      const ingredients = normalizeIngredients(drink.ingredients);
+      for (const ing of ingredients) parts.push(ing);
+      if (drink.garnish) parts.push(`<b>Garnish:</b> ${drink.garnish}`);
       parts.push("");
     }
   }
@@ -1746,9 +1878,11 @@ function formatHeaderDate(eventDate: string | undefined): string {
   return `${month}/${day}/${year}`;
 }
 
-function formatPackageLabel(pkg: string | undefined): string {
+export function formatPackageLabel(pkg: string | undefined): string {
   if (!pkg) return "";
   const lower = pkg.toLowerCase();
+  if (isDiveBar(lower)) return "Dive Bar";
+  if (isBigDayBar(lower)) return "The Big Day Bar";
   if (lower.includes("essentials")) return "Essentials Bar";
   if (lower.includes("premium")) return "Premium Bar";
   if (lower.includes("full")) return "Full Bar";
@@ -1916,9 +2050,17 @@ export function generateClientShoppingListEmail(
     "You are welcome to substitute any of these brands for others you prefer, as long as it is the same type of spirit. The options listed above are our recommendations based on quality and pricing. We only open what we use during the event, so any unopened bottles can be returned if you wish. You may choose the lesser amount suggested, but to ensure we do not run out of anything, I recommend going with the greater amount."
   );
   lines.push("");
-  lines.push(
-    "Please note that the estimated ice quantity provided is intended for mixing drinks only. We do not calculate or supply additional ice needed for chilling beer, wine, sodas, or other beverages. Our coolers and ice supply are reserved strictly for cocktail preparation and bar service use only."
-  );
+  if (isBartenderOnly) {
+    // Bartender Only / Tailored Bar: we do NOT bring any ice, it is on the client.
+    lines.push(
+      "Please note that ice is on your side for this package. We do not bring ice, so please plan to provide it yourself. A good estimate is about 1 to 1.5 pounds of ice per guest, and we have kept it on your shopping list above."
+    );
+  } else {
+    // Ice packages (Dive, Essentials, The Big Day Bar, Full, Premium): we bring all the ice.
+    lines.push(
+      "Good news on ice, we bring all of it for your event, both the ice for mixing drinks and the ice for chilling beer, wine, and sodas. We bring 1 cooler per bartender. If you need an extra cooler for chilling, just provide the cooler and we will provide the ice for it."
+    );
+  }
   lines.push("");
   lines.push("Please let us know if you have any questions!");
   lines.push("");
@@ -2121,6 +2263,13 @@ export function generateOrderTeamEmail(
   buckets["Sam's Club"].push("- Orange juice — 1 x 32 oz bottle (Kirkland or GV)");
   buckets["Sam's Club"].push("- Tonic — 2 x 1 liter bottles (Kirkland or GV)");
   buckets["Sam's Club"].push("- Club soda — 2 x 1 liter bottles (Kirkland or GV)");
+
+  // The Big Day Bar includes a coffee station scaled to guest count.
+  if (isBigDayBar(pkg)) {
+    for (const c of getCoffeeStationSupplies(guestCount)) {
+      buckets["Sam's Club"].push(`- ${c.item} — ${c.quantity}`);
+    }
+  }
 
   const lines: string[] = [];
   lines.push("ORDER LIST FOR NATALIE");
