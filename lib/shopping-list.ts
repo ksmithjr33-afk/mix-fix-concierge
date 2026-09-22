@@ -62,61 +62,15 @@ function isDiveBar(pkg: string | undefined | null): boolean {
 }
 
 /**
- * The Big Day Bar is the wedding package: two signature cocktails for the couple
- * plus the three classics served alongside, extra sodas and bottled water, and a
- * barback for setup and cocktail hour. Alcohol only shopping list. No coffee station,
- * that is an add on on every package.
+ * The Big Day Bar is the wedding package: the Essentials flow with two signature
+ * cocktails, extra sodas and bottled water for kids and non drinkers, and a barback
+ * for setup and cocktail hour. Alcohol only shopping list. No coffee station, that is
+ * an add on on every package.
  */
 function isBigDayBar(pkg: string | undefined | null): boolean {
   const p = (pkg ?? "").toLowerCase();
   // "wedding bar" is the older GHL name for the same package.
   return p.includes("big day") || p.includes("wedding bar");
-}
-
-/**
- * The three classics The Big Day Bar serves alongside the couple's two signature
- * cocktails. Standard recipes and standard names, included with the package, so they
- * never count toward the signature drink count or the additional drink charge.
- * Rims live on the garnish string so they are picked up by getRimIngredients()
- * instead of landing in the mixer lists.
- */
-const BIG_DAY_CLASSICS: SignatureDrink[] = [
-  {
-    name: "Old Fashioned",
-    base_spirit: "whiskey",
-    ingredients: ["2 oz whiskey", "0.25 oz simple syrup", "2 dashes bitters"],
-    garnish: "orange peel",
-  },
-  {
-    name: "Margarita",
-    base_spirit: "tequila",
-    ingredients: ["2 oz tequila blanco", "1 oz lime juice", "0.75 oz triple sec", "0.5 oz simple syrup"],
-    garnish: "salt rim, lime wheel",
-  },
-  {
-    name: "Lemon Drop",
-    base_spirit: "vodka",
-    ingredients: ["2 oz vodka", "1 oz lemon juice", "0.5 oz triple sec", "0.5 oz simple syrup"],
-    garnish: "sugar rim, lemon twist",
-  },
-];
-
-/**
- * Big Day only: the drinks every list should plan for, the client's signature cocktails
- * plus the three classics served alongside them. Every other package gets the submitted
- * drinks back untouched, and the submitted array itself is never mutated.
- */
-function withBigDayClassics(
-  drinks: SignatureDrink[],
-  pkg: string | undefined | null
-): SignatureDrink[] {
-  if (!isBigDayBar(pkg)) return drinks;
-  // If the couple already picked a classic as a signature, do not list it twice.
-  const submitted = new Set(drinks.map((d) => (d?.name ?? "").toLowerCase().trim()));
-  return [
-    ...drinks,
-    ...BIG_DAY_CLASSICS.filter((c) => !submitted.has(c.name.toLowerCase())),
-  ];
 }
 
 function isBeerAndWineOnly(pkg: string | undefined | null): boolean {
@@ -1077,11 +1031,7 @@ export function generateShoppingList(eventData: EventData): ShoppingListItem[] {
 
   const items: ShoppingListItem[] = [];
 
-  // Big Day plans for the couple's signature drinks plus the three classics served alongside.
-  const sigDrinks = withBigDayClassics(
-    Array.isArray(eventData.signature_drinks) ? eventData.signature_drinks : [],
-    pkg
-  );
+  const sigDrinks = Array.isArray(eventData.signature_drinks) ? eventData.signature_drinks : [];
   const barHours = calculateHours(eventData.bar_service_start, eventData.bar_service_end);
   const pace = eventData.drinking_pace ?? "moderate";
 
@@ -1251,11 +1201,7 @@ export function generateNatalieSupplyList(eventData: EventData): string {
   }
 
   const guestCount = parseGuestCount(eventData.guest_count);
-  // Big Day plans for the couple's signature drinks plus the three classics served alongside.
-  const drinks = withBigDayClassics(
-    Array.isArray(eventData.signature_drinks) ? eventData.signature_drinks : [],
-    pkg
-  );
+  const drinks = Array.isArray(eventData.signature_drinks) ? eventData.signature_drinks : [];
   const pace = eventData.drinking_pace ?? "moderate";
 
   const parts: string[] = [];
@@ -1725,11 +1671,7 @@ export function formatShoppingListForNote(
   if (isBuildABar(pkg)) return "";
 
   const guestCount = parseGuestCount(eventData.guest_count);
-  // Big Day plans for the couple's signature drinks plus the three classics served alongside.
-  const drinks = withBigDayClassics(
-    Array.isArray(eventData.signature_drinks) ? eventData.signature_drinks : [],
-    pkg
-  );
+  const drinks = Array.isArray(eventData.signature_drinks) ? eventData.signature_drinks : [];
   const pace = eventData.drinking_pace ?? "moderate";
   const hours = calculateHours(eventData.bar_service_start, eventData.bar_service_end);
 
@@ -2010,11 +1952,7 @@ export function generateClientShoppingListEmail(
     !pkg.includes("premium");
 
   const guestCount = parseGuestCount(eventData.guest_count);
-  // Big Day plans for the couple's signature drinks plus the three classics served alongside.
-  const drinks = withBigDayClassics(
-    Array.isArray(eventData.signature_drinks) ? eventData.signature_drinks : [],
-    pkg
-  );
+  const drinks = Array.isArray(eventData.signature_drinks) ? eventData.signature_drinks : [];
   const pace = eventData.drinking_pace ?? "moderate";
   const hours = calculateHours(eventData.bar_service_start, eventData.bar_service_end);
 
@@ -2269,11 +2207,7 @@ export function generateOrderTeamEmail(
 
   if (isBeerAndWine || isBartenderOnly) return "";
 
-  // Big Day plans for the couple's signature drinks plus the three classics served alongside.
-  const drinks = withBigDayClassics(
-    Array.isArray(eventData.signature_drinks) ? eventData.signature_drinks : [],
-    pkg
-  );
+  const drinks = Array.isArray(eventData.signature_drinks) ? eventData.signature_drinks : [];
   const guestCount = parseGuestCount(eventData.guest_count);
   const hours = calculateHours(eventData.bar_service_start, eventData.bar_service_end);
   const pace = eventData.drinking_pace ?? "moderate";
