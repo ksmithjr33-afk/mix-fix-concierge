@@ -204,6 +204,28 @@ function countDrinksUsingSpirit(drinks: SignatureDrink[], spiritKey: string): nu
   return Math.max(1, count);
 }
 
+/**
+ * Dive Bar with no signature drinks: guests walk up and order classics, so the
+ * client buys a default well. Each share is the fraction of guests drinking that
+ * spirit, since guests spread across the well. Triple sec is sized separately.
+ */
+const DIVE_WELL_SHARES: [string, number][] = [
+  ["vodka", 0.4],
+  ["whiskey", 0.4],
+  ["tequila", 0.4],
+  ["rum", 0.25],
+  ["gin", 0.25],
+];
+const DIVE_WELL_POUR_OZ = 2;
+const DIVE_WELL_GUESTS_PER_TRIPLE_SEC = 50;
+// Mixers the classics need beyond the Dive Bar baseline, sized at drink count 1.
+const DIVE_WELL_MIXERS = ["simple syrup", "lime juice", "lemon juice", "bitters"];
+
+/** True when a Dive Bar booking has no alcoholic signature drinks (no menu was built). */
+function usesDiveWell(eventData: EventData, drinks: SignatureDrink[]): boolean {
+  return isDiveBar(eventData.package) && drinks.filter(d => !d.is_mocktail).length === 0;
+}
+
 /** Recipe-based spirit bottle calculation. New formula calibrated against Isabel's lists. */
 function getSpiritBottles(
   drinks: SignatureDrink[],
@@ -213,7 +235,8 @@ function getSpiritBottles(
   eventData: EventData
 ): ShoppingListItem[] {
   const alcoholicDrinks = drinks.filter(d => !d.is_mocktail);
-  if (alcoholicDrinks.length === 0) return [];
+  const diveWell = usesDiveWell(eventData, drinks);
+  if (alcoholicDrinks.length === 0 && !diveWell) return [];
 
   const sf = scaleFactor(guestCount);
   const SAFETY = 1.25; // safety/over-pour buffer
@@ -293,6 +316,19 @@ function getSpiritBottles(
     }
   }
 
+  const wellShares = new Map<string, number>();
+  if (diveWell) {
+    for (const [spiritKey, share] of DIVE_WELL_SHARES) {
+      spiritOzTotals.set(spiritKey, DIVE_WELL_POUR_OZ);
+      spiritNames.set(spiritKey, spiritKey.charAt(0).toUpperCase() + spiritKey.slice(1));
+      wellShares.set(spiritKey, share);
+    }
+    spiritOzTotals.set("triple sec", 0);
+    spiritNames.set("triple sec", "Triple sec");
+  }
+  // Same hours scaling the mixers use: 4 hours = 1.0x, floor 0.75x.
+  const wellHoursFactor = Math.max(0.75, (barHours && barHours > 0 ? barHours : 4) / 4);
+
   const items: ShoppingListItem[] = [];
   const residential = isResidentialEvent(eventData);
 
@@ -316,7 +352,15 @@ function getSpiritBottles(
   for (const [spiritKey, ozPerDrink] of spiritOzTotals) {
     // NEW FORMULA: bottles = ceil(guests * scaleFactor * eventMult * oz_per_drink * SAFETY / 25.4)
     const eventMult = getEventTypeMultiplier(eventData.event_type);
-    let bottles = Math.ceil((guestCount * sf * eventMult * ozPerDrink * SAFETY) / ML_PER_BOTTLE);
+    let bottles: number;
+    if (diveWell && spiritKey === "triple sec") {
+      bottles = Math.ceil((guestCount * wellHoursFactor * eventMult) / DIVE_WELL_GUESTS_PER_TRIPLE_SEC);
+    } else if (diveWell) {
+      const share = wellShares.get(spiritKey) ?? 1;
+      bottles = Math.ceil((guestCount * sf * wellHoursFactor * eventMult * ozPerDrink * SAFETY * share) / ML_PER_BOTTLE);
+    } else {
+      bottles = Math.ceil((guestCount * sf * eventMult * ozPerDrink * SAFETY) / ML_PER_BOTTLE);
+    }
     bottles = Math.max(1, bottles);
 
     let notes: string | undefined;
@@ -1035,12 +1079,10 @@ export function generateShoppingList(eventData: EventData): ShoppingListItem[] {
   const barHours = calculateHours(eventData.bar_service_start, eventData.bar_service_end);
   const pace = eventData.drinking_pace ?? "moderate";
 
-  // Spirits from signature drinks
-  if (sigDrinks.length > 0) {
-    items.push(
-      ...getSpiritBottles(sigDrinks, guestCount, pace, barHours, eventData)
-    );
-  }
+  // Spirits from signature drinks (or the default well for Dive Bar with no drinks)
+  items.push(
+    ...getSpiritBottles(sigDrinks, guestCount, pace, barHours, eventData)
+  );
 
   // Beer (single number)
   if (eventData.beer) {
@@ -1466,7 +1508,14 @@ function generateDiveBarSupplyList(eventData: EventData): string {
       .trim();
   const seenRecipeMixers = new Set<string>();
   const recipeMixers: ShoppingListItem[] = [];
-  for (const m of getMixersAndIngredients(drinks, guestCount, hours, eventData.event_type)) {
+  const recipeMixerSource: ShoppingListItem[] = usesDiveWell(eventData, drinks)
+    ? DIVE_WELL_MIXERS.map((m) => ({
+        category: "Mixers & Ingredients",
+        item: m,
+        quantity: getNatalieMixerQuantity(m, guestCount, 0, 1, false, hours, eventData.event_type),
+      }))
+    : getMixersAndIngredients(drinks, guestCount, hours, eventData.event_type);
+  for (const m of recipeMixerSource) {
     const label = cleanMixerLabel(m.item);
     const key = label.toLowerCase();
     if (!key || key.endsWith(" rim")) continue;
@@ -2272,6 +2321,18 @@ export function generateOrderTeamEmail(
         // fallback: still add it
         buckets[store].push(line);
       }
+    }
+  }
+
+  // Dive Bar with no menu: guests order classics, so stock the classics mixers.
+  if (usesDiveWell(eventData, drinks)) {
+    for (const m of DIVE_WELL_MIXERS) {
+      if (seenMixers.has(m)) continue;
+      seenMixers.add(m);
+      const quantity = getNatalieMixerQuantity(m, guestCount, 0, 1, false, hours, eventData.event_type);
+      const label = m.charAt(0).toUpperCase() + m.slice(1);
+      const brand = brandPreferenceForItem(label);
+      buckets[routeMixerToStore(label)].push(`- ${label} — ${quantity}${brand ? ` (${brand})` : ""}`);
     }
   }
 
