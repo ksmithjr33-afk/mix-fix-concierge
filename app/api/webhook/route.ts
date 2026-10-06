@@ -86,6 +86,10 @@ export async function POST(request: Request) {
     let graphicDesignerBrief = "";
     let orderTeamEmail = "";
     let buildABarRecipeList = "";
+    const pkgLower = ((eventData.package as string) ?? "").toLowerCase();
+    // Dive Bar only gets a menu when the client asked for one.
+    const diveMenuRequested = eventData.dive_menu_requested === true;
+    const includeMenuDesign = !pkgLower.includes("dive") || diveMenuRequested;
     try {
       const shoppingListItems = generateShoppingList(eventData);
       shoppingListText = formatShoppingList(shoppingListItems);
@@ -96,14 +100,16 @@ export async function POST(request: Request) {
       const firstName = fullName.split(" ")[0] || "";
       shoppingListEmail = generateClientShoppingListEmail(shoppingListItems, eventData, firstName);
 
-      // Generate graphic designer menu brief (skipped for Beer and Wine package)
-      graphicDesignerBrief = generateGraphicDesignerBrief(eventData);
+      // Generate graphic designer menu brief (skipped for Beer and Wine package,
+      // and for Dive Bar unless the client requested a printed menu)
+      if (includeMenuDesign) {
+        graphicDesignerBrief = generateGraphicDesignerBrief(eventData);
+      }
 
       // Generate order team email for Natalie (skipped for Beer and Wine and Bartender Only)
       orderTeamEmail = generateOrderTeamEmail(shoppingListItems, eventData);
 
       // Build a Bar bookings: generate the client provided recipe list for the bartender.
-      const pkgLower = ((eventData.package as string) ?? "").toLowerCase();
       if (pkgLower.includes("build a bar") || pkgLower.includes("build-a-bar") || pkgLower.includes("build your")) {
         buildABarRecipeList = generateBuildABarRecipeList(eventData);
       }
@@ -176,8 +182,9 @@ export async function POST(request: Request) {
       build_a_bar_recipe_list: buildABarRecipeList || null,
       bar_floor_access: eventData.bar_floor_access || null,
       signature_drink_summary: signatureDrinkSummary || null,
-      menu_colors: eventData.menu_colors || null,
-      menu_reference_photos: eventData.menu_reference_photos || null,
+      menu_colors: includeMenuDesign ? eventData.menu_colors || null : null,
+      menu_reference_photos: includeMenuDesign ? eventData.menu_reference_photos || null : null,
+      dive_menu_requested: diveMenuRequested,
       ice_amount: iceAmount,
       actual_event_date: parseEventDate(eventData.event_date || ''),
       event_start_time: eventData.bar_service_start || null,

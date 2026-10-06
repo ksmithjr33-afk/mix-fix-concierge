@@ -75,6 +75,7 @@ const submitEventDataTool: Anthropic.Tool = {
       menu_colors: { type: ["string", "null"] },
       menu_reference_photos: { type: ["boolean", "null"] },
       dual_bar_setup: { type: "boolean" },
+      dive_menu_requested: { type: "boolean", default: false },
     },
     required: ["client_name", "package"],
   },
