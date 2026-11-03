@@ -199,12 +199,21 @@ export default function CompletePage() {
         <div className="bg-[#B5845A] text-white rounded-2xl p-5 sm:p-6 text-center">
           <div className="text-3xl mb-2">&#127864;</div>
           <h2 className="font-heading text-xl sm:text-2xl font-bold mb-2">
-            You&apos;re All Set!
+            You&apos;re all set!
           </h2>
           <p className="text-white/90 text-[15px] leading-relaxed max-w-md mx-auto">
-            We have everything we need to start building your custom cocktail
-            experience. Here&apos;s a summary of your event details.
+            Here&apos;s a summary of your event. Need to change anything before
+            the big day? Come back to this page anytime, it&apos;s the one place
+            to update guest count, times, drinks, and details.
           </p>
+          {sessionId && (
+            <Link
+              href={`/s?id=${encodeURIComponent(sessionId)}`}
+              className="inline-block mt-4 bg-white text-[#B5845A] px-6 py-3 rounded-xl font-medium hover:bg-[#F5F0EB] transition-colors"
+            >
+              View or update your event
+            </Link>
+          )}
         </div>
 
         {/* Event Overview */}
@@ -236,7 +245,6 @@ export default function CompletePage() {
               label="Guest Count"
               value={String(data.guest_count)}
             />
-            <DetailRow label="Age Range" value={data.age_range ?? ""} />
             <DetailRow label="Drinking Pace" value={data.drinking_pace ?? ""} />
             <DetailRow label="Package" value={data.package ?? ""} />
             {data.beer_and_wine_details && (
@@ -275,8 +283,10 @@ export default function CompletePage() {
             ))}
           </div>
           <p className="text-sm text-[#6B5D52] mt-6 pt-4 border-t border-[#DDD5CC] leading-relaxed">
-            You can make adjustments to your plan anytime up to 2 weeks before
-            the event. Text us anytime with questions.
+            Need to change something? Use the View or update your event button
+            on this page. Drink and ingredient changes lock the Monday before
+            your event, drink name changes lock the Wednesday before. Questions?
+            Text us at 469 754 8512.
           </p>
         </section>
 
@@ -348,7 +358,7 @@ export default function CompletePage() {
             href="tel:4697548512"
             className="block text-sm text-[#6B5D52] hover:text-[#B5845A] transition-colors"
           >
-            Questions? Text us at (469) 754-8512
+            Questions? Text us at 469 754 8512
           </a>
           <Link
             href="/"

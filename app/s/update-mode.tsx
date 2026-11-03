@@ -144,7 +144,7 @@ export default function UpdateMode({
       <header className="flex items-center justify-between px-3 sm:px-4 py-2 sm:py-3 bg-[#F5F0EB] border-b border-[#DDD5CC]">
         <img src="/logo.png" alt="The Mix Fix" className="h-8 sm:h-10" />
         <a href="sms:4697548512" className="text-xs text-[#6B5D52] hover:text-[#B5845A]">
-          Text us (469) 754-8512
+          Text us 469 754 8512
         </a>
       </header>
 
