@@ -1118,7 +1118,7 @@ export function generateShoppingList(eventData: EventData): ShoppingListItem[] {
 }
 
 /** Calculate hours between start and end time strings */
-function calculateHours(start?: string, end?: string): number {
+export function calculateHours(start?: string, end?: string): number {
   if (!start || !end) return 5;
   try {
     const startH = parseTimeToHours(start);

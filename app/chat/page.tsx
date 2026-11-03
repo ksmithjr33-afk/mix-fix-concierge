@@ -115,7 +115,11 @@ function ChatContent() {
 
         if (data?.status === "completed") {
           completedRef.current = true;
-          router.push("/complete");
+          router.push(
+            data.submitted
+              ? `/s?id=${encodeURIComponent(sessionIdFromUrl)}`
+              : "/complete"
+          );
           return;
         }
 
@@ -154,6 +158,9 @@ function ChatContent() {
     completedRef.current = true;
     try {
       localStorage.setItem("mixfix_event_data", JSON.stringify(eventData));
+      if (sessionIdRef.current) {
+        localStorage.setItem("mixfix_session_id", sessionIdRef.current);
+      }
     } catch (e) {
       console.error("Failed to store event data:", e);
     }

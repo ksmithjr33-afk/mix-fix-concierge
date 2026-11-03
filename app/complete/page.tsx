@@ -101,8 +101,14 @@ const timelineSteps = [
 
 export default function CompletePage() {
   const [data, setData] = useState<EventData | null>(null);
+  const [sessionId, setSessionId] = useState<string | null>(null);
 
   useEffect(() => {
+    try {
+      setSessionId(localStorage.getItem("mixfix_session_id"));
+    } catch {
+      // storage unavailable
+    }
     const stored = localStorage.getItem("mixfix_event_data");
     if (stored) {
       try {
@@ -330,6 +336,14 @@ export default function CompletePage() {
 
         {/* Contact & Back to Home */}
         <div className="text-center pb-6 sm:pb-8 space-y-3">
+          {sessionId && (
+            <Link
+              href={`/s?id=${encodeURIComponent(sessionId)}`}
+              className="inline-block bg-[#B5845A] text-white px-6 py-3 rounded-xl font-medium hover:bg-[#9A7049] transition-colors"
+            >
+              View or update your event
+            </Link>
+          )}
           <a
             href="tel:4697548512"
             className="block text-sm text-[#6B5D52] hover:text-[#B5845A] transition-colors"

@@ -27,7 +27,17 @@ export async function GET(req: NextRequest) {
   }
 
   if (data.status === "completed") {
-    return NextResponse.json({ status: "completed" });
+    // Submitted sessions open in update mode at /s. Chats started without a
+    // session row (no /s link) keep going to the complete page.
+    const { data: session } = await supabase
+      .from("sessions")
+      .select("status")
+      .eq("id", sessionId)
+      .maybeSingle();
+    return NextResponse.json({
+      status: "completed",
+      submitted: session?.status === "submitted",
+    });
   }
 
   return NextResponse.json({
