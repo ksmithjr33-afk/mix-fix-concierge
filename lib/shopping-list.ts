@@ -1,3 +1,5 @@
+import { parseEventDate } from "@/lib/event-date";
+
 interface SignatureDrink {
   name: string;
   base_spirit: string;
@@ -1692,13 +1694,8 @@ function calculateProduceFromGarnishes(drinks: SignatureDrink[], guestCount: num
 /** Format event date as M/D/YY */
 function formatNatalieDate(dateStr?: string): string {
   if (!dateStr) return "TBD";
-  const cleaned = dateStr.replace(/(st|nd|rd|th)/gi, "").trim();
-  let parsed = new Date(cleaned);
-  if (isNaN(parsed.getTime())) {
-    const withYear = cleaned + " " + new Date().getFullYear();
-    parsed = new Date(withYear);
-  }
-  if (!isNaN(parsed.getTime())) {
+  const parsed = parseEventDate(dateStr);
+  if (parsed) {
     const month = parsed.getMonth() + 1;
     const day = parsed.getDate();
     const year = String(parsed.getFullYear()).slice(-2);
@@ -1919,8 +1916,8 @@ function formatNoteItemLine(it: ShoppingListItem): string {
 
 function formatHeaderDate(eventDate: string | undefined): string {
   if (!eventDate) return "";
-  const d = new Date(eventDate);
-  if (isNaN(d.getTime())) return eventDate;
+  const d = parseEventDate(eventDate);
+  if (!d) return eventDate;
   const month = d.getMonth() + 1;
   const day = d.getDate();
   const year = d.getFullYear() % 100;
@@ -2131,13 +2128,8 @@ export function generateClientShoppingListEmail(
 
 function formatLongDate(dateStr: string | undefined): string {
   if (!dateStr) return "TBD";
-  const cleaned = String(dateStr).replace(/(st|nd|rd|th)/gi, "").trim();
-  let parsed = new Date(cleaned);
-  if (isNaN(parsed.getTime())) {
-    const withYear = cleaned + " " + new Date().getFullYear();
-    parsed = new Date(withYear);
-  }
-  if (isNaN(parsed.getTime())) return dateStr;
+  const parsed = parseEventDate(dateStr);
+  if (!parsed) return dateStr;
 
   const months = [
     "January", "February", "March", "April", "May", "June",
@@ -2221,15 +2213,10 @@ export function generateOrderTeamEmail(
   if (!eventData) return "";
   const pkg = (eventData.package ?? "").toLowerCase();
 
-  const isBeerAndWine =
-    pkg.includes("beer") &&
-    pkg.includes("wine") &&
-    !pkg.includes("essentials") &&
-    !pkg.includes("full") &&
-    !pkg.includes("premium");
+  const isBeerAndWine = isBeerAndWineOnly(pkg);
   const isBartenderOnly = isTailoredBar(pkg);
 
-  if (isBeerAndWine || isBartenderOnly) return "";
+  if (isBartenderOnly) return "";
 
   const drinks = Array.isArray(eventData.signature_drinks) ? eventData.signature_drinks : [];
   const guestCount = parseGuestCount(eventData.guest_count);
@@ -2237,16 +2224,10 @@ export function generateOrderTeamEmail(
   const pace = eventData.drinking_pace ?? "moderate";
 
   let orderByLong = "TBD";
-  if (eventData.event_date) {
-    try {
-      const d = new Date(eventData.event_date + "T12:00:00");
-      if (!isNaN(d.getTime())) {
-        d.setDate(d.getDate() - 6);
-        orderByLong = formatDateOnly(d);
-      }
-    } catch {
-      orderByLong = "TBD";
-    }
+  const eventDay = parseEventDate(eventData.event_date);
+  if (eventDay) {
+    eventDay.setDate(eventDay.getDate() - 6);
+    orderByLong = formatDateOnly(eventDay);
   }
 
   const buckets: Record<string, string[]> = {
@@ -2335,6 +2316,12 @@ export function generateOrderTeamEmail(
   buckets["Sam's Club"].push("- Orange juice — 1 x 32 oz bottle (Kirkland or GV)");
   buckets["Sam's Club"].push("- Tonic — 2 x 1 liter bottles (Kirkland or GV)");
   buckets["Sam's Club"].push("- Club soda — 2 x 1 liter bottles (Kirkland or GV)");
+
+  // Beer and Wine: the client brings the beer and wine, we only bring the ice.
+  if (isBeerAndWine) {
+    for (const store of Object.keys(buckets)) buckets[store] = [];
+    buckets["Sam's Club"].push(`- Ice — ${iceBags} x 16 lb bags`);
+  }
 
   const lines: string[] = [];
   lines.push("ORDER LIST FOR NATALIE");

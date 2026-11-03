@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { generateShoppingList, formatShoppingList, generateNatalieSupplyList } from "@/lib/shopping-list";
+import { toIsoEventDate } from "@/lib/event-date";
 
 export async function POST(request: Request) {
   try {
@@ -46,26 +47,6 @@ export async function POST(request: Request) {
     const iceBags = Math.ceil(iceLbs / 18);
     const iceAmount = `${iceBags} x 18lb bags`;
 
-    function parseEventDate(dateStr: string): string {
-      if (!dateStr) return '';
-      const cleaned = dateStr.replace(/(st|nd|rd|th)/gi, '').trim();
-      let parsed = new Date(cleaned);
-      if (isNaN(parsed.getTime())) {
-        const withYear = cleaned + ' ' + new Date().getFullYear();
-        parsed = new Date(withYear);
-      }
-      if (!isNaN(parsed.getTime())) {
-        if (parsed.getFullYear() < 2000) {
-          parsed.setFullYear(new Date().getFullYear());
-        }
-        const year = parsed.getFullYear();
-        const month = String(parsed.getMonth() + 1).padStart(2, '0');
-        const day = String(parsed.getDate()).padStart(2, '0');
-        return year + '-' + month + '-' + day;
-      }
-      return dateStr;
-    }
-
     // Build signature drink summary (drink names and brief descriptions)
     let signatureDrinkSummary = "";
     if (Array.isArray(eventData.signature_drinks) && eventData.signature_drinks.length > 0) {
@@ -91,7 +72,7 @@ export async function POST(request: Request) {
       menu_colors: eventData.menu_colors || null,
       menu_reference_photos: eventData.menu_reference_photos || null,
       ice_amount: iceAmount,
-      actual_event_date: parseEventDate(eventData.event_date || ''),
+      actual_event_date: toIsoEventDate(eventData.event_date),
       event_start_time: eventData.bar_service_start || null,
       event_end_time: eventData.bar_service_end || null,
     };
