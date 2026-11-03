@@ -97,7 +97,7 @@ const submitProperties = submitEventDataTool.input_schema.properties as Record<s
 const updateEventDataTool: Anthropic.Tool = {
   name: "update_event_data",
   description:
-    "Record a change to this already submitted event. Call it only after the client confirmed the change. Include ONLY the fields that changed. When any drink changes, send the complete signature_drinks array. Use manager_request for requests a manager must handle: extending hours, drinks beyond the package count, switching packages, or changing the event date.",
+    "Record a change to this already submitted event. Call it only after the client confirmed the change. Include ONLY the fields that changed. When any drink changes, send the complete signature_drinks array. Anything the client tells you that no other field covers (for example 'I will provide the cups') goes in special_requests as the complete existing text plus the new note. Use manager_request for requests a manager must handle: extending hours, drinks beyond the package count, switching packages, or changing the event date.",
   input_schema: {
     type: "object",
     additionalProperties: false,
