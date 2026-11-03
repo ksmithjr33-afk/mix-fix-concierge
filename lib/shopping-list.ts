@@ -28,7 +28,6 @@ interface EventData {
   event_location?: string;
   venue_type?: string;
   client_providing_beer_wine?: boolean;
-  build_a_bar_summary?: string;
 }
 
 /**
@@ -40,15 +39,6 @@ interface EventData {
 function isTailoredBar(pkg: string | undefined | null): boolean {
   const p = (pkg ?? "").toLowerCase();
   return p.includes("bartender") || p.includes("tailored");
-}
-
-/**
- * Build a Bar is a customizable package. By default we assume it does NOT include
- * the signature menu or shopping list unless add-ons say otherwise.
- */
-function isBuildABar(pkg: string | undefined | null): boolean {
-  const p = (pkg ?? "").toLowerCase();
-  return p.includes("build a bar") || p.includes("build-a-bar") || p.includes("build your");
 }
 
 /**
@@ -77,8 +67,7 @@ function isBeerAndWineOnly(pkg: string | undefined | null): boolean {
   const p = (pkg ?? "").toLowerCase();
   return p.includes("beer") && p.includes("wine") &&
     !p.includes("bartender") && !p.includes("tailored") &&
-    !p.includes("essentials") && !p.includes("full") && !p.includes("premium") &&
-    !p.includes("build");
+    !p.includes("essentials") && !p.includes("full") && !p.includes("premium");
 }
 
 /**
@@ -1054,7 +1043,7 @@ function getWineQuantity(guestCount: number, hours: number, eventType?: string):
 /**
  * Generates a shopping list based on event data and package type.
  *
- * - Beer and Wine Package: returns empty array (no shopping list)
+ * - Beer and Wine Package: returns empty array (client brings beer and wine, we bring ice)
  * - Bartender Only: everything (spirits, mixers, garnishes, supplies)
  * - Essentials / Full / Premium: alcohol only
  */
@@ -1064,12 +1053,6 @@ export function generateShoppingList(eventData: EventData): ShoppingListItem[] {
 
   // Beer and Wine — no shopping list
   if (isBeerAndWineOnly(pkg)) {
-    return [];
-  }
-
-  // Build a Bar — by default, no menu and no shopping list.
-  // Will need to branch on add-on selections once those data fields are available.
-  if (isBuildABar(pkg)) {
     return [];
   }
 
@@ -1232,8 +1215,14 @@ export function generateNatalieSupplyList(eventData: EventData): string {
   console.log("[generateNatalieSupplyList] eventData received:", JSON.stringify(eventData, null, 2));
 
   const pkg = (eventData.package ?? "").toLowerCase();
-  if (isBeerAndWineOnly(pkg) || isTailoredBar(pkg) || isBuildABar(pkg)) {
+  if (isTailoredBar(pkg)) {
     return "";
+  }
+
+  // Beer and Wine: we bring the ice and the cooler, the client brings everything
+  // else, so Natalie's list is just the ice.
+  if (isBeerAndWineOnly(pkg)) {
+    return generateBeerAndWineSupplyList(eventData);
   }
 
   // Dive Bar gets a simplified fixed supply list: baseline mixers, sodas, juices,
@@ -1445,6 +1434,20 @@ export function getCoffeeStationSupplies(guestCount: number): { item: string; qu
  * napkins, straws. Client supplies alcohol, so no spirits section. Includes the
  * classic cocktail recipes for the bartender when present.
  */
+function generateBeerAndWineSupplyList(eventData: EventData): string {
+  const guestCount = parseGuestCount(eventData.guest_count);
+  const hours = calculateHours(eventData.bar_service_start, eventData.bar_service_end);
+  const eventDate = formatNatalieDate(eventData.event_date);
+  const iceBags = getIceBags(guestCount);
+
+  return [
+    `<b style="color:#8B4513;">${eventDate} (Beer and Wine) ${guestCount} guests, ${hours} hours</b>`,
+    "",
+    "<b>ICE</b>",
+    `Ice — ${iceBags} x 16 lb bags`,
+  ].join("\n");
+}
+
 function generateDiveBarSupplyList(eventData: EventData): string {
   const guestCount = parseGuestCount(eventData.guest_count);
   const drinks = Array.isArray(eventData.signature_drinks) ? eventData.signature_drinks : [];
@@ -1715,10 +1718,6 @@ export function formatShoppingListForNote(
 
   if (isBeerAndWineOnly(pkg)) return "";
 
-  // Build a Bar without the shopping list add-on: skip the full list.
-  // TODO: branch on add-on fields once available.
-  if (isBuildABar(pkg)) return "";
-
   const guestCount = parseGuestCount(eventData.guest_count);
   const drinks = Array.isArray(eventData.signature_drinks) ? eventData.signature_drinks : [];
   const pace = eventData.drinking_pace ?? "moderate";
@@ -1899,41 +1898,6 @@ export function formatShoppingListForNote(
   return lines.join("\n");
 }
 
-/**
- * Build a Bar recipe list: just the drink recipes, NO shopping quantities.
- * Used when a Build a Bar client provides exact recipes but did not buy the shopping list.
- * Returns empty string if no drinks were captured.
- */
-export function generateBuildABarRecipeList(eventData: EventData): string {
-  const drinks = Array.isArray(eventData.signature_drinks) ? eventData.signature_drinks : [];
-  if (drinks.length === 0) return "";
-
-  const lines: string[] = [];
-  const dateLong = formatHeaderDate(eventData.event_date);
-  const guestCount = parseGuestCount(eventData.guest_count);
-  const header = `${dateLong} (Build a Bar) ${guestCount} guests`;
-  lines.push(header);
-  lines.push("");
-  lines.push("CLIENT PROVIDED RECIPES");
-  lines.push("");
-  lines.push("***Names subject to change by client***");
-
-  for (const drink of drinks) {
-    if (!drink) continue;
-    lines.push("");
-    const mocktailLabel = drink.is_mocktail ? " (Mocktail)" : "";
-    lines.push(`${drink.name}${mocktailLabel}`);
-    lines.push("");
-    const ings = normalizeIngredients(drink.ingredients);
-    for (const ing of ings) lines.push(`- ${ing}`);
-    if (drink.garnish && drink.garnish.toLowerCase() !== "none" && drink.garnish.toLowerCase() !== "no garnish") {
-      lines.push(`Garnish: ${drink.garnish}`);
-    }
-  }
-
-  return lines.join("\n");
-}
-
 function formatNoteItemLine(it: ShoppingListItem): string {
   let brandRec = "";
   if (it.notes) {
@@ -1973,10 +1937,12 @@ export function formatPackageLabel(pkg: string | undefined): string {
   if (lower.includes("full")) return "Full Bar";
   // Tailored Bar is the new name. Both "Bartender Only" (legacy) and "Tailored Bar" map here.
   if (isTailoredBar(lower)) return "Tailored Bar";
-  if (isBuildABar(lower)) return "Build a Bar";
   if (lower.includes("beer") && lower.includes("wine")) return "Beer and Wine";
   return pkg;
 }
+
+const ICE_INCLUDED_NOTE =
+  "Good news on ice, we bring all of it for your event, both the ice for mixing drinks and the ice for chilling beer, wine, and sodas. We bring 1 cooler per bartender. If you need an extra cooler for chilling, just provide the cooler and we will provide the ice for it.";
 
 /**
  * Client-facing shopping list email. Now includes ICE & BAR SUPPLIES for ALL packages
@@ -1989,10 +1955,21 @@ export function generateClientShoppingListEmail(
 ): string {
   const pkg = (eventData.package ?? "").toLowerCase();
 
-  if (isBeerAndWineOnly(pkg)) return "";
-
-  // Build a Bar without shopping list add-on: skip the client email.
-  if (isBuildABar(pkg)) return "";
+  // Beer and Wine has no shopping list, the client email is just the ice note.
+  if (isBeerAndWineOnly(pkg)) {
+    const greeting = clientFirstName ? `Hey ${clientFirstName},` : "Hey,";
+    return [
+      greeting,
+      "",
+      `We are very excited to bartend your upcoming celebration on ${formatLongDate(eventData.event_date)}! Since you are bringing the beer and wine, there is no shopping list for this package.`,
+      "",
+      ICE_INCLUDED_NOTE,
+      "",
+      "Please let us know if you have any questions!",
+      "",
+      "Best regards,",
+    ].join("\n");
+  }
 
   const isBartenderOnly =
     isTailoredBar(pkg) &&
@@ -2136,15 +2113,13 @@ export function generateClientShoppingListEmail(
   );
   lines.push("");
   if (isBartenderOnly) {
-    // Bartender Only / Tailored Bar: we do NOT bring any ice, it is on the client.
+    // Bartender Only / Tailored Bar: we bring the cooler, the ice is on the client.
     lines.push(
-      "Please note that ice is on your side for this package. We do not bring ice, so please plan to provide it yourself. A good estimate is about 1 to 1.5 pounds of ice per guest, and we have kept it on your shopping list above."
+      "Please note that ice is on your side for this package. We bring 1 cooler per bartender, but we do not bring ice, so please plan to provide it yourself. A good estimate is about 1 to 1.5 pounds of ice per guest, and we have kept it on your shopping list above."
     );
   } else {
-    // Ice packages (Dive, Essentials, The Big Day Bar, Full, Premium): we bring all the ice.
-    lines.push(
-      "Good news on ice, we bring all of it for your event, both the ice for mixing drinks and the ice for chilling beer, wine, and sodas. We bring 1 cooler per bartender. If you need an extra cooler for chilling, just provide the cooler and we will provide the ice for it."
-    );
+    // Ice packages (Beer and Wine, Dive, Essentials, The Big Day Bar, Full, Premium): we bring all the ice.
+    lines.push(ICE_INCLUDED_NOTE);
   }
   lines.push("");
   lines.push("Please let us know if you have any questions!");

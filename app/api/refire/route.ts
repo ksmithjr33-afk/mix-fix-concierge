@@ -32,9 +32,8 @@ export async function POST(request: Request) {
     // Generate Natalie supply list
     let natalieSupplyList = "";
     const pkg = (eventData.package ?? "").toLowerCase();
-    const isBeerAndWine = pkg.includes("beer") && pkg.includes("wine") && !pkg.includes("essentials") && !pkg.includes("full") && !pkg.includes("premium");
     const isBartenderOnly = pkg.includes("bartender");
-    if (!isBeerAndWine && !isBartenderOnly) {
+    if (!isBartenderOnly) {
       try {
         natalieSupplyList = generateNatalieSupplyList(eventData);
       } catch (err) {
