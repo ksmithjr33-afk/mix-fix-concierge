@@ -1,65 +1,30 @@
 import { NextResponse } from "next/server";
-import { createNoteByEmail } from "@/lib/ghl-api";
-import { getEventUpdates, getSession } from "@/lib/event-updates";
-import { buildUpdateNote, buildUpdatePayload } from "@/lib/update-notes";
+import { deliverEventUpdates, getUndeliveredUpdates } from "@/lib/update-delivery";
 
+// Manual retry. The chat route delivers every update itself right after it is
+// applied; this resends any update for a session whose webhook_sent is still
+// false. Pass updateIds to limit it to specific rows. Rows already sent are skipped.
 export async function POST(request: Request) {
   try {
     const { sessionId, updateIds } = await request.json();
-    if (!sessionId || !Array.isArray(updateIds) || updateIds.length === 0) {
-      return NextResponse.json({ error: "sessionId and updateIds are required" }, { status: 400 });
+    if (!sessionId || typeof sessionId !== "string") {
+      return NextResponse.json({ error: "sessionId is required" }, { status: 400 });
+    }
+    if (updateIds !== undefined && !Array.isArray(updateIds)) {
+      return NextResponse.json({ error: "updateIds must be an array" }, { status: 400 });
     }
 
-    const session = await getSession(sessionId);
-    if (!session || !session.event_data) {
-      return NextResponse.json({ error: "Session not found" }, { status: 404 });
-    }
-    const rows = (await getEventUpdates(sessionId)).filter((r) => updateIds.includes(r.id));
-
-    // A separate GHL inbound webhook, so updates never retrigger the intake workflow.
-    const webhookUrl = process.env.GHL_UPDATE_WEBHOOK_URL;
-    if (!webhookUrl) console.error("GHL_UPDATE_WEBHOOK_URL is not configured, sending notes only");
-
-    const email = (session.event_data.email as string) || session.email || "";
-    const results = [];
-    for (const row of rows) {
-      const note = buildUpdateNote(row);
-      const payload = buildUpdatePayload(session, row);
-
-      const [noteResult, webhookResult] = await Promise.allSettled([
-        email
-          ? createNoteByEmail(email, note)
-          : Promise.resolve({ success: false, contactId: null, reason: "no email" }),
-        webhookUrl
-          ? fetch(webhookUrl, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(payload),
-            })
-          : Promise.resolve(null),
-      ]);
-
-      const noteOk = noteResult.status === "fulfilled" && noteResult.value.success;
-      if (!noteOk) {
-        console.error(
-          `GHL update note failed for ${row.id}:`,
-          noteResult.status === "fulfilled" ? noteResult.value.reason : noteResult.reason
-        );
-      }
-      const webhookOk =
-        webhookResult.status === "fulfilled" && webhookResult.value !== null && webhookResult.value.ok;
-      if (webhookUrl && !webhookOk) {
-        console.error(
-          `GHL update webhook failed for ${row.id}:`,
-          webhookResult.status === "fulfilled" ? webhookResult.value?.status : webhookResult.reason
-        );
-      }
-      results.push({ id: row.id, note_created: noteOk, webhook_sent: webhookOk });
+    const rows = await getUndeliveredUpdates(sessionId, updateIds);
+    if (rows.length === 0) {
+      console.log(`[update-webhook] retry for session ${sessionId}: nothing pending`);
+      return NextResponse.json({ success: true, results: [], message: "No unsent updates" });
     }
 
-    return NextResponse.json({ success: true, results });
+    console.log(`[update-webhook] retry for session ${sessionId}: ${rows.length} unsent update(s)`);
+    const results = await deliverEventUpdates(sessionId, rows);
+    return NextResponse.json({ success: results.every((r) => r.webhook_sent), results });
   } catch (err) {
-    console.error("Update webhook error:", err);
+    console.error("[update-webhook] retry error:", err);
     return NextResponse.json({ error: "Failed to send update" }, { status: 500 });
   }
 }

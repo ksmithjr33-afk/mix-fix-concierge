@@ -10,6 +10,7 @@ import {
   type SessionRow,
 } from "@/lib/event-updates";
 import { UPDATE_OPENER } from "@/lib/update-mode-shared";
+import { deliverEventUpdates } from "@/lib/update-delivery";
 
 const anthropic = new Anthropic();
 
@@ -212,22 +213,7 @@ async function saveUpdateMessages(sessionId: string, messages: ChatMessage[]) {
   if (error) console.error("conversation_logs update_messages error:", error);
 }
 
-// Send the GHL update note and webhook before telling the client the update is
-// saved, the same way intake awaits its completion side effects.
-async function fireUpdateWebhook(origin: string, sessionId: string, updateIds: string[]) {
-  try {
-    const res = await fetch(`${origin}/api/update-webhook`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sessionId, updateIds }),
-    });
-    if (!res.ok) console.error("update-webhook responded with status", res.status);
-  } catch (err) {
-    console.error("update-webhook call failed:", err);
-  }
-}
-
-function updateModeResponse(request: Request, session: SessionRow, messages: ChatMessage[]) {
+function updateModeResponse(session: SessionRow, messages: ChatMessage[]) {
   const eventData = session.event_data as EventData;
   const deadlines = computeDeadlines(eventData.event_date ?? session.event_date);
 
@@ -278,11 +264,9 @@ function updateModeResponse(request: Request, session: SessionRow, messages: Cha
               send(controller, { text });
             }
 
-            await fireUpdateWebhook(
-              new URL(request.url).origin,
-              session.id,
-              result.rows.map((r) => r.id)
-            );
+            // Send the GHL note and update webhook before telling the client the
+            // update is saved, the same way intake awaits its completion side effects.
+            await deliverEventUpdates(session.id, result.rows);
 
             send(controller, {
               event: "updated",
@@ -330,7 +314,7 @@ export async function POST(request: Request) {
   if (sessionId) {
     const session = await getSession(sessionId);
     if (session?.status === "submitted" && session.event_data) {
-      return updateModeResponse(request, session, messages);
+      return updateModeResponse(session, messages);
     }
   }
 
