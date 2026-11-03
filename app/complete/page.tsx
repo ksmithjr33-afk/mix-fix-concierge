@@ -76,6 +76,32 @@ function DetailRow({ label, value }: { label: string; value: string }) {
   );
 }
 
+function UpdateEventButton({
+  sessionId,
+  className,
+  noteClassName,
+}: {
+  sessionId: string | null;
+  className: string;
+  noteClassName: string;
+}) {
+  return (
+    <div>
+      <Link
+        href={sessionId ? `/s?id=${encodeURIComponent(sessionId)}` : "/"}
+        className={className}
+      >
+        View or update your event
+      </Link>
+      {!sessionId && (
+        <p className={noteClassName}>
+          Use the planning link from your confirmation text to update your event.
+        </p>
+      )}
+    </div>
+  );
+}
+
 const timelineSteps = [
   {
     title: "Shopping List",
@@ -104,11 +130,16 @@ export default function CompletePage() {
   const [sessionId, setSessionId] = useState<string | null>(null);
 
   useEffect(() => {
-    try {
-      setSessionId(localStorage.getItem("mixfix_session_id"));
-    } catch {
-      // storage unavailable
+    const params = new URLSearchParams(window.location.search);
+    let id = params.get("session_id") || params.get("id");
+    if (!id) {
+      try {
+        id = localStorage.getItem("mixfix_session_id");
+      } catch {
+        // storage unavailable
+      }
     }
+    setSessionId(id);
     const stored = localStorage.getItem("mixfix_event_data");
     if (stored) {
       try {
@@ -167,9 +198,16 @@ export default function CompletePage() {
           <p className="text-[#6B5D52] mb-6">
             Complete a planning session to see your event details here.
           </p>
+          <div className="mb-4">
+            <UpdateEventButton
+              sessionId={sessionId}
+              className="inline-block bg-[#B5845A] text-white px-6 py-3 rounded-xl font-medium hover:bg-[#9A7049] transition-colors"
+              noteClassName="text-sm text-[#6B5D52] mt-2"
+            />
+          </div>
           <Link
             href="/chat"
-            className="inline-block bg-[#B5845A] text-white px-6 py-3 rounded-xl font-medium hover:bg-[#9A7049] transition-colors"
+            className="text-sm text-[#B5845A] hover:underline"
           >
             Start Planning
           </Link>
@@ -206,14 +244,11 @@ export default function CompletePage() {
             the big day? Come back to this page anytime, it&apos;s the one place
             to update guest count, times, drinks, and details.
           </p>
-          {sessionId && (
-            <Link
-              href={`/s?id=${encodeURIComponent(sessionId)}`}
-              className="inline-block mt-4 bg-white text-[#B5845A] px-6 py-3 rounded-xl font-medium hover:bg-[#F5F0EB] transition-colors"
-            >
-              View or update your event
-            </Link>
-          )}
+          <UpdateEventButton
+            sessionId={sessionId}
+            className="inline-block mt-4 bg-white text-[#B5845A] px-6 py-3 rounded-xl font-medium hover:bg-[#F5F0EB] transition-colors"
+            noteClassName="text-white/90 text-sm mt-2"
+          />
         </div>
 
         {/* Event Overview */}
@@ -346,14 +381,11 @@ export default function CompletePage() {
 
         {/* Contact & Back to Home */}
         <div className="text-center pb-6 sm:pb-8 space-y-3">
-          {sessionId && (
-            <Link
-              href={`/s?id=${encodeURIComponent(sessionId)}`}
-              className="inline-block bg-[#B5845A] text-white px-6 py-3 rounded-xl font-medium hover:bg-[#9A7049] transition-colors"
-            >
-              View or update your event
-            </Link>
-          )}
+          <UpdateEventButton
+            sessionId={sessionId}
+            className="inline-block bg-[#B5845A] text-white px-6 py-3 rounded-xl font-medium hover:bg-[#9A7049] transition-colors"
+            noteClassName="text-sm text-[#6B5D52] mt-2"
+          />
           <a
             href="tel:4697548512"
             className="block text-sm text-[#6B5D52] hover:text-[#B5845A] transition-colors"
