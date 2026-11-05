@@ -51,19 +51,19 @@ const FIELD_LABELS: Record<string, string> = {
   bar_service_start: "Bar service start",
   bar_service_end: "Bar service end",
   venue_type: "Venue type",
-  event_address: "Address",
+  event_address: "Event address",
   indoor_outdoor: "Bar indoor or outdoor",
   bar_on_site: "Bar on site",
   bar_details: "Bar details",
   bar_floor_access: "Bar floor access",
-  parking_info: "Parking",
+  parking_info: "Parking info",
   day_of_contact_name: "Day of contact",
   day_of_contact_phone: "Day of contact phone",
   beer: "Beer",
   wine: "Wine",
   client_providing_beer_wine: "Client providing beer and wine",
   beer_and_wine_details: "Beer and wine details",
-  special_requests: "Add ons and special requests",
+  special_requests: "Special requests",
   dual_bar_setup: "Second bar setup",
   extra_bottles: "Extra bottles",
   allergies: "Allergies",
@@ -177,6 +177,12 @@ export function packageDrinkCount(pkg: unknown): number {
 }
 
 // ---------- formatting ----------
+//
+// Notes and summaries are read by staff on a phone, so everything here is plain
+// text: no HTML, no markdown, no hyphen separators, and labels in plain English.
+
+/** Free text fields that are diffed sentence by sentence instead of printed whole. */
+const LONG_TEXT_FIELDS = new Set(["special_requests", "parking_info", "bar_details", "beer_and_wine_details"]);
 
 function drinkIndexLabel(field: string): string | null {
   const m = field.match(/^signature_drinks\[(\d+)\](\.name)?$/);
@@ -185,40 +191,173 @@ function drinkIndexLabel(field: string): string | null {
 }
 
 export function fieldLabel(field: string): string {
-  return drinkIndexLabel(field) ?? FIELD_LABELS[field] ?? field;
+  return drinkIndexLabel(field) ?? FIELD_LABELS[field] ?? field.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
 }
 
-function formatDrink(d: Drink): string {
-  const name = String(d.name ?? "Unnamed drink");
-  const mocktail = d.is_mocktail ? " (mocktail)" : "";
-  const ingredients = Array.isArray(d.ingredients) ? d.ingredients.join(", ") : String(d.ingredients ?? "");
-  return ingredients ? `${name}${mocktail}: ${ingredients}` : `${name}${mocktail}`;
+/** One line of plain text: no <br>, no markdown markers, no " - " separators. */
+function plain(s: string): string {
+  return s
+    .replace(/<br\s*\/?>/gi, " ")
+    .replace(/<[^>]+>/g, "")
+    .replace(/[*#`]+/g, "")
+    // "TBD - Client will provide later" reads as "TBD, client will provide later".
+    .replace(/\s+[-\u2013\u2014]+\s+([A-Z](?=[a-z]))?/g, (_m, c?: string) => `, ${c ? c.toLowerCase() : ""}`)
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+// "Top with Coca-Cola" reads better mid list as "top with Coca-Cola".
+const LOWERCASE_LEAD = /^(Top|Splash|Dash|Pinch|Float|Fill)\b/;
+
+export function formatDrink(d: Drink): string {
+  const name = plain(String(d.name ?? "Unnamed drink"));
+  const kind = d.is_mocktail ? "mocktail" : d.base_spirit ? plain(String(d.base_spirit)) : "";
+  const head = kind ? `${name} (${kind})` : name;
+  const list = Array.isArray(d.ingredients)
+    ? d.ingredients.map((x, i) => {
+        const t = plain(String(x));
+        return i > 0 && LOWERCASE_LEAD.test(t) ? t[0].toLowerCase() + t.slice(1) : t;
+      })
+    : d.ingredients
+      ? [plain(String(d.ingredients))]
+      : [];
+  return list.length > 0 ? `${head}. ${list.join(", ")}` : head;
 }
 
 export function formatValue(v: unknown): string {
-  if (v === null || v === undefined || v === "") return "(none)";
-  if (typeof v === "boolean") return v ? "yes" : "no";
+  if (v === null || v === undefined || v === "") return "None";
+  if (typeof v === "boolean") return v ? "Yes" : "No";
   if (Array.isArray(v)) {
-    if (v.length === 0) return "(none)";
-    if (v.every((x) => typeof x !== "object" || x === null)) return v.join(", ");
-    return v.map((x) => formatValue(x)).join(" | ");
+    if (v.length === 0) return "None";
+    return v.map((x) => formatValue(x)).join(", ");
   }
   if (typeof v === "object") {
     const obj = v as Drink;
     if ("ingredients" in obj || "base_spirit" in obj) return formatDrink(obj);
-    return JSON.stringify(v);
+    return Object.entries(obj)
+      .filter(([, x]) => x !== null && x !== undefined && x !== "")
+      .map(([k, x]) => `${fieldLabel(k)}: ${formatValue(x)}`)
+      .join(", ");
   }
-  return String(v);
+  return plain(String(v));
 }
 
-export function summarizeChanges(changes: FieldChange[]): string {
-  return changes
-    .map((c) =>
-      c.field === "manager_request"
-        ? `Manager request: ${formatValue(c.new)}`
-        : `${fieldLabel(c.field)}: ${formatValue(c.old)} → ${formatValue(c.new)}`
-    )
-    .join("\n");
+function sentences(v: unknown): string[] {
+  if (v === null || v === undefined) return [];
+  const text = typeof v === "string" ? v.replace(/<br\s*\/?>/gi, "\n") : formatValue(v);
+  return text
+    .split(/\n+|(?<=[.!?])\s+/)
+    .map(plain)
+    .filter((x) => x && x !== "None");
+}
+
+const sentenceKey = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+
+/** Sentences in the new text that were not in the old one, and the reverse. */
+export function sentenceDiff(oldText: unknown, newText: unknown): { added: string[]; removed: string[] } {
+  const oldList = sentences(oldText);
+  const newList = sentences(newText);
+  const oldKeys = new Set(oldList.map(sentenceKey));
+  const newKeys = new Set(newList.map(sentenceKey));
+  return {
+    added: newList.filter((s) => !oldKeys.has(sentenceKey(s))),
+    removed: oldList.filter((s) => !newKeys.has(sentenceKey(s))),
+  };
+}
+
+const isEmpty = (v: unknown) => v === null || v === undefined || v === "" || (Array.isArray(v) && v.length === 0);
+
+/**
+ * One change as a block: the label, then indented Was/Now lines, Added/Removed
+ * sentences for long text, or Added/Removed/Was/Now for a drink. Returns null
+ * for a long text change that neither added nor removed a sentence.
+ */
+export function changeBlock(c: FieldChange): string | null {
+  if (c.field === "manager_request") return `Manager request\n  ${formatValue(c.new)}`;
+  const label = fieldLabel(c.field);
+
+  if (LONG_TEXT_FIELDS.has(c.field)) {
+    const { added, removed } = sentenceDiff(c.old, c.new);
+    if (added.length === 0 && removed.length === 0) return null;
+    const lines = [label];
+    if (added.length > 0) lines.push(`  Added: "${added.join(" ")}"`);
+    if (removed.length > 0) lines.push(`  Removed: "${removed.join(" ")}"`);
+    return lines.join("\n");
+  }
+
+  if (/^signature_drinks\[\d+\]$/.test(c.field)) {
+    if (isEmpty(c.old)) return `${label}\n  Added: ${formatValue(c.new)}`;
+    if (isEmpty(c.new)) return `${label}\n  Removed: ${formatValue(c.old)}`;
+  }
+
+  return `${label}\n  Was: ${formatValue(c.old)}\n  Now: ${formatValue(c.new)}`;
+}
+
+/** Every displayable block. If all were skipped, one line says so instead of nothing. */
+export function changeBlocks(changes: FieldChange[]): string[] {
+  const blocks = changes.map(changeBlock).filter((b): b is string => b !== null);
+  if (blocks.length === 0 && changes.length > 0) {
+    const labels = [...new Set(changes.map((c) => fieldLabel(c.field)))].join(", ");
+    return [`${labels}\n  Wording edited, nothing added or removed`];
+  }
+  return blocks;
+}
+
+/**
+ * Why an unapplied row needs a manager: late drink changes are past the drink
+ * deadline, manager_request rows are hours changes or other requests. Null for
+ * applied rows.
+ */
+export function approvalReason(r: { applied: boolean; within_deadline: boolean | null; changes: FieldChange[] }): string | null {
+  if (r.applied) return null;
+  if (r.within_deadline === false) return "past drink deadline";
+  const requests = r.changes.filter((c) => c.field === "manager_request").map((c) => String(c.new ?? ""));
+  const reasons: string[] = [];
+  if (requests.some((t) => t.startsWith("Extend bar service"))) reasons.push("hours change");
+  if (requests.some((t) => t.startsWith("Add drinks beyond"))) reasons.push("extra drinks");
+  if (reasons.length < requests.length || reasons.length === 0) reasons.push("client request");
+  return reasons.join(", ");
+}
+
+export const SUMMARY_MAX = 500;
+
+/**
+ * Plain text summary for GHL (last_change_summary) and the staff SMS: the same
+ * blocks as the note without its header, separated by blank lines, at most
+ * SUMMARY_MAX characters. Blocks that do not fit become "and N more changes".
+ */
+export function summarizeChanges(
+  changes: FieldChange[],
+  reason: string | null = null,
+  max: number = SUMMARY_MAX
+): string {
+  const blocks = changeBlocks(changes);
+  const more = (n: number) => `and ${n} more change${n === 1 ? "" : "s"}`;
+  const len = (parts: string[]) => parts.join("\n\n").length;
+  const out: string[] = reason ? [`Needs manager approval: ${reason}`] : [];
+  const fixed = out.length;
+
+  for (let i = 0; i < blocks.length; i++) {
+    const rest = blocks.length - i - 1;
+    const restTail = rest > 0 ? [more(rest)] : [];
+    if (len([...out, blocks[i], ...restTail]) <= max) {
+      out.push(blocks[i]);
+      continue;
+    }
+    if (out.length === fixed) {
+      // Even the first block is too long on its own: cut it rather than send nothing.
+      const room = max - len([...out, "", ...restTail]) - 3;
+      out.push(blocks[i].slice(0, Math.max(0, room)).trimEnd() + "...");
+      return [...out, ...restTail].join("\n\n");
+    }
+    return [...out, more(blocks.length - i)].join("\n\n");
+  }
+  return out.join("\n\n");
+}
+
+/** Summary for a stored or planned row, with the approval line for unapplied rows. */
+export function summarizeRow(r: { applied: boolean; within_deadline: boolean | null; changes: FieldChange[] }): string {
+  return summarizeChanges(r.changes, approvalReason(r));
 }
 
 // ---------- applying and replaying ----------
@@ -320,7 +459,7 @@ function diffDrinks(oldDrinks: Drink[], newDrinks: Drink[]): FieldChange[] {
 
 function row(changes: FieldChange[], applied: boolean, within: boolean | null): PlannedRow | null {
   if (changes.length === 0) return null;
-  return { changes, applied, within_deadline: within, summary: summarizeChanges(changes) };
+  return { changes, applied, within_deadline: within, summary: summarizeRow({ changes, applied, within_deadline: within }) };
 }
 
 export function planUpdate(
@@ -368,7 +507,7 @@ export function planUpdate(
       requests.push({
         field: "manager_request",
         old: null,
-        new: `Add drinks beyond the package count: ${extra.map(formatDrink).join(" | ")}`,
+        new: `Add drinks beyond the package count: ${extra.map(formatDrink).join("; ")}`,
       });
       newDrinks = newDrinks.slice(0, allowed);
     }

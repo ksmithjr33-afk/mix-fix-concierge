@@ -40,7 +40,7 @@ async function deliverRow(session: SessionRow, row: EventUpdateRow & { note_crea
   let noteCreated = row.note_created === true;
   if (!noteCreated) {
     const email = (session.event_data?.email as string) || session.email || "";
-    const note = await createNoteByEmail(email, buildUpdateNote(row)).catch((err) => ({
+    const note = await createNoteByEmail(email, buildUpdateNote(row, session)).catch((err) => ({
       success: false,
       contactId: null,
       reason: err instanceof Error ? err.message : String(err),

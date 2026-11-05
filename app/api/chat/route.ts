@@ -2,9 +2,16 @@ import Anthropic from "@anthropic-ai/sdk";
 import { SYSTEM_PROMPT } from "@/lib/system-prompt";
 import { supabase } from "@/lib/supabase";
 import { buildUpdatePrompt } from "@/lib/update-prompt";
-import { computeDeadlines, UPDATABLE_FIELDS, type EventData } from "@/lib/event-diff";
+import {
+  approvalReason,
+  changeBlocks,
+  computeDeadlines,
+  UPDATABLE_FIELDS,
+  type EventData,
+} from "@/lib/event-diff";
 import {
   applyEventUpdate,
+  type ApplyResult,
   getSession,
   recordSubmission,
   type SessionRow,
@@ -213,19 +220,41 @@ async function saveUpdateMessages(sessionId: string, messages: ChatMessage[]) {
   if (error) console.error("conversation_logs update_messages error:", error);
 }
 
+/**
+ * What update_event_data actually recorded, handed back to the model so its
+ * confirmation repeats exactly what was saved and never claims more.
+ */
+function updateToolResult(result: ApplyResult | null): string {
+  if (!result) {
+    return "TOOL RESULT: NOTHING was recorded, this event could not be updated right now. Tell the client honestly that the change did not go through and a manager will follow up. Do not say it was saved.";
+  }
+  if (result.rows.length === 0) {
+    return "TOOL RESULT: NOTHING was recorded because every value sent already matches what is on file. Tell the client it is already on file. Do not say you updated or saved anything.";
+  }
+  const parts = result.rows.map((r) => {
+    const details = changeBlocks(r.changes).join("\n\n");
+    return r.applied
+      ? `SAVED, the event is now version ${r.version}:\n${details}`
+      : `NOT SAVED YET, sent to a manager for approval (${approvalReason(r)}):\n${details}`;
+  });
+  return `TOOL RESULT:\n\n${parts.join("\n\n")}`;
+}
+
 function updateModeResponse(session: SessionRow, messages: ChatMessage[]) {
   const eventData = session.event_data as EventData;
   const deadlines = computeDeadlines(eventData.event_date ?? session.event_date);
+  const system = buildUpdatePrompt(eventData, session.version, deadlines);
+  const history: Anthropic.MessageParam[] = messages.map((m: ChatMessage) => ({
+    role: m.role as "user" | "assistant",
+    content: m.content,
+  }));
 
   const stream = anthropic.messages.stream({
     model: "claude-sonnet-4-6",
     max_tokens: 4096,
-    system: buildUpdatePrompt(eventData, session.version, deadlines),
+    system,
     tools: [updateEventDataTool],
-    messages: messages.map((m: ChatMessage) => ({
-      role: m.role as "user" | "assistant",
-      content: m.content,
-    })),
+    messages: history,
   });
 
   const encoder = new TextEncoder();
@@ -256,14 +285,6 @@ function updateModeResponse(session: SessionRow, messages: ChatMessage[]) {
           });
 
           if (result && result.rows.length > 0) {
-            if (!fullText.trim()) {
-              const text = result.rows.some((r) => r.applied)
-                ? "All set, that change is saved. Anything else you would like to change?"
-                : "I have sent that to a manager who will reach out to you shortly. Anything else you would like to change?";
-              fullText = text;
-              send(controller, { text });
-            }
-
             // Send the GHL note and update webhook before telling the client the
             // update is saved, the same way intake awaits its completion side effects.
             await deliverEventUpdates(session.id, result.rows);
@@ -280,6 +301,48 @@ function updateModeResponse(session: SessionRow, messages: ChatMessage[]) {
                 summary: r.summary,
               })),
             });
+          }
+
+          // Second turn: the model sees what was actually recorded and confirms
+          // exactly that, so nothing is announced before the tool returns.
+          const followUp = anthropic.messages.stream({
+            model: "claude-sonnet-4-6",
+            max_tokens: 1024,
+            system,
+            tools: [updateEventDataTool],
+            tool_choice: { type: "none" },
+            messages: [
+              ...history,
+              { role: "assistant", content: finalMessage.content },
+              {
+                role: "user",
+                content: [{ type: "tool_result", tool_use_id: toolUse.id, content: updateToolResult(result) }],
+              },
+            ],
+          });
+          let separated = !fullText.trim();
+          let confirmation = "";
+          for await (const event of followUp) {
+            if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
+              const chunk = separated ? event.delta.text : `\n\n${event.delta.text}`;
+              separated = true;
+              confirmation += chunk;
+              fullText += chunk;
+              send(controller, { text: chunk });
+            }
+          }
+
+          if (!confirmation.trim()) {
+            const text = !result
+              ? "Sorry, that change did not go through. A manager will follow up with you."
+              : result.rows.length === 0
+                ? "That is already on file. Anything else you would like to change?"
+                : result.rows.some((r) => r.applied)
+                  ? "That change is saved. Anything else you would like to change?"
+                  : "I have sent that to a manager who will reach out to you shortly. Anything else you would like to change?";
+            const chunk = fullText.trim() ? `\n\n${text}` : text;
+            fullText += chunk;
+            send(controller, { text: chunk });
           }
         }
 
