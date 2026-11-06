@@ -229,9 +229,10 @@ function topoChicoCases(guestCount: number): string {
 /** Well mixers sized by guest count alone, not by hours or event type. */
 function diveWellSetMixers(guestCount: number): { item: string; quantity: string }[] {
   const bottles = (n: number) => `${n} bottle${n === 1 ? "" : "s"}`;
+  const sized = (n: number, size: string) => `${n} x ${size} bottle${n === 1 ? "" : "s"}`;
   return [
-    { item: "ginger beer", quantity: bottles(Math.max(1, Math.ceil(guestCount / 10))) },
-    { item: "grapefruit soda", quantity: bottles(Math.max(1, Math.ceil(guestCount / 15))) },
+    { item: "ginger beer", quantity: sized(Math.max(1, Math.ceil(guestCount / 10)), "1 L") },
+    { item: "grapefruit soda", quantity: sized(Math.max(1, Math.ceil(guestCount / 15)), "1.25 L") },
     { item: "grenadine", quantity: bottles(1) },
     { item: "agave nectar", quantity: bottles(1) },
     { item: "Topo Chico", quantity: topoChicoCases(guestCount) },
