@@ -12,9 +12,7 @@ export interface FieldChange {
   field: string;
   old: unknown;
   new: unknown;
-  // Set on changes the client did not ask for, see impliedChanges in change-order.
-  label?: string;
-  note?: string;
+  note?: string; // why it changed, on changes the client did not ask for (see impliedChanges)
 }
 
 /** Fields a client can change in update mode. Everything else is ignored. */
@@ -309,7 +307,7 @@ const isEmpty = (v: unknown) => v === null || v === undefined || v === "" || (Ar
  */
 export function changeBlock(c: FieldChange): string | null {
   if (c.field === "manager_request") return `Manager request\n  ${formatValue(c.new)}`;
-  const label = c.label ?? fieldLabel(c.field);
+  const label = fieldLabel(c.field);
 
   if (LONG_TEXT_FIELDS.has(c.field)) {
     const { added, removed } = sentenceDiff(c.old, c.new);

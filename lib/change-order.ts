@@ -52,7 +52,7 @@ export interface BookedPrice {
 
 export interface PendingChange {
   changes: FieldChange[]; // old = event_data value, new = requested value
-  implied?: FieldChange[]; // raises the client did not ask for, shown but not applied from here
+  implied?: FieldChange[]; // changes the client did not ask for, shown but not applied from here
   requested_at: string;
   base_version: number;
   amount: number | null; // positive owes more, negative is a credit, null if not priceable
@@ -84,7 +84,7 @@ export function toBool(v: unknown, fallback: boolean): boolean {
   return /^(yes|true|1|on|tip jar|jar)$/.test(s) ? true : fallback;
 }
 
-function toCount(v: unknown): number | null {
+export function toCount(v: unknown): number | null {
   const n = parseFloat(String(v ?? "").replace(/[^\d.]/g, ""));
   return Number.isFinite(n) && n > 0 ? n : null;
 }
@@ -133,8 +133,8 @@ export function impliedHoursChange(stored: EventData, changes: FieldChange[]): F
 }
 
 /**
- * Raises the client did not ask for: hours from new service times, and bartenders
- * from a higher guest count. Shown on the change order next to what they asked for.
+ * Changes the client did not ask for, up or down: hours from new service times,
+ * and bartenders from the guest count. Shown on the change order next to what they asked for.
  */
 export function impliedChanges(
   p: Pick<PendingChange, "changes" | "basis">,
@@ -143,25 +143,42 @@ export function impliedChanges(
 ): FieldChange[] {
   const out: FieldChange[] = [];
   const hours = impliedHoursChange(stored, p.changes);
-  const wasHours = toCount(hours?.old);
-  if (hours && wasHours !== null && Number(hours.new) > wasHours) {
-    out.push({ ...hours, label: "Hours", note: "from your new times" });
-  }
-  const asked = new Set(p.changes.map((c) => c.field));
-  if (p.basis && !asked.has("bartenders") && asked.has("guest_count") && bookedBartenders !== null && p.basis.bartenders > bookedBartenders) {
+  if (hours) out.push({ ...hours, note: "from your new times" });
+  const askedBartenders = p.changes.some((c) => c.field === "bartenders");
+  if (p.basis && !askedBartenders && bookedBartenders !== null && p.basis.bartenders !== bookedBartenders) {
     out.push({
       field: "bartenders",
       old: bookedBartenders,
       new: p.basis.bartenders,
-      note: `needed for ${p.basis.guests} guests`,
+      note: `${p.basis.bartenders > bookedBartenders ? "needed for" : "for"} ${p.basis.guests} guests`,
     });
+  }
+  return out;
+}
+
+/**
+ * Everything signing writes to event_data: what the client asked for, the hours
+ * their new times imply, and the bartender count the change order was priced with.
+ */
+export function signedChanges(
+  stored: EventData,
+  p: Pick<PendingChange, "changes" | "basis">,
+  priorBartenders: number | null
+): FieldChange[] {
+  const out = [...p.changes];
+  const hours = impliedHoursChange(stored, p.changes);
+  if (hours) out.push(hours);
+  const count = p.basis?.bartenders ?? priorBartenders;
+  const asked = p.changes.some((c) => c.field === "bartenders");
+  if (!asked && count !== null && toCount(stored.bartenders) !== count) {
+    out.push({ field: "bartenders", old: stored.bartenders ?? priorBartenders, new: count });
   }
   return out;
 }
 
 /** One implied change as the bot says it: "Bartenders, Was: 1, Now: 2 (needed for 100 guests)". */
 export function impliedLine(c: FieldChange): string {
-  return `${c.label ?? fieldLabel(c.field)}, Was: ${formatValue(c.old)}, Now: ${formatValue(c.new)}${c.note ? ` (${c.note})` : ""}`;
+  return `${fieldLabel(c.field)}, Was: ${formatValue(c.old)}, Now: ${formatValue(c.new)}${c.note ? ` (${c.note})` : ""}`;
 }
 
 /**
@@ -260,12 +277,13 @@ export function buildPendingChange(args: {
 
   if (original && booked.total !== null) {
     const nextGuests = toCount(nextEvent.guest_count) ?? original.guests;
-    // Bartenders: what the client asked for, else the booked count, raised to
-    // the recommended staffing when the guest count goes up.
+    // Bartenders: what the client asked for in this change order, else the booked
+    // count, raised to the recommended staffing when the guest count goes up. A
+    // count saved by an earlier signing is the booked count, not a request.
     const bartenders =
-      toCount(nextEvent.bartenders) ??
+      (fields.has("bartenders") ? toCount(nextEvent.bartenders) : null) ??
       (nextGuests > original.guests ? Math.max(original.bartenders, staffingFor(nextGuests)) : original.bartenders);
-    next = basisFromEvent(nextEvent, session, {
+    next = basisFromEvent({ ...nextEvent, bartenders }, session, {
       tipJar: booked.tip_jar,
       bartenders,
       preferHoursBooked: fields.has("hours_booked") && !fields.has("bar_service_start") && !fields.has("bar_service_end"),
@@ -329,14 +347,24 @@ const PENDING_VALUE_KEYS: Record<(typeof CHANGE_ORDER_FIELDS)[number], string> =
   event_address: "pending_change_address",
 };
 
+type PayloadSession = SessionFields & {
+  event_data?: EventData | null;
+  event_date?: string | null;
+  booked_price?: BookedPrice | null;
+};
+
+/** The implied changes saved with a change order, worked out for ones priced before they were saved. */
+function pendingImplied(p: PendingChange, session: PayloadSession): FieldChange[] {
+  if (p.implied) return p.implied;
+  const stored = withHoursBooked(session.event_data ?? {}, session);
+  return impliedChanges(p, stored, toCount(stored.bartenders) ?? session.booked_price?.bartenders ?? null);
+}
+
 /**
  * The event as it would be once signed: one key per change order field, plus
  * pending_change_fields naming the ones that change. Empty strings with no change order.
  */
-function pendingValues(
-  p: PendingChange | null | undefined,
-  session: SessionFields & { event_data?: EventData | null; event_date?: string | null; booked_price?: BookedPrice | null }
-): Record<string, string> {
+function pendingValues(p: PendingChange | null | undefined, session: PayloadSession): Record<string, string> {
   const out: Record<string, string> = { pending_change_fields: "" };
   for (const field of CHANGE_ORDER_FIELDS) out[PENDING_VALUE_KEYS[field]] = "";
   if (!p) return out;
@@ -351,13 +379,8 @@ function pendingValues(
     bartenders: stored.bartenders ?? p.basis?.bartenders ?? bookedBartenders,
   };
 
-  const pending = new Map(p.changes.map((c) => [c.field, c.new]));
-  const hours = impliedHoursChange(stored, p.changes);
-  if (hours) pending.set(hours.field, hours.new);
-  // A guest count increase can raise the bartenders without a change on the list.
-  if (!pending.has("bartenders") && p.basis && bookedBartenders !== null && p.basis.bartenders !== bookedBartenders) {
-    pending.set("bartenders", p.basis.bartenders);
-  }
+  // The same list the summary prints, so the summary and these fields cannot disagree.
+  const pending = new Map([...p.changes, ...pendingImplied(p, session)].map((c) => [c.field, c.new]));
 
   const changed: string[] = [];
   for (const field of CHANGE_ORDER_FIELDS) {
@@ -368,17 +391,10 @@ function pendingValues(
   return out;
 }
 
-/** The implied changes saved with a change order, worked out for ones priced before they were saved. */
-function pendingImplied(p: PendingChange, session: Parameters<typeof pendingValues>[1]): FieldChange[] {
-  if (p.implied) return p.implied;
-  const stored = withHoursBooked(session.event_data ?? {}, session);
-  return impliedChanges(p, stored, toCount(stored.bartenders) ?? session.booked_price?.bartenders ?? null);
-}
-
 /** Every pending_change_* key for the GHL payload, present even when nothing is pending. */
 export function pendingChangeFields(
   p: PendingChange | null | undefined,
-  session: Parameters<typeof pendingValues>[1]
+  session: PayloadSession
 ): Record<string, unknown> {
   return {
     ...pendingValues(p, session),

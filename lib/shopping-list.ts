@@ -16,6 +16,7 @@ interface EventData {
   signature_drinks: SignatureDrink[] | undefined;
   beer: boolean;
   wine: boolean;
+  bartenders?: number | string; // saved when a change order is signed
   extra_bottles?: string;
   event_date?: string;
   bar_service_start?: string;
@@ -1213,6 +1214,25 @@ function parseExtraSodas(specialRequests?: string): string[] {
 /**
  * Generates Natalie's supply list — everything she needs to know to prep and shop.
  */
+/** The saved bartender count, or null before one is on file (nothing is shown then). */
+function bartenderCount(eventData: EventData): number | null {
+  const n = Number(eventData.bartenders);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/** ", 2 bartenders" for the end of a list header, empty when no count is saved. */
+function bartenderHeader(eventData: EventData): string {
+  const n = bartenderCount(eventData);
+  return n === null ? "" : `, ${n} bartender${n === 1 ? "" : "s"}`;
+}
+
+/** Adds the actual number of coolers to a "1 cooler per bartender" sentence. */
+function withCoolerCount(text: string, eventData: EventData): string {
+  const n = bartenderCount(eventData);
+  if (n === null) return text;
+  return text.replace("1 cooler per bartender", `1 cooler per bartender, so ${n} cooler${n === 1 ? "" : "s"} for your event`);
+}
+
 export function generateNatalieSupplyList(eventData: EventData): string {
   console.log("[generateNatalieSupplyList] eventData received:", JSON.stringify(eventData, null, 2));
 
@@ -1243,7 +1263,7 @@ export function generateNatalieSupplyList(eventData: EventData): string {
   const packageLabel = eventData.package ?? "Full Bar";
   const eventDate = formatNatalieDate(eventData.event_date);
   const hours = calculateHours(eventData.bar_service_start, eventData.bar_service_end);
-  parts.push(`<b style="color:#8B4513;">${eventDate} (${packageLabel}) ${guestCount} guests, ${hours} hours</b>`);
+  parts.push(`<b style="color:#8B4513;">${eventDate} (${packageLabel}) ${guestCount} guests, ${hours} hours${bartenderHeader(eventData)}</b>`);
 
   parts.push(`Theme: ${eventData.theme || "No specific theme"}`);
   parts.push(`Colors: ${eventData.event_colors || "No specific colors"}`);
@@ -1443,7 +1463,7 @@ function generateBeerAndWineSupplyList(eventData: EventData): string {
   const iceBags = getIceBags(guestCount);
 
   return [
-    `<b style="color:#8B4513;">${eventDate} (Beer and Wine) ${guestCount} guests, ${hours} hours</b>`,
+    `<b style="color:#8B4513;">${eventDate} (Beer and Wine) ${guestCount} guests, ${hours} hours${bartenderHeader(eventData)}</b>`,
     "",
     "<b>ICE</b>",
     `Ice — ${iceBags} x 16 lb bags`,
@@ -1459,7 +1479,7 @@ function generateDiveBarSupplyList(eventData: EventData): string {
   const parts: string[] = [];
 
   const eventDate = formatNatalieDate(eventData.event_date);
-  parts.push(`<b style="color:#8B4513;">${eventDate} (Dive Bar) ${guestCount} guests, ${hours} hours</b>`);
+  parts.push(`<b style="color:#8B4513;">${eventDate} (Dive Bar) ${guestCount} guests, ${hours} hours${bartenderHeader(eventData)}</b>`);
   if (eventData.theme) parts.push(`Theme: ${eventData.theme}`);
   if (eventData.event_colors) parts.push(`Colors: ${eventData.event_colors}`);
   parts.push("");
@@ -1730,7 +1750,7 @@ export function formatShoppingListForNote(
   const headerParts: string[] = [];
   if (dateStr) headerParts.push(dateStr);
   if (pkgLabel) headerParts.push(`(${pkgLabel})`);
-  if (guestCount) headerParts.push(`${guestCount} guests, ${hours} hours`);
+  if (guestCount) headerParts.push(`${guestCount} guests, ${hours} hours${bartenderHeader(eventData)}`);
   if (headerParts.length > 0) lines.push(headerParts.join(" "));
 
   if (eventData.theme) lines.push(`Theme: ${eventData.theme}`);
@@ -1960,7 +1980,7 @@ export function generateClientShoppingListEmail(
       "",
       `We are very excited to bartend your upcoming celebration on ${formatLongDate(eventData.event_date)}! Since you are bringing the beer and wine, there is no shopping list for this package.`,
       "",
-      ICE_INCLUDED_NOTE,
+      withCoolerCount(ICE_INCLUDED_NOTE, eventData),
       "",
       "Please let us know if you have any questions!",
       "",
@@ -2112,11 +2132,14 @@ export function generateClientShoppingListEmail(
   if (isBartenderOnly) {
     // Bartender Only / Tailored Bar: we bring the cooler, the ice is on the client.
     lines.push(
-      "Please note that ice is on your side for this package. We bring 1 cooler per bartender, but we do not bring ice, so please plan to provide it yourself. A good estimate is about 1 to 1.5 pounds of ice per guest, and we have kept it on your shopping list above."
+      withCoolerCount(
+        "Please note that ice is on your side for this package. We bring 1 cooler per bartender, but we do not bring ice, so please plan to provide it yourself. A good estimate is about 1 to 1.5 pounds of ice per guest, and we have kept it on your shopping list above.",
+        eventData
+      )
     );
   } else {
     // Ice packages (Beer and Wine, Dive, Essentials, The Big Day Bar, Full, Premium): we bring all the ice.
-    lines.push(ICE_INCLUDED_NOTE);
+    lines.push(withCoolerCount(ICE_INCLUDED_NOTE, eventData));
   }
   lines.push("");
   lines.push("Please let us know if you have any questions!");
@@ -2338,7 +2361,7 @@ export function generateOrderTeamEmail(
   if (eventData.package) lines.push(`Package: ${eventData.package}`);
   if (guestCount > 0) {
     const hrsStr = hours > 0 ? `, ${hours} hours` : "";
-    lines.push(`Guests: ${guestCount} guests${hrsStr}`);
+    lines.push(`Guests: ${guestCount} guests${hrsStr}${bartenderHeader(eventData)}`);
   }
 
   lines.push("");

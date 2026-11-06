@@ -14,7 +14,7 @@ import { supabase } from "@/lib/supabase";
 import { applyChanges, type EventData } from "@/lib/event-diff";
 import { buildEventFields, buildNatalieSupplyList } from "@/lib/ghl-payload";
 import type { SessionRow } from "@/lib/event-updates";
-import { impliedHoursChange, withHoursBooked, type BookedPrice } from "@/lib/change-order";
+import { signedChanges, toCount, withHoursBooked, type BookedPrice } from "@/lib/change-order";
 
 function secretMatches(given: string | null): boolean {
   const expected = process.env.MANAGER_UPDATE_SECRET;
@@ -66,20 +66,19 @@ export async function POST(request: Request) {
     }
 
     const pending = session.pending_change;
-    // Stored hours follow the signed service times when the change order did not set them.
+    const prior: Partial<BookedPrice> = session.booked_price ?? {};
+    // Stored hours and bartenders follow what was signed, even when the client did not ask for them directly.
     const stored = withHoursBooked(session.event_data, session);
-    const impliedHours = impliedHoursChange(stored, pending.changes);
-    const changes = impliedHours ? [...pending.changes, impliedHours] : pending.changes;
+    const changes = signedChanges(stored, pending, prior.bartenders ?? null);
     const next: EventData = applyChanges(stored, changes);
     const version = session.version + 1;
     const nowIso = new Date().toISOString();
 
-    const prior: Partial<BookedPrice> = session.booked_price ?? {};
     const booked: BookedPrice = {
       package_price: pending.package_price ?? prior.package_price ?? null,
       gratuity: pending.gratuity ?? prior.gratuity ?? null,
       total: pending.new_total ?? prior.total ?? null,
-      bartenders: pending.basis?.bartenders ?? prior.bartenders ?? null,
+      bartenders: toCount(next.bartenders) ?? prior.bartenders ?? null,
       promo_code: prior.promo_code ?? null,
       custom_price: prior.custom_price ?? null,
       discount_amount: prior.discount_amount ?? null,
