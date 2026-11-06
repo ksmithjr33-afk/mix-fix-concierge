@@ -19,7 +19,7 @@ import {
 } from "@/lib/event-updates";
 import { UPDATE_OPENER } from "@/lib/update-mode-shared";
 import { deliverEventUpdates } from "@/lib/update-delivery";
-import { DEFAULT_DEPOSIT, money, paymentPhrase } from "@/lib/change-order";
+import { DEFAULT_DEPOSIT, impliedLine, money, paymentPhrase } from "@/lib/change-order";
 
 const anthropic = new Anthropic();
 
@@ -272,6 +272,7 @@ function updateToolResult(result: ApplyResult | null): string {
         `CHANGE ORDER PRICING (the whole pending change order): ${p.price_text}`,
         `pending_change_amount: ${p.amount === null ? "unknown, a manager will confirm the price" : `${p.amount} (${p.amount < 0 ? "credit of " : ""}${money(p.amount)})`}`,
         `payment_preference: ${result.paymentPreference ? `${result.paymentPreference} (say "${phrase}")` : "blank"}`,
+        `implied_changes: ${p.implied?.length ? p.implied.map(impliedLine).join("; ") : "none"}`,
       ].join("\n")
     );
   }

@@ -238,6 +238,7 @@ export async function applyEventUpdate(
             custom_price: null, discount_amount: null, tip_jar: true, deposit_paid: 150, source: "computed",
           },
           original: originalBasis,
+          stored: plan.next,
           nextEvent: applyChanges(plan.next, plan.pendingChanges),
           session,
           pending: plan.pendingChanges,

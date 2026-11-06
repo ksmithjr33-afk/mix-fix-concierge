@@ -12,6 +12,9 @@ export interface FieldChange {
   field: string;
   old: unknown;
   new: unknown;
+  // Set on changes the client did not ask for, see impliedChanges in change-order.
+  label?: string;
+  note?: string;
 }
 
 /** Fields a client can change in update mode. Everything else is ignored. */
@@ -306,7 +309,7 @@ const isEmpty = (v: unknown) => v === null || v === undefined || v === "" || (Ar
  */
 export function changeBlock(c: FieldChange): string | null {
   if (c.field === "manager_request") return `Manager request\n  ${formatValue(c.new)}`;
-  const label = fieldLabel(c.field);
+  const label = c.label ?? fieldLabel(c.field);
 
   if (LONG_TEXT_FIELDS.has(c.field)) {
     const { added, removed } = sentenceDiff(c.old, c.new);
@@ -324,7 +327,8 @@ export function changeBlock(c: FieldChange): string | null {
 
   // Nothing on file before: a "Was: None" line would only read as a mistake.
   const was = formatValue(c.old);
-  return was === "None" ? `${label}\n  Now: ${formatValue(c.new)}` : `${label}\n  Was: ${was}\n  Now: ${formatValue(c.new)}`;
+  const now = `${formatValue(c.new)}${c.note ? ` (${c.note})` : ""}`;
+  return was === "None" ? `${label}\n  Now: ${now}` : `${label}\n  Was: ${was}\n  Now: ${now}`;
 }
 
 /** Change order fields first in their fixed order, everything else as it came. */

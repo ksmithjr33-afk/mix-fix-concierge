@@ -346,6 +346,15 @@ EXTENDING HOURS: If a booked client asks to extend their event hours beyond what
 export const CONDUCT_RULE = `CONDUCT RULE, this overrides everything else: Never invent a drink or a recipe. Every drink you suggest or record must come from the menus in this prompt, following DRINK SOURCING BY PACKAGE. Never agree to, promise, or price anything that is not covered by the menu, the client's package, the pricing we use, or the rules in this prompt. When a client asks for anything outside that (a custom service, a discount, a different policy, an item we do not list, a favor, an add on, anything you are not sure is covered), do not say yes, do not say no, and do not improvise. Say exactly: "I will pass that along to our management team and someone will be in touch with you shortly." Then record what they asked for in special_requests, set change_approval_needed to "Yes", and move on to the next step. Add ons go through this path for now.`;
 
 /**
+ * What the bot does when a client picks an auto charge date past the due date.
+ * dueDate is the date when the caller knows it, otherwise the bot works it out.
+ */
+export function lateChargeRule(dueDate: string | null): string {
+  const due = dueDate ? `The due date is ${dueDate}.` : "The due date is 14 days before the event date.";
+  return `${due} If they pick an auto charge date after the due date, do not accept it. Say: "Your balance is due two weeks before your event, so we can't schedule it for that date. Can we charge it on the due date instead?" If they say yes, store "Auto charge on due date". If they say no, offer the other options once more, and if they still want the later date, use the CONDUCT RULE path and leave payment_preference as it was. If the due date has already passed, offer to charge the card now instead of the due date.`;
+}
+
+/**
  * The payment step, its own step after the drinks and before Phase 6. The
  * remaining balance is the booked total minus the deposit on the session.
  */
@@ -359,7 +368,7 @@ export function paymentStep(booking: { total: number | null; deposit: number } |
       ? `This client's remaining balance is ${fmt(remaining)} (booked total ${fmt(total)} minus the ${fmt(deposit)} deposit). Ask: "Your remaining balance is ${fmt(remaining)}, due two weeks before your event. How would you like to handle it? We can charge your card on file now, on a date you pick, or on the due date. Or we can text you a payment link to pay any time before the due date, or set up a payment plan."`
       : `We do not have this client's booked total on file, so do not state an amount. Ask: "How would you like to handle your remaining balance, which is due two weeks before your event? We can charge your card on file now, on a date you pick, or on the due date. Or we can text you a payment link to pay any time before the due date, or set up a payment plan."`;
   return `PAYMENT STEP (its own step, after the drinks are finished and after Phases 3B, 4, and 5, right before Phase 6, on EVERY package including Beer and Wine and Dive Bar): Ask the payment question once, as its own message. ${balanceLine}
-If they pick a specific date or a payment plan, ask one follow up for the date or the split, then confirm. Store the answer as payment_preference, exactly one of: "Auto charge now", "Auto charge on <date>" (with the date they gave in place of <date>), "Auto charge on due date", "Payment link", or "Payment plan: <split>" (with the split they gave in place of <split>). If they want something else, use the CONDUCT RULE path and leave payment_preference empty. Do not quote any other number, do not recalculate the balance, and do not discuss fees. Then move on to Phase 6.`;
+If they pick a specific date or a payment plan, ask one follow up for the date or the split, then confirm. ${lateChargeRule(null)} Store the answer as payment_preference, exactly one of: "Auto charge now", "Auto charge on <date>" (with the date they gave in place of <date>), "Auto charge on due date", "Payment link", or "Payment plan: <split>" (with the split they gave in place of <split>). If they want something else, use the CONDUCT RULE path and leave payment_preference empty. Do not quote any other number, do not recalculate the balance, and do not discuss fees. Then move on to Phase 6.`;
 }
 
 const INTAKE_CLOSING_HEADER = `PHASE 6 CLOSING once everything confirmed:`;

@@ -10,8 +10,10 @@ import {
   ADD_ONS_RULES,
   CHANGE_DEADLINES,
   CONDUCT_RULE,
+  lateChargeRule,
 } from "@/lib/system-prompt";
 import { changeBlocks, packageDrinkCount, type Deadlines, type EventData } from "@/lib/event-diff";
+import { parseEventDate } from "@/lib/event-date";
 import type { BookedPrice, PendingChange } from "@/lib/change-order";
 
 function longDate(ymd: string | null): string {
@@ -26,6 +28,17 @@ function longDate(ymd: string | null): string {
   });
 }
 
+/** Two weeks before the event, following a pending date change, as a YYYY-MM-DD string. */
+function balanceDueDate(eventDay: string | null, pending: PendingChange | null): string | null {
+  const moved = pending?.changes.find((c) => c.field === "event_date")?.new;
+  const parsed = parseEventDate(typeof moved === "string" ? moved : null);
+  const [y, m, d] = parsed
+    ? [parsed.getFullYear(), parsed.getMonth() + 1, parsed.getDate()]
+    : (eventDay ?? "").split("-").map(Number);
+  if (!y || !m || !d) return null;
+  return new Date(Date.UTC(y, m - 1, d - 14)).toISOString().slice(0, 10);
+}
+
 export function buildUpdatePrompt(
   eventData: EventData,
   version: number,
@@ -35,7 +48,7 @@ export function buildUpdatePrompt(
   const pending = extra.pendingChange ?? null;
   const pendingBlock = pending
     ? `PENDING CHANGE ORDER (sent to the client to sign, NOT applied yet, CURRENT EVENT DETAILS still show the booked values):
-${changeBlocks(pending.changes).join("\n\n")}
+${changeBlocks([...pending.changes, ...(pending.implied ?? [])]).join("\n\n")}
 ${pending.price_text}
 If the client restates one of these pending values, say it is already in the change order waiting for their signature and do NOT call update_event_data for it again.`
     : "PENDING CHANGE ORDER: none.";
@@ -46,6 +59,7 @@ If the client restates one of these pending values, say it is already in the cha
     bookedTotal !== null
       ? `"Your remaining balance is $${Math.max(0, Math.round(bookedTotal - deposit)).toLocaleString("en-US")} before this change, due two weeks before your event. How would you like to handle it? We can charge your card on file now, on a date you pick, or on the due date. Or we can text you a payment link to pay any time before the due date, or set up a payment plan."`
       : `"How would you like to handle your remaining balance, which is due two weeks before your event? We can charge your card on file now, on a date you pick, or on the due date. Or we can text you a payment link to pay any time before the due date, or set up a payment plan."`;
+  const dueDate = balanceDueDate(deadlines.eventDay, pending);
   const pkg = String(eventData.package ?? "unknown");
   const drinkCount = Array.isArray(eventData.signature_drinks) ? eventData.signature_drinks.length : 0;
   const packageCount = Math.max(packageDrinkCount(pkg), drinkCount);
@@ -79,9 +93,10 @@ ALWAYS ALLOWED up to the event: venue or private residence, parking, bar locatio
 
 CHANGE ORDERS: A change to the event date (event_date), the service times or hours (bar_service_start, bar_service_end, hours_booked), the guest count (guest_count), the package (package), the address (event_address), or the number of bartenders (bartenders) is a change order. These are allowed: do NOT send them as manager_request and do NOT quote any price yourself. Confirm the change in one yes or no question, then call update_event_data with the new values and write no text in that reply. The system prices it and holds it until the client signs. After the TOOL RESULT confirms the change order, reply with exactly this, naming what changed (date, hours, guest count, package, address, or bartenders):
 "Saved. Since this changes your [what changed], we will text and email you a short change order to sign. The new details take effect once you sign."
+If implied_changes in the TOOL RESULT is not "none", add each one on its own line exactly as written, so the client sees what else changes with their request.
 Then, based on pending_change_amount in the TOOL RESULT:
 If it is positive and payment_preference is set, add: "The difference is $X. We will add it to your remaining balance and handle it the way you asked, [payment phrase]." using the amount and the payment phrase from the TOOL RESULT.
-If it is positive and payment_preference is blank, ask the payment question instead: ${paymentQuestion} If they pick a specific date or a payment plan, ask one follow up for the date or the split, then confirm. Then call update_event_data with payment_preference set to exactly one of: "Auto charge now", "Auto charge on <date>" (with the date they gave in place of <date>), "Auto charge on due date", "Payment link", or "Payment plan: <split>" (with the split they gave in place of <split>).
+If it is positive and payment_preference is blank, ask the payment question instead: ${paymentQuestion} If they pick a specific date or a payment plan, ask one follow up for the date or the split, then confirm. ${lateChargeRule(dueDate ? longDate(dueDate) : null)} Then call update_event_data with payment_preference set to exactly one of: "Auto charge now", "Auto charge on <date>" (with the date they gave in place of <date>), "Auto charge on due date", "Payment link", or "Payment plan: <split>" (with the split they gave in place of <split>).
 If it is negative, add: "That gives you a $X credit toward your remaining balance." using the amount without the minus sign.
 If it is zero, add nothing about money. If the TOOL RESULT says a manager will confirm the price, say a manager will confirm the price with them and quote nothing.
 A package switch must still follow the package rules: The Big Day Bar is for weddings only, and any drinks the new package does not allow are a separate question for after the change order. Moving the start time keeps the same length of service unless the client asks for different hours.

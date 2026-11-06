@@ -11,7 +11,15 @@
 
 import { priceEvent, bookedPrice, staffingFor, packageKey, PROMOS } from "@/lib/pricing";
 import { calculateHours } from "@/lib/shopping-list";
-import { applyChanges, changeBlocks, CHANGE_ORDER_FIELDS, type EventData, type FieldChange } from "@/lib/event-diff";
+import {
+  applyChanges,
+  changeBlocks,
+  CHANGE_ORDER_FIELDS,
+  fieldLabel,
+  formatValue,
+  type EventData,
+  type FieldChange,
+} from "@/lib/event-diff";
 
 export const DEFAULT_DEPOSIT = 150;
 
@@ -44,6 +52,7 @@ export interface BookedPrice {
 
 export interface PendingChange {
   changes: FieldChange[]; // old = event_data value, new = requested value
+  implied?: FieldChange[]; // raises the client did not ask for, shown but not applied from here
   requested_at: string;
   base_version: number;
   amount: number | null; // positive owes more, negative is a credit, null if not priceable
@@ -124,6 +133,38 @@ export function impliedHoursChange(stored: EventData, changes: FieldChange[]): F
 }
 
 /**
+ * Raises the client did not ask for: hours from new service times, and bartenders
+ * from a higher guest count. Shown on the change order next to what they asked for.
+ */
+export function impliedChanges(
+  p: Pick<PendingChange, "changes" | "basis">,
+  stored: EventData,
+  bookedBartenders: number | null
+): FieldChange[] {
+  const out: FieldChange[] = [];
+  const hours = impliedHoursChange(stored, p.changes);
+  const wasHours = toCount(hours?.old);
+  if (hours && wasHours !== null && Number(hours.new) > wasHours) {
+    out.push({ ...hours, label: "Hours", note: "from your new times" });
+  }
+  const asked = new Set(p.changes.map((c) => c.field));
+  if (p.basis && !asked.has("bartenders") && asked.has("guest_count") && bookedBartenders !== null && p.basis.bartenders > bookedBartenders) {
+    out.push({
+      field: "bartenders",
+      old: bookedBartenders,
+      new: p.basis.bartenders,
+      note: `needed for ${p.basis.guests} guests`,
+    });
+  }
+  return out;
+}
+
+/** One implied change as the bot says it: "Bartenders, Was: 1, Now: 2 (needed for 100 guests)". */
+export function impliedLine(c: FieldChange): string {
+  return `${c.label ?? fieldLabel(c.field)}, Was: ${formatValue(c.old)}, Now: ${formatValue(c.new)}${c.note ? ` (${c.note})` : ""}`;
+}
+
+/**
  * The engine inputs for an event. Hours come from the service times, or from
  * hours_booked when preferHoursBooked (the change set hours directly) or when
  * the times are missing.
@@ -199,6 +240,7 @@ export function priceText(amount: number | null, newTotal: number | null): strin
 export function buildPendingChange(args: {
   booked: BookedPrice;
   original: PriceBasis | null;
+  stored: EventData; // the event as saved, before the pending changes
   nextEvent: EventData;
   session: SessionFields;
   pending: FieldChange[];
@@ -252,8 +294,15 @@ export function buildPendingChange(args: {
     }
   }
 
+  const implied = impliedChanges(
+    { changes: pending, basis: next },
+    args.stored,
+    toCount(args.stored.bartenders) ?? booked.bartenders ?? original?.bartenders ?? null
+  );
+
   return {
     changes: pending,
+    implied,
     requested_at: (args.now ?? new Date()).toISOString(),
     base_version: args.baseVersion,
     amount,
@@ -261,7 +310,7 @@ export function buildPendingChange(args: {
     package_price: newPackage,
     gratuity: newGratuity,
     price_text: priceText(amount, newTotal),
-    summary: changeBlocks(pending).join("\n\n"),
+    summary: changeBlocks([...pending, ...implied]).join("\n\n"),
     basis: next,
     class49_applied: class49,
     booked_total: booked.total,
@@ -319,6 +368,13 @@ function pendingValues(
   return out;
 }
 
+/** The implied changes saved with a change order, worked out for ones priced before they were saved. */
+function pendingImplied(p: PendingChange, session: Parameters<typeof pendingValues>[1]): FieldChange[] {
+  if (p.implied) return p.implied;
+  const stored = withHoursBooked(session.event_data ?? {}, session);
+  return impliedChanges(p, stored, toCount(stored.bartenders) ?? session.booked_price?.bartenders ?? null);
+}
+
 /** Every pending_change_* key for the GHL payload, present even when nothing is pending. */
 export function pendingChangeFields(
   p: PendingChange | null | undefined,
@@ -329,7 +385,7 @@ export function pendingChangeFields(
     pending_change_amount: p?.amount ?? null,
     pending_change_price_text: p?.price_text ?? "",
     // Rebuilt so change orders already pending get the current format.
-    pending_change_summary: p ? changeBlocks(p.changes).join("\n\n") : "",
+    pending_change_summary: p ? changeBlocks([...p.changes, ...pendingImplied(p, session)]).join("\n\n") : "",
     pending_change_new_total: p?.new_total ?? null,
     pending_change_package_price: p?.package_price ?? null,
     pending_change_gratuity: p?.gratuity ?? null,
