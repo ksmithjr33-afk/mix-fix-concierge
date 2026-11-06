@@ -11,7 +11,7 @@
 
 import { priceEvent, bookedPrice, staffingFor, packageKey, PROMOS } from "@/lib/pricing";
 import { calculateHours } from "@/lib/shopping-list";
-import { changeBlocks, type EventData, type FieldChange } from "@/lib/event-diff";
+import { applyChanges, changeBlocks, CHANGE_ORDER_FIELDS, type EventData, type FieldChange } from "@/lib/event-diff";
 
 export const DEFAULT_DEPOSIT = 150;
 
@@ -94,6 +94,33 @@ interface SessionFields {
   package_type?: string | null;
   guest_count?: string | null;
   hours_booked?: string | null;
+}
+
+/**
+ * event_data with hours_booked filled in when it is missing, from the session's
+ * booked hours or else the service times. Returns the same object if nothing is missing.
+ */
+export function withHoursBooked(ed: EventData, session: SessionFields): EventData {
+  if (toCount(ed.hours_booked)) return ed;
+  const hours =
+    toCount(session.hours_booked) ??
+    (hasTime(ed.bar_service_start) && hasTime(ed.bar_service_end)
+      ? calculateHours(ed.bar_service_start as string, ed.bar_service_end as string)
+      : null);
+  return hours ? { ...ed, hours_booked: hours } : ed;
+}
+
+/**
+ * The hours_booked change implied by pending time changes that did not set hours
+ * themselves, so stored hours cannot drift from the service times. Null if none.
+ */
+export function impliedHoursChange(stored: EventData, changes: FieldChange[]): FieldChange | null {
+  const fields = new Set(changes.map((c) => c.field));
+  if (fields.has("hours_booked") || !(fields.has("bar_service_start") || fields.has("bar_service_end"))) return null;
+  const next = applyChanges(stored, changes);
+  if (!hasTime(next.bar_service_start) || !hasTime(next.bar_service_end)) return null;
+  const hours = calculateHours(next.bar_service_start as string, next.bar_service_end as string);
+  return toCount(stored.hours_booked) === hours ? null : { field: "hours_booked", old: stored.hours_booked ?? null, new: hours };
 }
 
 /**
@@ -242,12 +269,67 @@ export function buildPendingChange(args: {
   };
 }
 
+const PENDING_VALUE_KEYS: Record<(typeof CHANGE_ORDER_FIELDS)[number], string> = {
+  event_date: "pending_change_date",
+  bar_service_start: "pending_change_start",
+  bar_service_end: "pending_change_end",
+  hours_booked: "pending_change_hours",
+  guest_count: "pending_change_guest_count",
+  bartenders: "pending_change_bartenders",
+  package: "pending_change_package",
+  event_address: "pending_change_address",
+};
+
+/**
+ * The event as it would be once signed: one key per change order field, plus
+ * pending_change_fields naming the ones that change. Empty strings with no change order.
+ */
+function pendingValues(
+  p: PendingChange | null | undefined,
+  session: SessionFields & { event_data?: EventData | null; event_date?: string | null; booked_price?: BookedPrice | null }
+): Record<string, string> {
+  const out: Record<string, string> = { pending_change_fields: "" };
+  for (const field of CHANGE_ORDER_FIELDS) out[PENDING_VALUE_KEYS[field]] = "";
+  if (!p) return out;
+
+  const stored = withHoursBooked(session.event_data ?? {}, session);
+  const bookedBartenders = toCount(stored.bartenders) ?? session.booked_price?.bartenders ?? null;
+  const current: Record<string, unknown> = {
+    ...stored,
+    event_date: stored.event_date ?? session.event_date,
+    guest_count: stored.guest_count ?? session.guest_count,
+    package: stored.package ?? session.package_type,
+    bartenders: stored.bartenders ?? p.basis?.bartenders ?? bookedBartenders,
+  };
+
+  const pending = new Map(p.changes.map((c) => [c.field, c.new]));
+  const hours = impliedHoursChange(stored, p.changes);
+  if (hours) pending.set(hours.field, hours.new);
+  // A guest count increase can raise the bartenders without a change on the list.
+  if (!pending.has("bartenders") && p.basis && bookedBartenders !== null && p.basis.bartenders !== bookedBartenders) {
+    pending.set("bartenders", p.basis.bartenders);
+  }
+
+  const changed: string[] = [];
+  for (const field of CHANGE_ORDER_FIELDS) {
+    if (pending.has(field)) changed.push(field);
+    out[PENDING_VALUE_KEYS[field]] = String((pending.has(field) ? pending.get(field) : current[field]) ?? "");
+  }
+  out.pending_change_fields = changed.join(", ");
+  return out;
+}
+
 /** Every pending_change_* key for the GHL payload, present even when nothing is pending. */
-export function pendingChangeFields(p: PendingChange | null | undefined): Record<string, unknown> {
+export function pendingChangeFields(
+  p: PendingChange | null | undefined,
+  session: Parameters<typeof pendingValues>[1]
+): Record<string, unknown> {
   return {
+    ...pendingValues(p, session),
     pending_change_amount: p?.amount ?? null,
     pending_change_price_text: p?.price_text ?? "",
-    pending_change_summary: p?.summary ?? "",
+    // Rebuilt so change orders already pending get the current format.
+    pending_change_summary: p ? changeBlocks(p.changes).join("\n\n") : "",
     pending_change_new_total: p?.new_total ?? null,
     pending_change_package_price: p?.package_price ?? null,
     pending_change_gratuity: p?.gratuity ?? null,

@@ -17,6 +17,7 @@ import {
   basisFromEvent,
   buildPendingChange,
   computeBaseline,
+  withHoursBooked,
   type BookedPrice,
   type PendingChange,
 } from "@/lib/change-order";
@@ -97,7 +98,8 @@ export function stripLegacyFields(eventData: EventData): EventData {
  * exist (chats started without a /s link) or was already submitted.
  */
 export async function recordSubmission(sessionId: string, eventData: EventData): Promise<boolean> {
-  const clean = stripLegacyFields(eventData);
+  const { data: bookedRow } = await supabase.from("sessions").select("hours_booked").eq("id", sessionId).maybeSingle();
+  const clean = withHoursBooked(stripLegacyFields(eventData), { hours_booked: bookedRow?.hours_booked ?? null });
   const nowIso = new Date().toISOString();
 
   const { data, error } = await supabase
@@ -199,7 +201,8 @@ export async function applyEventUpdate(
     const session = await getSession(sessionId);
     if (!session || session.status !== "submitted" || !session.event_data) return null;
 
-    const current = session.event_data;
+    // Sessions submitted before hours_booked was saved get it filled in here.
+    const current = withHoursBooked(session.event_data, session);
     const deadlines = computeDeadlines(current.event_date ?? session.event_date, options.now);
     const plan = planUpdate(current, partial, {
       managerRequest: options.managerRequest,
@@ -255,6 +258,8 @@ export async function applyEventUpdate(
     if (plan.applied) {
       sessionUpdate.event_data = plan.next;
       sessionUpdate.version = version + 1;
+    } else if (Object.keys(sessionUpdate).length > 0 && current !== session.event_data) {
+      sessionUpdate.event_data = current;
     }
 
     if (Object.keys(sessionUpdate).length > 0) {

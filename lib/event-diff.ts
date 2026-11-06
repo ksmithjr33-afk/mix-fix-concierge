@@ -55,17 +55,18 @@ export const UPDATABLE_FIELDS = [
 /**
  * Fields that change the price or the agreement. A confirmed change to any of
  * these is not applied to event_data: it is held on session.pending_change
- * until the client signs the change order (see app/api/manager-update).
+ * until the client signs the change order (see app/api/manager-update). Summaries
+ * and the webhook list them in this order.
  */
 export const CHANGE_ORDER_FIELDS = [
   "event_date",
   "bar_service_start",
   "bar_service_end",
   "hours_booked",
-  "package",
   "guest_count",
-  "event_address",
   "bartenders",
+  "package",
+  "event_address",
 ] as const;
 
 export function isChangeOrderField(field: string): boolean {
@@ -321,12 +322,23 @@ export function changeBlock(c: FieldChange): string | null {
     if (isEmpty(c.new)) return `${label}\n  Removed: ${formatValue(c.old)}`;
   }
 
-  return `${label}\n  Was: ${formatValue(c.old)}\n  Now: ${formatValue(c.new)}`;
+  // Nothing on file before: a "Was: None" line would only read as a mistake.
+  const was = formatValue(c.old);
+  return was === "None" ? `${label}\n  Now: ${formatValue(c.new)}` : `${label}\n  Was: ${was}\n  Now: ${formatValue(c.new)}`;
+}
+
+/** Change order fields first in their fixed order, everything else as it came. */
+function sortChanges(changes: FieldChange[]): FieldChange[] {
+  const rank = (c: FieldChange) => {
+    const i = (CHANGE_ORDER_FIELDS as readonly string[]).indexOf(c.field);
+    return i === -1 ? CHANGE_ORDER_FIELDS.length : i;
+  };
+  return [...changes].sort((a, b) => rank(a) - rank(b));
 }
 
 /** Every displayable block. If all were skipped, one line says so instead of nothing. */
 export function changeBlocks(changes: FieldChange[]): string[] {
-  const blocks = changes.map(changeBlock).filter((b): b is string => b !== null);
+  const blocks = sortChanges(changes).map(changeBlock).filter((b): b is string => b !== null);
   if (blocks.length === 0 && changes.length > 0) {
     const labels = [...new Set(changes.map((c) => fieldLabel(c.field)))].join(", ");
     return [`${labels}\n  Wording edited, nothing added or removed`];
@@ -477,8 +489,8 @@ export interface UpdatePlan {
   applied: PlannedRow | null; // merged now, bumps the version
   late: PlannedRow | null; // past the drink deadlines, a manager confirms
   requests: PlannedRow | null; // extra drinks beyond the package: a manager reaches out
-  // Change order fields this update touched, old = what the client had before
-  // (the pending value if one was already pending). Empty if none changed.
+  // Change order fields this update touched, old = the stored event_data value,
+  // or the pending value when going back to the stored one. Empty if none changed.
   changeOrder: FieldChange[];
   // Every pending change order field after this update, old = event_data.
   // Null when this update did not touch a change order field.
@@ -532,9 +544,14 @@ export function planUpdate(
     delete updates[key];
     const before = pendingMap.has(key) ? pendingMap.get(key)!.new : current[key];
     if (sameValue(before, value)) continue; // already on file or already pending
-    changeOrder.push({ field: key, old: before ?? null, new: value });
-    if (sameValue(current[key], value)) pendingMap.delete(key); // back to the booked value
-    else pendingMap.set(key, { field: key, old: current[key] ?? null, new: value });
+    if (sameValue(current[key], value)) {
+      changeOrder.push({ field: key, old: before ?? null, new: value });
+      pendingMap.delete(key); // back to the booked value
+    } else {
+      const change = { field: key, old: current[key] ?? null, new: value };
+      changeOrder.push(change);
+      pendingMap.set(key, change);
+    }
   }
 
   // Drinks beyond the package count are a manager request.
@@ -577,6 +594,8 @@ export function planUpdate(
     late: row(late, false, false),
     requests: row(requests, false, null),
     changeOrder,
-    pendingChanges: changeOrder.length > 0 ? [...pendingMap.values()] : null,
+    // Was always reads the stored value, including for fields pending from earlier updates.
+    pendingChanges:
+      changeOrder.length > 0 ? [...pendingMap.values()].map((c) => ({ ...c, old: current[c.field] ?? null })) : null,
   };
 }

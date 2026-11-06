@@ -18,7 +18,7 @@
 
 import { buildEventFields, buildNatalieSupplyList } from "@/lib/ghl-payload";
 import { approvalReason, changeBlocks, isChangeOrderRow, summarizeRow } from "@/lib/event-diff";
-import { pendingChangeFields } from "@/lib/change-order";
+import { pendingChangeFields, withHoursBooked } from "@/lib/change-order";
 import { parseEventDate } from "@/lib/event-date";
 import type { EventUpdateRow, SessionRow } from "@/lib/event-updates";
 
@@ -84,7 +84,7 @@ export function buildUpdateSummary(row: EventUpdateRow): string {
 
 /** GHL webhook payload for one update: the merged event plus regenerated documents. */
 export function buildUpdatePayload(session: SessionRow, row: EventUpdateRow): Record<string, unknown> {
-  const eventData = session.event_data ?? {};
+  const eventData = withHoursBooked(session.event_data ?? {}, session);
   const { cleanEventData, fields } = buildEventFields(eventData);
   const payload: Record<string, unknown> = {
     ...cleanEventData,
@@ -97,7 +97,7 @@ export function buildUpdatePayload(session: SessionRow, row: EventUpdateRow): Re
     within_deadline: row.within_deadline,
     // Change order rows carry the pending change as priced when it was sent.
     needs_change_order: isChangeOrderRow(row) && !!row.change_order,
-    ...pendingChangeFields(isChangeOrderRow(row) ? row.change_order : session.pending_change),
+    ...pendingChangeFields(isChangeOrderRow(row) ? row.change_order : session.pending_change, session),
     payment_preference: (eventData.payment_preference as string | undefined) || "",
     change_approval_needed: row.change_approval_needed ? "Yes" : "No",
     booked_total: session.booked_price?.total ?? null,

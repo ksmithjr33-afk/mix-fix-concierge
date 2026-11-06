@@ -14,7 +14,7 @@ import { supabase } from "@/lib/supabase";
 import { applyChanges, type EventData } from "@/lib/event-diff";
 import { buildEventFields, buildNatalieSupplyList } from "@/lib/ghl-payload";
 import type { SessionRow } from "@/lib/event-updates";
-import type { BookedPrice } from "@/lib/change-order";
+import { impliedHoursChange, withHoursBooked, type BookedPrice } from "@/lib/change-order";
 
 function secretMatches(given: string | null): boolean {
   const expected = process.env.MANAGER_UPDATE_SECRET;
@@ -66,7 +66,11 @@ export async function POST(request: Request) {
     }
 
     const pending = session.pending_change;
-    const next: EventData = applyChanges(session.event_data, pending.changes);
+    // Stored hours follow the signed service times when the change order did not set them.
+    const stored = withHoursBooked(session.event_data, session);
+    const impliedHours = impliedHoursChange(stored, pending.changes);
+    const changes = impliedHours ? [...pending.changes, impliedHours] : pending.changes;
+    const next: EventData = applyChanges(stored, changes);
     const version = session.version + 1;
     const nowIso = new Date().toISOString();
 
@@ -117,7 +121,7 @@ export async function POST(request: Request) {
       session_id: session.id,
       version,
       source: "manager",
-      changes: pending.changes,
+      changes,
       summary: "Change order signed",
       within_deadline: true,
       applied: true,
