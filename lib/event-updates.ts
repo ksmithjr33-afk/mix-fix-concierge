@@ -3,13 +3,23 @@
 
 import { supabase } from "@/lib/supabase";
 import {
+  applyChanges,
   computeDeadlines,
   planUpdate,
+  replayHistory,
   snapshotChanges,
+  summarizeChanges,
   type EventData,
   type FieldChange,
   type PlannedRow,
 } from "@/lib/event-diff";
+import {
+  basisFromEvent,
+  buildPendingChange,
+  computeBaseline,
+  type BookedPrice,
+  type PendingChange,
+} from "@/lib/change-order";
 
 export const SESSION_COLUMNS =
   "id, name, email, event_date, package_type, guest_count, event_name, hours_booked, status, event_data, version, submitted_at, updated_at";
@@ -28,6 +38,9 @@ export interface SessionRow {
   version: number;
   submitted_at: string | null;
   updated_at: string | null;
+  // Read with select("*"), so missing until the change order migration runs.
+  pending_change?: PendingChange | null;
+  booked_price?: BookedPrice | null;
 }
 
 export interface EventUpdateRow {
@@ -40,12 +53,14 @@ export interface EventUpdateRow {
   summary: string | null;
   within_deadline: boolean | null;
   applied: boolean;
+  change_order?: PendingChange | null; // set on change order rows: the pending change as priced then
+  change_approval_needed?: boolean | null; // the bot passed something to management
 }
 
 export async function getSession(sessionId: string): Promise<SessionRow | null> {
   const { data, error } = await supabase
     .from("sessions")
-    .select(SESSION_COLUMNS)
+    .select("*")
     .eq("id", sessionId)
     .maybeSingle();
   if (error) {
@@ -115,10 +130,19 @@ export interface ApplyResult {
   version: number;
   updatedAt: string | null;
   rows: EventUpdateRow[];
+  pendingChange: PendingChange | null; // the session's pending change order after this update
+  changeOrderSent: boolean; // this update created or changed the pending change order
+  paymentPreference: string | null;
 }
 
-function toInsert(sessionId: string, row: PlannedRow, version: number, source: "concierge" | "manager") {
-  return {
+function toInsert(
+  sessionId: string,
+  row: PlannedRow,
+  version: number,
+  source: "concierge" | "manager",
+  extra: { change_order?: PendingChange | null; change_approval_needed?: boolean } = {}
+) {
+  const insert: Record<string, unknown> = {
     session_id: sessionId,
     version,
     source,
@@ -127,17 +151,47 @@ function toInsert(sessionId: string, row: PlannedRow, version: number, source: "
     within_deadline: row.within_deadline,
     applied: row.applied,
   };
+  // Only written when set, so updates keep working before the migration adds these columns.
+  if (extra.change_order) insert.change_order = extra.change_order;
+  if (extra.change_approval_needed) insert.change_approval_needed = true;
+  return insert;
+}
+
+/**
+ * What the client booked. Sessions created before booked prices were stored get
+ * one computed from the original (version 1) event with the engine.
+ */
+async function resolveBookedPrice(
+  session: SessionRow
+): Promise<{ booked: BookedPrice | null; original: EventData; computed: boolean }> {
+  const history = await getEventUpdates(session.id);
+  const original = replayHistory(history, 1) ?? session.event_data ?? {};
+  if (session.booked_price && session.booked_price.total !== null && session.booked_price.total !== undefined) {
+    return { booked: session.booked_price, original, computed: false };
+  }
+  const computed = computeBaseline(original, session, {
+    promoCode: session.booked_price?.promo_code ?? null,
+    tipJar: session.booked_price?.tip_jar ?? true,
+  });
+  if (computed && session.booked_price?.deposit_paid) computed.deposit_paid = session.booked_price.deposit_paid;
+  return { booked: computed, original, computed: computed !== null };
 }
 
 /**
  * Diff a partial event against the session's current event_data, merge what is
- * allowed now and bump the version, and record late drink changes and manager
- * requests as unapplied rows. Returns null if the session is not submitted.
+ * allowed now and bump the version, hold change order fields on
+ * session.pending_change with their price, and record late drink changes and
+ * manager requests as unapplied rows. Returns null if the session is not submitted.
  */
 export async function applyEventUpdate(
   sessionId: string,
   partial: EventData,
-  options: { managerRequest?: string | null; source?: "concierge" | "manager"; now?: Date } = {}
+  options: {
+    managerRequest?: string | null;
+    changeApprovalNeeded?: boolean;
+    source?: "concierge" | "manager";
+    now?: Date;
+  } = {}
 ): Promise<ApplyResult | null> {
   const source = options.source ?? "concierge";
 
@@ -147,29 +201,87 @@ export async function applyEventUpdate(
 
     const current = session.event_data;
     const deadlines = computeDeadlines(current.event_date ?? session.event_date, options.now);
-    const plan = planUpdate(current, partial, { managerRequest: options.managerRequest, deadlines });
+    const plan = planUpdate(current, partial, {
+      managerRequest: options.managerRequest,
+      deadlines,
+      pending: session.pending_change?.changes ?? null,
+    });
 
     let version = session.version;
     let updatedAt = session.updated_at ?? session.submitted_at;
+    const sessionUpdate: Record<string, unknown> = {};
+
+    // Change order: price every pending field against what the client booked.
+    let pendingChange: PendingChange | null = session.pending_change ?? null;
+    let changeOrderRow: PlannedRow | null = null;
+    if (plan.pendingChanges) {
+      if (plan.pendingChanges.length === 0) {
+        pendingChange = null; // the client went back to the booked details
+        changeOrderRow = {
+          changes: plan.changeOrder,
+          applied: false,
+          within_deadline: null,
+          summary: `Change order canceled, back to the booked details:\n\n${summarizeChanges(plan.changeOrder, null, 440)}`,
+        };
+      } else {
+        const { booked, original, computed } = await resolveBookedPrice(session);
+        if (computed && booked) sessionUpdate.booked_price = booked;
+        const originalBasis =
+          booked?.basis ??
+          (booked ? basisFromEvent(original, session, { tipJar: booked.tip_jar, bartenders: booked.bartenders }) : null);
+        pendingChange = buildPendingChange({
+          booked: booked ?? {
+            package_price: null, gratuity: null, total: null, bartenders: null, promo_code: null,
+            custom_price: null, discount_amount: null, tip_jar: true, deposit_paid: 150, source: "computed",
+          },
+          original: originalBasis,
+          nextEvent: applyChanges(plan.next, plan.pendingChanges),
+          session,
+          pending: plan.pendingChanges,
+          baseVersion: version,
+          now: options.now,
+        });
+        const head = `Change order sent: ${pendingChange.price_text}`;
+        changeOrderRow = {
+          changes: plan.changeOrder,
+          applied: false,
+          within_deadline: null,
+          summary: `${head}\n\n${summarizeChanges(plan.changeOrder, null, Math.max(120, 500 - head.length - 2))}`,
+        };
+      }
+      sessionUpdate.pending_change = pendingChange;
+    }
 
     if (plan.applied) {
+      sessionUpdate.event_data = plan.next;
+      sessionUpdate.version = version + 1;
+    }
+
+    if (Object.keys(sessionUpdate).length > 0) {
       const nowIso = new Date().toISOString();
+      sessionUpdate.updated_at = nowIso;
       // Only succeeds if nobody bumped the version since we read it.
       const { data, error } = await supabase
         .from("sessions")
-        .update({ event_data: plan.next, version: version + 1, updated_at: nowIso })
+        .update(sessionUpdate)
         .eq("id", sessionId)
         .eq("version", version)
         .select("id");
       if (error) throw new Error(`sessions update failed: ${error.message}`);
       if (!data || data.length === 0) continue;
-      version += 1;
+      if (plan.applied) version += 1;
       updatedAt = nowIso;
     }
 
-    const inserts = [plan.applied, plan.late, plan.requests]
-      .filter((r): r is PlannedRow => r !== null)
-      .map((r) => toInsert(sessionId, r, version, source));
+    const approval = { change_approval_needed: options.changeApprovalNeeded === true };
+    const inserts = [
+      plan.applied ? toInsert(sessionId, plan.applied, version, source, approval) : null,
+      changeOrderRow
+        ? toInsert(sessionId, changeOrderRow, version, source, { ...approval, change_order: pendingChange })
+        : null,
+      plan.late ? toInsert(sessionId, plan.late, version, source, approval) : null,
+      plan.requests ? toInsert(sessionId, plan.requests, version, source, approval) : null,
+    ].filter((r): r is Record<string, unknown> => r !== null);
 
     let rows: EventUpdateRow[] = [];
     if (inserts.length > 0) {
@@ -178,7 +290,16 @@ export async function applyEventUpdate(
       rows = (data as EventUpdateRow[]) ?? [];
     }
 
-    return { eventData: plan.applied ? plan.next : current, version, updatedAt, rows };
+    const eventData = plan.applied ? plan.next : current;
+    return {
+      eventData,
+      version,
+      updatedAt,
+      rows,
+      pendingChange,
+      changeOrderSent: changeOrderRow !== null,
+      paymentPreference: (eventData.payment_preference as string | undefined) || null,
+    };
   }
 
   throw new Error("event update kept conflicting with a concurrent update");

@@ -4,7 +4,6 @@
 // lib/event-updates.ts for that.
 
 import { parseEventDate } from "@/lib/event-date";
-import { calculateHours } from "@/lib/shopping-list";
 
 export type EventData = Record<string, unknown>;
 type Drink = Record<string, unknown>;
@@ -44,7 +43,34 @@ export const UPDATABLE_FIELDS = [
   "event_name",
   "dive_menu_requested",
   "signature_drinks",
+  // Change order fields not covered above
+  "event_date",
+  "hours_booked",
+  "package",
+  "bartenders",
+  // How the client wants the remaining balance handled
+  "payment_preference",
 ] as const;
+
+/**
+ * Fields that change the price or the agreement. A confirmed change to any of
+ * these is not applied to event_data: it is held on session.pending_change
+ * until the client signs the change order (see app/api/manager-update).
+ */
+export const CHANGE_ORDER_FIELDS = [
+  "event_date",
+  "bar_service_start",
+  "bar_service_end",
+  "hours_booked",
+  "package",
+  "guest_count",
+  "event_address",
+  "bartenders",
+] as const;
+
+export function isChangeOrderField(field: string): boolean {
+  return (CHANGE_ORDER_FIELDS as readonly string[]).includes(field);
+}
 
 const FIELD_LABELS: Record<string, string> = {
   guest_count: "Guest count",
@@ -74,6 +100,11 @@ const FIELD_LABELS: Record<string, string> = {
   event_name: "Event name",
   dive_menu_requested: "Dive Bar menu requested",
   manager_request: "Manager request",
+  event_date: "Event date",
+  hours_booked: "Hours booked",
+  package: "Package",
+  bartenders: "Bartenders",
+  payment_preference: "Payment preference",
 };
 
 // ---------- equality ----------
@@ -311,12 +342,18 @@ export function changeBlocks(changes: FieldChange[]): string[] {
 export function approvalReason(r: { applied: boolean; within_deadline: boolean | null; changes: FieldChange[] }): string | null {
   if (r.applied) return null;
   if (r.within_deadline === false) return "past drink deadline";
+  if (isChangeOrderRow(r)) return "change order, waiting on client signature";
   const requests = r.changes.filter((c) => c.field === "manager_request").map((c) => String(c.new ?? ""));
   const reasons: string[] = [];
   if (requests.some((t) => t.startsWith("Extend bar service"))) reasons.push("hours change");
   if (requests.some((t) => t.startsWith("Add drinks beyond"))) reasons.push("extra drinks");
   if (reasons.length < requests.length || reasons.length === 0) reasons.push("client request");
   return reasons.join(", ");
+}
+
+/** An unapplied row made only of change order fields: a change order sent to the client to sign. */
+export function isChangeOrderRow(r: { applied: boolean; within_deadline: boolean | null; changes: FieldChange[] }): boolean {
+  return !r.applied && r.within_deadline === null && r.changes.length > 0 && r.changes.every((c) => isChangeOrderField(c.field));
 }
 
 export const SUMMARY_MAX = 500;
@@ -439,7 +476,13 @@ export interface UpdatePlan {
   next: EventData;
   applied: PlannedRow | null; // merged now, bumps the version
   late: PlannedRow | null; // past the drink deadlines, a manager confirms
-  requests: PlannedRow | null; // hours, extra drinks, package switch: a manager reaches out
+  requests: PlannedRow | null; // extra drinks beyond the package: a manager reaches out
+  // Change order fields this update touched, old = what the client had before
+  // (the pending value if one was already pending). Empty if none changed.
+  changeOrder: FieldChange[];
+  // Every pending change order field after this update, old = event_data.
+  // Null when this update did not touch a change order field.
+  pendingChanges: FieldChange[] | null;
 }
 
 function diffDrinks(oldDrinks: Drink[], newDrinks: Drink[]): FieldChange[] {
@@ -465,7 +508,7 @@ function row(changes: FieldChange[], applied: boolean, within: boolean | null): 
 export function planUpdate(
   current: EventData,
   partial: EventData,
-  options: { managerRequest?: string | null; deadlines: Deadlines }
+  options: { managerRequest?: string | null; deadlines: Deadlines; pending?: FieldChange[] | null }
 ): UpdatePlan {
   const { deadlines } = options;
   const updates: EventData = {};
@@ -478,21 +521,20 @@ export function planUpdate(
     requests.push({ field: "manager_request", old: null, new: options.managerRequest.trim() });
   }
 
-  // Extending bar service is a manager request, a same length shift is not.
-  if ("bar_service_start" in updates || "bar_service_end" in updates) {
-    const oldStart = current.bar_service_start as string | undefined;
-    const oldEnd = current.bar_service_end as string | undefined;
-    const newStart = (updates.bar_service_start ?? oldStart) as string | undefined;
-    const newEnd = (updates.bar_service_end ?? oldEnd) as string | undefined;
-    if (calculateHours(newStart, newEnd) > calculateHours(oldStart, oldEnd)) {
-      requests.push({
-        field: "manager_request",
-        old: null,
-        new: `Extend bar service. Currently ${oldStart ?? "?"} to ${oldEnd ?? "?"}, requested ${newStart ?? "?"} to ${newEnd ?? "?"}`,
-      });
-      delete updates.bar_service_start;
-      delete updates.bar_service_end;
-    }
+  // Date, hours, guest count, package, address, and bartenders become a change
+  // order the client signs. They are held as pending, never applied here.
+  const pendingMap = new Map<string, FieldChange>();
+  for (const c of options.pending ?? []) pendingMap.set(c.field, c);
+  const changeOrder: FieldChange[] = [];
+  for (const key of CHANGE_ORDER_FIELDS) {
+    if (!(key in updates)) continue;
+    const value = updates[key];
+    delete updates[key];
+    const before = pendingMap.has(key) ? pendingMap.get(key)!.new : current[key];
+    if (sameValue(before, value)) continue; // already on file or already pending
+    changeOrder.push({ field: key, old: before ?? null, new: value });
+    if (sameValue(current[key], value)) pendingMap.delete(key); // back to the booked value
+    else pendingMap.set(key, { field: key, old: current[key] ?? null, new: value });
   }
 
   // Drinks beyond the package count are a manager request.
@@ -534,5 +576,7 @@ export function planUpdate(
     applied: row(now, true, true),
     late: row(late, false, false),
     requests: row(requests, false, null),
+    changeOrder,
+    pendingChanges: changeOrder.length > 0 ? [...pendingMap.values()] : null,
   };
 }

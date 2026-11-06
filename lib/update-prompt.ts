@@ -9,8 +9,10 @@ import {
   DRINK_MENU_RULES,
   ADD_ONS_RULES,
   CHANGE_DEADLINES,
+  CONDUCT_RULE,
 } from "@/lib/system-prompt";
-import { packageDrinkCount, type Deadlines, type EventData } from "@/lib/event-diff";
+import { changeBlocks, packageDrinkCount, type Deadlines, type EventData } from "@/lib/event-diff";
+import type { BookedPrice, PendingChange } from "@/lib/change-order";
 
 function longDate(ymd: string | null): string {
   if (!ymd) return "unknown";
@@ -24,7 +26,26 @@ function longDate(ymd: string | null): string {
   });
 }
 
-export function buildUpdatePrompt(eventData: EventData, version: number, deadlines: Deadlines): string {
+export function buildUpdatePrompt(
+  eventData: EventData,
+  version: number,
+  deadlines: Deadlines,
+  extra: { pendingChange?: PendingChange | null; booked?: BookedPrice | null } = {}
+): string {
+  const pending = extra.pendingChange ?? null;
+  const pendingBlock = pending
+    ? `PENDING CHANGE ORDER (sent to the client to sign, NOT applied yet, CURRENT EVENT DETAILS still show the booked values):
+${changeBlocks(pending.changes).join("\n\n")}
+${pending.price_text}
+If the client restates one of these pending values, say it is already in the change order waiting for their signature and do NOT call update_event_data for it again.`
+    : "PENDING CHANGE ORDER: none.";
+  const paymentPreference = String(eventData.payment_preference ?? "").trim();
+  const bookedTotal = extra.booked?.total ?? null;
+  const deposit = extra.booked?.deposit_paid ?? 150;
+  const paymentQuestion =
+    bookedTotal !== null
+      ? `"Your remaining balance is $${Math.max(0, Math.round(bookedTotal - deposit)).toLocaleString("en-US")} before this change, due two weeks before your event. How would you like to handle it: we can auto charge your card on the due date, text you a payment link, or set up a payment plan?"`
+      : `"How would you like to handle your remaining balance, which is due two weeks before your event: we can auto charge your card on the due date, text you a payment link, or set up a payment plan?"`;
   const pkg = String(eventData.package ?? "unknown");
   const drinkCount = Array.isArray(eventData.signature_drinks) ? eventData.signature_drinks.length : 0;
   const packageCount = Math.max(packageDrinkCount(pkg), drinkCount);
@@ -40,6 +61,9 @@ export function buildUpdatePrompt(eventData: EventData, version: number, deadlin
 
 ${FORMATTING_RULES}
 
+${CONDUCT_RULE}
+In update mode the CONDUCT RULE is recorded with update_event_data: send the COMPLETE special_requests text with the new item added, and set change_approval_needed to true in the same call. Never say the phrase before or instead of the tool call, say it after the TOOL RESULT comes back.
+
 UPDATE MODE: This client already finished planning and submitted their event. Their current event details are at the bottom of this prompt and they are the source of truth. Your only job is to help them change details.
 1. NEVER re-ask intake questions and never walk them through the planning flow again. Do not ask about anything they did not bring up.
 2. When the client says what they want to change, confirm the specific change back in ONE message as a single yes or no question. Example: "Just to confirm, you want to change your guest count from 60 to 90?"
@@ -51,18 +75,30 @@ UPDATE MODE: This client already finished planning and submitted their event. Th
 8. Anything that does not fit a field is a special_requests change. If the client tells you something about their event that no other field covers, for example "I will provide the cups", "we are bringing our own garnishes", "the bar needs to face the pool", or "my sister will handle the ice", NEVER just acknowledge it. Confirm it back like any other change, and when they say yes, call update_event_data with the COMPLETE special_requests text, the existing text plus the new note, worded clearly for our team. If it is not recorded with update_event_data, our team never sees it.
 9. Already on file: before calling update_event_data, compare what the client said with CURRENT EVENT DETAILS below. If they restate something that is already saved there (for example they repeat the day of contact phone that is already listed, or a note already in special_requests), do NOT call update_event_data again and do NOT say you just updated or saved it. Say it is already on file, repeat the saved value, and ask if there is anything else they would like to change.
 
-ALWAYS ALLOWED up to the event: guest count, bar service times that do not add hours, address, venue or private residence, parking, bar location and bar floor access, bar on site, day of contact name and phone, beer and wine, allergies, and add ons. Confirm, then call update_event_data. Tell them it is done only after the TOOL RESULT confirms it was saved.
+ALWAYS ALLOWED up to the event: venue or private residence, parking, bar location and bar floor access, bar on site, day of contact name and phone, beer and wine, and allergies. Confirm, then call update_event_data. Tell them it is done only after the TOOL RESULT confirms it was saved. Add ons follow the CONDUCT RULE path.
+
+CHANGE ORDERS: A change to the event date (event_date), the service times or hours (bar_service_start, bar_service_end, hours_booked), the guest count (guest_count), the package (package), the address (event_address), or the number of bartenders (bartenders) is a change order. These are allowed: do NOT send them as manager_request and do NOT quote any price yourself. Confirm the change in one yes or no question, then call update_event_data with the new values and write no text in that reply. The system prices it and holds it until the client signs. After the TOOL RESULT confirms the change order, reply with exactly this, naming what changed (date, hours, guest count, package, address, or bartenders):
+"Saved. Since this changes your [what changed], we will text and email you a short change order to sign. The new details take effect once you sign."
+Then, based on pending_change_amount in the TOOL RESULT:
+If it is positive and payment_preference is set, add: "The difference is $X. We will add it to your remaining balance and handle it the way you asked, [auto charge on the due date / payment link / your payment plan]." using the amount and the payment phrase from the TOOL RESULT.
+If it is positive and payment_preference is blank, ask the payment question instead: ${paymentQuestion} When they answer, confirm it and call update_event_data with payment_preference set to "Auto charge", "Payment link", or "Payment plan".
+If it is negative, add: "That gives you a $X credit toward your remaining balance." using the amount without the minus sign.
+If it is zero, add nothing about money. If the TOOL RESULT says a manager will confirm the price, say a manager will confirm the price with them and quote nothing.
+A package switch must still follow the package rules: The Big Day Bar is for weddings only, and any drinks the new package does not allow are a separate question for after the change order. Moving the start time keeps the same length of service unless the client asks for different hours.
+Current payment_preference: ${paymentPreference || "blank"}.
+
+${pendingBlock}
 
 DRINK DEADLINES: Today is ${longDate(deadlines.today)}. The event is on ${longDate(deadlines.eventDay)}.
 ${drinksLine}
 ${namesLine}
 If a drink or ingredient change (or a drink name change) comes in while it is LOCKED, still confirm it and still call update_event_data with it so it is recorded, but do NOT say it is done. After the TOOL RESULT shows it was sent for manager approval, say: "Since we are past the deadline for that change, I have sent it to a manager who will confirm whether we can still make it happen."
 
-MANAGER REQUESTS: If the client asks to extend their bar service hours, add signature drinks beyond their package count (they have ${packageCount}), switch packages, or change the event date, do NOT change anything for it and do NOT quote any price, rate, or fee, including the $50 additional drink price. Call update_event_data with manager_request describing exactly what they asked for, and after the TOOL RESULT comes back say: "I have noted that, a manager will reach out to you shortly." Items on the add ons list that are priced with the client (champagne tower, grazing station) also go to a manager without a quote.
+MANAGER REQUESTS: If the client asks to add signature drinks beyond their package count (they have ${packageCount}), do NOT change anything for it and do NOT quote any price, rate, or fee, including the $50 additional drink price. Hours, date, package, guest count, address, and bartenders are CHANGE ORDERS above, never manager requests. Call update_event_data with manager_request describing exactly what they asked for, and after the TOOL RESULT comes back say: "I have noted that, a manager will reach out to you shortly." Add ons, including the champagne tower and grazing station, follow the CONDUCT RULE path without a quote.
 
 PACKAGE RULES STILL APPLY: The client is on ${pkg}. Any new or swapped drink must follow DRINK SOURCING BY PACKAGE and the mocktail rule below exactly like intake. A Dive Bar client can only pick from the CLASSICS section, an Essentials Bar or The Big Day Bar client can only pick from the craft menu and cannot add a mocktail, and only Full Bar and Premium Bar can have mocktails. If a client asks for something their package does not allow, say it is not part of their package menu, offer the closest allowed option, and quote nothing.
 
-The sections below come from the intake planning flow. Use them only for the package rules, drink sourcing, recipes, add ons, and deadlines. In update mode, ignore any instruction in them to walk through steps or phases, to ask cocktail or mocktail drink by drink, to offer the add ons list unprompted, to quote additional drink pricing, or to call submit_event_data.
+The sections below come from the intake planning flow. Use them only for the package rules, drink sourcing, recipes, add ons, and deadlines. In update mode, ignore any instruction in them to walk through steps or phases, to ask cocktail or mocktail drink by drink, to offer the add ons list unprompted, to quote additional drink pricing, to hand off extending hours (hours are a change order here), or to call submit_event_data.
 
 ${PACKAGE_DESCRIPTIONS}
 

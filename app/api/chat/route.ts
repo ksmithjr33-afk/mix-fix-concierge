@@ -1,11 +1,12 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { SYSTEM_PROMPT } from "@/lib/system-prompt";
+import { buildIntakePrompt } from "@/lib/system-prompt";
 import { supabase } from "@/lib/supabase";
 import { buildUpdatePrompt } from "@/lib/update-prompt";
 import {
   approvalReason,
   changeBlocks,
   computeDeadlines,
+  isChangeOrderRow,
   UPDATABLE_FIELDS,
   type EventData,
 } from "@/lib/event-diff";
@@ -18,6 +19,7 @@ import {
 } from "@/lib/event-updates";
 import { UPDATE_OPENER } from "@/lib/update-mode-shared";
 import { deliverEventUpdates } from "@/lib/update-delivery";
+import { DEFAULT_DEPOSIT, money, paymentPhrase } from "@/lib/change-order";
 
 const anthropic = new Anthropic();
 
@@ -93,6 +95,16 @@ const submitEventDataTool: Anthropic.Tool = {
       menu_reference_photos: { type: ["boolean", "null"] },
       dual_bar_setup: { type: "boolean" },
       dive_menu_requested: { type: "boolean", default: false },
+      payment_preference: {
+        type: "string",
+        enum: ["Auto charge", "Payment link", "Payment plan", ""],
+        description: "How the client wants the remaining balance handled, from the PAYMENT STEP. Empty if they did not answer.",
+      },
+      change_approval_needed: {
+        type: "string",
+        enum: ["Yes", "No"],
+        description: "Yes if anything was passed along to the management team under the CONDUCT RULE.",
+      },
     },
     required: ["client_name", "package"],
   },
@@ -104,7 +116,7 @@ const submitProperties = submitEventDataTool.input_schema.properties as Record<s
 const updateEventDataTool: Anthropic.Tool = {
   name: "update_event_data",
   description:
-    "Record a change to this already submitted event. Call it only after the client confirmed the change. Include ONLY the fields that changed. When any drink changes, send the complete signature_drinks array. Anything the client tells you that no other field covers (for example 'I will provide the cups') goes in special_requests as the complete existing text plus the new note. Use manager_request for requests a manager must handle: extending hours, drinks beyond the package count, switching packages, or changing the event date.",
+    "Record a change to this already submitted event. Call it only after the client confirmed the change. Include ONLY the fields that changed. When any drink changes, send the complete signature_drinks array. Anything the client tells you that no other field covers (for example 'I will provide the cups') goes in special_requests as the complete existing text plus the new note. Date, service times or hours, guest count, package, address, and bartenders are change orders: send the new values in their fields, the system prices them and holds them until the client signs. Use manager_request only for drinks beyond the package count. Set change_approval_needed when you passed something along to management under the CONDUCT RULE.",
   input_schema: {
     type: "object",
     additionalProperties: false,
@@ -112,9 +124,22 @@ const updateEventDataTool: Anthropic.Tool = {
       ...Object.fromEntries(
         UPDATABLE_FIELDS.map((field) => [field, submitProperties[field] ?? { type: "string" }])
       ),
+      event_date: { type: "string", description: "New event date, written like the current one." },
+      hours_booked: { type: "number", description: "New number of service hours, when the client changes the length of service." },
+      bartenders: { type: "number", description: "New number of bartenders, only when the client asks for a different count." },
+      package: { type: "string", description: "New package name, exactly as listed in PACKAGES." },
+      payment_preference: {
+        type: "string",
+        enum: ["Auto charge", "Payment link", "Payment plan"],
+        description: "How the client wants the remaining balance handled.",
+      },
       manager_request: {
         type: "string",
-        description: "Exactly what the client asked for that a manager must handle. Quote no prices.",
+        description: "Drinks beyond the package count, exactly as the client asked. Quote no prices.",
+      },
+      change_approval_needed: {
+        type: "boolean",
+        description: "True when this call records something passed along to management under the CONDUCT RULE (in special_requests).",
       },
     },
   },
@@ -233,17 +258,35 @@ function updateToolResult(result: ApplyResult | null): string {
   }
   const parts = result.rows.map((r) => {
     const details = changeBlocks(r.changes).join("\n\n");
+    if (isChangeOrderRow(r)) {
+      if (!r.change_order) return `CHANGE ORDER CANCELED, the client is back to the booked details, nothing to sign:\n${details}`;
+      return `CHANGE ORDER SAVED, NOT APPLIED until the client signs it:\n${details}`;
+    }
     return r.applied
       ? `SAVED, the event is now version ${r.version}:\n${details}`
       : `NOT SAVED YET, sent to a manager for approval (${approvalReason(r)}):\n${details}`;
   });
+  if (result.changeOrderSent && result.pendingChange) {
+    const p = result.pendingChange;
+    const phrase = paymentPhrase(result.paymentPreference);
+    parts.push(
+      [
+        `CHANGE ORDER PRICING (the whole pending change order): ${p.price_text}`,
+        `pending_change_amount: ${p.amount === null ? "unknown, a manager will confirm the price" : `${p.amount} (${p.amount < 0 ? "credit of " : ""}${money(p.amount)})`}`,
+        `payment_preference: ${result.paymentPreference ? `${result.paymentPreference} (say "${phrase}")` : "blank"}`,
+      ].join("\n")
+    );
+  }
   return `TOOL RESULT:\n\n${parts.join("\n\n")}`;
 }
 
 function updateModeResponse(session: SessionRow, messages: ChatMessage[]) {
   const eventData = session.event_data as EventData;
   const deadlines = computeDeadlines(eventData.event_date ?? session.event_date);
-  const system = buildUpdatePrompt(eventData, session.version, deadlines);
+  const system = buildUpdatePrompt(eventData, session.version, deadlines, {
+    pendingChange: session.pending_change ?? null,
+    booked: session.booked_price ?? null,
+  });
   const history: Anthropic.MessageParam[] = messages.map((m: ChatMessage) => ({
     role: m.role as "user" | "assistant",
     content: m.content,
@@ -279,9 +322,14 @@ function updateModeResponse(session: SessionRow, messages: ChatMessage[]) {
         );
 
         if (toolUse) {
-          const { manager_request: managerRequest, ...partial } = toolUse.input as Record<string, unknown>;
+          const {
+            manager_request: managerRequest,
+            change_approval_needed: changeApprovalNeeded,
+            ...partial
+          } = toolUse.input as Record<string, unknown>;
           const result = await applyEventUpdate(session.id, partial, {
             managerRequest: typeof managerRequest === "string" ? managerRequest : null,
+            changeApprovalNeeded: changeApprovalNeeded === true,
           });
 
           if (result && result.rows.length > 0) {
@@ -337,7 +385,9 @@ function updateModeResponse(session: SessionRow, messages: ChatMessage[]) {
               ? "Sorry, that change did not go through. A manager will follow up with you."
               : result.rows.length === 0
                 ? "That is already on file. Anything else you would like to change?"
-                : result.rows.some((r) => r.applied)
+                : result.changeOrderSent && result.pendingChange
+                  ? "Saved. We will text and email you a short change order to sign. The new details take effect once you sign."
+                  : result.rows.some((r) => r.applied)
                   ? "That change is saved. Anything else you would like to change?"
                   : "I have sent that to a manager who will reach out to you shortly. Anything else you would like to change?";
             const chunk = fullText.trim() ? `\n\n${text}` : text;
@@ -374,17 +424,22 @@ export async function POST(request: Request) {
   const { messages, sessionId, clientName, email } = await request.json();
 
   // Sessions that already submitted their event get update mode instead of intake.
+  let session: SessionRow | null = null;
   if (sessionId) {
-    const session = await getSession(sessionId);
+    session = await getSession(sessionId);
     if (session?.status === "submitted" && session.event_data) {
       return updateModeResponse(session, messages);
     }
   }
 
+  // The payment step quotes the remaining balance: booked total minus the deposit.
+  const booked = session?.booked_price ?? null;
   const stream = anthropic.messages.stream({
     model: "claude-sonnet-4-6",
     max_tokens: 8192,
-    system: SYSTEM_PROMPT,
+    system: buildIntakePrompt(
+      booked ? { total: booked.total ?? null, deposit: booked.deposit_paid ?? DEFAULT_DEPOSIT } : null
+    ),
     tools: [submitEventDataTool],
     messages: messages.map((m: ChatMessage) => ({
       role: m.role as "user" | "assistant",

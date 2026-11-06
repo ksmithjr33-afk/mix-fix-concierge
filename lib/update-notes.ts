@@ -13,10 +13,12 @@
 //     Now: Jazzy Fries
 //
 // Unapplied rows are titled EVENT CHANGE REQUEST with a
-// "Needs manager approval: ..." line right under the title.
+// "Needs manager approval: ..." line right under the title. Change order rows
+// are titled CHANGE ORDER SENT with the price line under it.
 
 import { buildEventFields, buildNatalieSupplyList } from "@/lib/ghl-payload";
-import { approvalReason, changeBlocks, summarizeRow } from "@/lib/event-diff";
+import { approvalReason, changeBlocks, isChangeOrderRow, summarizeRow } from "@/lib/event-diff";
+import { pendingChangeFields } from "@/lib/change-order";
 import { parseEventDate } from "@/lib/event-date";
 import type { EventUpdateRow, SessionRow } from "@/lib/event-updates";
 
@@ -54,9 +56,18 @@ function clientLine(session: SessionRow | null): string {
 
 /** Plain text GHL note for one event_updates row. */
 export function buildUpdateNote(row: EventUpdateRow, session: SessionRow | null = null): string {
-  const lines = [row.applied ? `EVENT UPDATE v${row.version}` : "EVENT CHANGE REQUEST"];
-  const reason = approvalReason(row);
-  if (reason) lines.push(`Needs manager approval: ${reason}`);
+  const lines: string[] = [];
+  if (isChangeOrderRow(row) && !row.change_order) {
+    lines.push("CHANGE ORDER CANCELED", "Client went back to the booked details, nothing to sign");
+  } else if (isChangeOrderRow(row)) {
+    lines.push("CHANGE ORDER SENT", "Waiting on client signature, not applied yet");
+    if (row.change_order?.price_text) lines.push(row.change_order.price_text);
+  } else {
+    lines.push(row.applied ? `EVENT UPDATE v${row.version}` : "EVENT CHANGE REQUEST");
+    const reason = approvalReason(row);
+    if (reason) lines.push(`Needs manager approval: ${reason}`);
+  }
+  if (row.change_approval_needed) lines.push("Change approval needed: client asked for something outside the rules");
   lines.push(noteTimestamp(row.created_at));
   const client = clientLine(session);
   if (client) lines.push(client);
@@ -66,6 +77,8 @@ export function buildUpdateNote(row: EventUpdateRow, session: SessionRow | null 
 
 /** The plain text update_summary for a row, rebuilt from its changes so old rows get the current format. */
 export function buildUpdateSummary(row: EventUpdateRow): string {
+  // Change order rows keep the "Change order sent:" summary saved with them.
+  if (isChangeOrderRow(row) && row.summary) return row.summary;
   return summarizeRow(row);
 }
 
@@ -77,10 +90,17 @@ export function buildUpdatePayload(session: SessionRow, row: EventUpdateRow): Re
     ...cleanEventData,
     ...fields,
     natalie_supply_list: buildNatalieSupplyList(eventData) || null,
-    event_updated: row.applied,
+    event_updated: true,
+    event_update_applied: row.applied,
     update_version: row.version,
     update_summary: buildUpdateSummary(row),
     within_deadline: row.within_deadline,
+    // Change order rows carry the pending change as priced when it was sent.
+    needs_change_order: isChangeOrderRow(row) && !!row.change_order,
+    ...pendingChangeFields(isChangeOrderRow(row) ? row.change_order : session.pending_change),
+    payment_preference: (eventData.payment_preference as string | undefined) || "",
+    change_approval_needed: row.change_approval_needed ? "Yes" : "No",
+    booked_total: session.booked_price?.total ?? null,
   };
   if (!payload.email && session.email) payload.email = session.email;
   return payload;
