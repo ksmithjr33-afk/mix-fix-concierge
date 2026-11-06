@@ -97,8 +97,7 @@ const submitEventDataTool: Anthropic.Tool = {
       dive_menu_requested: { type: "boolean", default: false },
       payment_preference: {
         type: "string",
-        enum: ["Auto charge", "Payment link", "Payment plan", ""],
-        description: "How the client wants the remaining balance handled, from the PAYMENT STEP. Empty if they did not answer.",
+        description: 'How the client wants the remaining balance handled, from the PAYMENT STEP. One of: "Auto charge now", "Auto charge on <date>", "Auto charge on due date", "Payment link", "Payment plan: <split>". Empty if they did not answer.',
       },
       change_approval_needed: {
         type: "string",
@@ -130,8 +129,7 @@ const updateEventDataTool: Anthropic.Tool = {
       package: { type: "string", description: "New package name, exactly as listed in PACKAGES." },
       payment_preference: {
         type: "string",
-        enum: ["Auto charge", "Payment link", "Payment plan"],
-        description: "How the client wants the remaining balance handled.",
+        description: 'How the client wants the remaining balance handled. One of: "Auto charge now", "Auto charge on <date>", "Auto charge on due date", "Payment link", "Payment plan: <split>".',
       },
       manager_request: {
         type: "string",

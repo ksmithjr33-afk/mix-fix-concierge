@@ -258,10 +258,15 @@ export function pendingChangeFields(p: PendingChange | null | undefined): Record
 
 /** The phrase the bot reads back for a payment_preference value. */
 export function paymentPhrase(pref: unknown): string | null {
-  const s = String(pref ?? "").toLowerCase();
-  if (!s) return null;
-  if (s.includes("auto")) return "auto charge on the due date";
-  if (s.includes("link")) return "payment link";
-  if (s.includes("plan")) return "your payment plan";
-  return null;
+  const raw = String(pref ?? "").trim();
+  if (!raw) return null;
+  const s = raw.toLowerCase();
+  if (s === "auto charge now") return "auto charge now";
+  // "Auto charge" alone is the older stored value, which meant the due date.
+  if (s === "auto charge" || s === "auto charge on due date") return "auto charge on the due date";
+  if (s.startsWith("auto charge on ")) return `auto charge on ${raw.slice("auto charge on ".length)}`;
+  if (s.startsWith("payment link")) return "payment link";
+  if (s.startsWith("payment plan:")) return `your payment plan (${raw.slice("payment plan:".length).trim()})`;
+  if (s.startsWith("payment plan")) return "your payment plan";
+  return raw;
 }
