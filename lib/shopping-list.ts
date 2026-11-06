@@ -210,6 +210,13 @@ const DIVE_WELL_SHARES: [string, number][] = [
 ];
 const DIVE_WELL_POUR_OZ = 2;
 const DIVE_WELL_GUESTS_PER_TRIPLE_SEC = 50;
+// The classics also need these, at a set bottle count however many guests come.
+const DIVE_WELL_FIXED_BOTTLES: [string, number][] = [
+  ["dry vermouth", 1],
+  ["sweet vermouth", 1],
+  ["dark rum", 1],
+];
+const DIVE_WELL_GUESTS_PER_PROSECCO = 25;
 // Mixers the classics need beyond the Dive Bar baseline, sized at drink count 1.
 const DIVE_WELL_MIXERS = ["simple syrup", "lime juice", "lemon juice", "bitters"];
 
@@ -220,7 +227,8 @@ const DIVE_BASELINE_MIXERS = [
 ];
 
 function isDiveBaselineMixer(key: string): boolean {
-  if (key.includes("blood orange")) return false;
+  // Named like a baseline mixer, but a different product to buy.
+  if (key.includes("blood orange") || key.includes("topo chico")) return false;
   return DIVE_BASELINE_MIXERS.some((b) => key.includes(b));
 }
 
@@ -287,6 +295,7 @@ function getSpiritBottles(
     "absinthe": { top: "St. George Absinthe Verte", moderate: "Pernod" },
     "viuda de sanchez": { top: "Viuda de Sanchez", moderate: "Viuda de Sanchez" },
     "jack daniels": { top: "Jack Daniel's Old No. 7", moderate: "Jack Daniel's Old No. 7" },
+    "prosecco": { top: "La Marca", moderate: "Kirkland Prosecco" },
     "vanilla vodka": { top: "Absolut Vanilia", moderate: "Smirnoff Vanilla" },
     "dark rum": { top: "Goslings Black Seal", moderate: "Myers's" },
     "red wine": { top: "Malbec or Cabernet", moderate: "Any dry red" },
@@ -325,6 +334,7 @@ function getSpiritBottles(
     }
   }
 
+  const wellFixed = new Map(DIVE_WELL_FIXED_BOTTLES);
   const wellShares = new Map<string, number>();
   if (diveWell) {
     for (const [spiritKey, share] of DIVE_WELL_SHARES) {
@@ -334,6 +344,12 @@ function getSpiritBottles(
     }
     spiritOzTotals.set("triple sec", 0);
     spiritNames.set("triple sec", "Triple sec");
+    for (const [spiritKey] of DIVE_WELL_FIXED_BOTTLES) {
+      spiritOzTotals.set(spiritKey, 0);
+      spiritNames.set(spiritKey, spiritKey.charAt(0).toUpperCase() + spiritKey.slice(1));
+    }
+    spiritOzTotals.set("prosecco", 0);
+    spiritNames.set("prosecco", "Prosecco");
   }
   // Same hours scaling the mixers use: 4 hours = 1.0x, floor 0.75x.
   const wellHoursFactor = Math.max(0.75, (barHours && barHours > 0 ? barHours : 4) / 4);
@@ -364,6 +380,10 @@ function getSpiritBottles(
     let bottles: number;
     if (diveWell && spiritKey === "triple sec") {
       bottles = Math.ceil((guestCount * wellHoursFactor * eventMult) / DIVE_WELL_GUESTS_PER_TRIPLE_SEC);
+    } else if (diveWell && spiritKey === "prosecco") {
+      bottles = Math.ceil(guestCount / DIVE_WELL_GUESTS_PER_PROSECCO);
+    } else if (diveWell && wellFixed.has(spiritKey)) {
+      bottles = wellFixed.get(spiritKey)!;
     } else if (diveWell) {
       const share = wellShares.get(spiritKey) ?? 1;
       bottles = Math.ceil((guestCount * sf * wellHoursFactor * eventMult * ozPerDrink * SAFETY * share) / ML_PER_BOTTLE);
@@ -510,7 +530,6 @@ function canonicalIngredient(name: string): string {
   const k = name.toLowerCase();
   if (k === "soda") return "soda water";
   if (k.includes("cucumber")) return "cucumbers";
-  if (k.includes("green grape")) return "green grapes";
   return name;
 }
 
@@ -668,9 +687,10 @@ function getMixerQuantity(
     const count = Math.max(3, Math.ceil((guestCount * hoursFactor) / 15));
     return `${count} count`;
   }
-  if (key.includes("green grape")) {
-    const bags = Math.max(1, Math.ceil((guestCount * hoursFactor) / 50));
-    return `${bags} x 2 lb bag${bags === 1 ? "" : "s"}`;
+  if (key.includes("espresso")) {
+    // Brewed on site. A 10 oz can of ground espresso pulls about 40 one ounce shots.
+    const cans = Math.max(1, Math.ceil((guestCount * hoursFactor) / 40));
+    return `${cans} x 10 oz can${cans === 1 ? "" : "s"} ground espresso (Cafe Bustelo), brewed fresh`;
   }
   if (key.includes("prosecco")) {
     const bottles = Math.max(1, Math.ceil((guestCount * hoursFactor) / 15));
@@ -2481,7 +2501,7 @@ function routeMixerToStore(itemName: string): string {
   if (name.includes("smoked salt") || name.includes("rim sugar") || name.includes("cocktail rim")) return "Amazon";
   if (name.includes("rose water")) return "Amazon";
   if (name.includes("vanilla syrup") || name.includes("blood orange")) return "Specs";
-  if (name.includes("heavy cream") || name.includes("cucumber") || name.includes("green grape") || name.includes("mandarin soda")) return "Walmart";
+  if (name.includes("heavy cream") || name.includes("cucumber") || name.includes("espresso") || name.includes("mandarin soda")) return "Walmart";
 
   if (name.includes("finest call")) return "Specs";
   if (name.includes("real brand") || name.includes("real ")) return "Specs";
