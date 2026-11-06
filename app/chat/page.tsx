@@ -2,10 +2,13 @@
 
 import { useState, useRef, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import MenuCards from "@/app/menu-card";
+import type { MenuKey } from "@/lib/menu-markers";
 
 interface Message {
   role: "user" | "assistant";
   content: string;
+  menus?: MenuKey[];
 }
 
 export default function ChatPage() {
@@ -194,7 +197,19 @@ function ChatContent() {
 
       const decoder = new TextDecoder();
       let fullText = "";
+      let menus: MenuKey[] = [];
       let buffer = "";
+
+      const showAssistant = () =>
+        setMessages((prev) => {
+          const updated = [...prev];
+          updated[updated.length - 1] = {
+            role: "assistant",
+            content: fullText,
+            ...(menus.length > 0 ? { menus } : {}),
+          };
+          return updated;
+        });
 
       const processFrame = (data: string) => {
         if (data === "[DONE]") return;
@@ -203,6 +218,7 @@ function ChatContent() {
           error?: string;
           event?: string;
           eventData?: unknown;
+          menu?: MenuKey;
         };
         try {
           parsed = JSON.parse(data);
@@ -223,16 +239,15 @@ function ChatContent() {
           return;
         }
 
+        if (parsed.event === "menu" && parsed.menu) {
+          menus = [...menus, parsed.menu];
+          showAssistant();
+          return;
+        }
+
         if (typeof parsed.text === "string") {
           fullText += parsed.text;
-          setMessages((prev) => {
-            const updated = [...prev];
-            updated[updated.length - 1] = {
-              role: "assistant",
-              content: fullText,
-            };
-            return updated;
-          });
+          showAssistant();
         }
       };
 
@@ -350,8 +365,8 @@ function ChatContent() {
         {messages
           .filter((msg) => msg.content.length > 0)
           .map((msg, i, filtered) => (
+            <div key={i} className="space-y-2">
             <div
-              key={i}
               className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
             >
               <div
@@ -368,6 +383,8 @@ function ChatContent() {
                     <span className="inline-block w-1.5 h-4 bg-[#B5845A] ml-1 animate-pulse rounded-sm align-text-bottom" />
                   )}
               </div>
+            </div>
+            <MenuCards menus={msg.menus} className="w-[88%] sm:w-[75%] max-w-md" />
             </div>
           ))}
         <div ref={messagesEndRef} />

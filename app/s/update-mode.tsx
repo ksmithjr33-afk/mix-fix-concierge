@@ -3,10 +3,13 @@
 import { useEffect, useRef, useState } from "react";
 import EventSummary from "./event-summary";
 import { UPDATE_OPENER, updateGreeting } from "@/lib/update-mode-shared";
+import MenuCards from "@/app/menu-card";
+import type { MenuKey } from "@/lib/menu-markers";
 
 interface Message {
   role: "user" | "assistant";
   content: string;
+  menus?: MenuKey[];
 }
 
 type EventData = Record<string, unknown>;
@@ -75,7 +78,11 @@ export default function UpdateMode({
 
       const decoder = new TextDecoder();
       let fullText = "";
+      let menus: MenuKey[] = [];
       let buffer = "";
+
+      const showAssistant = () =>
+        setMessages([...visible, { role: "assistant", content: fullText, ...(menus.length > 0 ? { menus } : {}) }]);
 
       const processFrame = (data: string) => {
         if (data === "[DONE]") return;
@@ -86,6 +93,7 @@ export default function UpdateMode({
           eventData?: EventData;
           version?: number;
           updatedAt?: string | null;
+          menu?: MenuKey;
         };
         try {
           parsed = JSON.parse(data);
@@ -102,9 +110,14 @@ export default function UpdateMode({
           if (parsed.updatedAt) setUpdatedAt(parsed.updatedAt);
           return;
         }
+        if (parsed.event === "menu" && parsed.menu) {
+          menus = [...menus, parsed.menu];
+          showAssistant();
+          return;
+        }
         if (typeof parsed.text === "string") {
           fullText += parsed.text;
-          setMessages([...visible, { role: "assistant", content: fullText }]);
+          showAssistant();
         }
       };
 
@@ -158,7 +171,8 @@ export default function UpdateMode({
             {messages
               .filter((m) => m.content.length > 0 || (isStreaming && m.role === "assistant"))
               .map((msg, i) => (
-                <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+                <div key={i} className="space-y-2">
+                <div className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
                   <div
                     className={`max-w-[88%] px-3.5 py-2.5 rounded-2xl text-[15px] leading-relaxed whitespace-pre-wrap break-words ${
                       msg.role === "user"
@@ -170,6 +184,8 @@ export default function UpdateMode({
                       <span className="inline-block w-1.5 h-4 bg-[#B5845A] animate-pulse rounded-sm align-text-bottom" />
                     )}
                   </div>
+                </div>
+                <MenuCards menus={msg.menus} className="w-[88%] max-w-md" />
                 </div>
               ))}
           </div>

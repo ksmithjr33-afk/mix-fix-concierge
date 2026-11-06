@@ -19,6 +19,7 @@ import {
 } from "@/lib/event-updates";
 import { UPDATE_OPENER } from "@/lib/update-mode-shared";
 import { deliverEventUpdates } from "@/lib/update-delivery";
+import { allowedMenus, createMenuFilter, type MenuKey } from "@/lib/menu-markers";
 import { DEFAULT_DEPOSIT, impliedLine, money, paymentPhrase } from "@/lib/change-order";
 
 const anthropic = new Anthropic();
@@ -26,6 +27,18 @@ const anthropic = new Anthropic();
 interface ChatMessage {
   role: string;
   content: string;
+  menus?: MenuKey[]; // menu images shown with this message, never sent to the model
+}
+
+/** The stored assistant message, with the menu images it showed so a reload brings them back. */
+function assistantMessage(content: string, menus: MenuKey[]): ChatMessage {
+  return { role: "assistant", content, ...(menus.length > 0 ? { menus } : {}) };
+}
+
+/** The package from the hidden booking context, for chats without a session row. */
+function packageFromContext(messages: ChatMessage[]): string | null {
+  const first = messages[0]?.content ?? "";
+  return first.startsWith("CONTEXT") ? first.match(/Package: ([^,]+)/)?.[1]?.trim() ?? null : null;
 }
 
 // Completion is driven by this tool call, not by a literal marker the model has
@@ -306,13 +319,21 @@ function updateModeResponse(session: SessionRow, messages: ChatMessage[]) {
   const readable = new ReadableStream({
     async start(controller) {
       let fullText = "";
+      const menuFilter = createMenuFilter(
+        allowedMenus(eventData.package ?? session.package_type, eventData.dive_menu_requested === true),
+        (text) => {
+          fullText += text;
+          send(controller, { text });
+        },
+        (menu) => send(controller, { event: "menu", menu })
+      );
       try {
         for await (const event of stream) {
           if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
-            fullText += event.delta.text;
-            send(controller, { text: event.delta.text });
+            menuFilter.push(event.delta.text);
           }
         }
+        menuFilter.flush();
 
         const finalMessage = await stream.finalMessage();
         const toolUse = finalMessage.content.find(
@@ -368,18 +389,16 @@ function updateModeResponse(session: SessionRow, messages: ChatMessage[]) {
             ],
           });
           let separated = !fullText.trim();
-          let confirmation = "";
+          const beforeConfirmation = fullText.length;
           for await (const event of followUp) {
             if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
-              const chunk = separated ? event.delta.text : `\n\n${event.delta.text}`;
+              menuFilter.push(separated ? event.delta.text : `\n\n${event.delta.text}`);
               separated = true;
-              confirmation += chunk;
-              fullText += chunk;
-              send(controller, { text: chunk });
             }
           }
+          menuFilter.flush();
 
-          if (!confirmation.trim()) {
+          if (!fullText.slice(beforeConfirmation).trim()) {
             const text = !result
               ? "Sorry, that change did not go through. A manager will follow up with you."
               : result.rows.length === 0
@@ -395,10 +414,9 @@ function updateModeResponse(session: SessionRow, messages: ChatMessage[]) {
           }
         }
 
-        await saveUpdateMessages(session.id, [
-          ...messages,
-          { role: "assistant", content: fullText.trim() },
-        ]);
+        menuFilter.finish();
+
+        await saveUpdateMessages(session.id, [...messages, assistantMessage(fullText.trim(), menuFilter.menus())]);
 
         controller.enqueue(encoder.encode("data: [DONE]\n\n"));
         controller.close();
@@ -451,17 +469,24 @@ export async function POST(request: Request) {
   const readable = new ReadableStream({
     async start(controller) {
       let fullText = "";
+      const menuFilter = createMenuFilter(
+        allowedMenus(session?.package_type ?? packageFromContext(messages)),
+        (text) => {
+          fullText += text;
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ text })}\n\n`));
+        },
+        (menu) => controller.enqueue(encoder.encode(`data: ${JSON.stringify({ event: "menu", menu })}\n\n`))
+      );
       try {
         for await (const event of stream) {
           if (
             event.type === "content_block_delta" &&
             event.delta.type === "text_delta"
           ) {
-            fullText += event.delta.text;
-            const data = JSON.stringify({ text: event.delta.text });
-            controller.enqueue(encoder.encode(`data: ${data}\n\n`));
+            menuFilter.push(event.delta.text);
           }
         }
+        menuFilter.finish();
 
         // Inspect the assembled message for the completion tool call.
         const finalMessage = await stream.finalMessage();
@@ -475,7 +500,7 @@ export async function POST(request: Request) {
         if (sessionId) {
           const updatedMessages: ChatMessage[] = [
             ...messages,
-            { role: "assistant", content: closingText },
+            assistantMessage(closingText, menuFilter.menus()),
           ];
 
           await upsertConversationLog(

@@ -213,6 +213,17 @@ const DIVE_WELL_GUESTS_PER_TRIPLE_SEC = 50;
 // Mixers the classics need beyond the Dive Bar baseline, sized at drink count 1.
 const DIVE_WELL_MIXERS = ["simple syrup", "lime juice", "lemon juice", "bitters"];
 
+// Already on every Dive Bar list, so highballs and classics draw from these.
+const DIVE_BASELINE_MIXERS = [
+  "cranberry juice", "pineapple juice", "orange juice", "tonic",
+  "club soda", "soda water", "coke", "diet coke", "sprite", "ginger ale", "bottled water",
+];
+
+function isDiveBaselineMixer(key: string): boolean {
+  if (key.includes("blood orange")) return false;
+  return DIVE_BASELINE_MIXERS.some((b) => key.includes(b));
+}
+
 /** True when a Dive Bar booking has no alcoholic signature drinks (no menu was built). */
 function usesDiveWell(eventData: EventData, drinks: SignatureDrink[]): boolean {
   return isDiveBar(eventData.package) && drinks.filter(d => !d.is_mocktail).length === 0;
@@ -275,6 +286,12 @@ function getSpiritBottles(
     "dry vermouth": { top: "Dolin Dry", moderate: "Martini & Rossi" },
     "absinthe": { top: "St. George Absinthe Verte", moderate: "Pernod" },
     "viuda de sanchez": { top: "Viuda de Sanchez", moderate: "Viuda de Sanchez" },
+    "jack daniels": { top: "Jack Daniel's Old No. 7", moderate: "Jack Daniel's Old No. 7" },
+    "vanilla vodka": { top: "Absolut Vanilia", moderate: "Smirnoff Vanilla" },
+    "dark rum": { top: "Goslings Black Seal", moderate: "Myers's" },
+    "red wine": { top: "Malbec or Cabernet", moderate: "Any dry red" },
+    "maraschino liqueur": { top: "Luxardo Maraschino", moderate: "Luxardo Maraschino" },
+    "creme de violette": { top: "Rothman & Winter", moderate: "Rothman & Winter" },
     "jack daniels blackberry": { top: "Jack Daniel's Tennessee Blackberry", moderate: "Jack Daniel's Tennessee Blackberry" },
     "frangelico": { top: "Frangelico", moderate: "Frangelico" },
     "sambuca": { top: "Romana Sambuca", moderate: "Romana Sambuca" },
@@ -395,7 +412,8 @@ function isLikelySpirit(ingName: string, baseSpirit: string): boolean {
     "aperol", "campari",
     "kahlua", "kahlúa", "mr black", "coffee liqueur",
     "raspberry liqueur", "chambord", "framboise",
-    "elderflower", "st-germain", "st germain",
+    "elderflower", "st-germain", "st germain", "st. germain",
+    "red wine",
     "coconut liqueur", "kalani",
     "amaretto", "disaronno",
     "lillet", "lillet blanc",
@@ -420,14 +438,20 @@ function isLikelySpirit(ingName: string, baseSpirit: string): boolean {
     // Bot recipes write things like "1 oz pear liqueur", "1 oz banana liqueur" etc.
     "liqueur",
   ];
-  if (baseSpirit && ingName.includes(baseSpirit.toLowerCase())) return true;
-  return spiritKeywords.some(kw => ingName.includes(kw));
+  // "ginger" contains "gin": ginger beer, ale, and syrup are mixers, not spirits.
+  const name = ingName.toLowerCase().replace(/ginger/g, "");
+  if (baseSpirit && name.includes(baseSpirit.toLowerCase())) return true;
+  return spiritKeywords.some(kw => name.includes(kw));
 }
 
 /** Normalize spirit names so the same spirit from different drinks groups together */
 function normalizeSpiritName(ingName: string, baseSpirit: string): string {
   const lower = ingName.toLowerCase();
 
+  if (lower.includes("vanilla vodka")) return "vanilla vodka";
+  if (lower.includes("red wine")) return "red wine";
+  if (lower.includes("maraschino")) return "maraschino liqueur";
+  if (lower.includes("violette")) return "creme de violette";
   if (lower.includes("triple sec") || lower.includes("cointreau")) return "triple sec";
   if (lower.includes("grand marnier")) return "grand marnier";
   if (lower.includes("dry curacao") || lower.includes("dry curaçao")) return "dry curacao";
@@ -436,7 +460,7 @@ function normalizeSpiritName(ingName: string, baseSpirit: string): string {
   if (lower.includes("campari")) return "campari";
   if (lower.includes("kahlua") || lower.includes("kahlúa") || lower.includes("mr black") || lower.includes("coffee liqueur")) return "coffee liqueur";
   if (lower.includes("chambord") || lower.includes("raspberry liqueur") || lower.includes("framboise")) return "raspberry liqueur";
-  if (lower.includes("elderflower") || lower.includes("st-germain") || lower.includes("st germain")) return "elderflower liqueur";
+  if (lower.includes("elderflower") || lower.includes("st-germain") || lower.includes("st germain") || lower.includes("st. germain")) return "elderflower liqueur";
   if (lower.includes("amaretto") || lower.includes("disaronno")) return "amaretto";
   if (lower.includes("lillet")) return "lillet blanc";
   if (lower.includes("hibiscus liqueur")) return "hibiscus liqueur";
@@ -453,7 +477,7 @@ function normalizeSpiritName(ingName: string, baseSpirit: string): string {
   if (lower.includes("dry vermouth")) return "dry vermouth";
   if (lower.includes("absinthe")) return "absinthe";
   if (lower.includes("viuda de sanchez")) return "viuda de sanchez";
-  if (lower.includes("jack daniel")) return "jack daniels blackberry";
+  if (lower.includes("jack daniel")) return lower.includes("blackberry") ? "jack daniels blackberry" : "jack daniels";
 
   // Tequila variants: keep blanco and reposado as separate IF both are specified.
   // If recipe just says "tequila" with no qualifier, normalize to base "tequila"
@@ -468,11 +492,26 @@ function normalizeSpiritName(ingName: string, baseSpirit: string): string {
   if (lower.includes("coconut rum") || lower.includes("malibu")) return "coconut rum";
   if (lower.includes("coconut liqueur")) return "coconut liqueur";
   if (lower.includes("gold rum")) return "gold rum";
+  if (lower.includes("dark rum")) return "dark rum";
   if (lower.includes("jamaican rum")) return "jamaican rum";
   if (lower.includes("empress gin")) return "gin";
   if (lower.includes("bourbon")) return "bourbon";
+  // Any other liqueur is its own bottle, not more of the drink's base spirit.
+  if (lower.includes("liqueur")) return lower;
 
   return baseSpirit.toLowerCase();
+}
+
+/**
+ * One shopping line per ingredient: produce written with a count or prep
+ * ("3 cucumber slices muddled") and a plain "soda" both collapse to a single name.
+ */
+function canonicalIngredient(name: string): string {
+  const k = name.toLowerCase();
+  if (k === "soda") return "soda water";
+  if (k.includes("cucumber")) return "cucumbers";
+  if (k.includes("green grape")) return "green grapes";
+  return name;
 }
 
 /** Count how many signature drinks contain ginger beer */
@@ -556,7 +595,7 @@ function getMixersAndIngredients(
       // Strip prep prefix from the display name and use the cleaned version
       // Detect splash/dash usage to scale quantities down
       const isSplash = /^(splash of|pinch of|dash of|drop of|squeeze of)\s+/i.test(ing);
-      const cleanedIng = ing.replace(/^(splash of|pinch of|dash of|drop of|squeeze of|muddled?|top with|topped with|garnish with|garnished with|float of)\s+/i, "").trim();
+      const cleanedIng = canonicalIngredient(ing.replace(/^(splash of|pinch of|dash of|drop of|squeeze of|muddled?|top with|topped with|garnish with|garnished with|float of)\s+/i, "").trim());
       const cleanedKey = cleanedIng.toLowerCase().trim();
       if (seen.has(cleanedKey)) continue;
       seen.add(key);
@@ -600,6 +639,44 @@ function getMixerQuantity(
   const eventMult = getEventTypeMultiplier(eventType);
   const hoursFactor = Math.max(0.75, (hours && hours > 0 ? hours : 4) / 4) * eventMult;
 
+  // ===== MENU SPECIFIC, checked first because broader rules below also match these =====
+  if (key.includes("blood orange")) {
+    const bottles = Math.max(1, Math.ceil((guestCount * hoursFactor) / 20));
+    return `${bottles} x 32 oz bottle${bottles === 1 ? "" : "s"}`;
+  }
+  if (key.includes("passion fruit puree") || key.includes("passionfruit puree")) {
+    const bottles = Math.max(1, Math.ceil((guestCount * hoursFactor) / 60));
+    return `${bottles} x 1 liter bottle${bottles === 1 ? "" : "s"}`;
+  }
+  if (key.includes("pumpkin spice") || key.includes("vanilla syrup") || key.includes("ginger syrup")) {
+    const bottles = Math.max(1, Math.ceil((guestCount * hoursFactor) / 50));
+    return `${bottles} x 750 ml bottle${bottles === 1 ? "" : "s"}`;
+  }
+  if (key.includes("heavy cream")) {
+    const cartons = Math.max(1, Math.ceil((guestCount * hoursFactor) / 60));
+    return `${cartons} x 32 oz carton${cartons === 1 ? "" : "s"}`;
+  }
+  if (key.includes("topo chico")) {
+    const cases = Math.max(1, Math.ceil((guestCount * hoursFactor) / 60));
+    return `${cases} case${cases === 1 ? "" : "s"} (24 pack${cases === 1 ? "" : "s"}, 12 oz bottles)`;
+  }
+  if (key.includes("mandarin soda")) {
+    const cases = Math.max(1, Math.ceil((guestCount * hoursFactor) / 60));
+    return `${cases} case${cases === 1 ? "" : "s"} (24 pack${cases === 1 ? "" : "s"}, 12.5 oz Jarritos)`;
+  }
+  if (key.includes("cucumber")) {
+    const count = Math.max(3, Math.ceil((guestCount * hoursFactor) / 15));
+    return `${count} count`;
+  }
+  if (key.includes("green grape")) {
+    const bags = Math.max(1, Math.ceil((guestCount * hoursFactor) / 50));
+    return `${bags} x 2 lb bag${bags === 1 ? "" : "s"}`;
+  }
+  if (key.includes("prosecco")) {
+    const bottles = Math.max(1, Math.ceil((guestCount * hoursFactor) / 15));
+    return `${bottles} x 750 ml bottle${bottles === 1 ? "" : "s"}`;
+  }
+
   // ===== SYRUPS =====
   if (key.includes("simple syrup")) {
     const bottles = Math.max(1, Math.ceil((guestCount * hoursFactor) / 33));
@@ -616,7 +693,6 @@ function getMixerQuantity(
   if (key.includes("grenadine")) return "1 x 1 liter bottle";
   if (key.includes("lavender") && key.includes("syrup")) return "1 x 12.7 oz bottle";
   if (key.includes("butterscotch") && key.includes("syrup")) return "1 x 12.7 oz bottle";
-  if (key.includes("ginger syrup")) return "1 x 1 liter bottle";
 
   // ===== JUICES =====
   if (key.includes("lime juice")) {
@@ -797,7 +873,8 @@ function getMixerQuantity(
     return `${bottles} x 1 liter bottle${bottles === 1 ? "" : "s"}`;
   }
   if (key.includes("rose water")) {
-    const bottles = Math.max(1, Math.ceil((guestCount * hoursFactor) / 15));
+    // 0.25 oz a drink, so an 8 oz bottle pours about 30.
+    const bottles = Math.max(1, Math.ceil((guestCount * hoursFactor) / 30));
     return `${bottles} x 8 oz bottle${bottles === 1 ? "" : "s"}`;
   }
   if (key.includes("coconut cream") || key.includes("coconut milk") || key.includes("cream of coconut")) {
@@ -1150,6 +1227,8 @@ function isSodaOrGingerBeer(key: string): boolean {
   return (
     key.includes("ginger beer") ||
     key.includes("ginger ale") ||
+    key.includes("topo chico") ||
+    key.includes("mandarin soda") ||
     key.includes("club soda") ||
     key.includes("soda water") ||
     key.includes("sparkling water") ||
@@ -1292,10 +1371,10 @@ export function generateNatalieSupplyList(eventData: EventData): string {
     for (const ing of ingredients) {
       // Detect splash usage BEFORE stripping modifiers
       const isSplash = /^(splash of|pinch of|dash of|drop of|squeeze of)\s+/i.test(ing.replace(/^[\d.]+\s*oz\s*/i, ""));
-      const ingName = ing
+      const ingName = canonicalIngredient(ing
         .replace(/^[\d.]+\s*oz\s*/i, "")
         .replace(/^(splash of|pinch of|dash of|drop of|squeeze of|muddled?|top with|topped with|garnish with|garnished with|float of)\s+/i, "")
-        .trim();
+        .trim());
       const key = ingName.toLowerCase();
       if (!key) continue;
       if (seenMixers.has(key)) continue;
@@ -1517,10 +1596,6 @@ function generateDiveBarSupplyList(eventData: EventData): string {
   // deduped against the baseline mixers above so we do not list them twice.
   // e.g. a margarita adds lime juice, a lemon drop adds lemon juice and simple syrup,
   // an old fashioned adds bitters and simple syrup.
-  const baselineMixerKeys = [
-    "cranberry juice", "pineapple juice", "orange juice", "tonic",
-    "club soda", "coke", "diet coke", "sprite", "ginger ale", "bottled water",
-  ];
   // The shared mixer path returns labels that may still carry the oz/dash prefix
   // ("1 oz lime juice", "2 dashes bitters"). Clean those to plain ingredient names
   // for display, drop rim entries (rims are not mixers), dedupe by cleaned name, and
@@ -1544,7 +1619,7 @@ function generateDiveBarSupplyList(eventData: EventData): string {
     const label = cleanMixerLabel(m.item);
     const key = label.toLowerCase();
     if (!key || key.endsWith(" rim")) continue;
-    if (baselineMixerKeys.some((b) => key === b || key.includes(b))) continue;
+    if (isDiveBaselineMixer(key)) continue;
     if (seenRecipeMixers.has(key)) continue;
     seenRecipeMixers.add(key);
     recipeMixers.push({ ...m, item: label });
@@ -1603,6 +1678,7 @@ function calculateProduceFromGarnishes(drinks: SignatureDrink[], guestCount: num
     if (g.includes("pineapple")) garnishCounts["pineapple"] = (garnishCounts["pineapple"] || 0) + 1;
     if (g.includes("watermelon")) garnishCounts["watermelon"] = (garnishCounts["watermelon"] || 0) + 1;
     if (g.includes("cucumber")) garnishCounts["cucumber"] = (garnishCounts["cucumber"] || 0) + 1;
+    if (g.includes("olive")) garnishCounts["olive"] = (garnishCounts["olive"] || 0) + 1;
     if (g.includes("jalapeno") || g.includes("jalapeño")) garnishCounts["jalapeno"] = (garnishCounts["jalapeno"] || 0) + 1;
     if (g.includes("habanero")) garnishCounts["habanero"] = (garnishCounts["habanero"] || 0) + 1;
     if (g.includes("cherry") || g.includes("cherries") || g.includes("maraschino")) garnishCounts["cherry"] = (garnishCounts["cherry"] || 0) + 1;
@@ -1664,6 +1740,11 @@ function calculateProduceFromGarnishes(drinks: SignatureDrink[], guestCount: num
       case "cucumber": {
         const cukes = Math.max(3, Math.ceil(servings / 15));
         items.push({ item: "Cucumbers", quantity: `${cukes} count` });
+        break;
+      }
+      case "olive": {
+        const jars = Math.max(1, Math.ceil(servings / 40));
+        items.push({ item: "Cocktail olives", quantity: `${jars} x 10 oz jar${jars === 1 ? "" : "s"}` });
         break;
       }
       case "jalapeno": {
@@ -1787,10 +1868,10 @@ export function formatShoppingListForNote(
       // Detect splash/dash usage BEFORE stripping modifiers
       const isSplash = /^(splash of|pinch of|dash of|drop of|squeeze of)\s+/i.test(ing.replace(/^[\d.]+\s*oz\s*/i, ""));
       // Strip oz prefix and prep modifiers ("splash of", "muddled", "top with", "pinch of", etc.)
-      const ingName = ing
+      const ingName = canonicalIngredient(ing
         .replace(/^[\d.]+\s*oz\s*/i, "")
         .replace(/^(splash of|pinch of|dash of|drop of|squeeze of|muddled?|top with|topped with|garnish with|garnished with|float of)\s+/i, "")
-        .trim();
+        .trim());
       const key = ingName.toLowerCase();
       if (!key) continue;
       if (seenMixers.has(key)) continue;
@@ -2049,10 +2130,10 @@ export function generateClientShoppingListEmail(
         // Detect splash usage BEFORE stripping modifiers
         const isSplash = /^(splash of|pinch of|dash of|drop of|squeeze of)\s+/i.test(ing.replace(/^[\d.]+\s*oz\s*/i, ""));
         // Strip oz prefix AND prep modifiers
-        const ingName = ing
+        const ingName = canonicalIngredient(ing
           .replace(/^[\d.]+\s*oz\s*/i, "")
           .replace(/^(splash of|pinch of|dash of|drop of|squeeze of|muddled?|top with|topped with|garnish with|garnished with|float of)\s+/i, "")
-          .trim();
+          .trim());
         const key = ingName.toLowerCase();
         if (!key) continue;
         if (seenMixers.has(key)) continue;
@@ -2269,14 +2350,15 @@ export function generateOrderTeamEmail(
     const ingredients = normalizeIngredients(drink.ingredients);
     for (const ing of ingredients) {
       const isSplash = /^(splash of|pinch of|dash of|drop of|squeeze of)\s+/i.test(ing.replace(/^[\d.]+\s*oz\s*/i, ""));
-      const ingName = ing
+      const ingName = canonicalIngredient(ing
         .replace(/^[\d.]+\s*oz\s*/i, "")
         .replace(/^(splash of|pinch of|dash of|drop of|squeeze of|muddled?|top with|topped with|garnish with|garnished with|float of)\s+/i, "")
-        .trim();
+        .trim());
       const key = ingName.toLowerCase();
       if (!key) continue;
       if (seenMixers.has(key)) continue;
       if (isLikelySpirit(key, drink.base_spirit?.toLowerCase() ?? "")) continue;
+      if (isDiveBar(pkg) && isDiveBaselineMixer(key)) continue;
 
       const aromaticsOnly = ["salt", "pepper", "bitters", "kosher salt", "sea salt", "black pepper", "white pepper"];
       if (aromaticsOnly.includes(key)) continue;
@@ -2398,6 +2480,8 @@ function routeMixerToStore(itemName: string): string {
   if (name.includes("dried flower") || name.includes("dried lavender") || name.includes("edible flower") || name.includes("edible glitter")) return "Amazon";
   if (name.includes("smoked salt") || name.includes("rim sugar") || name.includes("cocktail rim")) return "Amazon";
   if (name.includes("rose water")) return "Amazon";
+  if (name.includes("vanilla syrup") || name.includes("blood orange")) return "Specs";
+  if (name.includes("heavy cream") || name.includes("cucumber") || name.includes("green grape") || name.includes("mandarin soda")) return "Walmart";
 
   if (name.includes("finest call")) return "Specs";
   if (name.includes("real brand") || name.includes("real ")) return "Specs";
@@ -2446,6 +2530,7 @@ function brandPreferenceForItem(itemName: string): string | null {
   if (n.includes("lemon juice")) return "RealLemon brand";
   if (n.includes("pomegranate juice")) return "POM Wonderful";
   if (n.includes("ginger beer")) return "Goslings";
+  if (n.includes("blood orange")) return null;
   if (n.includes("cranberry juice") || n.includes("orange juice") || n.includes("pineapple juice") || n.includes("grapefruit juice")) {
     return "Kirkland or GV";
   }
