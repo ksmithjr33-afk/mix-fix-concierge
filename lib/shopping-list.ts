@@ -220,6 +220,24 @@ const DIVE_WELL_GUESTS_PER_PROSECCO = 25;
 // Mixers the classics need beyond the Dive Bar baseline, sized at drink count 1.
 const DIVE_WELL_MIXERS = ["simple syrup", "lime juice", "lemon juice", "bitters"];
 
+/** Topo Chico comes in cases of 12, one case per 20 guests. */
+function topoChicoCases(guestCount: number): string {
+  const cases = Math.max(1, Math.ceil(guestCount / 20));
+  return `${cases} case${cases === 1 ? "" : "s"} of 12 (12 oz bottles)`;
+}
+
+/** Well mixers sized by guest count alone, not by hours or event type. */
+function diveWellSetMixers(guestCount: number): { item: string; quantity: string }[] {
+  const bottles = (n: number) => `${n} bottle${n === 1 ? "" : "s"}`;
+  return [
+    { item: "ginger beer", quantity: bottles(Math.max(1, Math.ceil(guestCount / 10))) },
+    { item: "grapefruit soda", quantity: bottles(Math.max(1, Math.ceil(guestCount / 15))) },
+    { item: "grenadine", quantity: bottles(1) },
+    { item: "agave nectar", quantity: bottles(1) },
+    { item: "Topo Chico", quantity: topoChicoCases(guestCount) },
+  ];
+}
+
 // Already on every Dive Bar list, so highballs and classics draw from these.
 const DIVE_BASELINE_MIXERS = [
   "cranberry juice", "pineapple juice", "orange juice", "tonic",
@@ -675,10 +693,7 @@ function getMixerQuantity(
     const cartons = Math.max(1, Math.ceil((guestCount * hoursFactor) / 60));
     return `${cartons} x 32 oz carton${cartons === 1 ? "" : "s"}`;
   }
-  if (key.includes("topo chico")) {
-    const cases = Math.max(1, Math.ceil((guestCount * hoursFactor) / 60));
-    return `${cases} case${cases === 1 ? "" : "s"} (24 pack${cases === 1 ? "" : "s"}, 12 oz bottles)`;
-  }
+  if (key.includes("topo chico")) return topoChicoCases(guestCount);
   if (key.includes("mandarin soda")) {
     const cases = Math.max(1, Math.ceil((guestCount * hoursFactor) / 60));
     return `${cases} case${cases === 1 ? "" : "s"} (24 pack${cases === 1 ? "" : "s"}, 12.5 oz Jarritos)`;
@@ -1629,11 +1644,14 @@ function generateDiveBarSupplyList(eventData: EventData): string {
   const seenRecipeMixers = new Set<string>();
   const recipeMixers: ShoppingListItem[] = [];
   const recipeMixerSource: ShoppingListItem[] = usesDiveWell(eventData, drinks)
-    ? DIVE_WELL_MIXERS.map((m) => ({
-        category: "Mixers & Ingredients",
-        item: m,
-        quantity: getNatalieMixerQuantity(m, guestCount, 0, 1, false, hours, eventData.event_type),
-      }))
+    ? [
+        ...DIVE_WELL_MIXERS.map((m) => ({
+          category: "Mixers & Ingredients",
+          item: m,
+          quantity: getNatalieMixerQuantity(m, guestCount, 0, 1, false, hours, eventData.event_type),
+        })),
+        ...diveWellSetMixers(guestCount).map((m) => ({ category: "Mixers & Ingredients", ...m })),
+      ]
     : getMixersAndIngredients(drinks, guestCount, hours, eventData.event_type);
   for (const m of recipeMixerSource) {
     const label = cleanMixerLabel(m.item);
@@ -2412,6 +2430,11 @@ export function generateOrderTeamEmail(
       seenMixers.add(m);
       const quantity = getNatalieMixerQuantity(m, guestCount, 0, 1, false, hours, eventData.event_type);
       const label = m.charAt(0).toUpperCase() + m.slice(1);
+      const brand = brandPreferenceForItem(label);
+      buckets[routeMixerToStore(label)].push(`- ${label} — ${quantity}${brand ? ` (${brand})` : ""}`);
+    }
+    for (const { item, quantity } of diveWellSetMixers(guestCount)) {
+      const label = item.charAt(0).toUpperCase() + item.slice(1);
       const brand = brandPreferenceForItem(label);
       buckets[routeMixerToStore(label)].push(`- ${label} — ${quantity}${brand ? ` (${brand})` : ""}`);
     }
