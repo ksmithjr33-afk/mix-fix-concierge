@@ -15,7 +15,7 @@ registerHooks({
   },
 });
 
-const { DRINK_MENU_RULES } = await import("../lib/system-prompt.ts");
+const { DRINK_MENU_RULES, SYSTEM_PROMPT: DRINK_SOURCING_AND_PACKAGE_TEXT } = await import("../lib/system-prompt.ts");
 const list = await import("../lib/shopping-list.ts");
 
 let failed = 0;
@@ -80,6 +80,20 @@ check(
     !!otherLine("RUM", "GIN", "Mai Tai")
 );
 
+const NOT_ON_DIVE = "That one is not part of the Dive Bar package";
+const autoFill = lines.find((l: string) => l.startsWith("AUTO FILL BY PACKAGE:")) ?? "";
+for (const drink of ["Espresso Martini", "Mojito", "Mint Julep", "Bloody Mary", "Mai Tai"]) {
+  check(`${drink} gets the flat answer on Dive Bar`, new RegExp(`NEVER available on Dive Bar[^.]*\\b${drink}\\b`).test(autoFill), autoFill.slice(0, 200));
+}
+check("Dive Bar flat answer offers classics and asks for no recipe", autoFill.includes(`"${NOT_ON_DIVE}" and offer drinks from the CLASSICS section instead. Do not ask for a recipe.`));
+const neitherLine = lines.find((l: string) => l.startsWith("Only a drink on neither")) ?? "";
+check("Exclusion line gives Dive Bar the flat answer", neitherLine.includes(NOT_ON_DIVE) && neitherLine.includes("Do not ask for a recipe."), neitherLine);
+check("Exclusion line no longer sends these drinks off list on Dive Bar", !neitherLine.includes("handled as an off list drink"));
+check(
+  "Dive Bar package flow bars the four from signature picks",
+  DRINK_SOURCING_AND_PACKAGE_TEXT.includes("never Espresso Martini, French Connection, Aperol Spritz, Mojito, Mint Julep, Bloody Mary, or Mai Tai")
+);
+
 const frozen = lines.find((l: string) => l.startsWith("ON THE ROCKS, NEVER FROZEN:")) ?? "";
 check("Frozen rule names both drinks", frozen.includes("Pina Colada and Daiquiri are served on the rocks, never frozen"), frozen);
 check("Frozen rule gives the answer", frozen.includes("We serve that one on the rocks, we do not do frozen drinks."));
@@ -129,8 +143,8 @@ const lineWith = (text: string, word: string) =>
 const full = lists(event("Full Bar", [PINA, MOJITO, BLOODY]));
 const expected: [string, RegExp][] = [
   ["coconut cream", /coconut cream — 4 x 16\.9 oz cans/i],
-  ["fresh mint", /fresh mint — 3 bunches/i],
-  ["tomato juice", /tomato juice — 9 x 46 oz cans/i],
+  ["fresh mint", /fresh mint — 4 bunches/i],
+  ["tomato juice", /tomato juice — 3 x 46 oz cans/i],
   ["worcestershire", /worcestershire — 1 x 10 oz bottle/i],
   ["hot sauce", /hot sauce — 1 x 5 oz bottle/i],
   ["celery", /celery — 3 bunches/i],
@@ -159,6 +173,14 @@ check(
   /fresh mint/i.test(lists(event("Full Bar", [{ ...MOJITO, garnish: "" }]))["supply list"])
 );
 
+const mintBunches = (drinks: object[]) =>
+  Number(lineWith(lists(event("Full Bar", drinks))["supply list"], "fresh mint").match(/(\d+) bunches/)?.[1]);
+const GARNISH_MINT = { name: "Garnish only", base_spirit: "rum", ingredients: ["2 oz rum", "0.75 oz lime juice"], garnish: "mint" };
+const NO_MINT = { name: "No mint", base_spirit: "gin", ingredients: ["2 oz gin", "0.75 oz lemon juice"], garnish: "" };
+check("Mojito for 100 guests at the 3 drink split is 4 to 5 bunches", [4, 5].includes(mintBunches([MOJITO, NO_MINT, BLOODY])), String(mintBunches([MOJITO, NO_MINT, BLOODY])));
+check("Garnish only mint stays at the garnish rate", mintBunches([GARNISH_MINT, NO_MINT, BLOODY]) === 3, String(mintBunches([GARNISH_MINT, NO_MINT, BLOODY])));
+check("Muddled and garnish mint drinks add up", mintBunches([MOJITO, GARNISH_MINT, BLOODY]) === 6, String(mintBunches([MOJITO, GARNISH_MINT, BLOODY])));
+
 const wrongLine = /(ice|rocks|shaken|wedge|celery|pepper|garnish|mint)[^<\n—]*— \d+ x 1 liter bottle/i;
 for (const [name, text] of Object.entries(lists(event("Full Bar", [JULEP, ...MESSY])))) {
   check(`${name} prints no liter bottle of ice, garnish, or serving notes`, !wrongLine.test(text), text.match(wrongLine)?.[0]);
@@ -173,6 +195,13 @@ check(
   "Dive Bar well stays at 1 bottle coconut cream for a big party",
   /coconut cream — 1 bottle/i.test(lists(event("Dive Bar", [], 300))["supply list"])
 );
+
+for (const [guests, whole] of [[25, 1], [50, 1], [100, 2], [300, 6]]) {
+  for (const [name, text] of Object.entries(lists(event("Dive Bar", [], guests)))) {
+    check(`Dive Bar no menu ${name} has ${whole} pineapple for ${guests} guests`, new RegExp(`pineapple — ${whole} whole`, "i").test(text), lineWith(text, "pineapple —") || "no line");
+  }
+}
+check("Dive Bar with a menu does not get the well pineapple line", !/pineapple — \d+ whole/i.test(lists(event("Dive Bar", [BLOODY]))["supply list"]));
 
 if (failed > 0) {
   console.error(`\n${failed} of ${total} menu checks failed.`);

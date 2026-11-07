@@ -240,6 +240,11 @@ function diveWellSetMixers(guestCount: number): { item: string; quantity: string
   ];
 }
 
+/** Pina Colada garnish for the well, one pineapple per 50 guests. */
+function diveWellPineapple(guestCount: number): string {
+  return `${Math.max(1, Math.ceil(guestCount / 50))} whole (for wedges)`;
+}
+
 // Already on every Dive Bar list, so highballs and classics draw from these.
 const DIVE_BASELINE_MIXERS = [
   "cranberry juice", "pineapple juice", "orange juice", "tonic",
@@ -703,8 +708,9 @@ function getMixerQuantity(
   }
   if (key.includes("topo chico")) return topoChicoCases(guestCount);
   if (key.includes("tomato juice")) {
-    // 4 oz a drink, so a 46 oz can pours about 12.
-    const cans = Math.max(1, Math.ceil((guestCount * hoursFactor) / 12));
+    // 4 oz a drink, so a 46 oz can pours about 12. Bloody Mary sells at one third
+    // the per guest rate of other drinks, so one can covers 36 guests.
+    const cans = Math.max(1, Math.ceil((guestCount * hoursFactor) / 36));
     return `${cans} x 46 oz can${cans === 1 ? "" : "s"}`;
   }
   if (key.includes("worcestershire")) {
@@ -1711,6 +1717,7 @@ function generateDiveBarSupplyList(eventData: EventData): string {
   parts.push(`Limes — ${limes} count`);
   parts.push(`Lemons — ${lemons} count`);
   parts.push(`Oranges — ${oranges} count`);
+  if (usesDiveWell(eventData, drinks)) parts.push(`Pineapple — ${diveWellPineapple(guestCount)}`);
   parts.push("");
 
   // Classic cocktail recipes for the bartender (auto filled standard recipes)
@@ -1734,6 +1741,7 @@ function generateDiveBarSupplyList(eventData: EventData): string {
 /** Parse garnish descriptions and calculate produce quantities */
 function calculateProduceFromGarnishes(drinks: SignatureDrink[], guestCount: number): { item: string; quantity: string }[] {
   const garnishCounts: Record<string, number> = {};
+  let muddledMintDrinks = 0;
 
   for (const drink of drinks) {
     const g = typeof drink.garnish === "string" ? drink.garnish.toLowerCase().trim() : "";
@@ -1744,6 +1752,11 @@ function calculateProduceFromGarnishes(drinks: SignatureDrink[], guestCount: num
         return k.includes(word) && isGarnishOnlyKey(k);
       });
     if (usedInRecipe("mint") || g.includes("mint")) garnishCounts["mint"] = (garnishCounts["mint"] || 0) + 1;
+    const muddlesMint = normalizeIngredients(drink.ingredients).some((i) => {
+      const k = String(i).toLowerCase();
+      return k.includes("mint") && isGarnishOnlyKey(k) && /muddle|leaves/.test(k);
+    });
+    if (muddlesMint) muddledMintDrinks++;
     if (usedInRecipe("celery") || g.includes("celery")) garnishCounts["celery"] = (garnishCounts["celery"] || 0) + 1;
     if (!g) continue;
 
@@ -1790,7 +1803,9 @@ function calculateProduceFromGarnishes(drinks: SignatureDrink[], guestCount: num
         break;
       }
       case "mint": {
-        const bunches = Math.max(3, Math.ceil(servings / 15));
+        // Muddled drinks go through mint faster than a garnish does.
+        const muddled = Math.ceil((guestCount * muddledMintDrinks) / numDrinks);
+        const bunches = Math.max(3, Math.ceil(muddled / 10 + (servings - muddled) / 15));
         items.push({ item: "Fresh mint", quantity: `${bunches} bunches` });
         break;
       }
@@ -2482,6 +2497,7 @@ export function generateOrderTeamEmail(
       const brand = brandPreferenceForItem(label);
       buckets[routeMixerToStore(label)].push(`- ${label} — ${quantity}${brand ? ` (${brand})` : ""}`);
     }
+    buckets[routeMixerToStore("Pineapple")].push(`- Pineapple — ${diveWellPineapple(guestCount)}`);
   }
 
   const produceItems = calculateProduceFromGarnishes(drinks, guestCount);
