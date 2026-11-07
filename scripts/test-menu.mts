@@ -176,6 +176,7 @@ check(
 const mintBunches = (drinks: object[]) =>
   Number(lineWith(lists(event("Full Bar", drinks))["supply list"], "fresh mint").match(/(\d+) bunches/)?.[1]);
 const GARNISH_MINT = { name: "Garnish only", base_spirit: "rum", ingredients: ["2 oz rum", "0.75 oz lime juice"], garnish: "mint" };
+const MARGARITA = { name: "Margarita", base_spirit: "tequila", ingredients: ["2 oz tequila blanco", "1 oz lime juice"], garnish: "lime" };
 const NO_MINT = { name: "No mint", base_spirit: "gin", ingredients: ["2 oz gin", "0.75 oz lemon juice"], garnish: "" };
 check("Mojito for 100 guests at the 3 drink split is 4 to 5 bunches", [4, 5].includes(mintBunches([MOJITO, NO_MINT, BLOODY])), String(mintBunches([MOJITO, NO_MINT, BLOODY])));
 check("Garnish only mint stays at the garnish rate", mintBunches([GARNISH_MINT, NO_MINT, BLOODY]) === 3, String(mintBunches([GARNISH_MINT, NO_MINT, BLOODY])));
@@ -201,7 +202,11 @@ for (const [guests, whole] of [[25, 1], [50, 1], [100, 2], [300, 6]]) {
     check(`Dive Bar no menu ${name} has ${whole} pineapple for ${guests} guests`, new RegExp(`pineapple — ${whole} whole`, "i").test(text), lineWith(text, "pineapple —") || "no line");
   }
 }
-check("Dive Bar with a menu does not get the well pineapple line", !/pineapple — \d+ whole/i.test(lists(event("Dive Bar", [BLOODY]))["supply list"]));
+check("Dive Bar with a menu and no Pina Colada gets no pineapple line", !/pineapple — \d+ whole/i.test(lists(event("Dive Bar", [MARGARITA]))["supply list"]));
+for (const [guests, whole] of [[25, 1], [100, 2], [300, 6]]) {
+  const text = lists(event("Dive Bar", [PINA, MARGARITA, NO_MINT], guests))["supply list"];
+  check(`Dive Bar signature Pina Colada supply list has ${whole} pineapple for ${guests} guests`, new RegExp(`pineapple — ${whole} whole`, "i").test(text), lineWith(text, "pineapple —") || "no line");
+}
 
 if (failed > 0) {
   console.error(`\n${failed} of ${total} menu checks failed.`);

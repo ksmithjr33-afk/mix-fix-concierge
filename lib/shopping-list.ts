@@ -240,7 +240,7 @@ function diveWellSetMixers(guestCount: number): { item: string; quantity: string
   ];
 }
 
-/** Pina Colada garnish for the well, one pineapple per 50 guests. */
+/** Pina Colada garnish on Dive Bar, one pineapple per 50 guests. */
 function diveWellPineapple(guestCount: number): string {
   return `${Math.max(1, Math.ceil(guestCount / 50))} whole (for wedges)`;
 }
@@ -1717,7 +1717,8 @@ function generateDiveBarSupplyList(eventData: EventData): string {
   parts.push(`Limes — ${limes} count`);
   parts.push(`Lemons — ${lemons} count`);
   parts.push(`Oranges — ${oranges} count`);
-  if (usesDiveWell(eventData, drinks)) parts.push(`Pineapple — ${diveWellPineapple(guestCount)}`);
+  const picksPinaColada = drinks.some((d) => /pi[nñ]a colada/i.test(d?.name ?? ""));
+  if (usesDiveWell(eventData, drinks) || picksPinaColada) parts.push(`Pineapple — ${diveWellPineapple(guestCount)}`);
   parts.push("");
 
   // Classic cocktail recipes for the bartender (auto filled standard recipes)
