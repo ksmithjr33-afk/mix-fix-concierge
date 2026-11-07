@@ -236,6 +236,7 @@ function diveWellSetMixers(guestCount: number): { item: string; quantity: string
     { item: "grenadine", quantity: bottles(1) },
     { item: "agave nectar", quantity: bottles(1) },
     { item: "Topo Chico", quantity: topoChicoCases(guestCount) },
+    { item: "coconut cream", quantity: bottles(1) },
   ];
 }
 
@@ -549,6 +550,9 @@ function canonicalIngredient(name: string): string {
   const k = name.toLowerCase();
   if (k === "soda") return "soda water";
   if (k.includes("cucumber")) return "cucumbers";
+  // Bloody Mary recipes say "dash Worcestershire", which the "dash of" prefix rules miss.
+  if (k.includes("worcestershire")) return "Worcestershire";
+  if (k.includes("hot sauce")) return "hot sauce";
   return name;
 }
 
@@ -578,14 +582,17 @@ function countDrinksUsingMixer(drinks: SignatureDrink[], mixerKeyword: string): 
 }
 
 /**
- * Detect if an ingredient key is garnish-only (mint, basil, peels, etc.)
+ * Detect if an ingredient key is garnish-only (mint, basil, celery, peels, etc.)
+ * or not something to buy as a mixer (ice, how a drink is served, salt and pepper).
  * Returns true if the key contains an herb/peel word and is not a syrup/liqueur.
  * Use this BEFORE adding to mixers list.
  */
 function isGarnishOnlyKey(key: string): boolean {
   const k = (key ?? "").toLowerCase().trim();
   if (!k) return false;
-  const herbWords = ["mint", "basil", "rosemary", "thyme", "cilantro"];
+  // Without this the mixer fallback prints "1 x 1 liter bottle" for each of these.
+  if (/\bice$|\bon the rocks\b|^shaken\b|\bgarnish$|^pineapple wedges?$|^salt( and |, ?| & )pepper$/.test(k)) return true;
+  const herbWords = ["mint", "basil", "rosemary", "thyme", "cilantro", "celery"];
   const peelWords = ["lime wheel", "lemon wheel", "orange peel", "lemon peel", "lime peel"];
   const isHerb = herbWords.some(h =>
     k.includes(h) && !k.includes("syrup") && !k.includes("liqueur")
@@ -695,6 +702,21 @@ function getMixerQuantity(
     return `${cartons} x 32 oz carton${cartons === 1 ? "" : "s"}`;
   }
   if (key.includes("topo chico")) return topoChicoCases(guestCount);
+  if (key.includes("tomato juice")) {
+    // 4 oz a drink, so a 46 oz can pours about 12.
+    const cans = Math.max(1, Math.ceil((guestCount * hoursFactor) / 12));
+    return `${cans} x 46 oz can${cans === 1 ? "" : "s"}`;
+  }
+  if (key.includes("worcestershire")) {
+    // A dash a drink, so a 10 oz bottle lasts about 100 drinks.
+    const bottles = Math.max(1, Math.ceil((guestCount * hoursFactor) / 100));
+    return `${bottles} x 10 oz bottle${bottles === 1 ? "" : "s"}`;
+  }
+  if (key.includes("hot sauce")) {
+    // A dash a drink, so a 5 oz bottle lasts about 100 drinks.
+    const bottles = Math.max(1, Math.ceil((guestCount * hoursFactor) / 100));
+    return `${bottles} x 5 oz bottle${bottles === 1 ? "" : "s"}`;
+  }
   if (key.includes("mandarin soda")) {
     const cases = Math.max(1, Math.ceil((guestCount * hoursFactor) / 60));
     return `${cases} case${cases === 1 ? "" : "s"} (24 pack${cases === 1 ? "" : "s"}, 12.5 oz Jarritos)`;
@@ -982,6 +1004,7 @@ function getGarnishNotes(garnish: string): string | undefined {
   if (key.includes("lemon")) return "Sam's Club (7 to 10 ct) or individual from Walmart";
   if (key.includes("orange")) return "Sam's Club (8 to 12 ct) or individual from Walmart";
   if (key.includes("mint")) return "Fresh mint 0.5 oz clamshell from Walmart";
+  if (key.includes("celery")) return "Fresh celery from Walmart";
   if (key.includes("basil")) return "Fresh basil 0.5 oz clamshell from Walmart";
   if (key.includes("rosemary")) return "Fresh rosemary 0.5 oz clamshell from Walmart";
   if (key.includes("dried flower") || key.includes("dried lavender")) return "Specialty, order from Amazon";
@@ -989,7 +1012,7 @@ function getGarnishNotes(garnish: string): string | undefined {
   return undefined;
 }
 
-function getGarnishes(drinks: SignatureDrink[]): ShoppingListItem[] {
+function getGarnishes(drinks: SignatureDrink[], guestCount: number): ShoppingListItem[] {
   const seen = new Set<string>();
   const items: ShoppingListItem[] = [];
 
@@ -997,12 +1020,20 @@ function getGarnishes(drinks: SignatureDrink[]): ShoppingListItem[] {
     const g = typeof drink.garnish === "string" ? drink.garnish.trim() : "";
     if (!g || seen.has(g.toLowerCase())) continue;
     seen.add(g.toLowerCase());
+    // Plain mint and celery get a line sized by drink count below.
+    if (/^(fresh )?(mint|celery)( \w+)?$/i.test(g)) continue;
     items.push({
       category: "Garnishes",
       item: g,
       quantity: "1 pack or bundle",
       notes: getGarnishNotes(g),
     });
+  }
+
+  for (const p of calculateProduceFromGarnishes(drinks, guestCount)) {
+    if (p.item === "Fresh mint" || p.item === "Celery") {
+      items.push({ category: "Garnishes", ...p, notes: getGarnishNotes(p.item) });
+    }
   }
 
   return items;
@@ -1208,7 +1239,7 @@ export function generateShoppingList(eventData: EventData): ShoppingListItem[] {
   // Bartender Only gets mixers, garnishes, rim ingredients, AND supplies
   if (isBartenderOnly && sigDrinks.length > 0) {
     items.push(...getMixersAndIngredients(sigDrinks, guestCount, barHours, eventData.event_type));
-    items.push(...getGarnishes(sigDrinks));
+    items.push(...getGarnishes(sigDrinks, guestCount));
     items.push(...getRimIngredients(sigDrinks));
   }
 
@@ -1706,12 +1737,19 @@ function calculateProduceFromGarnishes(drinks: SignatureDrink[], guestCount: num
 
   for (const drink of drinks) {
     const g = typeof drink.garnish === "string" ? drink.garnish.toLowerCase().trim() : "";
+    // Muddled mint and celery sit in the ingredients, and the mixer list skips them.
+    const usedInRecipe = (word: string) =>
+      normalizeIngredients(drink.ingredients).some((i) => {
+        const k = String(i).toLowerCase();
+        return k.includes(word) && isGarnishOnlyKey(k);
+      });
+    if (usedInRecipe("mint") || g.includes("mint")) garnishCounts["mint"] = (garnishCounts["mint"] || 0) + 1;
+    if (usedInRecipe("celery") || g.includes("celery")) garnishCounts["celery"] = (garnishCounts["celery"] || 0) + 1;
     if (!g) continue;
 
     if (g.includes("lime")) garnishCounts["lime"] = (garnishCounts["lime"] || 0) + 1;
     if (g.includes("lemon")) garnishCounts["lemon"] = (garnishCounts["lemon"] || 0) + 1;
     if (g.includes("orange")) garnishCounts["orange"] = (garnishCounts["orange"] || 0) + 1;
-    if (g.includes("mint")) garnishCounts["mint"] = (garnishCounts["mint"] || 0) + 1;
     if (g.includes("basil")) garnishCounts["basil"] = (garnishCounts["basil"] || 0) + 1;
     if (g.includes("rosemary")) garnishCounts["rosemary"] = (garnishCounts["rosemary"] || 0) + 1;
     if (g.includes("pineapple")) garnishCounts["pineapple"] = (garnishCounts["pineapple"] || 0) + 1;
@@ -1753,7 +1791,12 @@ function calculateProduceFromGarnishes(drinks: SignatureDrink[], guestCount: num
       }
       case "mint": {
         const bunches = Math.max(3, Math.ceil(servings / 15));
-        items.push({ item: "Mint", quantity: `${bunches} bunches` });
+        items.push({ item: "Fresh mint", quantity: `${bunches} bunches` });
+        break;
+      }
+      case "celery": {
+        const bunches = Math.max(1, Math.ceil(servings / 15));
+        items.push({ item: "Celery", quantity: `${bunches} bunch${bunches === 1 ? "" : "es"}` });
         break;
       }
       case "basil": {
@@ -2537,7 +2580,7 @@ function routeMixerToStore(itemName: string): string {
   if (name.includes("pumpkin spice")) return "Specs";
   if (name.includes("black cherry puree") || name.includes("dark cherry puree")) return "Specs";
   if (name.includes("lychee")) return "Specs";
-  if (name.includes("cream of coconut")) return "Specs";
+  if (name.includes("cream of coconut") || name.includes("coconut cream")) return "Specs";
   if (name.includes("grenadine")) return "Specs";
   if (name.includes("hibiscus") && (name.includes("syrup") || name.includes("agave"))) return "Specs";
   if (name.includes("orgeat")) return "Specs";
@@ -2549,6 +2592,7 @@ function routeMixerToStore(itemName: string): string {
   if (name.includes("toothpick") || name.includes("pick")) return "Walmart";
   if (name.includes("stir stick") || name.includes("stirrer")) return "Walmart";
   if (name === "mint" || name.includes("fresh mint")) return "Walmart";
+  if (name.includes("celery") || name.includes("worcestershire") || name.includes("hot sauce")) return "Walmart";
   if (name === "basil" || name.includes("fresh basil")) return "Walmart";
   if (name === "rosemary" || name.includes("fresh rosemary")) return "Walmart";
   if (name === "thyme" || name.includes("fresh thyme")) return "Walmart";

@@ -222,6 +222,7 @@ White Lemon Drop: vodka, white cranberry juice, lemon juice, triple sec, simple 
 Blood Orange Vodka Martini: vodka, blood orange juice, cranberry juice, simple syrup, sugar rim. Recipe: 2 oz vodka, 1.5 oz blood orange juice, 1 oz cranberry juice, 0.5 oz simple syrup, sugar rim.
 Passion Velvet Martini: vanilla vodka, passion fruit puree, lime juice, vanilla syrup, heavy cream. Recipe: 2 oz vanilla vodka, 1.5 oz passion fruit puree, 0.5 oz lime juice, 0.5 oz vanilla syrup, 0.5 oz heavy cream.
 Espresso Martini: vodka, coffee liqueur, fresh espresso, simple syrup. Recipe: 2 oz vodka, 1 oz coffee liqueur, 1 oz fresh espresso, 0.5 oz simple syrup.
+Bloody Mary: vodka, tomato juice, Worcestershire, hot sauce, lemon juice, salt, pepper, celery garnish. Recipe: 1.5 oz vodka, 4 oz tomato juice, dash Worcestershire, dash hot sauce, 0.5 oz lemon juice, salt, pepper.
 
 === TEQUILA ===
 POPULAR:
@@ -254,6 +255,7 @@ Bourbon Pine Lemonade: bourbon, pineapple juice, lemonade. Recipe: 2 oz bourbon,
 Pumpkin Spice Old Fashioned: bourbon, pumpkin spice syrup, maple syrup, vanilla syrup, bitters, orange peel (seasonal). Recipe: 2 oz bourbon, 0.5 oz pumpkin spice syrup, 0.25 oz maple syrup, 0.25 oz vanilla syrup, 2 dashes bitters, orange peel.
 Honey Lemon Mule: whiskey, lemon juice, honey syrup, ginger beer. Recipe: 2 oz whiskey, 0.75 oz lemon juice, 0.5 oz honey syrup, top with ginger beer.
 Southside 45: whiskey, lemon juice, St. Germain, simple syrup, muddled cucumber, mint garnish. Recipe: 2 oz whiskey, 0.75 oz lemon juice, 0.5 oz St. Germain, 0.5 oz simple syrup, 3 cucumber slices muddled, mint garnish.
+Mint Julep: bourbon, simple syrup, muddled mint, crushed ice, mint garnish. Recipe: 2 oz bourbon, 0.5 oz simple syrup, muddled mint, crushed ice.
 
 === RUM ===
 POPULAR:
@@ -265,6 +267,7 @@ Mai Tai: gold rum, dry curacao, orgeat, lime juice, sugar syrup, dark rum float,
 Forbidden Fruit: rum, amaretto, cassis, cranberry juice, lime juice, grenadine. Recipe: 1 oz rum, 0.25 oz amaretto, 0.25 oz cassis, 1.5 oz cranberry juice, 0.25 oz lime juice, 0.25 oz grenadine.
 Passionfruit Mojito: rum, passion fruit puree, lime juice, simple syrup, mint leaves, soda. Recipe: 2 oz rum, 1 oz passion fruit puree, 0.75 oz lime juice, 0.5 oz simple syrup, 8 mint leaves, top with soda.
 Coco de Agua: rum, coconut water, lime juice, salt. Recipe: 2 oz rum, 3 oz coconut water, 0.75 oz lime juice, pinch of salt.
+Mojito: rum, lime juice, simple syrup, muddled mint, soda water, mint garnish. Recipe: 2 oz rum, 0.75 oz lime juice, 0.5 oz simple syrup, muddled mint, top with soda water.
 
 === GIN ===
 POPULAR:
@@ -319,7 +322,8 @@ Martini: 2.5 oz gin, 0.5 oz dry vermouth, olive or twist
 Gimlet: 2 oz gin, 0.75 oz lime juice, 0.5 oz simple syrup
 Southside: 2 oz gin, 1 oz lime juice, 0.75 oz simple syrup, 6 mint leaves
 RUM AND COGNAC
-Daiquiri: 2 oz rum, 0.75 oz lime juice, 0.5 oz simple syrup
+Daiquiri: 2 oz rum, 0.75 oz lime juice, 0.5 oz simple syrup, on the rocks
+Pina Colada: 2 oz rum, 1.5 oz coconut cream, 2 oz pineapple juice, shaken and served on the rocks, pineapple wedge garnish
 Hurricane: 2 oz rum, 2 oz passion fruit juice, 1 oz orange juice, 0.5 oz grenadine
 Dark and Stormy: 2 oz dark rum, 0.5 oz lime juice, top with ginger beer
 Sidecar: 1.5 oz cognac, 0.75 oz triple sec, 0.75 oz lemon juice, sugar rim
@@ -335,7 +339,8 @@ Jack and Coke: 2 oz Jack Daniels, top with Coke
 Whiskey Ginger: 2 oz whiskey, top with ginger ale
 Tequila Soda: 2 oz tequila, top with soda water, lime
 Screwdriver: 2 oz vodka, top with orange juice
-Pina Colada, Mint Julep, Mojito, Mai Tai, and Bloody Mary are NOT classics and are not auto filled. If a client asks for one of them by name, treat it like any other off list drink: ask if they have an exact recipe, and if not, say our team will reach out and note it in special_requests. The one exception is Mai Tai on a package that includes the craft menu (Essentials Bar, The Big Day Bar, Full Bar, Premium Bar), where the craft menu Mai Tai is a normal menu drink.
+Only a drink on neither the craft menu nor the CLASSICS section is excluded. It is not auto filled: if a client asks for one by name, treat it like any other off list drink, ask if they have an exact recipe, and if not, say our team will reach out and note it in special_requests. Mojito, Mint Julep, Bloody Mary, and Mai Tai are on the craft menu and not in the CLASSICS section, so on a package that includes the craft menu (Essentials Bar, The Big Day Bar, Full Bar, Premium Bar) each one is a normal menu drink, and on Dive Bar each one is handled as an off list drink.
+ON THE ROCKS, NEVER FROZEN: Pina Colada and Daiquiri are served on the rocks, never frozen. If a client asks for either one frozen, say: "We serve that one on the rocks, we do not do frozen drinks." This is our set policy, so give this answer directly and not the management line from the CONDUCT RULE. Do not add anything to special_requests unless the client still wants to discuss it after hearing that. Only then note it in special_requests and move on, without setting change_approval_needed. When you record either drink, put shaken or on the rocks in the method field, not in ingredients.
 `;
 
 const INTAKE_PHASES_3B_TO_5 = `PHASE 3B MENU DESIGN (REQUIRED for all packages except Beer and Wine and Dive Bar unless the Dive Bar client asked for a signature cocktail menu):
