@@ -83,7 +83,8 @@ export interface StaffInput {
  */
 export function validateStaffInput(
   raw: { first?: unknown; last?: unknown; phone?: unknown; role?: unknown; markets?: unknown },
-  normalizePhone: (v: unknown) => string | null
+  normalizePhone: (v: unknown) => string | null,
+  opts: { requireMarkets?: boolean } = {}
 ): { ok: true; value: StaffInput } | { ok: false; error: string } {
   const first = String(raw.first ?? "").replace(/\s+/g, " ").trim().slice(0, 40);
   const last = String(raw.last ?? "").replace(/\s+/g, " ").trim().slice(0, 40);
@@ -92,8 +93,9 @@ export function validateStaffInput(
   if (!phone) return { ok: false, error: "Enter a 10 digit phone number." };
   const role = raw.role === "admin" ? "admin" : raw.role === "bartender" || raw.role === undefined ? "bartender" : null;
   if (!role) return { ok: false, error: "Pick a role." };
-  // Markets: at least one. A form from before markets existed counts as Dallas.
-  const markets = raw.markets === undefined ? [DEFAULT_MARKET] : cleanMarkets(raw.markets);
+  // Markets: at least one. Adding someone always needs one picked; an edit from
+  // a form that predates markets counts as Dallas.
+  const markets = raw.markets === undefined && !opts.requireMarkets ? [DEFAULT_MARKET] : cleanMarkets(raw.markets);
   if (!markets) return { ok: false, error: "Pick at least one market." };
   return { ok: true, value: { name: `${first} ${last}`, phone, role, markets } };
 }

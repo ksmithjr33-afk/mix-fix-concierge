@@ -56,6 +56,10 @@ function StaffForm({
       className="space-y-2"
       onSubmit={async (e) => {
         e.preventDefault();
+        if (v.markets.length === 0) {
+          setError("Pick at least one market.");
+          return;
+        }
         setBusy(true);
         setError("");
         try {
@@ -92,6 +96,7 @@ function StaffForm({
             </label>
           ))}
         </div>
+        {v.markets.length === 0 && <p className="text-xs text-[#9A7049] mt-1">Pick at least one market to save.</p>}
       </fieldset>
       {error && <p className="text-sm text-[#A0412D]">{error}</p>}
       <div className="flex gap-2">
@@ -175,10 +180,9 @@ function StaffRow({ s, meId, onSaved }: { s: StaffRecord; meId: string; onSaved:
             </a>
             {" · "}
             {s.role === "admin" ? "Admin" : "Bartender"}
-            {" · "}
-            {marketNames(s.markets)}
             {!s.active && " · Inactive"}
           </p>
+          <p className="text-sm text-[#6B5D52]">Markets: {marketNames(s.markets) || "None"}</p>
         </div>
         <button type="button" onClick={() => setEditing(true)} className="shrink-0 text-sm text-[#B5845A] underline">
           Edit
@@ -211,7 +215,7 @@ export default function StaffManager({ initial, meId }: { initial: StaffRecord[]
           <>
             <h2 className="font-heading text-base font-bold text-[#2C2420] mb-2">Add a staff member</h2>
             <StaffForm
-              initial={{ first: "", last: "", phone: "", role: "bartender", markets: ["dallas"] }}
+              initial={{ first: "", last: "", phone: "", role: "bartender", markets: [] }}
               submitLabel="Add"
               onCancel={() => setAdding(false)}
               onSubmit={async (v) => {

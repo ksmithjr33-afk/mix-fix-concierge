@@ -54,8 +54,9 @@ function duplicatePhone(message: string): boolean {
   return /duplicate key|unique/i.test(message);
 }
 
+/** Add a staff member. A market is required: nobody is added to a market by default. */
 export async function createStaff(raw: Record<string, unknown>): Promise<SaveResult> {
-  const valid = validateStaffInput(raw, normalizePhone);
+  const valid = validateStaffInput(raw, normalizePhone, { requireMarkets: true });
   if (!valid.ok) return valid;
   const { data, error } = await supabase
     .from("staff")

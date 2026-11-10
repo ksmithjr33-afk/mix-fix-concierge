@@ -94,7 +94,10 @@ check("Staff from before markets count as Dallas", markets.staffMarketsOf({}).jo
 const sf = asg.validateStaffInput({ first: "Jordan", last: "Lee", phone: "214 555 0101", markets: ["austin", "houston"] }, normalizePhone);
 check("The staff form saves markets", sf.ok && sf.value.markets.join() === "austin,houston");
 check("The staff form refuses no market", !asg.validateStaffInput({ first: "Jordan", last: "Lee", phone: "214 555 0101", markets: [] }, normalizePhone).ok);
-check("An older staff form defaults to Dallas", (() => { const r = asg.validateStaffInput({ first: "A", last: "B", phone: "214 555 0101" }, normalizePhone); return r.ok && r.value.markets.join() === "dallas"; })());
+check("Adding someone requires a market: none sent is refused", (() => { const r = asg.validateStaffInput({ first: "A", last: "B", phone: "214 555 0101" }, normalizePhone, { requireMarkets: true }); return !r.ok && r.error === "Pick at least one market."; })());
+check("Adding someone requires a market: none checked is refused", !asg.validateStaffInput({ first: "A", last: "B", phone: "214 555 0101", markets: [] }, normalizePhone, { requireMarkets: true }).ok);
+check("Adding someone with one market checked is allowed", (() => { const r = asg.validateStaffInput({ first: "A", last: "B", phone: "214 555 0101", markets: ["houston"] }, normalizePhone, { requireMarkets: true }); return r.ok && r.value.markets.join() === "houston"; })());
+check("An older edit form (no markets field) defaults to Dallas", (() => { const r = asg.validateStaffInput({ first: "A", last: "B", phone: "214 555 0101" }, normalizePhone); return r.ok && r.value.markets.join() === "dallas"; })());
 
 // ----- Time zones: a Los Angeles event at 6:00 PM -----
 const la = (day: string, start = "6:00pm", end = "10:00pm") => markets.eventData({ event_date: day, event_data: { event_date: day, bar_service_start: start, bar_service_end: end, event_type: "Birthday" }, team_market: "los_angeles" } as never);
@@ -195,6 +198,21 @@ check("An unknown market is refused", !(await marketsDb.setEventMarket("s1", "mi
 (db.sessions[1].event_data as Record<string, unknown>).event_address = "1 Main St, Oklahoma City, OK";
 check("An address far from every market gets no market", (await marketsDb.ensureMarket(session("s2"))) === null && db.sessions[1].team_market_source === "none");
 check("ensureMarkets stops at the limit", (await marketsDb.ensureMarkets(db.sessions as never, 1)) === 1);
+
+// ----- Adding staff: a market is required -----
+reset();
+const before = db.staff.length;
+const noMk = await asgDb.createStaff({ first: "New", last: "Person", phone: "214 555 0199", role: "bartender" });
+check("The add path refuses someone with no market", !noMk.ok && noMk.error === "Pick at least one market." && db.staff.length === before);
+const emptyMk = await asgDb.createStaff({ first: "New", last: "Person", phone: "214 555 0199", role: "bartender", markets: [] });
+check("The add path refuses an empty market list", !emptyMk.ok && db.staff.length === before);
+const okMk = await asgDb.createStaff({ first: "New", last: "Person", phone: "214 555 0199", role: "bartender", markets: ["austin", "los_angeles"] });
+check("The add path saves the markets checked", okMk.ok && okMk.staff.markets.join() === "austin,los_angeles" && db.staff.length === before + 1);
+check("The staff list shows each person's markets", (await asgDb.listStaff()).find((x) => x.name === "New Person")?.markets.join() === "austin,los_angeles");
+const staffForm = readFileSync(new URL("../app/team/admin/staff/staff-manager.tsx", import.meta.url), "utf8");
+check("The add form starts with no market checked", staffForm.includes('initial={{ first: "", last: "", phone: "", role: "bartender", markets: [] }}'));
+check("The add form cannot save until a market is checked", staffForm.includes("disabled={busy || v.markets.length === 0}") && staffForm.includes("if (v.markets.length === 0) {"));
+check("The staff list shows markets on each row", staffForm.includes("Markets: {marketNames(s.markets)"));
 
 // ----- Posting -----
 reset();
