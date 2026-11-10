@@ -168,6 +168,7 @@ function reset() {
   db.shift_requests = [];
   db.shift_handoffs = [];
   db.team_notices = [];
+  db.shift_notices = [];
   db.team_hidden_events = [];
   db.time_punches = [];
   db.staff_checks = [];
@@ -214,22 +215,204 @@ check("The add form starts with no market checked", staffForm.includes('initial=
 check("The add form cannot save until a market is checked", staffForm.includes("disabled={busy || v.markets.length === 0}") && staffForm.includes("if (v.markets.length === 0) {"));
 check("The staff list shows markets on each row", staffForm.includes("Markets: {marketNames(s.markets)"));
 
-// ----- Posting -----
+// ----- Quiet hours and batching: the pure rules -----
+const CT = "America/Chicago", PT = "America/Los_Angeles";
+const ct = (ymd: string, h: number, m = 0) => time.zonedInstant(ymd, h * 60 + m, CT);
+const pt = (ymd: string, h: number, m = 0) => time.zonedInstant(ymd, h * 60 + m, PT);
+check("Quiet hours start at 9:00 PM", !shifts.inQuietHours(ct("2026-12-01", 20, 59), CT) && shifts.inQuietHours(ct("2026-12-01", 21), CT));
+check("Quiet hours end at 8:00 AM", shifts.inQuietHours(ct("2026-12-02", 7, 59), CT) && !shifts.inQuietHours(ct("2026-12-02", 8), CT));
+check("10:00 PM Central is 8:00 PM Pacific: quiet in Dallas, not in Los Angeles", shifts.inQuietHours(ct("2026-12-01", 22), CT) && !shifts.inQuietHours(ct("2026-12-01", 22), PT));
+check("Held at night, sent at 8:00 AM the next morning", shifts.sendableAt(ct("2026-12-01", 23, 30), CT).getTime() === ct("2026-12-02", 8).getTime());
+check("Held after midnight, sent at 8:00 AM the same morning", shifts.sendableAt(ct("2026-12-02", 2), CT).getTime() === ct("2026-12-02", 8).getTime());
+check("8:00 AM is local: Pacific morning for Los Angeles", shifts.sendableAt(pt("2026-12-01", 23), PT).getTime() === pt("2026-12-02", 8).getTime());
+check("Across the spring clock change, still 8:00 AM", shifts.sendableAt(ct("2027-03-13", 22), CT).getTime() === ct("2027-03-14", 8).getTime());
+check("A single post waits 10 minutes", shifts.noticeSendAfter(ct("2026-12-01", 12), CT, "hold").getTime() === ct("2026-12-01", 12, 10).getTime());
+check("A post at 8:55 PM would land in quiet hours, so it waits for 8:00 AM", shifts.noticeSendAfter(ct("2026-12-01", 20, 55), CT, "hold").getTime() === ct("2026-12-02", 8).getTime());
+check("Post all is due right away", shifts.noticeSendAfter(ct("2026-12-01", 12), CT, "now").getTime() === ct("2026-12-01", 12).getTime());
+check("The batch text wording", shifts.batchText({ count: 3, market: "Austin", link: "https://plan.test/team/events?tab=open" }) === "3 new Mix Fix shifts posted in Austin. See them and request: https://plan.test/team/events?tab=open");
+
+// ----- Posting: one shift, held 10 minutes, then the detailed text -----
+const NOON = ct(today, 12);
+const plus = (d: Date, min: number) => new Date(d.getTime() + min * 60_000);
+const OPEN_LINK = "https://plan.test/team/events?tab=open";
+const BATCH2 = `2 new Mix Fix shifts posted in Austin. See them and request: ${OPEN_LINK}`;
 reset();
-const noMarket = await shiftsDb.postShift(session("s1"), admin);
+const noMarket = await shiftsDb.postShift(session("s1"), admin, NOON);
 check("Posting works the market out first", noMarket.ok && db.sessions[0].team_market === "austin", JSON.stringify(noMarket));
+check("Posting queues a text for every active bartender in the market", noMarket.ok && noMarket.plan.queued === 3 && db.shift_notices.map((n) => n.staff_id).sort().join() === "b1,b2,b5", JSON.stringify(db.shift_notices));
+check("Nothing is sent at the moment of posting", texts.length === 0, JSON.stringify(texts));
+check("The texts are due 10 minutes after posting", db.shift_notices.every((n) => n.send_after === plus(NOON, 10).toISOString() && n.status === "pending"));
+check("The admin is told who gets a text and when", noMarket.ok && noMarket.message === "Posted. 3 bartenders get a text within 10 minutes, together with any other shifts you post to Austin.", noMarket.ok ? noMarket.message : "");
+check("Not sent before the 10 minutes are up", (await shiftsDb.deliverShiftNotices(plus(NOON, 9))) === 0 && texts.length === 0);
+const sentCount = await shiftsDb.deliverShiftNotices(plus(NOON, 10));
 const notified = textsTo(b1).length + textsTo(b2).length;
-check("Posting texts every active bartender in the market", noMarket.ok && noMarket.notified === 3 && notified === 2 && textsTo(b5).length === 1, JSON.stringify(texts));
+check("After 10 minutes each bartender in the market gets one text", sentCount === 3 && notified === 2 && textsTo(b5).length === 1, JSON.stringify(texts));
 check("Bartenders in other markets, inactive staff, and admins are not texted", textsTo(b3).length === 0 && textsTo(b4).length === 0 && textsTo(admin).length === 0);
 const postMsg = textsTo(b1)[0]?.message ?? "";
 const postId = (db.shift_posts[0]?.id as string) ?? "";
 check(
-  "The shift text wording",
+  "A single shift keeps the detailed text",
   postMsg === `New Mix Fix shift: ${time.shortDate(day10)}, Austin, arrive 4:00 PM, service 6:00 PM to 10:00 PM. Details and request: https://plan.test/team/shifts/${postId}`,
   postMsg
 );
 check("The shift text has no client details", noClientData(postMsg));
-check("A second post is refused", !(await shiftsDb.postShift(session("s1"), admin)).ok && db.shift_posts.length === 1);
+check("Sent texts are marked sent, batch of 1", db.shift_notices.every((n) => n.status === "sent" && n.batch_size === 1 && n.sent_at === plus(NOON, 10).toISOString()));
+check("The cron running again sends nothing twice", (await shiftsDb.deliverShiftNotices(plus(NOON, 25))) === 0 && texts.length === 3);
+check("A second post is refused", !(await shiftsDb.postShift(session("s1"), admin, NOON)).ok && db.shift_posts.length === 1);
+check("A second post queues nothing more", db.shift_notices.length === 3);
+
+// ----- Batching: several shifts to one market within 10 minutes -----
+reset();
+await shiftsDb.postShift(session("s1"), admin, NOON);
+await shiftsDb.postShift(session("s3"), admin, plus(NOON, 4));
+await shiftsDb.deliverShiftNotices(plus(NOON, 10));
+check("Two shifts posted 4 minutes apart: one text each", textsTo(b1).length === 1 && textsTo(b5).length === 1 && textsTo(b2).length === 1, JSON.stringify(texts));
+check("The batch text names the count and the market, and links to Open shifts", textsTo(b1)[0]?.message === BATCH2, textsTo(b1)[0]?.message);
+check("Batched rows are all marked sent with the batch size", db.shift_notices.every((n) => n.status === "sent" && n.batch_size === 2));
+check("The batch text has no client details", noClientData(BATCH2));
+reset();
+await shiftsDb.postShift(session("s1"), admin, NOON);
+await shiftsDb.deliverShiftNotices(plus(NOON, 10));
+await shiftsDb.postShift(session("s3"), admin, plus(NOON, 12));
+await shiftsDb.deliverShiftNotices(plus(NOON, 15));
+check("A shift posted after the first text went out waits its own 10 minutes", textsTo(b1).length === 1);
+await shiftsDb.deliverShiftNotices(plus(NOON, 22));
+check("Then goes out as its own detailed text", textsTo(b1).length === 2 && textsTo(b1)[1].message.startsWith(`New Mix Fix shift: ${time.shortDate(day4)}, Austin`), JSON.stringify(textsTo(b1)));
+
+// Different markets go out separately.
+reset();
+db.sessions.push(event("s8", day10, "1 Main St, Dallas, TX"));
+await shiftsDb.postShift(session("s1"), admin, NOON);
+await shiftsDb.postShift(session("s8"), admin, plus(NOON, 2));
+await shiftsDb.deliverShiftNotices(plus(NOON, 10));
+check("Each market's batch keeps its own 10 minutes", textsTo(b2).length === 1 && textsTo(b2)[0].message.includes(", Austin,") && textsTo(b3).length === 0);
+await shiftsDb.deliverShiftNotices(plus(NOON, 12));
+check("A bartender in two markets gets one text per market", textsTo(b2).length === 2 && textsTo(b2).some((t) => t.message.includes(", Austin,")) && textsTo(b2).some((t) => t.message.includes(", Dallas,")), JSON.stringify(textsTo(b2)));
+check("Dallas only bartenders get only the Dallas shift", textsTo(b3).length === 1 && textsTo(b3)[0].message.includes(", Dallas,") && textsTo(b1).length === 1 && textsTo(b1)[0].message.includes(", Austin,"));
+
+// Filled or unposted in the meantime.
+reset();
+await shiftsDb.postShift(session("s1"), admin, NOON);
+await shiftsDb.postShift(session("s3"), admin, plus(NOON, 1));
+await shiftsDb.unpostShift(db.shift_posts.find((p) => p.session_id === "s3")!.id as string, admin);
+await shiftsDb.deliverShiftNotices(plus(NOON, 10));
+check("An unposted shift is skipped: the other one goes out as the detailed text", textsTo(b1).length === 1 && textsTo(b1)[0].message.startsWith(`New Mix Fix shift: ${time.shortDate(day10)}`), JSON.stringify(textsTo(b1)));
+check("Its rows are marked skipped", db.shift_notices.filter((n) => n.post_id === db.shift_posts.find((p) => p.session_id === "s3")!.id).every((n) => n.status === "skipped"));
+reset();
+await shiftsDb.postShift(session("s1"), admin, NOON);
+await asgDb.assignStaff(session("s1"), "b1", admin, "https://plan.test");
+await asgDb.assignStaff(session("s1"), "b3", admin, "https://plan.test");
+texts.length = 0;
+await shiftsDb.deliverShiftNotices(plus(NOON, 10));
+check("A shift filled in the meantime is skipped for everyone", texts.length === 0 && db.shift_posts[0].status === "filled" && db.shift_notices.every((n) => n.status === "skipped"), JSON.stringify(texts));
+reset();
+await shiftsDb.postShift(session("s1"), admin, NOON);
+await asgDb.assignStaff(session("s1"), "b1", admin, "https://plan.test");
+texts.length = 0;
+await shiftsDb.deliverShiftNotices(plus(NOON, 10));
+check("Someone put on the event in the meantime is not texted about it; the others are", textsTo(b1).length === 0 && textsTo(b2).length === 1 && textsTo(b5).length === 1);
+reset();
+await shiftsDb.postShift(session("s1"), admin, NOON);
+db.staff.find((x) => x.id === "b5")!.active = false;
+await shiftsDb.deliverShiftNotices(plus(NOON, 10));
+check("Someone deactivated in the meantime is not texted", textsTo(b5).length === 0 && textsTo(b1).length === 1);
+
+// ----- Quiet hours -----
+const TEN_PM = ct(today, 22);
+const tomorrow = addDays(today, 1);
+reset();
+const late = await shiftsDb.postShift(session("s1"), admin, TEN_PM);
+check("A post at 10:00 PM Central is held for 8:00 AM", late.ok && late.plan.quiet && db.shift_notices.every((n) => n.send_after === ct(tomorrow, 8).toISOString()), JSON.stringify(db.shift_notices));
+check("The admin is told it goes out at 8:00 AM", late.ok && late.message === "Posted. It is quiet hours in Austin, so 3 bartenders get a text at 8:00 AM.", late.ok ? late.message : "");
+await shiftsDb.deliverShiftNotices(plus(TEN_PM, 15));
+await shiftsDb.deliverShiftNotices(ct(tomorrow, 3));
+await shiftsDb.deliverShiftNotices(ct(tomorrow, 7, 59));
+check("Nothing goes out overnight", texts.length === 0);
+await shiftsDb.postShift(session("s3"), admin, ct(tomorrow, 1));
+await shiftsDb.deliverShiftNotices(ct(tomorrow, 8));
+check("At 8:00 AM the held shifts go out, batched", textsTo(b1).length === 1 && textsTo(b1)[0].message === BATCH2 && textsTo(b5).length === 1, JSON.stringify(texts));
+reset();
+await shiftsDb.postShift(session("s1"), admin, ct(today, 20, 55));
+check("A post at 8:55 PM is held for the morning, not sent at 9:05 PM", db.shift_notices.every((n) => n.send_after === ct(tomorrow, 8).toISOString()));
+// A row due before quiet hours, still pending when they start, waits too.
+reset();
+await shiftsDb.postShift(session("s1"), admin, ct(today, 20, 40));
+await shiftsDb.deliverShiftNotices(ct(today, 21, 5));
+check("A text due at 8:50 PM but not run until 9:05 PM waits for 8:00 AM", texts.length === 0 && db.shift_notices.every((n) => n.status === "pending"));
+await shiftsDb.deliverShiftNotices(ct(tomorrow, 8, 15));
+check("And goes out in the morning", textsTo(b1).length === 1);
+// Overnight, a held shift that gets unposted is skipped.
+reset();
+await shiftsDb.postShift(session("s1"), admin, TEN_PM);
+await shiftsDb.unpostShift(db.shift_posts[0].id as string, admin);
+await shiftsDb.deliverShiftNotices(ct(tomorrow, 8));
+check("A shift unposted overnight is never texted", texts.length === 0 && db.shift_notices.every((n) => n.status === "skipped"));
+// Los Angeles keeps its own clock.
+reset();
+const b6 = { id: "b6", name: "Avery Kim", phone: "+13105550116", role: "bartender" as const, active: true, markets: ["los_angeles"] };
+db.staff.push({ ...b6 });
+db.sessions.push({ ...event("la2", day10, "1 Ocean Ave, Santa Monica, CA"), team_market: "los_angeles", team_market_source: "admin", team_market_address: "1 Ocean Ave, Santa Monica, CA" });
+const laPost = await shiftsDb.postShift(session("la2"), admin, TEN_PM);
+check("10:00 PM Central is 8:00 PM in Los Angeles: not quiet there", laPost.ok && !laPost.plan.quiet && db.shift_notices[0]?.send_after === plus(TEN_PM, 10).toISOString(), JSON.stringify(laPost));
+await shiftsDb.deliverShiftNotices(plus(TEN_PM, 10));
+check("The Los Angeles bartender is texted at 8:10 PM Pacific", textsTo(b6).length === 1);
+reset();
+db.staff.push({ ...b6 });
+db.sessions.push({ ...event("la2", day10, "1 Ocean Ave, Santa Monica, CA"), team_market: "los_angeles", team_market_source: "admin", team_market_address: "1 Ocean Ave, Santa Monica, CA" });
+await shiftsDb.postShift(session("la2"), admin, ct(tomorrow, 9)); // 7:00 AM Pacific
+check("9:00 AM Central is 7:00 AM Pacific: held for 8:00 AM Pacific", db.shift_notices[0]?.send_after === pt(tomorrow, 8).toISOString());
+await shiftsDb.deliverShiftNotices(ct(tomorrow, 9, 30));
+check("Not sent at 7:30 AM Pacific", textsTo(b6).length === 0);
+await shiftsDb.deliverShiftNotices(pt(tomorrow, 8));
+check("Sent at 8:00 AM Pacific", textsTo(b6).length === 1);
+
+// Urgent cover posts ignore quiet hours; others wait.
+reset();
+db.event_assignments.push({ id: "h4", session_id: "s4", staff_id: "b1", status: "accepted" });
+await shiftsDb.startHandoff(session("s4"), b1, { mode: "market", reason: "Sick" }, TEN_PM);
+check("An urgent cover post at 10:00 PM texts the market right away", textsTo(b5).length === 1 && textsTo(b5)[0].message.startsWith("Mix Fix shift, cover needed:") && textsTo(b2).length === 1 && db.shift_notices.length === 0, JSON.stringify(texts));
+check("And the urgent admin alert goes too", textsTo(admin).length === 1 && textsTo(admin)[0].message.startsWith("URGENT:"));
+reset();
+db.event_assignments.push({ id: "h1", session_id: "s1", staff_id: "b1", status: "accepted" });
+await shiftsDb.startHandoff(session("s1"), b1, { mode: "market", reason: "Family thing" }, TEN_PM);
+check("A cover post 10 days out at 10:00 PM is held for 8:00 AM", textsTo(b5).length === 0 && db.shift_notices.length === 2 && db.shift_notices.every((n) => n.send_after === ct(tomorrow, 8).toISOString()), JSON.stringify(db.shift_notices));
+check("The giver is never queued for their own cover post", !db.shift_notices.some((n) => n.staff_id === "b1"));
+await shiftsDb.deliverShiftNotices(ct(tomorrow, 8));
+check("At 8:00 AM it goes out as cover needed", textsTo(b5).length === 1 && textsTo(b5)[0].message.startsWith("Mix Fix shift, cover needed:"));
+reset();
+db.event_assignments.push({ id: "h1", session_id: "s1", staff_id: "b1", status: "accepted" });
+await shiftsDb.startHandoff(session("s1"), b1, { mode: "market", reason: "Family thing" }, TEN_PM);
+await shiftsDb.cancelHandoff(db.shift_handoffs[0].id as string, b1);
+await shiftsDb.deliverShiftNotices(ct(tomorrow, 8));
+check("A cover post cancelled overnight is never texted", textsTo(b5).length === 0 && db.shift_notices.every((n) => n.status === "skipped"));
+
+// Texts about a bartender's own shift go right away, quiet hours or not.
+reset();
+await shiftsDb.postShift(session("s1"), admin, TEN_PM);
+await shiftsDb.requestShift(db.shift_posts[0].id as string, b1);
+await shiftsDb.requestShift(db.shift_posts[0].id as string, b5);
+texts.length = 0;
+await shiftsDb.approveRequest(admin, db.shift_posts[0].id as string, "b1");
+check("An approval texts the bartender right away, even with new shift texts held", textsTo(b1).length === 1 && textsTo(b1)[0].message.startsWith("You got the shift"));
+await asgDb.assignStaff(session("s1"), "b3", admin, "https://plan.test");
+check("Filled texts go right away too", textsTo(b5).some((t) => /has been filled/.test(t.message)));
+await shiftsDb.deliverShiftNotices(ct(tomorrow, 8));
+check("The held new shift text for a filled shift is skipped in the morning", textsTo(b2).length === 0 && db.shift_notices.every((n) => n.status === "skipped"));
+
+// The claim step: two cron runs at once send once.
+reset();
+await shiftsDb.postShift(session("s1"), admin, NOON);
+const [ra, rb] = await Promise.all([shiftsDb.deliverShiftNotices(plus(NOON, 10)), shiftsDb.deliverShiftNotices(plus(NOON, 10))]);
+check("Two deliveries at once never double send", ra + rb === 3 && textsTo(b1).length === 1 && textsTo(b5).length === 1, `${ra} ${rb} ${JSON.stringify(texts)}`);
+
+// A failed text never blocks the post.
+reset();
+const realFetch = globalThis.fetch;
+globalThis.fetch = (async (input: string | URL, init?: RequestInit) => (String(input) === process.env.GHL_STAFF_SMS_WEBHOOK ? new Response("down", { status: 500 }) : realFetch(input, init))) as typeof fetch;
+const okPost = await shiftsDb.postShift(session("s1"), admin, NOON);
+await shiftsDb.deliverShiftNotices(plus(NOON, 10));
+globalThis.fetch = realFetch;
+check("A failed text never blocks posting, and is marked failed", okPost.ok && db.shift_posts[0].status === "posted" && db.shift_notices.every((n) => n.status === "failed"));
 
 reset();
 db.team_hidden_events = [{ session_id: "s1" }];
@@ -255,14 +438,23 @@ reset();
 db.sessions.push(event("s5", addDays(today, -3), "1 Past St, Austin, TX"), event("s6", day10, "Hidden Rd, Austin, TX"), event("s7", day10, "9 Far Rd, Oklahoma City, OK"));
 db.team_hidden_events = [{ session_id: "s6" }];
 db.event_assignments.push({ id: "full1", session_id: "s3", staff_id: "b1", status: "accepted" }, { id: "full2", session_id: "s3", staff_id: "b5", status: "accepted" });
-const all = await shiftsDb.postAllUnstaffed(admin);
+const all = await shiftsDb.postAllUnstaffed(admin, null, NOON);
 const postedIds = db.shift_posts.map((p) => p.session_id).sort().join();
 check("Post all posts every unstaffed upcoming event", all.posted === 3 && postedIds === "s1,s2,s4", `${JSON.stringify(all)} ${postedIds}`);
 check("Post all skips past, hidden, and fully staffed events, and counts events with no market", all.noMarket === 1 && !postedIds.includes("s5") && !postedIds.includes("s6") && !postedIds.includes("s3"));
-check("Post all again posts nothing new", (await shiftsDb.postAllUnstaffed(admin)).posted === 0);
+check("Post all texts right away, one text per bartender per market", textsTo(b1).length === 1 && textsTo(b5).length === 1 && textsTo(b2).length === 1, JSON.stringify(texts));
+check("Post all: 3 shifts for someone free for all of them", textsTo(b1)[0]?.message === `3 new Mix Fix shifts posted in Austin. See them and request: ${OPEN_LINK}`, textsTo(b1)[0]?.message);
+check("Post all: a bartender already on one event hears about the other two", textsTo(b2)[0]?.message === BATCH2, textsTo(b2)[0]?.message);
+check("Post all reports texts sent and none held at noon", all.texted === 3 && all.held === 0, JSON.stringify(all));
+check("Post all again posts nothing new", (await shiftsDb.postAllUnstaffed(admin, null, plus(NOON, 1))).posted === 0 && texts.length === 3);
+reset();
+const allLate = await shiftsDb.postAllUnstaffed(admin, null, TEN_PM);
+check("Post all at 10:00 PM sends nothing and holds one text per bartender", texts.length === 0 && allLate.texted === 0 && allLate.held === 3, JSON.stringify(allLate));
+await shiftsDb.deliverShiftNotices(ct(tomorrow, 8));
+check("Post all's held texts go out at 8:00 AM, batched", textsTo(b1).length === 1 && textsTo(b1)[0].message === `4 new Mix Fix shifts posted in Austin. See them and request: ${OPEN_LINK}`, JSON.stringify(textsTo(b1)));
 reset();
 db.sessions.push(event("s8", day10, "1 Main St, Houston, TX"));
-const onlyHouston = await shiftsDb.postAllUnstaffed(admin, "houston");
+const onlyHouston = await shiftsDb.postAllUnstaffed(admin, "houston", NOON);
 check("Post all can be limited to one market", onlyHouston.posted === 1 && db.shift_posts.map((p) => p.session_id).join() === "s8", JSON.stringify(onlyHouston));
 
 // ----- Bartender view and requests -----
@@ -477,6 +669,13 @@ check("Every shift text goes through sendStaffText", !/fetch\(/.test(shiftsSrc) 
 check("Shift pages only show the allowlisted summary", src("app/team/shifts/shift-card.tsx").includes("ShiftSummary") && !/event_data|client_name|event_address/.test(src("app/team/shifts/shift-card.tsx")));
 check("Admin shift and handoff routes are admin only", ["app/api/team/admin/shifts/route.ts", "app/api/team/admin/handoff/route.ts", "app/api/team/admin/market/route.ts"].every((p) => src(p).includes('role !== "admin"') && src(p).includes("status: 403")));
 check("Bartender shift routes need a sign in", ["app/api/team/shifts/route.ts", "app/api/team/handoff/route.ts"].every((p) => src(p).includes("getCurrentStaff()") && src(p).includes("status: 401")));
+check("The cron sends held shift texts", src("app/api/cron/team/route.ts").includes("deliverShiftNotices(now)"));
+check("Only new shift texts are queued: one place writes shift_notices rows", (shiftsSrc.match(/from\("shift_notices"\)\.upsert/g) ?? []).length === 1);
+check("Own shift texts are sent directly, never queued", ["gotShiftText(", "filledText(", "releasedText(", "stillOnShiftText(", "teammateDeclinedText("].every((f) => shiftsSrc.includes(f)) && !/shift_notices[\s\S]{0,200}(gotShiftText|filledText|releasedText)/.test(shiftsSrc));
+const noticeMig = src("supabase/migrations/20261119_shift_notices.sql");
+check("Migration: one queued text per person per post", noticeMig.includes("unique (post_id, staff_id)"));
+check("Migration: queued texts go with their post", noticeMig.includes("references public.shift_posts(id) on delete cascade"));
+check("Migration: shift_notices has RLS on", noticeMig.includes("alter table public.shift_notices enable row level security"));
 const mig = src("supabase/migrations/20261118_markets_shifts.sql");
 check("Migration: existing staff default to Dallas", mig.includes("markets text[] not null default '{dallas}'"));
 check("Migration: one posted open shift per event", mig.includes("create unique index if not exists shift_posts_one_open on public.shift_posts (session_id) where kind = 'open' and status = 'posted'"));

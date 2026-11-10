@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { sendClockOutReminders, sendLateSetupAlerts } from "@/lib/team/clock-db";
-import { sendShortShiftAlerts } from "@/lib/team/shifts-db";
+import { deliverShiftNotices, sendShortShiftAlerts } from "@/lib/team/shifts-db";
 import { ensureMarkets } from "@/lib/team/markets-db";
 import { supabase } from "@/lib/supabase";
 import type { SessionRow } from "@/lib/event-updates";
@@ -24,13 +24,19 @@ export async function GET(request: Request) {
   // Each job runs on its own, so one failing never stops the others.
   // Markets first, so the time math below uses each event's time zone.
   const markets = await Promise.allSettled([fillMarkets()]);
-  const [reminders, alerts, short] = await Promise.allSettled([sendClockOutReminders(now), sendLateSetupAlerts(now), sendShortShiftAlerts(now)]);
+  const [reminders, alerts, short, shiftTexts] = await Promise.allSettled([
+    sendClockOutReminders(now),
+    sendLateSetupAlerts(now),
+    sendShortShiftAlerts(now),
+    deliverShiftNotices(now), // held new shift texts: batched, and sent at 8:00 AM after quiet hours
+  ]);
   const result = (r: PromiseSettledResult<number>) => (r.status === "fulfilled" ? r.value : `failed: ${String(r.reason)}`);
   const out = {
     marketsSet: result(markets[0]),
     clockOutReminders: result(reminders),
     lateSetupAlerts: result(alerts),
     shortShiftAlerts: result(short),
+    newShiftTexts: result(shiftTexts),
   };
   console.log("[team-cron]", JSON.stringify(out));
   return NextResponse.json({ ok: true, ...out });

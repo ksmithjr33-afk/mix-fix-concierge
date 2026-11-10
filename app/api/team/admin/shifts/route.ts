@@ -21,7 +21,7 @@ export async function POST(request: Request) {
       if (!session) return NextResponse.json({ error: "We could not find that event." }, { status: 404 });
       const r = await postShift(session, staff);
       if (!r.ok) return NextResponse.json({ error: r.error }, { status: r.status });
-      return NextResponse.json({ ok: true, postId: r.postId, notified: r.notified });
+      return NextResponse.json({ ok: true, postId: r.postId, queued: r.plan.queued, sendAt: r.plan.sendAt, message: r.message });
     }
     if (body.action === "post_all") {
       return NextResponse.json({ ok: true, ...(await postAllUnstaffed(staff, isMarket(body.market) ? body.market : null)) });

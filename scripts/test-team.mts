@@ -569,7 +569,7 @@ const punchRoute = readFileSync(new URL("../app/api/team/punch/route.ts", import
 check("/api/team/punch checks access before saving", punchRoute.includes("getCurrentStaff()") && punchRoute.indexOf("openEvent(") < punchRoute.indexOf("recordPunch(") && punchRoute.includes("status: 403"));
 const cronRoute = readFileSync(new URL("../app/api/cron/team/route.ts", import.meta.url), "utf8");
 check("The cron route needs the cron secret", cronRoute.includes("Bearer ${secret}") && cronRoute.includes("if (!secret ||"));
-check("The cron runs every job, each on its own", cronRoute.includes("Promise.allSettled([sendClockOutReminders(now), sendLateSetupAlerts(now), sendShortShiftAlerts(now)])") && cronRoute.includes("Promise.allSettled([fillMarkets()])"));
+check("The cron runs every job, each on its own", /Promise\.allSettled\(\[\s*sendClockOutReminders\(now\),\s*sendLateSetupAlerts\(now\),\s*sendShortShiftAlerts\(now\),\s*deliverShiftNotices\(now\)/.test(cronRoute) && cronRoute.includes("Promise.allSettled([fillMarkets()])"));
 const vercelJson = JSON.parse(readFileSync(new URL("../vercel.json", import.meta.url), "utf8"));
 check("Vercel cron every 15 minutes", vercelJson.crons?.[0]?.path === "/api/cron/team" && vercelJson.crons?.[0]?.schedule === "*/15 * * * *");
 check("Staff who clocked in cannot be removed", /removeStaff[\s\S]*?if \(await hasPunches\(session\.id, staffId\)\)/.test(asgDb));

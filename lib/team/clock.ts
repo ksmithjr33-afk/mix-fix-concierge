@@ -2,7 +2,7 @@
 // assignment, offline punches, hours, the cron reminders, and the rule that
 // nobody edits or approves their own time. Pure, no database.
 
-import { eventDayStart, eventSchedule, eventTz, formatClock, TZ } from "@/lib/team/time";
+import { eventDayStart, eventSchedule, formatClock, TZ } from "@/lib/team/time";
 
 export const CLOCK_IN_LEAD_MIN = 30; // clock in opens 30 minutes before arrival
 export const SITE_RADIUS_M = 300; // within 300 m of the event is clean

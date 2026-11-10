@@ -13,12 +13,15 @@ import { claimNotice, hasPunches, siteOrigin } from "@/lib/team/clock-db";
 import { hiddenEventIds, isHidden } from "@/lib/team/hidden";
 import { sendStaffText } from "@/lib/team/sms";
 import { ensureMarket, staffMarkets } from "@/lib/team/markets-db";
-import { eventData, sessionMarket, staffMarketsOf, type Market } from "@/lib/team/markets";
+import { eventData, marketLabel, marketTz, sessionMarket, staffMarketsOf, type Market } from "@/lib/team/markets";
 import { staffingCounts, type AssignmentStatus } from "@/lib/team/assignments";
 import { eventDay, eventSchedule, formatClock, shortDate, todayIn } from "@/lib/team/time";
 import {
   ACTIVE_HANDOFF,
+  batchText,
   canSeePost,
+  inQuietHours,
+  noticeSendAfter,
   filledText,
   firstRequestText,
   gotShiftText,
@@ -137,15 +140,146 @@ async function textAdmins(message: string): Promise<number> {
   return sent.filter(Boolean).length;
 }
 
-/** Text every active bartender in the post's market, except anyone already on the event (and whoever is handing it off). */
-async function notifyMarket(post: PostRow, session: SessionRow, exclude: Set<string>): Promise<number> {
+/** Active bartenders in the post's market, except anyone already on the event (and whoever is handing it off). */
+async function marketBartenders(post: PostRow, session: SessionRow, exclude: Set<string>): Promise<StaffFull[]> {
   const { data } = await supabase.from("staff").select("*").eq("active", true).eq("role", "bartender");
   const onEvent = new Set((await assignmentsOf(session.id)).filter((a) => a.status !== "declined").map((a) => a.staff_id));
-  const people = ((data as StaffFull[]) ?? []).filter((s) => staffMarketsOf(s).includes(post.market) && !onEvent.has(s.id) && !exclude.has(s.id));
-  if (people.length === 0) return 0;
-  const message = postText(shiftSummary(session, post, post.kind === "cover" ? 1 : await spotsOpen(session)), shiftLink(post.id));
-  const sent = await Promise.all(people.map((s) => sendStaffText(s.phone, s.name, message)));
-  return sent.filter(Boolean).length;
+  return ((data as StaffFull[]) ?? []).filter((s) => staffMarketsOf(s).includes(post.market) && !onEvent.has(s.id) && !exclude.has(s.id));
+}
+
+export interface NoticePlan {
+  queued: number; // bartenders who will get a text about this shift
+  sent: number; // of those, texted right away
+  sendAt: string | null; // when the held texts go out, ISO
+  quiet: boolean; // held for quiet hours
+}
+
+/**
+ * New shift texts. An urgent cover post texts the market right away, quiet
+ * hours or not. Everything else is queued in shift_notices: held 10 minutes
+ * after a single post so more shifts to the market go out as one text
+ * ("hold"), or due now for "Post all unstaffed" ("now"), and never sent from
+ * 9:00 PM to 8:00 AM in the market's time zone. The cron delivers them.
+ */
+async function notifyMarket(post: PostRow, session: SessionRow, exclude: Set<string>, now: Date, mode: "hold" | "now" | "urgent"): Promise<NoticePlan> {
+  const people = await marketBartenders(post, session, exclude);
+  if (people.length === 0) return { queued: 0, sent: 0, sendAt: null, quiet: false };
+  if (mode === "urgent") {
+    const message = postText(shiftSummary(session, post, 1), shiftLink(post.id));
+    const sent = await Promise.all(people.map((s) => sendStaffText(s.phone, s.name, message)));
+    return { queued: people.length, sent: sent.filter(Boolean).length, sendAt: now.toISOString(), quiet: false };
+  }
+  const tz = marketTz(post.market);
+  const sendAfter = noticeSendAfter(now, tz, mode);
+  const { error } = await supabase.from("shift_notices").upsert(
+    people.map((p) => ({ post_id: post.id, staff_id: p.id, market: post.market, created_at: now.toISOString(), send_after: sendAfter.toISOString(), status: "pending" })),
+    { onConflict: "post_id,staff_id", ignoreDuplicates: true }
+  );
+  if (error) {
+    // Before the table exists, or a failed write: text now rather than not at all.
+    console.error("[team] queueing shift texts failed, sending now:", error.message);
+    const message = postText(shiftSummary(session, post, post.kind === "cover" ? 1 : await spotsOpen(session)), shiftLink(post.id));
+    const sent = await Promise.all(people.map((s) => sendStaffText(s.phone, s.name, message)));
+    return { queued: people.length, sent: sent.filter(Boolean).length, sendAt: now.toISOString(), quiet: false };
+  }
+  return { queued: people.length, sent: 0, sendAt: sendAfter.toISOString(), quiet: inQuietHours(now, tz) || inQuietHours(new Date(now.getTime() + 10 * 60_000), tz) };
+}
+
+interface NoticeRow {
+  id: string;
+  post_id: string;
+  staff_id: string;
+  market: Market;
+  send_after: string;
+  status: string;
+}
+
+/**
+ * Send the held new shift texts that are due: one text per bartender per
+ * market. A single shift gets the detailed text; several get "<n> new Mix Fix
+ * shifts posted in <market>". Shifts filled or unposted in the meantime, or
+ * that the bartender can no longer take, are skipped. Nothing goes out in
+ * quiet hours. Each row is claimed before sending, so a text is never sent
+ * twice. Returns how many texts went out.
+ */
+export async function deliverShiftNotices(now: Date = new Date(), only: { markets?: Market[] } = {}): Promise<number> {
+  let q = supabase.from("shift_notices").select("id, post_id, staff_id, market, send_after, status").eq("status", "pending");
+  if (only.markets?.length) q = q.in("market", only.markets);
+  const { data, error } = await q;
+  if (error || !data) return 0;
+  const groups = new Map<string, NoticeRow[]>();
+  for (const n of data as NoticeRow[]) {
+    const key = `${n.staff_id}|${n.market}`;
+    groups.set(key, [...(groups.get(key) ?? []), n]);
+  }
+
+  const posts = new Map<string, { post: PostRow | null; session: SessionRow | null; spots: number; onEvent: Set<string>; handoff: HandoffRow | null }>();
+  const postInfo = async (id: string) => {
+    if (!posts.has(id)) {
+      const post = await postById(id);
+      const session = post ? await getSubmittedSession(post.session_id) : null;
+      const rows = session ? await assignmentsOf(session.id) : [];
+      posts.set(id, {
+        post,
+        session,
+        spots: session && post?.kind === "open" ? staffingCounts(bartendersNeeded(session), rows.map((r) => r.status)).stillNeeded : 1,
+        onEvent: new Set(rows.filter((a) => a.status !== "declined").map((a) => a.staff_id)),
+        handoff: post?.handoff_id ? await handoffById(post.handoff_id) : null,
+      });
+    }
+    return posts.get(id)!;
+  };
+  const hidden = await hiddenEventIds();
+
+  let texts = 0;
+  for (const rows of groups.values()) {
+    const market = rows[0].market;
+    // Due once the earliest text in the batch is due, and never in quiet hours.
+    if (Math.min(...rows.map((r) => new Date(r.send_after).getTime())) > now.getTime()) continue;
+    if (inQuietHours(now, marketTz(market))) continue;
+    const { data: claimed } = await supabase
+      .from("shift_notices")
+      .update({ status: "sending" })
+      .in("id", rows.map((r) => r.id))
+      .eq("status", "pending")
+      .select("id, post_id, staff_id");
+    const mine = (claimed as NoticeRow[]) ?? [];
+    if (mine.length === 0) continue;
+    const staff = await staffById(mine[0].staff_id);
+
+    const good: { n: NoticeRow; info: Awaited<ReturnType<typeof postInfo>> }[] = [];
+    const skip: string[] = [];
+    for (const n of mine) {
+      const info = await postInfo(n.post_id);
+      const ok =
+        !!staff &&
+        staff.active &&
+        staffMarketsOf(staff).includes(market) &&
+        info.post?.status === "posted" &&
+        !!info.session &&
+        !hidden.has(info.session.id) &&
+        !isPast(info.session, now) &&
+        info.spots > 0 &&
+        !info.onEvent.has(n.staff_id) &&
+        (info.post.kind === "open" || (info.handoff?.status === "open" && info.handoff.from_staff_id !== n.staff_id));
+      if (ok) good.push({ n, info });
+      else skip.push(n.id);
+    }
+    if (skip.length) await supabase.from("shift_notices").update({ status: "skipped" }).in("id", skip);
+    if (good.length === 0 || !staff) continue;
+
+    const message =
+      good.length === 1
+        ? postText(shiftSummary(good[0].info.session!, good[0].info.post!, good[0].info.spots), shiftLink(good[0].n.post_id))
+        : batchText({ count: good.length, market: marketLabel(market), link: `${siteOrigin()}/team/events?tab=open` });
+    const sent = await sendStaffText(staff.phone, staff.name, message);
+    await supabase
+      .from("shift_notices")
+      .update({ status: sent ? "sent" : "failed", sent_at: now.toISOString(), batch_size: good.length })
+      .in("id", good.map((g) => g.n.id));
+    if (sent) texts++;
+  }
+  return texts;
 }
 
 /** Close a post as filled or unposted. Everyone still waiting is texted, except people now on the event. */
@@ -170,36 +304,69 @@ async function closePost(post: PostRow, session: SessionRow, status: "filled" | 
 // ----- Posting -----
 
 /** Post an event's unfilled spots to its market and text every active bartender there. */
-export async function postShift(session: SessionRow, admin: StaffMember): Promise<Result<{ postId: string; notified: number }>> {
+/** "Posted. 4 bartenders get a text within 10 minutes." */
+export function postedMessage(plan: NoticePlan, market: Market | null): string {
+  if (plan.queued === 0) return "Posted. Nobody else in this market is free to text.";
+  const who = `${plan.queued} ${plan.queued === 1 ? "bartender gets" : "bartenders get"} a text`;
+  if (plan.quiet && plan.sendAt) {
+    const at = new Intl.DateTimeFormat("en-US", { timeZone: marketTz(market), hour: "numeric", minute: "2-digit" }).format(new Date(plan.sendAt)).replace(/[  ]/g, " ");
+    return `Posted. It is quiet hours in ${marketLabel(market)}, so ${who} at ${at}.`;
+  }
+  return `Posted. ${who} within 10 minutes, together with any other shifts you post to ${marketLabel(market)}.`;
+}
+
+/** Post an event's unfilled spots to its market. Bartenders there get a text (see notifyMarket). */
+export async function postShift(
+  session: SessionRow,
+  admin: StaffMember,
+  now: Date = new Date(),
+  mode: "hold" | "now" = "hold"
+): Promise<Result<{ postId: string; plan: NoticePlan; message: string }>> {
   const hidden = await isHidden(session.id);
   const market = hidden ? sessionMarket(session) : await ensureMarket(session);
-  const err = postError({ hidden, market, spotsOpen: await spotsOpen(session), alreadyPosted: !!(await activeOpenPost(session.id)), past: isPast(session) });
+  const err = postError({ hidden, market, spotsOpen: await spotsOpen(session), alreadyPosted: !!(await activeOpenPost(session.id)), past: isPast(session, now) });
   if (err) return fail(err);
   const { data, error } = await supabase
     .from("shift_posts")
-    .insert({ session_id: session.id, market, kind: "open", status: "posted", posted_by: admin.id, posted_at: new Date().toISOString() })
+    .insert({ session_id: session.id, market, kind: "open", status: "posted", posted_by: admin.id, posted_at: now.toISOString() })
     .select("*")
     .single();
   if (error) return fail(/duplicate key|unique/i.test(error.message) ? "This shift is already posted." : "Could not post. Try again.");
   const post = data as PostRow;
-  const notified = await notifyMarket(post, session, new Set());
-  return { ok: true, postId: post.id, notified };
+  const plan = await notifyMarket(post, session, new Set(), now, mode);
+  return { ok: true, postId: post.id, plan, message: postedMessage(plan, market) };
 }
 
 /** Post every upcoming, visible event that still has open spots and is not posted yet (in one market, when given). */
-export async function postAllUnstaffed(admin: StaffMember, market: Market | null = null): Promise<{ posted: number; notified: number; noMarket: number }> {
+/**
+ * Post every upcoming, visible event that still has open spots and is not
+ * posted yet (in one market, when given). Each bartender gets one text per
+ * market right away, or at 8:00 AM in quiet hours.
+ */
+export async function postAllUnstaffed(
+  admin: StaffMember,
+  market: Market | null = null,
+  now: Date = new Date()
+): Promise<{ posted: number; texted: number; held: number; noMarket: number }> {
   const { data } = await supabase.from("sessions").select("*").eq("status", "submitted");
   const hidden = await hiddenEventIds();
-  const out = { posted: 0, notified: 0, noMarket: 0 };
+  const out = { posted: 0, texted: 0, held: 0, noMarket: 0 };
+  const markets = new Set<Market>();
   for (const s of (data as SessionRow[]) ?? []) {
-    if (hidden.has(s.id) || isPast(s) || !eventSchedule(eventData(s)).day) continue;
+    if (hidden.has(s.id) || isPast(s, now) || !eventSchedule(eventData(s)).day) continue;
     if (market && (await ensureMarket(s)) !== market) continue;
     if ((await spotsOpen(s)) <= 0 || (await activeOpenPost(s.id))) continue;
-    const r = await postShift(s, admin);
+    const r = await postShift(s, admin, now, "now");
     if (r.ok) {
       out.posted++;
-      out.notified += r.notified;
+      const m = sessionMarket(s);
+      if (m) markets.add(m);
     } else if (/market/i.test(r.error)) out.noMarket++;
+  }
+  if (markets.size > 0) {
+    out.texted = await deliverShiftNotices(now, { markets: [...markets] });
+    const { data: waiting } = await supabase.from("shift_notices").select("staff_id, market").eq("status", "pending").in("market", [...markets]);
+    out.held = new Set(((waiting as { staff_id: string; market: string }[]) ?? []).map((w) => `${w.staff_id}|${w.market}`)).size;
   }
   return out;
 }
@@ -578,7 +745,8 @@ export async function startHandoff(
       await supabase.from("shift_handoffs").update({ status: "cancelled" }).eq("id", h.id);
       return fail("Could not open it to the market. Try again.");
     }
-    await notifyMarket(postRow as PostRow, session, new Set([staff.id]));
+    // An urgent cover request (inside 48 hours) texts the market right away, even in quiet hours.
+    await notifyMarket(postRow as PostRow, session, new Set([staff.id]), now, urgent ? "urgent" : "hold");
     await textAdmins(handoffAdminText({ urgent, mode, from: staff.name, title: f.title, date: f.date, reason, link: adminLink(session.id) }));
   }
   return { ok: true, handoffId: h.id };

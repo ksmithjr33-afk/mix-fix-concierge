@@ -10,11 +10,14 @@
 import { cityFrom } from "@/lib/team/event-list";
 import { bartendersNeeded, firstName, scrub, type SessionLike, type StaffMember } from "@/lib/team/event-view";
 import { eventData, marketLabel, staffMarketsOf, type Market } from "@/lib/team/markets";
-import { eventDayStart, eventSchedule, formatClock, longDate, shortDate } from "@/lib/team/time";
+import { eventDayStart, eventSchedule, formatClock, longDate, shortDate, todayIn, zonedInstant } from "@/lib/team/time";
 
 export const SHORT_ALERT_DAYS = 5; // admins hear once when a posted shift is still short 5 days out
 export const URGENT_HOURS = 48; // a handoff inside 48 hours of the event is marked URGENT
 export const MIN_REASON = 3;
+export const BATCH_WINDOW_MIN = 10; // new shift texts to one market within 10 minutes go out as one text
+export const QUIET_START_HOUR = 21; // no new shift texts from 9:00 PM
+export const QUIET_END_HOUR = 8; // until 8:00 AM, in the market's time zone
 
 export type PostKind = "open" | "cover";
 export type PostStatus = "posted" | "filled" | "unposted";
@@ -174,6 +177,44 @@ export function teammateError(o: { teammate: (StaffMember & { markets?: unknown 
   if (!staffMarketsOf(o.teammate).includes(o.market)) return `${firstName(o.teammate.name) || "They"} does not work the ${marketLabel(o.market)} market.`;
   if (o.onEvent) return `${firstName(o.teammate.name) || "They"} is already on this event.`;
   return null;
+}
+
+// ----- New shift texts: batching and quiet hours -----
+
+function localHour(at: Date, tz: string): number {
+  return Number(new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "numeric", hourCycle: "h23" }).format(at)) % 24;
+}
+
+/** 9:00 PM to 8:00 AM in the market's time zone. */
+export function inQuietHours(at: Date, tz: string): boolean {
+  const h = localHour(at, tz);
+  return h >= QUIET_START_HOUR || h < QUIET_END_HOUR;
+}
+
+/** The time a new shift text may go out: `at`, or 8:00 AM in the market's time zone when `at` falls in quiet hours. */
+export function sendableAt(at: Date, tz: string): Date {
+  if (!inQuietHours(at, tz)) return at;
+  let day = todayIn(tz, at);
+  if (localHour(at, tz) >= QUIET_START_HOUR) {
+    const [y, m, d] = day.split("-").map(Number);
+    day = new Date(Date.UTC(y, m - 1, d + 1)).toISOString().slice(0, 10);
+  }
+  return zonedInstant(day, QUIET_END_HOUR * 60, tz);
+}
+
+/**
+ * When a new shift text is held until. A single "Post shift" waits 10 minutes
+ * so more shifts posted to the market go out as one text; "Post all
+ * unstaffed" is already a batch and goes right away. Either way, never in
+ * quiet hours.
+ */
+export function noticeSendAfter(now: Date, tz: string, mode: "hold" | "now"): Date {
+  return sendableAt(mode === "hold" ? new Date(now.getTime() + BATCH_WINDOW_MIN * 60_000) : now, tz);
+}
+
+/** "3 new Mix Fix shifts posted in Austin. See them and request: <link>". */
+export function batchText(o: { count: number; market: string; link: string }): string {
+  return `${o.count} new Mix Fix shifts posted in ${o.market}. See them and request: ${o.link}`;
 }
 
 // ----- Texts -----

@@ -29,7 +29,8 @@ export default function PostAll({ count, market }: { count: number; market: stri
                 const d = await res.json().catch(() => ({}));
                 if (!res.ok) throw new Error(d.error ?? "Could not post.");
                 setMessage(
-                  `Posted ${d.posted} ${d.posted === 1 ? "shift" : "shifts"}, ${d.notified} ${d.notified === 1 ? "text" : "texts"} sent.` +
+                  `Posted ${d.posted} ${d.posted === 1 ? "shift" : "shifts"}. ${d.texted} ${d.texted === 1 ? "text" : "texts"} sent, one per bartender per market.` +
+                    (d.held ? ` ${d.held} held for quiet hours, sent at 8:00 AM.` : "") +
                     (d.noMarket ? ` ${d.noMarket} need a market first.` : "")
                 );
                 router.refresh();

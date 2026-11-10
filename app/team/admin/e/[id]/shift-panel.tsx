@@ -145,7 +145,7 @@ export default function ShiftPanel({
             <button
               type="button"
               disabled={!!busy || !!why}
-              onClick={() => run("post", "/api/team/admin/shifts", { action: "post", sessionId }, (d) => `Posted. ${d.notified} ${d.notified === 1 ? "bartender" : "bartenders"} texted.`)}
+              onClick={() => run("post", "/api/team/admin/shifts", { action: "post", sessionId }, (d) => String(d.message ?? "Posted."))}
               className="rounded-xl bg-[#B5845A] text-white px-4 py-2.5 font-medium disabled:opacity-40"
             >
               {busy === "post" ? "Posting..." : `Post shift${panel.spotsOpen > 0 ? ` (${panel.spotsOpen} ${panel.spotsOpen === 1 ? "spot" : "spots"})` : ""}`}
