@@ -174,6 +174,10 @@ export async function recordPunch(opts: {
   });
   if (error) {
     // The unique (assignment_id, type) index catches a double tap that raced past the check.
+    // An admin already approved this row: the phone drops the punch instead of retrying it.
+    if (/approved and locked/i.test(error.message)) {
+      return { ok: false, error: "Your time for this event is already approved. Text us at 469 754 8512 if it is wrong.", status: 409 };
+    }
     if (/duplicate key|unique/i.test(error.message)) {
       return { ok: false, error: type === "in" ? "You already clocked in for this event." : "You already clocked out for this event.", status: 409 };
     }

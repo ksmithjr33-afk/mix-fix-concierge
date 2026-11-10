@@ -15,7 +15,11 @@ const UNIQUE: Record<string, string[][]> = {
   team_notices: [["key"]],
   time_punches: [["assignment_id", "type"], ["client_id"]],
   event_assignments: [["session_id", "staff_id"]],
+  time_approvals: [["assignment_id"]],
 };
+
+/** Tests can stand in for database constraints and triggers: return an error message to refuse a write. */
+export const guards: ((table: string, op: string, rows: Record<string, unknown>[]) => string | null)[] = [];
 
 const JOIN_TABLES: Record<string, string> = { staff: "staff", session: "sessions" };
 
@@ -117,6 +121,13 @@ class Query implements PromiseLike<Result> {
 
   private run(): Result {
     const rows = db[this.table];
+    if (this.op !== "select") {
+      const touched = this.op === "insert" || this.op === "upsert" ? (Array.isArray(this.payload) ? this.payload : [this.payload!]) : rows.filter((r) => this.filters.every((f) => f(r)));
+      for (const g of guards) {
+        const refused = g(this.table, this.op, touched);
+        if (refused) return { data: null, error: { message: refused } };
+      }
+    }
     if (this.op === "insert") {
       for (const p of Array.isArray(this.payload) ? this.payload : [this.payload!]) {
         for (const key of UNIQUE[this.table] ?? []) {

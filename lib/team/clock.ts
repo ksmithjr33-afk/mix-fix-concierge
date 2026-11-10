@@ -19,7 +19,8 @@ export type PunchFlag =
   | "far" // more than 300 m from the event
   | "no_event_location" // the event address could not be found on a map
   | "sent_late" // queued on the phone and sent later
-  | "admin_entry"; // added or corrected by an admin (phase 4)
+  | "admin_entry" // added by an admin
+  | "edited"; // corrected by an admin
 
 export interface LatLng {
   lat: number;
@@ -92,7 +93,8 @@ export const FLAG_LABELS: Record<PunchFlag, string> = {
   far: "Away from the event",
   no_event_location: "Event address not on the map",
   sent_late: "Sent late",
-  admin_entry: "Entered by an admin",
+  admin_entry: "Added by an admin",
+  edited: "Corrected by an admin",
 };
 
 export interface PunchLike {

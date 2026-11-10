@@ -32,6 +32,9 @@ export default function TeamHeader({
               <Link href="/team/admin/staff" className="text-xs sm:text-sm font-medium text-[#9A7049] hover:text-[#B5845A]">
                 Staff
               </Link>
+              <Link href="/team/admin/timesheets" className="text-xs sm:text-sm font-medium text-[#9A7049] hover:text-[#B5845A]">
+                Time
+              </Link>
             </>
           )}
           <form action="/api/team/logout" method="post">
