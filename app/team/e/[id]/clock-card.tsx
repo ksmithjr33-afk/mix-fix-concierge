@@ -157,14 +157,14 @@ export default function ClockCard({ sessionId, initial, renderedAt }: { sessionI
         <ul className="space-y-1.5 text-[15px] text-[#2C2420]">
           {clockedIn && (
             <li>
-              Clocked in {timeLabel(clockedIn.at)}
+              Clocked in {timeLabel(clockedIn.at, undefined, clock.timeZone)}
               {pendingIn && <span className="text-sm text-[#9A7049]"> (saved on your phone, sending when you have signal)</span>}
               <Flags flags={clockedIn.flags} />
             </li>
           )}
           {clockedOut && (
             <li>
-              Clocked out {timeLabel(clockedOut.at)}
+              Clocked out {timeLabel(clockedOut.at, undefined, clock.timeZone)}
               {pendingOut && <span className="text-sm text-[#9A7049]"> (saved on your phone, sending when you have signal)</span>}
               <Flags flags={clockedOut.flags} />
             </li>
@@ -178,7 +178,7 @@ export default function ClockCard({ sessionId, initial, renderedAt }: { sessionI
             {busy ? "Clocking in..." : "Clock in"}
           </button>
         ) : (
-          <p className="text-[15px] text-[#6B5D52]">Clock in opens at {timeLabel(clock.opensAt)}.</p>
+          <p className="text-[15px] text-[#6B5D52]">Clock in opens at {timeLabel(clock.opensAt, undefined, clock.timeZone)}.</p>
         ))}
 
       {clockedIn &&

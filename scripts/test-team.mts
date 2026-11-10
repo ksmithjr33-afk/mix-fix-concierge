@@ -503,12 +503,12 @@ check("Hidden events cannot be assigned", /assignStaff[\s\S]*?if \(await isHidde
 const staffEventsSrc = readFileSync(new URL("../app/team/events/page.tsx", import.meta.url), "utf8");
 check("Hidden events are left out of /team/events", staffEventsSrc.includes("withoutHidden(all, hidden)"));
 const adminEventsSrc = readFileSync(new URL("../app/team/admin/events/page.tsx", import.meta.url), "utf8");
-check("Hidden events are left out of staffing and its needs count", adminEventsSrc.includes("const sessions = withoutHidden(allSessions, hidden);") && adminEventsSrc.indexOf("withoutHidden(allSessions") < adminEventsSrc.indexOf("const open ="));
+check("Hidden events are left out of staffing and its needs count", adminEventsSrc.includes("const visible = withoutHidden(allSessions, hidden);") && adminEventsSrc.includes("? visible.filter(") && adminEventsSrc.indexOf("withoutHidden(allSessions") < adminEventsSrc.indexOf("const open ="));
 check("The staffing page links to Hidden events", adminEventsSrc.includes('href="/team/admin/events?hidden=1"'));
 const hideAction = readFileSync(new URL("../app/team/admin/e/[id]/hide-action.tsx", import.meta.url), "utf8");
 check("Hiding asks to confirm first", hideAction.includes("Yes, hide it") && hideAction.indexOf("setConfirming(true)") > 0);
 const adminEventPage = readFileSync(new URL("../app/team/admin/e/[id]/page.tsx", import.meta.url), "utf8");
-check("A hidden event shows Unhide instead of the assign panel", /hidden \? \(\s*<HideAction sessionId=\{id\} hidden \/>/.test(adminEventPage));
+check("A hidden event shows Unhide instead of the assign panel", /hidden \? \(\s*<>[\s\S]*?<HideAction sessionId=\{id\} hidden \/>\s*<\/>\s*\) : \(/.test(adminEventPage) && adminEventPage.indexOf("<AssignPanel") > adminEventPage.indexOf("<HideAction sessionId={id} hidden />"));
 
 // ----- Phase 3: time clock rules -----
 const venue = { lat: 32.7767, lng: -96.797 }; // downtown Dallas
@@ -569,7 +569,7 @@ const punchRoute = readFileSync(new URL("../app/api/team/punch/route.ts", import
 check("/api/team/punch checks access before saving", punchRoute.includes("getCurrentStaff()") && punchRoute.indexOf("openEvent(") < punchRoute.indexOf("recordPunch(") && punchRoute.includes("status: 403"));
 const cronRoute = readFileSync(new URL("../app/api/cron/team/route.ts", import.meta.url), "utf8");
 check("The cron route needs the cron secret", cronRoute.includes("Bearer ${secret}") && cronRoute.includes("if (!secret ||"));
-check("The cron runs both jobs, each on its own", cronRoute.includes("Promise.allSettled([sendClockOutReminders(now), sendLateSetupAlerts(now)])"));
+check("The cron runs every job, each on its own", cronRoute.includes("Promise.allSettled([sendClockOutReminders(now), sendLateSetupAlerts(now), sendShortShiftAlerts(now)])") && cronRoute.includes("Promise.allSettled([fillMarkets()])"));
 const vercelJson = JSON.parse(readFileSync(new URL("../vercel.json", import.meta.url), "utf8"));
 check("Vercel cron every 15 minutes", vercelJson.crons?.[0]?.path === "/api/cron/team" && vercelJson.crons?.[0]?.schedule === "*/15 * * * *");
 check("Staff who clocked in cannot be removed", /removeStaff[\s\S]*?if \(await hasPunches\(session\.id, staffId\)\)/.test(asgDb));

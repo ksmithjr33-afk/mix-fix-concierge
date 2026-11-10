@@ -3,6 +3,14 @@
 import { useState } from "react";
 import type { StaffRecord } from "@/lib/team/assignments";
 
+const MARKET_CHOICES: [string, string][] = [
+  ["dallas", "Dallas"],
+  ["austin", "Austin"],
+  ["houston", "Houston"],
+  ["los_angeles", "Los Angeles"],
+];
+const marketNames = (ms: string[]) => MARKET_CHOICES.filter(([v]) => ms.includes(v)).map(([, l]) => l).join(", ");
+
 const card = "bg-[#F5F0EB] rounded-2xl border border-[#DDD5CC] px-4 py-3 sm:px-5 sm:py-4";
 const input =
   "w-full rounded-xl border border-[#DDD5CC] bg-white px-3 py-2.5 text-[16px] text-[#2C2420] placeholder:text-[#A39585] focus:outline-none focus:ring-2 focus:ring-[#B5845A]/30";
@@ -26,7 +34,7 @@ async function save(method: "POST" | "PATCH", body: Record<string, unknown>): Pr
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error ?? "Could not save.");
-  return { ...data.staff, alerts: data.staff.alerts !== false };
+  return { ...data.staff, alerts: data.staff.alerts !== false, markets: data.staff.markets ?? ["dallas"] };
 }
 
 function StaffForm({
@@ -35,9 +43,9 @@ function StaffForm({
   onSubmit,
   onCancel,
 }: {
-  initial: { first: string; last: string; phone: string; role: "bartender" | "admin" };
+  initial: { first: string; last: string; phone: string; role: "bartender" | "admin"; markets: string[] };
   submitLabel: string;
-  onSubmit: (v: { first: string; last: string; phone: string; role: string }) => Promise<void>;
+  onSubmit: (v: { first: string; last: string; phone: string; role: string; markets: string[] }) => Promise<void>;
   onCancel?: () => void;
 }) {
   const [v, setV] = useState(initial);
@@ -70,9 +78,24 @@ function StaffForm({
           <option value="admin">Admin</option>
         </select>
       </div>
+      <fieldset>
+        <legend className="text-xs text-[#A39585] uppercase tracking-wide mb-1">Markets (at least one)</legend>
+        <div className="flex flex-wrap gap-x-4 gap-y-1">
+          {MARKET_CHOICES.map(([m, label]) => (
+            <label key={m} className="flex items-center gap-1.5 text-[15px] text-[#2C2420]">
+              <input
+                type="checkbox"
+                checked={v.markets.includes(m)}
+                onChange={(e) => setV({ ...v, markets: e.target.checked ? [...v.markets, m] : v.markets.filter((x) => x !== m) })}
+              />
+              {label}
+            </label>
+          ))}
+        </div>
+      </fieldset>
       {error && <p className="text-sm text-[#A0412D]">{error}</p>}
       <div className="flex gap-2">
-        <button type="submit" disabled={busy} className="rounded-xl bg-[#B5845A] text-white px-5 py-2.5 font-medium disabled:opacity-40">
+        <button type="submit" disabled={busy || v.markets.length === 0} className="rounded-xl bg-[#B5845A] text-white px-5 py-2.5 font-medium disabled:opacity-40">
           {busy ? "Saving..." : submitLabel}
         </button>
         {onCancel && (
@@ -126,7 +149,7 @@ function StaffRow({ s, meId, onSaved }: { s: StaffRecord; meId: string; onSaved:
     return (
       <li className="py-3">
         <StaffForm
-          initial={{ ...splitName(s.name), phone: prettyPhone(s.phone), role: s.role }}
+          initial={{ ...splitName(s.name), phone: prettyPhone(s.phone), role: s.role, markets: s.markets }}
           submitLabel="Save"
           onCancel={() => setEditing(false)}
           onSubmit={async (v) => {
@@ -152,6 +175,8 @@ function StaffRow({ s, meId, onSaved }: { s: StaffRecord; meId: string; onSaved:
             </a>
             {" · "}
             {s.role === "admin" ? "Admin" : "Bartender"}
+            {" · "}
+            {marketNames(s.markets)}
             {!s.active && " · Inactive"}
           </p>
         </div>
@@ -186,7 +211,7 @@ export default function StaffManager({ initial, meId }: { initial: StaffRecord[]
           <>
             <h2 className="font-heading text-base font-bold text-[#2C2420] mb-2">Add a staff member</h2>
             <StaffForm
-              initial={{ first: "", last: "", phone: "", role: "bartender" }}
+              initial={{ first: "", last: "", phone: "", role: "bartender", markets: ["dallas"] }}
               submitLabel="Add"
               onCancel={() => setAdding(false)}
               onSubmit={async (v) => {

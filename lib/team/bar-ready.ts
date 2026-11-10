@@ -2,7 +2,7 @@
 // the card opens, the upload limits, and the text to admins. Pure, no database.
 
 import { canOpenEvent, type AssignmentLike, type StaffMember } from "@/lib/team/event-view";
-import { chicagoInstant, eventSchedule } from "@/lib/team/time";
+import { eventDayStart, eventSchedule } from "@/lib/team/time";
 
 export const BAR_PHOTO_BUCKET = "bar-photos";
 export const MAX_PHOTO_BYTES = 8 * 1024 * 1024; // phones resize first, this only stops runaway uploads
@@ -14,7 +14,7 @@ export const SIGNED_URL_SECONDS = 60 * 60;
 export function barReadyOpensAt(ed: Record<string, unknown>): Date | null {
   const s = eventSchedule(ed);
   if (s.arrival) return s.arrival;
-  return s.day ? chicagoInstant(s.day, 0) : null;
+  return eventDayStart(ed);
 }
 
 export function barReadyOpen(ed: Record<string, unknown>, now: Date = new Date()): boolean {

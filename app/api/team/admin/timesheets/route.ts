@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { getCurrentStaff } from "@/lib/team/auth";
 import { approveRows, editPunch, reopenRow } from "@/lib/team/timesheet-db";
-import { parseChicagoLocal } from "@/lib/team/timesheet";
 
 // Admin timesheet actions.
 //   { action: "edit", assignmentId, type: "in" | "out", at: "2026-12-12T17:05", reason }
@@ -18,7 +17,7 @@ export async function POST(request: Request) {
       if (typeof body.assignmentId !== "string" || (body.type !== "in" && body.type !== "out")) {
         return NextResponse.json({ error: "Bad request" }, { status: 400 });
       }
-      const r = await editPunch(staff, body.assignmentId, body.type, parseChicagoLocal(body.at), String(body.reason ?? ""));
+      const r = await editPunch(staff, body.assignmentId, body.type, typeof body.at === "string" ? body.at : null, String(body.reason ?? ""));
       if (!r.ok) return NextResponse.json({ error: r.error }, { status: r.status });
       return NextResponse.json({ ok: true, rows: r.rows });
     }

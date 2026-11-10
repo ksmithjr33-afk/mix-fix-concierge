@@ -8,10 +8,12 @@ import { hiddenEventIds } from "@/lib/team/hidden";
 import { withoutHidden } from "@/lib/team/assignments";
 import TeamHeader from "../team-header";
 import EventList from "./event-list";
+import { openShiftsFor } from "@/lib/team/shifts-db";
 
 export const dynamic = "force-dynamic";
 
-const COLUMNS = "id, event_date, guest_count, package_type, event_data, status";
+// "*" so the event's market (and its time zone) comes along once the column exists.
+const COLUMNS = "*";
 
 /** Events this staff member can open: every submitted event for admins, assigned events for bartenders. */
 async function visibleEvents(staffId: string, admin: boolean): Promise<EventListItem[]> {
@@ -41,9 +43,12 @@ export default async function TeamEventsPage({
 }: {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }) {
-  const past = (await searchParams).past === "1";
-  const staff = await requireStaff(past ? "/team/events?past=1" : "/team/events");
+  const params = await searchParams;
+  const tab = params.tab === "open" ? "open" : "mine";
+  const past = tab === "mine" && params.past === "1";
+  const staff = await requireStaff(tab === "open" ? "/team/events?tab=open" : past ? "/team/events?past=1" : "/team/events");
   const admin = staff.role === "admin";
+  const shifts = await openShiftsFor(staff);
   const [all, hidden] = await Promise.all([visibleEvents(staff.id, admin), hiddenEventIds()]);
   const events = withoutHidden(all, hidden);
   const today = chicagoToday();
@@ -60,8 +65,46 @@ export default async function TeamEventsPage({
             {past ? "Past events" : admin ? "All upcoming events" : "Your upcoming events"}
           </p>
         </div>
-        <EventList sections={sections} empty={past ? "No past events." : "No upcoming events yet."} respond={!past} />
-        <div className="px-1 pt-2">
+        <nav className="grid grid-cols-2 gap-1 bg-[#DDD5CC] p-1 rounded-xl" aria-label="Events">
+          <Link href="/team/events" aria-current={tab === "mine" ? "page" : undefined} className={`py-2 rounded-lg text-sm font-medium text-center ${tab === "mine" ? "bg-[#F5F0EB] text-[#2C2420] shadow-sm" : "text-[#6B5D52]"}`}>
+            {admin ? "Events" : "My events"}
+          </Link>
+          <Link href="/team/events?tab=open" aria-current={tab === "open" ? "page" : undefined} className={`py-2 rounded-lg text-sm font-medium text-center ${tab === "open" ? "bg-[#F5F0EB] text-[#2C2420] shadow-sm" : "text-[#6B5D52]"}`}>
+            Open shifts{shifts.length ? ` (${shifts.length})` : ""}
+          </Link>
+        </nav>
+        {tab === "open" ? (
+          shifts.length === 0 ? (
+            <p className="text-[15px] text-[#6B5D52] bg-[#F5F0EB] rounded-2xl border border-[#DDD5CC] px-4 py-4">No open shifts in your markets right now. We text you when one is posted.</p>
+          ) : (
+            <ul className="bg-[#F5F0EB] rounded-2xl border border-[#DDD5CC] divide-y divide-[#DDD5CC] overflow-hidden">
+              {shifts.map(({ shift, myRequest, sameDay }) => (
+                <li key={shift.postId}>
+                  <Link href={`/team/shifts/${shift.postId}`} className="flex items-start gap-3 px-3 py-2.5 hover:bg-[#EFE7DF] transition-colors">
+                    <span className="w-[4.5rem] shrink-0 pt-0.5 text-sm font-medium text-[#2C2420] tabular-nums">
+                      {shift.arrival || "TBD"}
+                      <span className="block text-[10px] font-normal uppercase tracking-wide text-[#A39585]">arrive</span>
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="flex flex-wrap items-center gap-2">
+                        <span className="font-heading font-bold text-[#2C2420]">{shift.shortDate}</span>
+                        {shift.cover && <span className="text-[11px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-[#F6E3DC] text-[#A0412D]">Cover needed</span>}
+                        {myRequest === "requested" && <span className="text-[11px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-[#E4EBDF] text-[#55684A]">Requested</span>}
+                      </span>
+                      <span className="block text-sm text-[#6B5D52] break-words">
+                        {[shift.eventType, shift.city, shift.guestCount ? `${shift.guestCount} guests` : "", shift.package].filter(Boolean).join(" · ")}
+                      </span>
+                      {sameDay.length > 0 && <span className="block text-xs text-[#9A7049]">You have another event that day</span>}
+                    </span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )
+        ) : (
+          <EventList sections={sections} empty={past ? "No past events." : "No upcoming events yet."} respond={!past} />
+        )}
+        <div className="px-1 pt-2" hidden={tab === "open"}>
           {past ? (
             <Link href="/team/events" className="text-sm text-[#B5845A] underline">
               Back to upcoming events

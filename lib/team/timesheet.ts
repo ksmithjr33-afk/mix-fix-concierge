@@ -3,7 +3,7 @@
 // approves their own time, admins included. Pure, no database.
 
 import { canChangeTime, workedMinutes, type PunchFlag, type PunchType } from "@/lib/team/clock";
-import { chicagoInstant } from "@/lib/team/time";
+import { TZ, zonedInstant, zoneShort } from "@/lib/team/time";
 
 export const OWN_EDIT_MESSAGE = "You cannot edit your own time. Ask another admin to make this change.";
 export const OWN_APPROVE_MESSAGE = "You cannot approve your own time. Ask another admin to approve it.";
@@ -79,6 +79,7 @@ export interface TimesheetRow {
   staffName: string;
   staffPhone: string;
   sessionId: string;
+  timeZone: string; // the event's market time zone: punches show and edit in it
   eventTitle: string;
   eventDay: string | null; // YYYY-MM-DD
   scheduledStart: string; // "6:00 PM", or ""
@@ -112,27 +113,35 @@ export function staffTotals(rows: TimesheetRow[]): { staffId: string; staffName:
 
 // ----- Edits and approvals -----
 
-/** "2026-12-12T17:05" from a datetime-local input, read as a Chicago wall clock. */
-export function parseChicagoLocal(v: unknown): Date | null {
+/** "2026-12-12T17:05" from a datetime-local input, read as a wall clock in `tz` (the event's time zone). */
+export function parseLocal(v: unknown, tz: string = TZ): Date | null {
   const m = String(v ?? "").match(/^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})/);
   if (!m || !isYmd(m[1])) return null;
   const h = Number(m[2]);
   const min = Number(m[3]);
   if (h > 23 || min > 59) return null;
-  return chicagoInstant(m[1], h * 60 + min);
+  return zonedInstant(m[1], h * 60 + min, tz);
 }
 
-/** An instant as "2026-12-12T17:05" for a datetime-local input, in Chicago time. */
-export function toChicagoLocal(iso: string | null | undefined): string {
+export function parseChicagoLocal(v: unknown): Date | null {
+  return parseLocal(v, TZ);
+}
+
+/** An instant as "2026-12-12T17:05" for a datetime-local input, in `tz`. */
+export function toLocal(iso: string | null | undefined, tz: string = TZ): string {
   if (!iso) return "";
   const d = new Date(iso);
   if (isNaN(d.getTime())) return "";
   const parts = Object.fromEntries(
-    new Intl.DateTimeFormat("en-CA", { timeZone: "America/Chicago", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" })
+    new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" })
       .formatToParts(d)
       .map((p) => [p.type, p.value])
   );
   return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
+}
+
+export function toChicagoLocal(iso: string | null | undefined): string {
+  return toLocal(iso, TZ);
 }
 
 export type Check = { ok: true } | { ok: false; error: string };
@@ -220,6 +229,7 @@ export const CSV_COLUMNS = [
   "Flags",
   "Edited by admin",
   "Approved by",
+  "Time zone",
 ] as const;
 
 /** One CSV cell. Quoted when needed, and text that a spreadsheet would run as a formula is made plain. */
@@ -229,10 +239,10 @@ export function csvCell(v: unknown): string {
   return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
-/** "2026-12-12 5:02 PM" in Chicago time. */
-export function csvTime(iso: string | null | undefined): string {
+/** "2026-12-12 5:02 PM" in the event's time zone (Chicago by default). */
+export function csvTime(iso: string | null | undefined, tz: string = TZ): string {
   if (!iso) return "";
-  const local = toChicagoLocal(iso);
+  const local = toLocal(iso, tz);
   if (!local) return "";
   const [day, hm] = local.split("T");
   const [h, m] = hm.split(":").map(Number);
@@ -270,12 +280,13 @@ export function timesheetCsv(rows: TimesheetRow[]): string {
         r.eventTitle,
         r.scheduledStart,
         r.scheduledEnd,
-        csvTime(r.clockIn?.at),
-        csvTime(r.clockOut?.at),
+        csvTime(r.clockIn?.at, r.timeZone),
+        csvTime(r.clockOut?.at, r.timeZone),
         csvHours(r.minutes),
         r.flags.map((f) => FLAG_CSV[f] ?? f).join("; "),
         r.editedByAdmin ? "Yes" : "No",
         r.approved?.byName ?? "",
+        zoneShort(r.timeZone || TZ),
       ]
         .map(csvCell)
         .join(",")

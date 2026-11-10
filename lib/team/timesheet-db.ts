@@ -10,6 +10,7 @@ import { supabase } from "@/lib/supabase";
 import type { StaffMember } from "@/lib/team/event-view";
 import { eventTitle } from "@/lib/team/event-list";
 import { eventDay, eventSchedule, formatClock } from "@/lib/team/time";
+import { eventData } from "@/lib/team/markets";
 import type { PunchFlag, PunchType } from "@/lib/team/clock";
 import {
   checkApprove,
@@ -20,6 +21,7 @@ import {
   OWN_EDIT_MESSAGE,
   OWN_REOPEN_MESSAGE,
   ownTimeConstraint,
+  parseLocal,
   rowMinutes,
   sortRows,
   weekApproval,
@@ -33,6 +35,7 @@ interface SessionLite {
   id: string;
   event_date: string | null;
   event_data: Record<string, unknown> | null;
+  team_market?: string | null;
 }
 
 interface PunchDb {
@@ -65,9 +68,7 @@ interface ReopenDb {
 }
 
 function edOf(s: SessionLite): Record<string, unknown> {
-  const ed = { ...(s.event_data ?? {}) };
-  if (!ed.event_date && s.event_date) ed.event_date = s.event_date;
-  return ed;
+  return eventData(s);
 }
 
 /** Rows for the given assignments, or for every event dated from..to (YYYY-MM-DD, inclusive). */
@@ -81,10 +82,10 @@ async function buildRows(filter: { from: string; to: string } | { assignmentIds:
     if (error) throw new Error(`event_assignments lookup failed: ${error.message}`);
     assignments = (data as typeof assignments) ?? [];
     const ids = [...new Set(assignments.map((a) => a.session_id))];
-    const { data: s } = ids.length ? await supabase.from("sessions").select("id, event_date, event_data").in("id", ids) : { data: [] };
+    const { data: s } = ids.length ? await supabase.from("sessions").select("*").in("id", ids) : { data: [] };
     sessions = (s as SessionLite[]) ?? [];
   } else {
-    const { data: s, error } = await supabase.from("sessions").select("id, event_date, event_data").eq("status", "submitted");
+    const { data: s, error } = await supabase.from("sessions").select("*").eq("status", "submitted");
     if (error) throw new Error(`sessions lookup failed: ${error.message}`);
     sessions = ((s as SessionLite[]) ?? []).filter((x) => {
       const day = eventDay(edOf(x).event_date);
@@ -159,6 +160,7 @@ async function buildRows(filter: { from: string; to: string } | { assignmentIds:
         staffName: person?.name || "Unknown staff member",
         staffPhone: person?.phone ?? "",
         sessionId: a.session_id,
+        timeZone: sched.tz,
         eventTitle: eventTitle(ed),
         eventDay: sched.day,
         scheduledStart: sched.startMin === null ? "" : formatClock(sched.startMin),
@@ -202,9 +204,11 @@ function refusal(message: string, kind: "edit" | "approve" | "reopen"): string {
  * Add a missing punch or correct one, with a reason, written to time_edits.
  * A correction keeps the original time on the edit row.
  */
-export async function editPunch(actor: StaffMember, assignmentId: string, type: PunchType, at: Date | null, reason: string): Promise<ActionResult> {
+export async function editPunch(actor: StaffMember, assignmentId: string, type: PunchType, rawAt: Date | string | null, reason: string): Promise<ActionResult> {
   const [row] = await buildRows({ assignmentIds: [assignmentId] });
   if (!row) return { ok: false, error: "We could not find that timesheet row.", status: 404 };
+  // A typed time is read in the event's time zone, so an LA event is edited in Pacific time.
+  const at = rawAt instanceof Date ? rawAt : parseLocal(rawAt, row.timeZone);
   const check = checkEdit(actor.id, row, { type, at, reason });
   if (!check.ok) return { ok: false, error: check.error, status: check.error === OWN_EDIT_MESSAGE ? 403 : 400 };
   const when = at!.toISOString();

@@ -8,7 +8,8 @@ import { DRINK_MENU_RULES } from "@/lib/system-prompt";
 import { staffingFor } from "@/lib/pricing";
 import { isBottleRequest } from "@/lib/shopping-list";
 import { recapLines, type FieldChange } from "@/lib/event-diff";
-import { chicagoStamp, eventSchedule, formatClock, longDate } from "@/lib/team/time";
+import { chicagoStamp, eventDayStart, eventSchedule, formatClock, longDate } from "@/lib/team/time";
+import { eventData, marketLabel, sessionMarket } from "@/lib/team/markets";
 
 export const MIX_FIX_LINE = "469 754 8512";
 export const PHONE_HIDDEN_NOTE = "Contact number appears 48 hours before the event.";
@@ -78,6 +79,8 @@ export interface StaffEventView {
   drinks: StaffDrink[];
   classics: ClassicGroup[] | null; // Dive Bar with no menu
   lastUpdated: string;
+  timeZone: string; // the event's market time zone, for times shown on the page
+  market: string; // "Austin", or "No market"
   whatChanged: string[];
   dayOfContact: { name: string; phone: string | null; phoneNote: string | null };
   mixFixLine: string;
@@ -92,6 +95,7 @@ export interface SessionLike {
   updated_at?: string | null;
   submitted_at?: string | null;
   booked_price?: { bartenders?: number | null } | null;
+  team_market?: string | null;
 }
 
 export interface UpdateLike {
@@ -189,7 +193,7 @@ export function whatChanged(update: UpdateLike | null): string[] {
 /** True from 48 hours before service starts (or before the event day when the start time is unknown). */
 export function showDayOfPhone(ed: Record<string, unknown>, now: Date): boolean {
   const s = eventSchedule(ed);
-  const start = s.start ?? (s.day ? eventSchedule({ ...ed, bar_service_start: "12:00 AM" }).start : null);
+  const start = s.start ?? eventDayStart(ed);
   if (!start) return false;
   return now.getTime() >= start.getTime() - PHONE_LEAD_MS;
 }
@@ -206,8 +210,7 @@ export function buildStaffEventView(
   opts: { now?: Date; teammates?: string[]; latestUpdate?: UpdateLike | null } = {}
 ): StaffEventView {
   const now = opts.now ?? new Date();
-  const ed = { ...(session.event_data ?? {}) };
-  if (!ed.event_date && session.event_date) ed.event_date = session.event_date;
+  const ed = eventData(session);
   const s = eventSchedule(ed);
   const pkg = text(ed.package) || text(session.package_type);
   const guests = text(ed.guest_count) || text(session.guest_count);
@@ -251,7 +254,9 @@ export function buildStaffEventView(
     bottleNote: ed.extra_bottles && !isBottleRequest(ed.extra_bottles) && !/^(no|none|n\/a)\.?$/i.test(text(ed.extra_bottles)) ? scrub(ed.extra_bottles) : "",
     drinks,
     classics: dive && drinks.length === 0 ? classicsMenu({ dive: true }) : null,
-    lastUpdated: chicagoStamp(session.updated_at ?? session.submitted_at),
+    lastUpdated: chicagoStamp(session.updated_at ?? session.submitted_at, s.tz),
+    timeZone: s.tz,
+    market: marketLabel(sessionMarket(session)),
     whatChanged: whatChanged(opts.latestUpdate ?? null),
     dayOfContact: {
       name: scrub(ed.day_of_contact_name) || "To be confirmed",

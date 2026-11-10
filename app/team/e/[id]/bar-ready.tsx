@@ -9,6 +9,7 @@ export interface BarReadyProps {
   canSubmit: boolean;
   isAdmin: boolean;
   entries: BarReadyEntry[];
+  timeZone?: string;
 }
 
 const MAX_SIDE = 1600; // px on the long side: sharp enough to check the setup, small enough for weak signal
@@ -57,14 +58,14 @@ function PhotoThumb({ photo, onOpen }: { photo: BarReadyPhoto; onOpen: (p: BarRe
   );
 }
 
-function Entry({ entry, onOpen, onReplace }: { entry: BarReadyEntry; onOpen: (p: BarReadyPhoto) => void; onReplace?: () => void }) {
+function Entry({ entry, onOpen, onReplace, tz }: { entry: BarReadyEntry; onOpen: (p: BarReadyPhoto) => void; onReplace?: () => void; tz?: string }) {
   const [showEarlier, setShowEarlier] = useState(false);
   const [latest, ...earlier] = entry.photos;
   return (
     <div className="space-y-2">
       <div className="flex items-baseline justify-between gap-2">
         <p className="font-heading font-bold text-[#2C2420]">
-          {entry.mine ? "Bar ready" : `${entry.staffFirstName}'s bar ready`} at {timeLabel(latest.createdAt)}
+          {entry.mine ? "Bar ready" : `${entry.staffFirstName}'s bar ready`} at {timeLabel(latest.createdAt, undefined, tz)}
         </p>
         <span className="text-xs text-[#6B5D52] shrink-0">
           {latest.checked} of {latest.total} checked
@@ -96,7 +97,7 @@ function Entry({ entry, onOpen, onReplace }: { entry: BarReadyEntry; onOpen: (p:
               ) : (
                 <div className="w-full aspect-square rounded-lg bg-[#E8DDD5]" />
               )}
-              <span className="block text-[11px] text-[#6B5D52] mt-0.5">{timeLabel(p.createdAt)}</span>
+              <span className="block text-[11px] text-[#6B5D52] mt-0.5">{timeLabel(p.createdAt, undefined, tz)}</span>
             </li>
           ))}
         </ul>
@@ -105,11 +106,11 @@ function Entry({ entry, onOpen, onReplace }: { entry: BarReadyEntry; onOpen: (p:
   );
 }
 
-function FullSize({ photo, onClose }: { photo: BarReadyPhoto; onClose: () => void }) {
+function FullSize({ photo, onClose, tz }: { photo: BarReadyPhoto; onClose: () => void; tz?: string }) {
   return (
     <div className="fixed inset-0 z-50 bg-black/90 flex flex-col" onClick={onClose}>
       <div className="flex items-center justify-between px-4 py-3 text-white text-sm">
-        <span>{timeLabel(photo.createdAt)}</span>
+        <span>{timeLabel(photo.createdAt, undefined, tz)}</span>
         <div className="flex items-center gap-4">
           {photo.url && (
             <a href={photo.url} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="underline">
@@ -254,7 +255,7 @@ function SubmitSheet({
 }
 
 /** Card at the top of the event page, from arrival time on the event day. Never blocks anything else on the page. */
-export default function BarReadyCard({ sessionId, canSubmit, isAdmin, entries: initial }: BarReadyProps) {
+export default function BarReadyCard({ sessionId, canSubmit, isAdmin, entries: initial, timeZone: tz }: BarReadyProps) {
   const [entries, setEntries] = useState(initial);
   const [sheet, setSheet] = useState<null | "new" | "replace">(null);
   const [full, setFull] = useState<BarReadyPhoto | null>(null);
@@ -264,7 +265,7 @@ export default function BarReadyCard({ sessionId, canSubmit, isAdmin, entries: i
   return (
     <section className="bg-[#F5F0EB] rounded-2xl border-2 border-[#8B9E7E] px-4 py-3 sm:px-5 sm:py-4 space-y-4">
       {mine ? (
-        <Entry entry={mine} onOpen={setFull} onReplace={canSubmit ? () => setSheet("replace") : undefined} />
+        <Entry entry={mine} tz={tz} onOpen={setFull} onReplace={canSubmit ? () => setSheet("replace") : undefined} />
       ) : (
         canSubmit && (
           <div className="space-y-2">
@@ -282,7 +283,7 @@ export default function BarReadyCard({ sessionId, canSubmit, isAdmin, entries: i
       {others.length > 0 && (
         <div className={`space-y-4 ${mine || canSubmit ? "pt-3 border-t border-[#DDD5CC]" : ""}`}>
           {others.map((e) => (
-            <Entry key={e.staffId} entry={e} onOpen={setFull} />
+            <Entry key={e.staffId} entry={e} tz={tz} onOpen={setFull} />
           ))}
         </div>
       )}
@@ -298,7 +299,7 @@ export default function BarReadyCard({ sessionId, canSubmit, isAdmin, entries: i
           onClose={() => setSheet(null)}
         />
       )}
-      {full && <FullSize photo={full} onClose={() => setFull(null)} />}
+      {full && <FullSize photo={full} tz={tz} onClose={() => setFull(null)} />}
     </section>
   );
 }

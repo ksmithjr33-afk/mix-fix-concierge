@@ -3,6 +3,7 @@ import { getCurrentStaff } from "@/lib/team/auth";
 import { getAssignment, openEvent } from "@/lib/team/events";
 import { barReadyEntries, submitBarReady } from "@/lib/team/bar-ready-db";
 import { canSubmitBarReady, validateBarReady } from "@/lib/team/bar-ready";
+import { eventData } from "@/lib/team/markets";
 
 // "Bar is ready": a photo of the bar setup (required) and an optional note.
 // Only assigned staff and admins, from arrival time on the event day.
@@ -17,7 +18,7 @@ export async function POST(request: Request) {
     const access = await openEvent(sessionId, staff);
     if (!access.ok) return NextResponse.json({ error: "You are not assigned to this event." }, { status: 403 });
     const assignment = staff.role === "admin" ? null : await getAssignment(sessionId, staff.id);
-    if (!canSubmitBarReady(staff, assignment, access.session.event_data ?? {})) {
+    if (!canSubmitBarReady(staff, assignment, eventData(access.session))) {
       return NextResponse.json({ error: "The bar check in opens at arrival time on the event day." }, { status: 403 });
     }
 

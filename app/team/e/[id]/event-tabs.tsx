@@ -9,6 +9,7 @@ import { timeLabel } from "@/lib/team/clock-label";
 import BarReadyCard, { type BarReadyProps } from "./bar-ready";
 import RespondBanner from "./respond-banner";
 import ClockCard from "./clock-card";
+import GiveUp, { type GiveUpProps } from "./give-up";
 import type { ClockView } from "@/lib/team/clock-db";
 
 
@@ -261,12 +262,14 @@ function Checklist({
   initial,
   footer,
   initialConfirmedAt,
+  timeZone,
 }: {
   sessionId: string;
   groups: ResolvedGroup[];
   initial: Record<string, CheckState>;
   footer: string;
   initialConfirmedAt: string | null;
+  timeZone: string;
 }) {
   const [confirmedAt, setConfirmedAt] = useState(initialConfirmedAt);
   const [confirming, setConfirming] = useState(false);
@@ -331,7 +334,7 @@ function Checklist({
       ))}
       <p className="text-sm text-[#6B5D52] px-1">{footer}</p>
       {confirmedAt && ready ? (
-        <p className="w-full rounded-xl bg-[#8B9E7E] text-white py-3 text-center font-medium">Confirmed {timeLabel(confirmedAt)}</p>
+        <p className="w-full rounded-xl bg-[#8B9E7E] text-white py-3 text-center font-medium">Confirmed {timeLabel(confirmedAt, undefined, timeZone)}</p>
       ) : (
         <button
           type="button"
@@ -489,7 +492,9 @@ export default function EventTabs({
   manageHref,
   clock,
   renderedAt,
+  giveUp,
 }: {
+  giveUp: GiveUpProps | null;
   offered: boolean;
   clock: ClockView;
   renderedAt: number;
@@ -526,6 +531,8 @@ export default function EventTabs({
 
       {offered && <RespondBanner sessionId={view.sessionId} />}
 
+      {giveUp?.handoff && <GiveUp {...giveUp} />}
+
       {clock.canPunch && <ClockCard sessionId={view.sessionId} initial={clock} renderedAt={renderedAt} />}
 
       {barReady.show && <BarReadyCard sessionId={view.sessionId} {...barReady} />}
@@ -549,6 +556,11 @@ export default function EventTabs({
 
       <div hidden={tab !== "details"}>
         <Details v={view} />
+        {giveUp && !giveUp.handoff && giveUp.canStart && (
+          <div className="mt-4">
+            <GiveUp {...giveUp} />
+          </div>
+        )}
       </div>
       <div hidden={tab !== "checklist"}>
         <Checklist
@@ -557,6 +569,7 @@ export default function EventTabs({
           initial={checklistState}
           footer={checklistFooter}
           initialConfirmedAt={confirmedAt}
+          timeZone={view.timeZone}
         />
       </div>
       <div hidden={tab !== "shopping"}>

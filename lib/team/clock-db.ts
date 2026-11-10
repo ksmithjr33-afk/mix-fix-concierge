@@ -14,7 +14,8 @@ import { alertAdmins } from "@/lib/team/events";
 import { hiddenEventIds } from "@/lib/team/hidden";
 import { geocodeAddress } from "@/lib/team/geocode";
 import { sendStaffText } from "@/lib/team/sms";
-import { chicagoToday } from "@/lib/team/time";
+import { chicagoToday, eventTz } from "@/lib/team/time";
+import { eventData } from "@/lib/team/markets";
 import {
   checkPunch,
   cleanLocation,
@@ -101,6 +102,7 @@ export async function eventLocation(session: SessionRow): Promise<LatLng | null>
 
 export interface ClockView {
   canPunch: boolean; // accepted on the event
+  timeZone: string; // the event's time zone, for the times on the card
   opensAt: string | null; // ISO
   clockIn: { at: string; flags: PunchFlag[]; distance: number | null } | null;
   clockOut: { at: string; flags: PunchFlag[]; distance: number | null } | null;
@@ -113,6 +115,7 @@ export function clockView(assignment: AssignmentRef | null, ed: Record<string, u
   const shape = (p: PunchRow | null) => (p ? { at: p.punched_at, flags: p.flags ?? [], distance: p.distance_m } : null);
   return {
     canPunch: assignment?.status === "accepted",
+    timeZone: eventTz(ed),
     opensAt: clockInOpensAt(ed)?.toISOString() ?? null,
     clockIn: shape(pin),
     clockOut: shape(pout),
@@ -132,8 +135,7 @@ export async function recordPunch(opts: {
   clientId: unknown;
 }): Promise<PunchResult> {
   const { session, staff, type } = opts;
-  const ed = { ...(session.event_data ?? {}) };
-  if (!ed.event_date && session.event_date) ed.event_date = session.event_date;
+  const ed = eventData(session);
   const assignment = await assignmentRef(session.id, staff.id);
   if (!assignment || assignment.status !== "accepted") {
     return { ok: false, error: "Only staff who accepted this event can clock in.", status: 403 };
@@ -148,7 +150,7 @@ export async function recordPunch(opts: {
   const receivedAt = new Date();
   const { punchedAt, late } = punchTime(opts.clientTime, receivedAt);
   const existing = await punchesFor(assignment.id);
-  const allowed = checkPunch(type, existing, punchedAt, clockInOpensAt(ed));
+  const allowed = checkPunch(type, existing, punchedAt, clockInOpensAt(ed), eventTz(ed));
   if (!allowed.ok) return { ok: false, error: allowed.error, status: 409 };
 
   const phone = cleanLocation(opts.location);
@@ -189,14 +191,14 @@ export async function recordPunch(opts: {
 // ----- Cron: clock out reminders and late setup alerts -----
 
 /** Claim a once only notice. False when it was already sent, so callers skip it. */
-async function claimNotice(key: string, kind: string): Promise<boolean> {
+export async function claimNotice(key: string, kind: string): Promise<boolean> {
   const { error } = await supabase.from("team_notices").insert({ key, kind });
   if (!error) return true;
   if (!/duplicate key|unique/i.test(error.message)) console.error("[team] notice claim failed:", error.message);
   return false;
 }
 
-function siteOrigin(): string {
+export function siteOrigin(): string {
   return (process.env.TEAM_BASE_URL || "https://plan.themixfix.com").replace(/\/+$/, "");
 }
 
@@ -212,10 +214,9 @@ export async function sendClockOutReminders(now: Date = new Date()): Promise<num
 
   let sent = 0;
   for (const p of open) {
-    const { data: s } = await supabase.from("sessions").select("id, event_date, event_data").eq("id", p.session_id).maybeSingle();
+    const { data: s } = await supabase.from("sessions").select("*").eq("id", p.session_id).maybeSingle();
     if (!s) continue;
-    const ed = { ...((s.event_data as Record<string, unknown>) ?? {}) };
-    if (!ed.event_date && s.event_date) ed.event_date = s.event_date;
+    const ed = eventData(s as SessionRow);
     if (!clockOutReminderDue(ed, now)) continue;
     const { data: staff } = await supabase.from("staff").select("id, name, phone, active").eq("id", p.staff_id).maybeSingle();
     if (!staff || !staff.active) continue;
@@ -238,16 +239,15 @@ export async function sendLateSetupAlerts(now: Date = new Date()): Promise<numbe
   const ids = [...new Set((rows as { session_id: string }[]).map((r) => r.session_id))];
   if (ids.length === 0) return 0;
   const hidden = await hiddenEventIds();
-  const { data: sessions } = await supabase.from("sessions").select("id, event_date, event_data, status").in("id", ids).eq("status", "submitted");
+  const { data: sessions } = await supabase.from("sessions").select("*").in("id", ids).eq("status", "submitted");
   const { data: ready } = await supabase.from("bar_ready_reports").select("session_id").in("session_id", ids);
   const hasReady = new Set(((ready as { session_id: string }[]) ?? []).map((r) => r.session_id));
   const today = chicagoToday(now);
 
   let sent = 0;
-  for (const s of (sessions as { id: string; event_date: string | null; event_data: Record<string, unknown> | null }[]) ?? []) {
+  for (const s of (sessions as SessionRow[]) ?? []) {
     if (hidden.has(s.id)) continue;
-    const ed = { ...(s.event_data ?? {}) };
-    if (!ed.event_date && s.event_date) ed.event_date = s.event_date;
+    const ed = eventData(s);
     if (!lateSetupDue(ed, now, { hasStaff: true, hasBarReady: hasReady.has(s.id) })) continue;
     if (!(await claimNotice(noticeKey.lateSetup(s.id), "late_setup"))) continue;
     const message = lateSetupText({ title: eventTitle(ed), startTime: serviceStartLabel(ed), link: `${siteOrigin()}/team/admin/e/${s.id}` });

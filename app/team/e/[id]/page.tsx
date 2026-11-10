@@ -5,6 +5,8 @@ import { barReadyEntries } from "@/lib/team/bar-ready-db";
 import { barReadyOpen } from "@/lib/team/bar-ready";
 import { shoppingGroups } from "@/lib/team/shopping";
 import { assignmentRef, clockView, punchesFor } from "@/lib/team/clock-db";
+import { eventData } from "@/lib/team/markets";
+import { myHandoff, teammateChoices } from "@/lib/team/shifts-db";
 import TeamHeader from "../../team-header";
 import EventTabs from "./event-tabs";
 
@@ -36,22 +38,24 @@ export default async function TeamEventPage({ params }: { params: Promise<{ id: 
     );
   }
 
-  const ed = access.session.event_data ?? {};
+  const ed = eventData(access.session);
   const [data, entries, assignment] = await Promise.all([
     eventPageData(access.session, staff),
     barReadyEntries(id, staff),
     assignmentRef(id, staff.id),
   ]);
   const punches = assignment ? await punchesFor(assignment.id) : [];
+  const accepted = assignment?.status === "accepted";
+  const [handoff, teammates] = accepted ? await Promise.all([myHandoff(id, staff.id), teammateChoices(access.session, staff.id)]) : [null, []];
   const renderedAt = serverNow();
-  const clockEd = { ...ed, event_date: ed.event_date ?? access.session.event_date };
   const open = barReadyOpen(ed);
   return (
     <>
       <TeamHeader signedIn admin={staff.role === "admin"} back={back} />
       <EventTabs
         offered={assignment?.status === "offered"}
-        clock={clockView(assignment, clockEd, punches)}
+        giveUp={accepted ? { sessionId: id, handoff, teammates, canStart: punches.length === 0 } : null}
+        clock={clockView(assignment, ed, punches)}
         renderedAt={renderedAt}
         manageHref={staff.role === "admin" ? `/team/admin/e/${id}` : null}
         view={data.view}
@@ -66,6 +70,7 @@ export default async function TeamEventPage({ params }: { params: Promise<{ id: 
           canSubmit: open,
           isAdmin: staff.role === "admin",
           entries,
+          timeZone: data.view.timeZone,
         }}
       />
     </>

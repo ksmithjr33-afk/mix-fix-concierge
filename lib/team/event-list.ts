@@ -3,6 +3,7 @@
 
 import { firstName, scrub } from "@/lib/team/event-view";
 import { chicagoToday, eventDay, eventSchedule, formatClock, longDate } from "@/lib/team/time";
+import { eventData, marketLabel, sessionMarket, type Market } from "@/lib/team/markets";
 
 export interface EventRowSource {
   id: string;
@@ -10,6 +11,7 @@ export interface EventRowSource {
   guest_count?: string | null;
   package_type?: string | null;
   event_data: Record<string, unknown> | null;
+  team_market?: string | null;
 }
 
 export interface EventListItem {
@@ -22,6 +24,7 @@ export interface EventListItem {
   status?: string; // the bartender's assignment status, when there is one
   href?: string; // defaults to the staff event page
   badge?: { text: string; tone: "ok" | "warn" | "muted" };
+  market?: Market | null;
 }
 
 /** "Justin · Wedding": client first name and event type. */
@@ -57,15 +60,15 @@ function guests(ed: Record<string, unknown>, row: EventRowSource): string {
   return Number.isFinite(n) && n > 0 ? `${n} guests` : "";
 }
 
-export function eventListItem(row: EventRowSource, status?: string): EventListItem {
-  const ed = { ...(row.event_data ?? {}) };
-  if (!ed.event_date && row.event_date) ed.event_date = row.event_date;
+export function eventListItem(row: EventRowSource, status?: string, opts: { showMarket?: boolean } = {}): EventListItem {
+  const ed = eventData(row);
+  const market = sessionMarket(row);
   const s = eventSchedule(ed);
   const named = scrub(ed.event_name);
   const title = eventTitle(ed);
   const times = s.startMin !== null && s.endMin !== null ? `${formatClock(s.startMin)} to ${formatClock(s.endMin)}` : s.startMin !== null ? formatClock(s.startMin) : "";
   const pkg = scrub(ed.package) || scrub(row.package_type);
-  const detail = [named ? nameAndType(ed) : "", times, guests(ed, row), pkg, cityFrom(ed.event_address)].filter(Boolean).join(" · ");
+  const detail = [opts.showMarket ? marketLabel(market) : "", named ? nameAndType(ed) : "", times, guests(ed, row), pkg, cityFrom(ed.event_address)].filter(Boolean).join(" · ");
   return {
     id: row.id,
     day: eventDay(ed.event_date),
@@ -73,6 +76,7 @@ export function eventListItem(row: EventRowSource, status?: string): EventListIt
     title,
     detail,
     search: [title, firstName(ed.client_name), scrub(ed.event_type), named].join(" ").toLowerCase(),
+    market,
     ...(status ? { status } : {}),
   };
 }

@@ -1,8 +1,8 @@
-// Time clock rules: when clock in opens, location flags, one in and one out per
+// Time clock rules (in the event's market time zone): when clock in opens, location flags, one in and one out per
 // assignment, offline punches, hours, the cron reminders, and the rule that
 // nobody edits or approves their own time. Pure, no database.
 
-import { chicagoInstant, eventSchedule, formatClock } from "@/lib/team/time";
+import { eventDayStart, eventSchedule, eventTz, formatClock, TZ } from "@/lib/team/time";
 
 export const CLOCK_IN_LEAD_MIN = 30; // clock in opens 30 minutes before arrival
 export const SITE_RADIUS_M = 300; // within 300 m of the event is clean
@@ -57,7 +57,7 @@ export function cleanLocation(raw: unknown): PhoneLocation | null {
 export function clockInOpensAt(ed: Record<string, unknown>): Date | null {
   const s = eventSchedule(ed);
   if (s.arrival) return new Date(s.arrival.getTime() - CLOCK_IN_LEAD_MIN * 60_000);
-  return s.day ? chicagoInstant(s.day, 0) : null;
+  return eventDayStart(ed);
 }
 
 /** The time a punch counts for: the tap time when it was queued on the phone, otherwise when we received it. */
@@ -109,12 +109,12 @@ export type PunchCheck = { ok: true } | { ok: false; error: string };
  * out before clock in, no clock in before the window opens, and the out never
  * before the in.
  */
-export function checkPunch(type: PunchType, existing: PunchLike[], at: Date, opensAt: Date | null): PunchCheck {
+export function checkPunch(type: PunchType, existing: PunchLike[], at: Date, opensAt: Date | null, tz: string = TZ): PunchCheck {
   const hasIn = existing.find((p) => p.type === "in");
   const hasOut = existing.some((p) => p.type === "out");
   if (type === "in") {
     if (hasIn) return { ok: false, error: "You already clocked in for this event." };
-    if (opensAt && at.getTime() < opensAt.getTime()) return { ok: false, error: `Clock in opens at ${formatInstant(opensAt)}.` };
+    if (opensAt && at.getTime() < opensAt.getTime()) return { ok: false, error: `Clock in opens at ${formatInstant(opensAt, tz)}.` };
     return { ok: true };
   }
   if (!hasIn) return { ok: false, error: "Clock in first." };
@@ -136,8 +136,9 @@ export function formatWorked(minutes: number): string {
   return h ? `${h}h ${String(m).padStart(2, "0")}m` : `${m}m`;
 }
 
-function formatInstant(d: Date): string {
-  return new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", hour: "numeric", minute: "2-digit" })
+/** "3:30 PM" in the event's time zone. */
+export function formatInstant(d: Date, tz: string = TZ): string {
+  return new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "numeric", minute: "2-digit" })
     .format(d)
     .replace(/[  ]/g, " ");
 }

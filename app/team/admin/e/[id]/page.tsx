@@ -12,6 +12,10 @@ import EditEvent, { type EditValues } from "./edit-event";
 import { PACKAGE_CHOICES } from "@/lib/team/admin-edit";
 import { eventDay, parseClock } from "@/lib/team/time";
 import { isHidden } from "@/lib/team/hidden";
+import { ensureMarket } from "@/lib/team/markets-db";
+import { handoffPanel, postPanel } from "@/lib/team/shifts-db";
+import { marketLabel } from "@/lib/team/markets";
+import ShiftPanel from "./shift-panel";
 
 export const dynamic = "force-dynamic";
 
@@ -39,8 +43,10 @@ export default async function AdminEventPage({ params }: { params: Promise<{ id:
     );
   }
 
-  const [people, staff, hidden] = await Promise.all([assigneeProgress(session), listStaff(), isHidden(id)]);
+  await ensureMarket(session); // works out the market from the address the first time, and after an address change
+  const [people, staff, hidden, panel, handoffs] = await Promise.all([assigneeProgress(session), listStaff(), isHidden(id), postPanel(session), handoffPanel(session)]);
   const v = buildStaffEventView(session);
+  const marketSource = (session as { team_market_source?: string | null }).team_market_source ?? null;
   const counts = staffingCounts(bartendersNeeded(session), people.map((p) => p.status));
   const ed = session.event_data ?? {};
   const editValues: EditValues = {
@@ -60,7 +66,7 @@ export default async function AdminEventPage({ params }: { params: Promise<{ id:
   const onEvent = new Set(people.filter((p) => p.status !== "declined").map((p) => p.staffId));
   const available = staff
     .filter((s) => s.active && !onEvent.has(s.id))
-    .map((s) => ({ id: s.id, name: s.name || s.phone, role: s.role, declined: people.some((p) => p.staffId === s.id) }));
+    .map((s) => ({ id: s.id, name: s.name || s.phone, role: s.role, declined: people.some((p) => p.staffId === s.id), markets: s.markets }));
 
   return (
     <>
@@ -73,13 +79,17 @@ export default async function AdminEventPage({ params }: { params: Promise<{ id:
               .filter(Boolean)
               .join(", ")}
           </p>
-          <p className="text-[15px] text-[#6B5D52]">{[v.guestCount ? `${v.guestCount} guests` : "", v.package].filter(Boolean).join(" · ")}</p>
+          <p className="text-[15px] text-[#6B5D52]">{[v.market, v.guestCount ? `${v.guestCount} guests` : "", v.package].filter(Boolean).join(" · ")}</p>
+          {v.timeZone !== "America/Chicago" && <p className="text-sm text-[#9A7049]">Times are Pacific time.</p>}
           <Link href={`/team/e/${id}`} className="inline-block mt-1 text-sm text-[#B5845A] underline">
             Open the event page
           </Link>
         </div>
         {hidden ? (
-          <HideAction sessionId={id} hidden />
+          <>
+            <p className="text-sm text-[#6B5D52] px-1">Market: {marketLabel(panel.market)}. Hidden events cannot be posted.</p>
+            <HideAction sessionId={id} hidden />
+          </>
         ) : (
           <>
             <AssignPanel
@@ -88,7 +98,10 @@ export default async function AdminEventPage({ params }: { params: Promise<{ id:
               covered={counts.needed !== null && counts.stillNeeded === 0}
               people={people}
               available={available}
+              timeZone={v.timeZone}
+              market={panel.market}
             />
+            <ShiftPanel sessionId={id} panel={panel} handoffs={handoffs} marketSource={marketSource} timeZone={v.timeZone} />
             <EditEvent sessionId={id} version={session.version} initial={editValues} packages={packages} />
             <HideAction sessionId={id} hidden={false} />
           </>

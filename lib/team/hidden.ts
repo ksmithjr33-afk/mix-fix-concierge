@@ -27,6 +27,8 @@ export async function hideEvent(sessionId: string, admin: StaffMember): Promise<
   if (error) throw new Error(`event_assignments lookup failed: ${error.message}`);
   const refusal = hideError(((data as { status: AssignmentStatus }[]) ?? []).map((r) => r.status));
   if (refusal) return { ok: false, error: refusal, status: 409 };
+  const { data: posts, error: postErr } = await supabase.from("shift_posts").select("id").eq("session_id", sessionId).eq("status", "posted");
+  if (!postErr && ((posts as unknown[]) ?? []).length > 0) return { ok: false, error: "Unpost the shift first, then hide this event.", status: 409 };
   const { error: insErr } = await supabase
     .from("team_hidden_events")
     .upsert({ session_id: sessionId, hidden_by: admin.id, hidden_at: new Date().toISOString() }, { onConflict: "session_id" });

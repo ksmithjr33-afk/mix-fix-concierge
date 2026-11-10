@@ -14,6 +14,8 @@ import { isHidden } from "@/lib/team/hidden";
 import { hasPunches } from "@/lib/team/clock-db";
 import { workedMinutes } from "@/lib/team/clock";
 import { eventDay, eventSchedule, formatClock, shortDate } from "@/lib/team/time";
+import { cleanMarkets, eventData, staffMarketsOf } from "@/lib/team/markets";
+import { cancelHandoffsFor, closeIfFilled } from "@/lib/team/shifts-db";
 import {
   assignText,
   canRespond,
@@ -31,14 +33,19 @@ import {
   type StaffRecord,
 } from "@/lib/team/assignments";
 
-const STAFF_COLUMNS = "id, name, phone, role, active, alerts";
+// "*" so markets is read once the column exists, and older rows still load before it does.
+const STAFF_COLUMNS = "*";
+
+function shapeStaff(s: StaffRecord): StaffRecord {
+  return { id: s.id, name: s.name, phone: s.phone, role: s.role, active: s.active, alerts: s.alerts !== false, markets: staffMarketsOf(s) };
+}
 
 // ----- Staff list -----
 
 export async function listStaff(): Promise<StaffRecord[]> {
   const { data, error } = await supabase.from("staff").select(STAFF_COLUMNS).order("active", { ascending: false }).order("name");
   if (error) throw new Error(`staff list failed: ${error.message}`);
-  return ((data as StaffRecord[]) ?? []).map((s) => ({ ...s, alerts: s.alerts !== false }));
+  return ((data as StaffRecord[]) ?? []).map(shapeStaff);
 }
 
 export type SaveResult = { ok: true; staff: StaffRecord } | { ok: false; error: string };
@@ -56,7 +63,7 @@ export async function createStaff(raw: Record<string, unknown>): Promise<SaveRes
     .select(STAFF_COLUMNS)
     .single();
   if (error) return { ok: false, error: duplicatePhone(error.message) ? "Someone on the team already has that phone number." : "Could not save. Try again." };
-  return { ok: true, staff: data as StaffRecord };
+  return { ok: true, staff: shapeStaff(data as StaffRecord) };
 }
 
 /** Edit name, phone, role, active, or alerts. Deactivating also signs the person out everywhere. */
@@ -69,6 +76,11 @@ export async function updateStaff(actor: StaffMember, id: string, raw: Record<st
   }
   if (typeof raw.active === "boolean") patch.active = raw.active;
   if (typeof raw.alerts === "boolean") patch.alerts = raw.alerts;
+  if ("markets" in raw && !("markets" in patch)) {
+    const markets = cleanMarkets(raw.markets);
+    if (!markets) return { ok: false, error: "Pick at least one market." };
+    patch.markets = markets;
+  }
   if (Object.keys(patch).length === 0) return { ok: false, error: "Nothing to change." };
 
   const selfError = selfChangeError(actor.id, id, patch as { active?: boolean; role?: string });
@@ -78,7 +90,7 @@ export async function updateStaff(actor: StaffMember, id: string, raw: Record<st
   if (error) return { ok: false, error: duplicatePhone(error.message) ? "Someone on the team already has that phone number." : "Could not save. Try again." };
   if (!data) return { ok: false, error: "That person is not on the team." };
   if (patch.active === false) await supabase.from("staff_sessions").delete().eq("staff_id", id);
-  return { ok: true, staff: data as StaffRecord };
+  return { ok: true, staff: shapeStaff(data as StaffRecord) };
 }
 
 // ----- Assignments -----
@@ -93,8 +105,7 @@ export interface AssignmentRow {
 }
 
 function eventFacts(session: SessionRow) {
-  const ed = { ...(session.event_data ?? {}) };
-  if (!ed.event_date && session.event_date) ed.event_date = session.event_date;
+  const ed = eventData(session);
   const s = eventSchedule(ed);
   return {
     date: shortDate(eventDay(ed.event_date)),
@@ -144,6 +155,12 @@ export async function assignStaff(session: SessionRow, staffId: string, admin: S
 
   const f = eventFacts(session);
   await sendStaffText(staff.phone, staff.name, assignText({ firstName: firstName(staff.name), date: f.date, arrival: f.arrival, link: `${origin}/team/e/${session.id}` }));
+  // Assigning directly still works. If it filled the last spot, a posted shift closes.
+  try {
+    await closeIfFilled(session);
+  } catch (err) {
+    console.error("[team] closing the filled shift failed:", err instanceof Error ? err.message : String(err));
+  }
   return { ok: true };
 }
 
@@ -162,6 +179,7 @@ export async function removeStaff(session: SessionRow, staffId: string): Promise
   if (error) throw new Error(`remove failed: ${error.message}`);
   const removed = (data as { status: AssignmentStatus }[] | null)?.[0];
   if (!removed) return { ok: false, error: "That person is not on this event.", status: 404 };
+  await cancelHandoffsFor(session.id, staffId).catch((err) => console.error("[team] closing a handoff failed:", err));
   if (removed.status !== "declined") {
     const staff = await staffById(staffId);
     if (staff) await sendStaffText(staff.phone, staff.name, removalText({ firstName: firstName(staff.name), date: eventFacts(session).date }));
@@ -196,6 +214,7 @@ export async function respondToAssignment(sessionId: string, staff: StaffMember,
   if (error) throw new Error(`respond failed: ${error.message}`);
 
   if (response === "decline") {
+    await cancelHandoffsFor(sessionId, staff.id).catch((err) => console.error("[team] closing a handoff failed:", err));
     const f = eventFacts(session);
     const message = declineText({ firstName: firstName(staff.name), title: f.title, date: f.date, link: `${origin}/team/admin/e/${sessionId}` });
     const admins = await alertAdmins();

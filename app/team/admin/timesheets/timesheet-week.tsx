@@ -2,9 +2,10 @@
 
 import { useMemo, useState } from "react";
 import type { TimesheetRow } from "@/lib/team/timesheet";
-import { OWN_APPROVE_MESSAGE, rowHistory, staffTotals, toChicagoLocal, weekApproval } from "@/lib/team/timesheet";
+import { OWN_APPROVE_MESSAGE, rowHistory, staffTotals, toLocal, weekApproval } from "@/lib/team/timesheet";
 import { FLAG_LABELS, formatWorked, type PunchFlag } from "@/lib/team/clock";
 import { timeLabel } from "@/lib/team/clock-label";
+import { zoneName, zoneShort } from "@/lib/team/time";
 
 const card = "bg-[#F5F0EB] rounded-2xl border border-[#DDD5CC] px-4 py-3 sm:px-5 sm:py-4";
 const input =
@@ -26,14 +27,14 @@ async function post(body: Record<string, unknown>): Promise<{ rows: TimesheetRow
 function EditForm({ row, onSaved, onCancel }: { row: TimesheetRow; onSaved: (rows: TimesheetRow[]) => void; onCancel: () => void }) {
   const [type, setType] = useState<"in" | "out">(!row.clockIn ? "in" : !row.clockOut ? "out" : "in");
   const existing = type === "in" ? row.clockIn : row.clockOut;
-  const [at, setAt] = useState(toChicagoLocal(existing?.at ?? null));
+  const [at, setAt] = useState(toLocal(existing?.at ?? null, row.timeZone));
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
   const pick = (t: "in" | "out") => {
     setType(t);
-    setAt(toChicagoLocal((t === "in" ? row.clockIn : row.clockOut)?.at ?? null));
+    setAt(toLocal((t === "in" ? row.clockIn : row.clockOut)?.at ?? null, row.timeZone));
   };
 
   return (
@@ -51,14 +52,14 @@ function EditForm({ row, onSaved, onCancel }: { row: TimesheetRow; onSaved: (row
         ))}
       </div>
       <label className="block text-xs text-[#A39585] uppercase tracking-wide">
-        Clock {type} time (Dallas time)
+        Clock {type} time ({zoneName(row.timeZone)} time)
         <input type="datetime-local" className={`${input} mt-1`} value={at} onChange={(e) => setAt(e.target.value)} />
       </label>
       <label className="block text-xs text-[#A39585] uppercase tracking-wide">
         Reason (required)
         <textarea rows={2} maxLength={500} className={`${input} mt-1 resize-none`} placeholder="Forgot to clock out, left at 11:15" value={reason} onChange={(e) => setReason(e.target.value)} />
       </label>
-      {existing && <p className="text-xs text-[#6B5D52]">Was {timeLabel(existing.at)}. The original time stays in the edit history.</p>}
+      {existing && <p className="text-xs text-[#6B5D52]">Was {timeLabel(existing.at, undefined, row.timeZone)}. The original time stays in the edit history.</p>}
       {error && <p className="text-sm text-[#A0412D]">{error}</p>}
       <div className="flex gap-2">
         <button
@@ -108,6 +109,7 @@ function Row({ row, meId, onRows }: { row: TimesheetRow; meId: string; onRows: (
           <p className="text-sm text-[#6B5D52] break-words">
             {dayLabel(row.eventDay)} · {row.eventTitle}
             {row.scheduledStart && ` · scheduled ${row.scheduledStart}${row.scheduledEnd ? ` to ${row.scheduledEnd}` : ""}`}
+            {row.timeZone !== "America/Chicago" && ` · times in ${zoneShort(row.timeZone)}`}
           </p>
         </div>
         <span className="shrink-0 text-right">
@@ -120,8 +122,8 @@ function Row({ row, meId, onRows }: { row: TimesheetRow; meId: string; onRows: (
         </span>
       </div>
       <p className="text-sm text-[#2C2420] mt-1">
-        In {row.clockIn ? timeLabel(row.clockIn.at) : <span className="text-[#A0412D]">missing</span>} · Out{" "}
-        {row.clockOut ? timeLabel(row.clockOut.at) : <span className="text-[#A0412D]">missing</span>}
+        In {row.clockIn ? timeLabel(row.clockIn.at, undefined, row.timeZone) : <span className="text-[#A0412D]">missing</span>} · Out{" "}
+        {row.clockOut ? timeLabel(row.clockOut.at, undefined, row.timeZone) : <span className="text-[#A0412D]">missing</span>}
       </p>
       {row.flags.length > 0 && (
         <p className="flex flex-wrap gap-1 mt-1">
@@ -134,7 +136,7 @@ function Row({ row, meId, onRows }: { row: TimesheetRow; meId: string; onRows: (
       )}
       {row.approved && (
         <p className="text-xs text-[#6B5D52] mt-1">
-          Approved by {row.approved.byName} {timeLabel(row.approved.at)}. Locked until reopened.
+          Approved by {row.approved.byName} {timeLabel(row.approved.at, undefined, row.timeZone)}. Locked until reopened.
         </p>
       )}
       {history.length > 0 && (
@@ -148,11 +150,11 @@ function Row({ row, meId, onRows }: { row: TimesheetRow; meId: string; onRows: (
             h.kind === "edit" ? (
               <li key={i} className="text-xs text-[#6B5D52]">
                 {h.edit.byName} {h.edit.action === "add" ? "added" : "corrected"} clock {h.edit.type}
-                {h.edit.oldAt ? ` from ${timeLabel(h.edit.oldAt)}` : ""} to {timeLabel(h.edit.newAt)}: &ldquo;{h.edit.reason}&rdquo; ({timeLabel(h.edit.at)})
+                {h.edit.oldAt ? ` from ${timeLabel(h.edit.oldAt, undefined, row.timeZone)}` : ""} to {timeLabel(h.edit.newAt, undefined, row.timeZone)}: &ldquo;{h.edit.reason}&rdquo; ({timeLabel(h.edit.at, undefined, row.timeZone)})
               </li>
             ) : (
               <li key={i} className="text-xs text-[#9A7049]">
-                {h.reopen.byName} reopened it {timeLabel(h.reopen.at)}: &ldquo;{h.reopen.reason}&rdquo;. It had been approved by {h.reopen.approvedByName} {timeLabel(h.reopen.approvedAt)}.
+                {h.reopen.byName} reopened it {timeLabel(h.reopen.at, undefined, row.timeZone)}: &ldquo;{h.reopen.reason}&rdquo;. It had been approved by {h.reopen.approvedByName} {timeLabel(h.reopen.approvedAt, undefined, row.timeZone)}.
               </li>
             )
           )}
@@ -335,7 +337,7 @@ export default function TimesheetWeek({ initial, meId, from, to }: { initial: Ti
             Download
           </button>
         </form>
-        <p className="text-xs text-[#A39585] mt-2">By event date. Times are Dallas time. Hours are decimal, so 5h 30m is 5.50.</p>
+        <p className="text-xs text-[#A39585] mt-2">By event date. Times are in each event&apos;s time zone (see the Time zone column). Hours are decimal, so 5h 30m is 5.50.</p>
       </section>
     </div>
   );

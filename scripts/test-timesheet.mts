@@ -80,6 +80,7 @@ const row = (o: Partial<import("../lib/team/timesheet.ts").TimesheetRow>): impor
   staffName: "Jordan Lee",
   staffPhone: "+12145550101",
   sessionId: "s1",
+  timeZone: "America/Chicago",
   eventTitle: "Justin · Birthday",
   eventDay: "2026-12-12",
   scheduledStart: "6:00 PM",
@@ -130,15 +131,15 @@ const csv = ts.timesheetCsv([
 const lines = csv.split("\r\n");
 check(
   "CSV header has every column",
-  lines[0] === "Staff name,Staff phone,Event date,Event name,Scheduled start,Scheduled end,Clock in,Clock out,Hours,Flags,Edited by admin,Approved by",
+  lines[0] === "Staff name,Staff phone,Event date,Event name,Scheduled start,Scheduled end,Clock in,Clock out,Hours,Flags,Edited by admin,Approved by,Time zone",
   lines[0],
 );
 check(
   "CSV row: phone, schedule, Chicago times, decimal hours, flags, edited yes",
-  lines[1] === "Jordan Lee,(214) 555-0101,2026-12-12,Justin · Birthday,6:00 PM,10:00 PM,2026-12-12 6:00 PM,2026-12-12 11:30 PM,5.50,away from event; corrected by admin,Yes,Pat Jones",
+  lines[1] === "Jordan Lee,(214) 555-0101,2026-12-12,Justin · Birthday,6:00 PM,10:00 PM,2026-12-12 6:00 PM,2026-12-12 11:30 PM,5.50,away from event; corrected by admin,Yes,Pat Jones,CT",
   lines[1],
 );
-check("CSV edited is No when nothing was edited, hours blank until clock out", lines[2].endsWith(",,No,") && lines[2].includes(",2026-12-12 6:00 PM,,,"), lines[2]);
+check("CSV edited is No when nothing was edited, hours blank until clock out", lines[2].endsWith(",,No,,CT") && lines[2].includes(",2026-12-12 6:00 PM,,,"), lines[2]);
 check("CSV stops spreadsheet formulas", lines[2].startsWith(`"'=HYPERLINK(""x"")"`), lines[2]);
 check("CSV quotes commas", lines[2].includes('"Smith, Wedding"'));
 check("CSV phone is readable and stays text", ts.csvPhone("+12145550101") === "(214) 555-0101" && ts.csvPhone("+447700900123") === "+447700900123");
@@ -302,6 +303,7 @@ check("The reopen is logged with who and why, and which approval it undid", log?
 check("The reopened row shows as not approved, with its reopen history", reopened.ok && reopened.rows[0].approved === null && reopened.rows[0].reopens.length === 1 && reopened.rows[0].reopens[0].byName === "Kenneth Smith" && reopened.rows[0].reopens[0].approvedByName === "Pat Jones");
 check("The reopen answer tells the admin what next", reopened.ok && reopened.message === "Reopened. Correct the row, then approve it again.");
 
+await new Promise((r) => setTimeout(r, 5)); // the correction comes after the reopen
 const fixed = await tsDb.editPunch(admin, "as1", "out", local("23:30"), "Left at 11:30");
 check("The reopened row can be corrected", fixed.ok && db.time_punches.find((x) => x.id === "p9")!.punched_at === local("23:30").toISOString());
 const reapproved = await tsDb.approveRows(admin2, ["as1"]);

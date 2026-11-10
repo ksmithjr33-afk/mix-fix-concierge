@@ -3,6 +3,7 @@
 
 import { staffChange, type StaffMember } from "@/lib/team/event-view";
 import { eventDay, shortDate } from "@/lib/team/time";
+import { cleanMarkets, DEFAULT_MARKET, type Market } from "@/lib/team/markets";
 
 export type AssignmentStatus = "offered" | "accepted" | "declined";
 export type Response = "accept" | "decline";
@@ -10,6 +11,7 @@ export type Response = "accept" | "decline";
 /** Staff as stored, with the admin alerts setting. Only admins use alerts; it is on by default. */
 export interface StaffRecord extends StaffMember {
   alerts: boolean;
+  markets: Market[];
 }
 
 /** Admin alert texts (declines, missing items, bar ready) go only to active admins with alerts on. */
@@ -72,6 +74,7 @@ export interface StaffInput {
   name: string;
   phone: string;
   role: "bartender" | "admin";
+  markets: Market[];
 }
 
 /**
@@ -79,7 +82,7 @@ export interface StaffInput {
  * cleaned record or an error to show.
  */
 export function validateStaffInput(
-  raw: { first?: unknown; last?: unknown; phone?: unknown; role?: unknown },
+  raw: { first?: unknown; last?: unknown; phone?: unknown; role?: unknown; markets?: unknown },
   normalizePhone: (v: unknown) => string | null
 ): { ok: true; value: StaffInput } | { ok: false; error: string } {
   const first = String(raw.first ?? "").replace(/\s+/g, " ").trim().slice(0, 40);
@@ -89,7 +92,10 @@ export function validateStaffInput(
   if (!phone) return { ok: false, error: "Enter a 10 digit phone number." };
   const role = raw.role === "admin" ? "admin" : raw.role === "bartender" || raw.role === undefined ? "bartender" : null;
   if (!role) return { ok: false, error: "Pick a role." };
-  return { ok: true, value: { name: `${first} ${last}`, phone, role } };
+  // Markets: at least one. A form from before markets existed counts as Dallas.
+  const markets = raw.markets === undefined ? [DEFAULT_MARKET] : cleanMarkets(raw.markets);
+  if (!markets) return { ok: false, error: "Pick at least one market." };
+  return { ok: true, value: { name: `${first} ${last}`, phone, role, markets } };
 }
 
 /** Admins cannot deactivate themselves or drop their own admin role, so nobody locks the team out by accident. */

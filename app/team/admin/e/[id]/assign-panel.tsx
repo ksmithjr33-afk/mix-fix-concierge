@@ -36,12 +36,16 @@ export default function AssignPanel({
   covered,
   people,
   available,
+  timeZone,
+  market,
 }: {
+  timeZone: string;
+  market: string | null;
   sessionId: string;
   summary: string;
   covered: boolean;
   people: AssigneeProgress[];
-  available: { id: string; name: string; role: string; declined: boolean }[];
+  available: { id: string; name: string; role: string; declined: boolean; markets: string[] }[];
 }) {
   const router = useRouter();
   const [pick, setPick] = useState("");
@@ -87,8 +91,8 @@ export default function AssignPanel({
                   <div className="min-w-0">
                     <p className="font-medium text-[#2C2420]">{p.name}</p>
                     <p className="text-xs text-[#6B5D52]">
-                      Assigned {timeLabel(p.assignedAt)}
-                      {p.respondedAt ? `, replied ${timeLabel(p.respondedAt)}` : ""}
+                      Assigned {timeLabel(p.assignedAt, undefined, timeZone)}
+                      {p.respondedAt ? `, replied ${timeLabel(p.respondedAt, undefined, timeZone)}` : ""}
                     </p>
                   </div>
                   <span className={`shrink-0 text-[11px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded ${STATUS[p.status].cls}`}>{STATUS[p.status].text}</span>
@@ -98,13 +102,13 @@ export default function AssignPanel({
                     <Bar label="Checklist" checked={p.checklist.checked} total={p.checklist.total} />
                     <Bar label="Shopping list" checked={p.shopping.checked} total={p.shopping.total} />
                     <p className="text-xs text-[#6B5D52]">
-                      {p.confirmedAt ? `Has everything, confirmed ${timeLabel(p.confirmedAt)}` : "Has not confirmed the checklist"}
-                      {p.barReadyAt ? ` · Bar ready ${timeLabel(p.barReadyAt)}` : ""}
+                      {p.confirmedAt ? `Has everything, confirmed ${timeLabel(p.confirmedAt, undefined, timeZone)}` : "Has not confirmed the checklist"}
+                      {p.barReadyAt ? ` · Bar ready ${timeLabel(p.barReadyAt, undefined, timeZone)}` : ""}
                     </p>
                     {(p.clockIn || p.clockOut) && (
                       <p className="text-xs text-[#2C2420]">
-                        {p.clockIn ? `In ${timeLabel(p.clockIn)}` : "Not clocked in"}
-                        {p.clockOut ? ` · Out ${timeLabel(p.clockOut)}` : p.clockIn ? " · Still clocked in" : ""}
+                        {p.clockIn ? `In ${timeLabel(p.clockIn, undefined, timeZone)}` : "Not clocked in"}
+                        {p.clockOut ? ` · Out ${timeLabel(p.clockOut, undefined, timeZone)}` : p.clockIn ? " · Still clocked in" : ""}
                         {p.workedMinutes !== null ? ` · ${formatWorked(p.workedMinutes)}` : ""}
                         {p.punchFlags.length > 0 && (
                           <span className="text-[#9A7049]"> · {p.punchFlags.map((f) => FLAG_LABELS[f as PunchFlag] ?? f).join(", ")}</span>
@@ -152,6 +156,7 @@ export default function AssignPanel({
                   {s.name}
                   {s.role === "admin" ? " (admin)" : ""}
                   {s.declined ? " (declined before)" : ""}
+                  {market && !s.markets.includes(market) ? " (other market)" : ""}
                 </option>
               ))}
             </select>
