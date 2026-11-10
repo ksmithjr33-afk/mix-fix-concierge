@@ -292,6 +292,17 @@ check("The note stays off the staff shopping list", !JSON.stringify(shop.buildSt
 check("The note stays off the client shopping list", !JSON.stringify(shoppingLib.generateShoppingList(noted as never)).includes("hard seltzer"));
 check("Staff see the note on Details instead", view.buildStaffEventView({ id: "s9", event_data: noted }).bottleNote.startsWith("Wine and hard seltzer"));
 check("A real extra bottle stays on the list", shop.buildStaffShopping({ ...ed, extra_bottles: "Fireball" }).alcohol.some((i) => i.item === "Fireball"));
+for (const pkg of ["Full Bar", "Tailored Bar", "Dive Bar"]) {
+  const withBottle = { ...ed, package: pkg, extra_bottles: "Fireball" };
+  const email = shoppingLib.generateClientShoppingListEmail(shoppingLib.generateShoppingList(withBottle as never), withBottle as never, "Alex");
+  const liquor = email.slice(email.indexOf("LIQUOR"), email.indexOf("\n\n", email.indexOf("LIQUOR") + 8));
+  check(`${pkg}: a real extra bottle is on the client shopping list email under LIQUOR`, email.includes("LIQUOR") && liquor.includes("Fireball") && liquor.includes("Extra bottle requested by client"), liquor);
+  const withNote = { ...ed, package: pkg, wine: true, extra_bottles: NOTE };
+  const noteEmail = shoppingLib.generateClientShoppingListEmail(shoppingLib.generateShoppingList(withNote as never), withNote as never, "Alex");
+  check(`${pkg}: a bottle note stays out of the client shopping list email`, !noteEmail.includes("hard seltzer") && !noteEmail.includes("Extra bottle requested"));
+}
+const plainEmail = shoppingLib.generateClientShoppingListEmail(shoppingLib.generateShoppingList(ed as never), ed as never, "Alex");
+check("No extra bottle line when the client asked for none", !plainEmail.includes("Extra bottle requested"));
 
 // ----- Events list -----
 const justin = { id: "e1", event_data: { client_name: "Justin Reyes", event_type: "Wedding", event_date: "2026-11-14", bar_service_start: "6:00 PM", bar_service_end: "11:00 PM", guest_count: 150, package: "Premium Bar", event_address: "500 Main St, Fort Worth, TX 76102" } };

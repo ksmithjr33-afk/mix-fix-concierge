@@ -1255,18 +1255,25 @@ export function generateShoppingList(eventData: EventData): ShoppingListItem[] {
     items.push(...getSupplies(guestCount, barHours, pace));
   }
 
-  // Extra bottles. Only a bottle request becomes an item: the field sometimes
-  // holds a note ("Wine quantities based on 120 guests..."), which is not a product.
-  if (isBottleRequest(eventData.extra_bottles)) {
-    items.push({
-      category: "Spirits",
-      item: eventData.extra_bottles,
-      quantity: "1 bottle (750 ml)",
-      notes: "Extra bottle requested by client",
-    });
-  }
+  const extra = extraBottleItem(eventData);
+  if (extra) items.push(extra);
 
   return items;
+}
+
+/**
+ * The client's extra bottle as a shopping item. Only a bottle request becomes
+ * an item: the field sometimes holds a note ("Wine quantities based on 120
+ * guests..."), which is not a product.
+ */
+export function extraBottleItem(eventData: EventData): ShoppingListItem | null {
+  if (!isBottleRequest(eventData.extra_bottles)) return null;
+  return {
+    category: "Spirits",
+    item: eventData.extra_bottles.trim(),
+    quantity: "1 bottle (750 ml)",
+    notes: "Extra bottle requested by client",
+  };
 }
 
 /** Words that mark extra_bottles as a planning note, not a bottle to buy. */
@@ -2206,8 +2213,10 @@ export function generateClientShoppingListEmail(
   );
   lines.push("");
 
-  // LIQUOR
+  // LIQUOR, with the client's extra bottle request when there is a real one
   const spiritItems = getSpiritBottles(drinks, guestCount, pace, hours, eventData);
+  const extraBottle = extraBottleItem(eventData);
+  if (extraBottle) spiritItems.push(extraBottle);
   const grouped = new Map<string, ShoppingListItem[]>();
   for (const item of items) {
     const list = grouped.get(item.category) ?? [];
