@@ -70,6 +70,7 @@ export function buildUpdateNote(row: EventUpdateRow, session: SessionRow | null 
   if (row.applied && row.change_order?.price_text) lines.push(`Price: ${row.change_order.price_text}`);
   if (withinSixDays(row, session)) lines.push("Within 6 days of the event");
   if (row.change_approval_needed) lines.push("Change approval needed: client asked for something outside the rules");
+  if (row.updated_by === "admin") lines.push(`Updated by admin: ${row.updated_by_name || "team member"}`);
   lines.push(noteTimestamp(row.created_at));
   const client = clientLine(session);
   if (client) lines.push(client);
@@ -103,6 +104,9 @@ export function buildUpdatePayload(session: SessionRow, row: EventUpdateRow): Re
     payment_preference: (eventData.payment_preference as string | undefined) || "",
     change_approval_needed: row.change_approval_needed ? "Yes" : "No",
     booked_total: session.booked_price?.total ?? null,
+    // Who made the change, so the team can tell an admin edit from a client change.
+    updated_by: row.updated_by === "admin" ? "admin" : "client",
+    updated_by_name: row.updated_by === "admin" ? row.updated_by_name || "" : "",
   };
   if (!payload.email && session.email) payload.email = session.email;
   return payload;

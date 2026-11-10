@@ -62,6 +62,15 @@ export interface EventUpdateRow {
   applied: boolean;
   change_order?: PriceChange | null; // the update's price change, when it changed a priced field
   change_approval_needed?: boolean | null; // the bot passed something to management
+  updated_by?: "client" | "admin" | null; // who made the change; null on rows from before this column
+  updated_by_name?: string | null; // the admin's first name, for admin edits
+  updated_by_staff_id?: string | null;
+}
+
+/** An admin who edited the event from the team portal. */
+export interface AdminEditor {
+  name: string; // first name
+  staffId: string;
 }
 
 export async function getSession(sessionId: string): Promise<SessionRow | null> {
@@ -152,7 +161,7 @@ function toInsert(
   row: PlannedRow,
   version: number,
   source: "concierge" | "manager",
-  extra: { price?: PriceChange | null; change_approval_needed?: boolean } = {}
+  extra: { price?: PriceChange | null; change_approval_needed?: boolean; editor?: AdminEditor | null } = {}
 ) {
   const insert: Record<string, unknown> = {
     session_id: sessionId,
@@ -166,6 +175,12 @@ function toInsert(
   // The change_order column holds the update's price change. Only written when set.
   if (extra.price) insert.change_order = extra.price;
   if (extra.change_approval_needed) insert.change_approval_needed = true;
+  // Admin edits are marked with the admin. Client rows keep the column default.
+  if (extra.editor) {
+    insert.updated_by = "admin";
+    insert.updated_by_name = extra.editor.name;
+    insert.updated_by_staff_id = extra.editor.staffId;
+  }
   return insert;
 }
 
@@ -201,12 +216,14 @@ interface PreparedUpdate {
 function prepareUpdate(
   session: SessionRow & { event_data: EventData },
   partial: EventData,
-  options: { managerRequest?: string | null; now?: Date }
+  options: { managerRequest?: string | null; now?: Date; ignoreCutoff?: boolean }
 ): PreparedUpdate {
   // Sessions submitted before hours_booked was saved get it filled in here.
   const current = withHoursBooked(session.event_data, session);
   const deadlines = computeDeadlines(current.event_date ?? session.event_date, options.now);
-  const plan = planUpdate(current, partial, { managerRequest: options.managerRequest, deadlines });
+  // Admins are not bound by the six day cutoff.
+  const planDeadlines = options.ignoreCutoff ? { ...deadlines, withinSixDays: false } : deadlines;
+  const plan = planUpdate(current, partial, { managerRequest: options.managerRequest, deadlines: planDeadlines });
 
   let applied = plan.applied;
   let next = plan.next;
@@ -253,10 +270,15 @@ export interface QuoteResult {
 }
 
 /** Price a proposed update for the bot to quote. Saves nothing. Null if the session is not submitted. */
-export async function quoteEventUpdate(sessionId: string, partial: EventData, now?: Date): Promise<QuoteResult | null> {
+export async function quoteEventUpdate(
+  sessionId: string,
+  partial: EventData,
+  now?: Date,
+  opts: { ignoreCutoff?: boolean } = {}
+): Promise<QuoteResult | null> {
   const session = await getSession(sessionId);
   if (!session || session.status !== "submitted" || !session.event_data) return null;
-  const prep = prepareUpdate(session as SessionRow & { event_data: EventData }, partial, { now });
+  const prep = prepareUpdate(session as SessionRow & { event_data: EventData }, partial, { now, ignoreCutoff: opts.ignoreCutoff });
   return {
     price: prep.price,
     refusedDrinks: prep.refusedDrinks,
@@ -290,6 +312,14 @@ export async function applyEventUpdate(
     requireQuote?: boolean;
     quotedNewTotal?: unknown;
     now?: Date;
+    // Admin edits from the team portal: no six day cutoff, the admin's price
+    // choice replaces the engine's price, and the row is marked with the admin.
+    ignoreCutoff?: boolean;
+    priceOverride?: (engine: PriceChange) => PriceChange;
+    customTotal?: boolean; // the admin typed the new total
+    editor?: AdminEditor | null;
+    // Refuse to save when someone else changed the event since this version was read.
+    expectedVersion?: number;
   } = {}
 ): Promise<ApplyResult | null> {
   const source = options.source ?? "concierge";
@@ -298,8 +328,12 @@ export async function applyEventUpdate(
     const session = await getSession(sessionId);
     if (!session || session.status !== "submitted" || !session.event_data) return null;
 
+    if (options.expectedVersion !== undefined && session.version !== options.expectedVersion) {
+      throw new VersionConflictError();
+    }
     const prep = prepareUpdate(session as SessionRow & { event_data: EventData }, partial, options);
-    const { current, applied, requests, next, price, booked } = prep;
+    const { current, applied, requests, next, booked } = prep;
+    const price = prep.price && options.priceOverride ? options.priceOverride(prep.price) : prep.price;
     let version = session.version;
     let updatedAt = session.updated_at ?? session.submitted_at;
     const base = {
@@ -327,7 +361,12 @@ export async function applyEventUpdate(
       if (touched.has("hours_booked")) sessionUpdate.hours_booked = String(next.hours_booked ?? "");
       if (price && booked) {
         sessionUpdate.booked_price =
-          price.new_total !== null ? bookedAfter(booked, price, toCount(next.bartenders), nowIso) : booked;
+          price.new_total !== null
+            ? {
+                ...bookedAfter(booked, price, toCount(next.bartenders), nowIso),
+                ...(options.customTotal ? { custom_price: price.new_total } : {}),
+              }
+            : booked;
       }
     } else if (requests && current !== session.event_data) {
       sessionUpdate.event_data = current;
@@ -348,7 +387,7 @@ export async function applyEventUpdate(
       updatedAt = nowIso;
     }
 
-    const approval = { change_approval_needed: options.changeApprovalNeeded === true };
+    const approval = { change_approval_needed: options.changeApprovalNeeded === true, editor: options.editor ?? null };
     const inserts = [
       applied ? toInsert(sessionId, applied, version, source, { ...approval, price }) : null,
       requests ? toInsert(sessionId, requests, version, source, approval) : null,
@@ -374,6 +413,13 @@ export async function applyEventUpdate(
   }
 
   throw new Error("event update kept conflicting with a concurrent update");
+}
+
+/** The event changed since the admin opened the form. */
+export class VersionConflictError extends Error {
+  constructor() {
+    super("This event changed since you opened it. Reload the page and try again.");
+  }
 }
 
 /**
