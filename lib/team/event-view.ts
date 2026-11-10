@@ -6,6 +6,7 @@
 
 import { DRINK_MENU_RULES } from "@/lib/system-prompt";
 import { staffingFor } from "@/lib/pricing";
+import { isBottleRequest } from "@/lib/shopping-list";
 import { recapLines, type FieldChange } from "@/lib/event-diff";
 import { chicagoStamp, eventSchedule, formatClock, longDate } from "@/lib/team/time";
 
@@ -73,6 +74,7 @@ export interface StaffEventView {
   allergies: string[];
   beerAndWine: string;
   specialRequests: string;
+  bottleNote: string; // extra_bottles when it is a note, not a bottle to buy
   drinks: StaffDrink[];
   classics: ClassicGroup[] | null; // Dive Bar with no menu
   lastUpdated: string;
@@ -238,6 +240,7 @@ export function buildStaffEventView(
       .filter(Boolean)
       .join(", "),
     specialRequests: scrub(ed.special_requests),
+    bottleNote: ed.extra_bottles && !isBottleRequest(ed.extra_bottles) && !/^(no|none|n\/a)\.?$/i.test(text(ed.extra_bottles)) ? scrub(ed.extra_bottles) : "",
     drinks,
     classics: dive && drinks.length === 0 ? classicsMenu({ dive: true }) : null,
     lastUpdated: chicagoStamp(session.updated_at ?? session.submitted_at),

@@ -21,6 +21,10 @@ const config = await import("../lib/team/checklist-config.ts");
 const checks = await import("../lib/team/checks.ts");
 const shop = await import("../lib/team/shopping.ts");
 const time = await import("../lib/team/time.ts");
+const list = await import("../lib/team/event-list.ts");
+const bar = await import("../lib/team/bar-ready.ts");
+const auth = { needsName: (s: { name: string }) => !s.name.trim() || s.name.trim().toLowerCase() === "admin" };
+const shoppingLib = await import("../lib/shopping-list.ts");
 
 let failed = 0;
 let total = 0;
@@ -193,7 +197,7 @@ check("Dev code logging never runs in production", authSrc.includes('process.env
 const fullList = config.checklistFor("Full Bar");
 const premiumList = config.checklistFor("Premium Bar");
 const lines = (g: ReturnType<typeof config.checklistFor>) => g.flatMap((x) => x.sections.flatMap((s) => s.lines));
-check("Checklist has the two groups", fullList.map((g) => g.title).join(" / ") === "The Mix Fix provides / You bring");
+check("Checklist has the two groups", fullList.map((g) => g.title).join(" / ") === "From The Mix Fix / Your own tools");
 check("Full Bar has the folding tables to check", lines(fullList).some((l) => l.label === "6 ft folding tables (2)" && !l.info));
 check("Premium Bar has no folding tables", !lines(premiumList).some((l) => l.label === "6 ft folding tables (2)"));
 check("Premium Bar shows the wooden bar as info with no checkbox", lines(premiumList).some((l) => l.label === "Wooden bar, delivered by the company" && l.info));
@@ -240,6 +244,120 @@ const fresh = checks.mergeChecks(items1, items1.map((i) => ({ item_key: i.key, c
 check("First open is all unchecked with no tags", Object.values(fresh).every((s) => !s.checked && !s.changed));
 const cl = checks.mergeChecks(config.checklistKeys("Full Bar").map((key) => ({ key, quantity: "" })), [{ item_key: "Muddler", checked: true, quantity: "" }], { trackChanges: false });
 check("Checklist ticks save and are never tagged changed", cl["Muddler"].checked && Object.values(cl).every((s) => !s.changed));
+
+// ----- Checklist wording and "I have everything" -----
+check("Checklist title", config.CHECKLIST_TITLE === "Do you have everything?");
+check("Checklist intro", config.CHECKLIST_INTRO === "Go through the list and check off each item before you leave for the event.");
+check("Confirm button label", config.CONFIRM_LABEL === "I have everything");
+const keys = config.checklistKeys("Full Bar");
+const allOn = Object.fromEntries(keys.map((k) => [k, { checked: true, changed: false }]));
+const oneOff = { ...allOn, [keys[3]]: { checked: false, changed: false } };
+check("I have everything is off until every box is checked", !checks.canConfirm(oneOff) && !checks.canConfirm(Object.fromEntries(keys.map((k) => [k, { checked: false, changed: false }]))));
+check("I have everything turns on when every box is checked", checks.canConfirm(allOn));
+check("I have everything stays off with no boxes", !checks.canConfirm({}));
+check("A saved confirmation shows while every box is checked", checks.activeConfirmation("2026-12-12T22:00:00Z", allOn) === "2026-12-12T22:00:00Z");
+check("A saved confirmation no longer counts once a box is unchecked", checks.activeConfirmation("2026-12-12T22:00:00Z", oneOff) === null);
+check("Unchecking a checklist item clears the confirmation", checks.clearsConfirmation("checklist", false));
+check("Checking an item, or any shopping tick, keeps it", !checks.clearsConfirmation("checklist", true) && !checks.clearsConfirmation("shopping", false));
+const eventsSrc = readFileSync(new URL("../lib/team/events.ts", import.meta.url), "utf8");
+const confirmFn = eventsSrc.slice(eventsSrc.indexOf("export async function confirmChecklist"), eventsSrc.indexOf("async function clearConfirmation"));
+check("The server only saves a confirmation when every box is checked", confirmFn.includes("if (!canConfirm(state)) return null"));
+check("Saving an uncheck clears the saved confirmation", eventsSrc.includes("if (clearsConfirmation(list, checked)) await clearConfirmation("));
+const confirmSrc = readFileSync(new URL("../app/api/team/confirm/route.ts", import.meta.url), "utf8");
+check("/api/team/confirm checks access before acting", confirmSrc.includes("getCurrentStaff()") && confirmSrc.includes("openEvent(") && confirmSrc.includes("status: 403"));
+
+// ----- Shopping tab layout and wording -----
+for (const pkg of ["Bartender Only", "Tailored Bar"]) {
+  const layout = shop.shoppingGroups(pkg, shop.buildStaffShopping({ ...ed, package: pkg }));
+  check(`${pkg}: banner says the client provides everything`, layout.banner === "The client provides everything on this list. Check on site that it is all here.");
+  check(`${pkg}: first group is provided by the client`, layout.groups[0].title === "Mixers, garnishes and supplies, provided by the client");
+}
+for (const pkg of ["Full Bar", "Premium Bar", "Essentials Bar", "Dive Bar", "Beer and Wine"]) {
+  const layout = shop.shoppingGroups(pkg, shop.buildStaffShopping({ ...ed, package: pkg }));
+  check(`${pkg}: no banner, supplies provided by The Mix Fix`, layout.banner === null && layout.groups[0].title === "Mixers, garnishes and supplies, provided by The Mix Fix");
+  check(`${pkg}: alcohol group is last`, layout.groups.at(-1)!.id === "alcohol" && layout.groups[0].id === "supplies");
+}
+const fullLayout = shop.shoppingGroups("Full Bar", shopping);
+check("Alcohol group title", fullLayout.groups.at(-1)!.title === "Alcohol, provided by the client");
+check("Alcohol group line", fullLayout.groups.at(-1)!.note === "The client buys the alcohol. Check on site that everything is here, and tap Something is missing if it is not.");
+check("Tailored Bar alcohol group is last too", shop.shoppingGroups("Tailored Bar", shopping).groups.at(-1)!.id === "alcohol");
+
+// ----- A note in extra_bottles is not a shopping item -----
+const NOTE = "Wine and hard seltzer quantities to be included in shopping list based on 120 guests and mixed drinking pace.";
+check("A planning note is not a bottle request", !shoppingLib.isBottleRequest(NOTE));
+check("Real bottle requests still count", shoppingLib.isBottleRequest("Fireball") && shoppingLib.isBottleRequest("1 bottle of Aperol") && shoppingLib.isBottleRequest("Hennessy VS"));
+check("None is not a bottle request", !shoppingLib.isBottleRequest("None") && !shoppingLib.isBottleRequest(""));
+const noted = { ...ed, package: "Tailored Bar", wine: true, extra_bottles: NOTE };
+check("The note stays off the staff shopping list", !JSON.stringify(shop.buildStaffShopping(noted)).includes("hard seltzer"));
+check("The note stays off the client shopping list", !JSON.stringify(shoppingLib.generateShoppingList(noted as never)).includes("hard seltzer"));
+check("Staff see the note on Details instead", view.buildStaffEventView({ id: "s9", event_data: noted }).bottleNote.startsWith("Wine and hard seltzer"));
+check("A real extra bottle stays on the list", shop.buildStaffShopping({ ...ed, extra_bottles: "Fireball" }).alcohol.some((i) => i.item === "Fireball"));
+
+// ----- Events list -----
+const justin = { id: "e1", event_data: { client_name: "Justin Reyes", event_type: "Wedding", event_date: "2026-11-14", bar_service_start: "6:00 PM", bar_service_end: "11:00 PM", guest_count: 150, package: "Premium Bar", event_address: "500 Main St, Fort Worth, TX 76102" } };
+const named = { id: "e2", event_data: { ...justin.event_data, event_name: "Reyes Fall Gala", event_type: "Corporate", event_date: "2026-11-20" } };
+const li = list.eventListItem(justin);
+check("Title is first name and event type", li.title === "Justin · Wedding", li.title);
+check("Detail line has times, guests, package, city", li.detail === "6:00 PM to 11:00 PM · 150 guests · Premium Bar · Fort Worth", li.detail);
+check("Arrival is on the row (3 hours early for a wedding)", li.arrival === "3:00 PM", li.arrival);
+const ln = list.eventListItem(named);
+check("A client event name is the title", ln.title === "Reyes Fall Gala");
+check("First name and type move to the detail line", ln.detail.startsWith("Justin · Corporate · "), ln.detail);
+check("City from a plain address", list.cityFrom("123 Elm St, Dallas, TX 75201") === "Dallas" && list.cityFrom("12 Oak Ln, Plano, Texas 75024, USA") === "Plano");
+check("No city from a one part address", list.cityFrom("The Adolphus") === "");
+check("List rows never include the last name", !JSON.stringify(li).includes("Reyes"));
+const today = "2026-11-10"; // a Tuesday
+const mk = (id: string, day: string) => list.eventListItem({ id, event_data: { client_name: "A B", event_type: "Party", event_date: day, bar_service_start: "7:00 PM" } });
+const secs = list.upcomingSections([mk("a", "2026-11-15"), mk("b", "2026-11-16"), mk("c", "2026-11-23"), mk("d", "2026-11-12"), mk("old", "2026-11-01")], today);
+check("Sections are This week, Next week, Later", secs.map((s) => s.name).join(",") === "This week,Next week,Later");
+check("This week runs through Sunday", secs[0].days.map((d) => d.day).join(",") === "2026-11-12,2026-11-15");
+check("Next week is Monday to Sunday", secs[1].days.map((d) => d.day).join(",") === "2026-11-16");
+check("Date headers read like Saturday, November 14", list.dayHeader("2026-11-14", today) === "Saturday, November 14");
+check("Past events are left out of upcoming", !JSON.stringify(secs).includes('"old"'));
+check("Past events list holds them", list.pastSection([mk("old", "2026-11-01"), mk("a", "2026-11-15")], today)[0].days[0].events[0].id === "old");
+check("Search matches the first name", list.matchesSearch(li, "justin") && !list.matchesSearch(li, "maria"));
+check("Search matches the event name", list.matchesSearch(ln, "fall gala"));
+
+// ----- Name on first sign in -----
+check("Admins added from ADMIN_PHONES start with no name", authSrc.includes('name: "", phone, role: "admin"'));
+check("A blank or Admin name is asked for", auth.needsName({ name: "" }) && auth.needsName({ name: "Admin" }) && !auth.needsName({ name: "Kenneth Smith" }));
+check("The real needsName matches", authSrc.includes('return !n || n.toLowerCase() === "admin";'));
+check("Pages send nameless staff to the name form", authSrc.includes("if (needsName(staff)) redirect(`/team/welcome"));
+
+// ----- Bar is ready -----
+const evDay = { ...ed, event_date: "2026-12-12", bar_service_start: "6:00pm", event_type: "Birthday" };
+const beforeArrival = new Date("2026-12-12T21:59:00Z"); // 3:59 PM Chicago, arrival is 4:00 PM
+const afterArrival = new Date("2026-12-12T22:00:00Z");
+check("Bar ready opens at arrival time on the event day", !bar.barReadyOpen(evDay, beforeArrival) && bar.barReadyOpen(evDay, afterArrival));
+check("Assigned staff can submit from arrival", bar.canSubmitBarReady(bartender, { status: "accepted" }, evDay, afterArrival));
+check("Assigned staff cannot submit before arrival", !bar.canSubmitBarReady(bartender, { status: "accepted" }, evDay, beforeArrival));
+check("Staff not assigned cannot submit", !bar.canSubmitBarReady(bartender, null, evDay, afterArrival) && !bar.canSubmitBarReady(bartender, { status: "declined" }, evDay, afterArrival));
+check("Admins can submit", bar.canSubmitBarReady(admin, null, evDay, afterArrival));
+check("Signed out cannot submit", !bar.canSubmitBarReady(null, { status: "accepted" }, evDay, afterArrival));
+check("Only assigned staff or admins view bar photos", bar.canViewBarPhotos(bartender, { status: "offered" }) && bar.canViewBarPhotos(admin, null) && !bar.canViewBarPhotos(bartender, null) && !bar.canViewBarPhotos({ ...bartender, active: false }, { status: "accepted" }));
+check("A photo is required", !bar.validateBarReady(null, "Looks good").ok && !bar.validateBarReady({ type: "image/jpeg", size: 0 }, "").ok);
+check("A non photo file is refused", !bar.validateBarReady({ type: "application/pdf", size: 1000 }, "").ok);
+const okBar = bar.validateBarReady({ type: "image/jpeg", size: 250_000 }, "  Two coolers on the left  ");
+check("A photo with an optional note is accepted", okBar.ok && okBar.note === "Two coolers on the left");
+check("The note is optional", bar.validateBarReady({ type: "image/jpeg", size: 250_000 }, undefined).ok);
+const p1 = bar.photoPath("s1", "b1", new Date(1), "image/jpeg");
+const p2 = bar.photoPath("s1", "b1", new Date(2), "image/jpeg");
+check("Each replacement gets its own photo file", p1 !== p2 && p1.startsWith("s1/b1/"));
+check("Admin text", bar.barReadyText({ firstName: "Jordan", eventTitle: "Justin · Wedding", checked: 40, total: 42, missingReported: false, link: "https://x/team/e/s1" }) === "Jordan's bar is ready for Justin · Wedding. 40 of 42 items checked. https://x/team/e/s1");
+check("Admin text mentions missing items", bar.barReadyText({ firstName: "Jordan", eventTitle: "T", checked: 1, total: 2, missingReported: true, link: "L" }).includes("Items were reported missing for this event."));
+const grouped = bar.groupReports([
+  { id: "1", staff_id: "b1", created_at: "2026-12-12T22:10:00Z" },
+  { id: "2", staff_id: "b2", created_at: "2026-12-12T22:20:00Z" },
+  { id: "3", staff_id: "b1", created_at: "2026-12-12T22:30:00Z" },
+]);
+check("Replacements are kept, newest first", grouped[0].map((r) => r.id).join(",") === "3,1" && grouped[1][0].id === "2");
+const barRoute = readFileSync(new URL("../app/api/team/bar-ready/route.ts", import.meta.url), "utf8");
+check("/api/team/bar-ready checks access and arrival time before saving", barRoute.includes("getCurrentStaff()") && barRoute.indexOf("openEvent(") < barRoute.indexOf("submitBarReady(") && barRoute.indexOf("canSubmitBarReady(") < barRoute.indexOf("submitBarReady(") && barRoute.includes("status: 403"));
+check("/api/team/bar-ready refuses a missing photo", barRoute.indexOf("validateBarReady(") < barRoute.indexOf("submitBarReady(") && barRoute.includes("status: 400"));
+const barDb = readFileSync(new URL("../lib/team/bar-ready-db.ts", import.meta.url), "utf8");
+check("Bar photos are shown through signed URLs only", barDb.includes("createSignedUrls(") && !barDb.includes("getPublicUrl"));
+const eventPage = readFileSync(new URL("../app/team/e/[id]/page.tsx", import.meta.url), "utf8");
+check("Event page loads bar photos only after the access check", eventPage.indexOf("openEvent(") < eventPage.indexOf("barReadyEntries("));
 
 if (failed > 0) {
   console.error(`\n${failed} of ${total} team checks failed.`);

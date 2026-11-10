@@ -98,3 +98,38 @@ export function buildStaffShopping(eventData: Record<string, unknown>): StaffSho
 export function allShopItems(s: StaffShopping): ShopItem[] {
   return [...s.alcohol, ...s.supplies];
 }
+
+/** Bartender Only and Tailored Bar: the client buys everything on the list. */
+export function clientProvidesAll(pkg: unknown): boolean {
+  const p = String(pkg ?? "").toLowerCase();
+  return p.includes("bartender") || p.includes("tailored");
+}
+
+export const CLIENT_PROVIDES_BANNER = "The client provides everything on this list. Check on site that it is all here.";
+export const ALCOHOL_TITLE = "Alcohol, provided by the client";
+export const ALCOHOL_NOTE =
+  "The client buys the alcohol. Check on site that everything is here, and tap Something is missing if it is not.";
+
+export interface ShoppingGroup {
+  id: "supplies" | "alcohol";
+  title: string;
+  note: string | null;
+  items: ShopItem[];
+}
+
+/** The shopping tab layout: supplies first, alcohol last, titled by who provides them. */
+export function shoppingGroups(pkg: unknown, s: StaffShopping): { banner: string | null; groups: ShoppingGroup[] } {
+  const client = clientProvidesAll(pkg);
+  return {
+    banner: client ? CLIENT_PROVIDES_BANNER : null,
+    groups: [
+      {
+        id: "supplies",
+        title: `Mixers, garnishes and supplies, provided by ${client ? "the client" : "The Mix Fix"}`,
+        note: null,
+        items: s.supplies,
+      },
+      { id: "alcohol", title: ALCOHOL_TITLE, note: ALCOHOL_NOTE, items: s.alcohol },
+    ],
+  };
+}

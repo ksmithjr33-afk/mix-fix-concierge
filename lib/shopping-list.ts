@@ -1255,8 +1255,9 @@ export function generateShoppingList(eventData: EventData): ShoppingListItem[] {
     items.push(...getSupplies(guestCount, barHours, pace));
   }
 
-  // Extra bottles
-  if (eventData.extra_bottles) {
+  // Extra bottles. Only a bottle request becomes an item: the field sometimes
+  // holds a note ("Wine quantities based on 120 guests..."), which is not a product.
+  if (isBottleRequest(eventData.extra_bottles)) {
     items.push({
       category: "Spirits",
       item: eventData.extra_bottles,
@@ -1266,6 +1267,21 @@ export function generateShoppingList(eventData: EventData): ShoppingListItem[] {
   }
 
   return items;
+}
+
+/** Words that mark extra_bottles as a planning note, not a bottle to buy. */
+const BOTTLE_NOTE_WORDS =
+  /\b(quantit(?:y|ies)|to be|includ(?:e|ed|ing)|based on|guests?|shopping list|drinking pace|pace|tbd|to be determined|if needed|depending|will (?:bring|provide|confirm|let)|n\/a|none|no extra)\b/i;
+
+/**
+ * True when extra_bottles names something to buy ("1 bottle of Fireball",
+ * "Aperol"), false for empty values and sentences from the client's notes.
+ */
+export function isBottleRequest(v: unknown): v is string {
+  const s = typeof v === "string" ? v.trim() : "";
+  if (!s || /^(no|none|n\/a|nope|false|null)\.?$/i.test(s)) return false;
+  if (s.length > 80 || s.split(/\s+/).length > 10) return false;
+  return !BOTTLE_NOTE_WORDS.test(s);
 }
 
 /** Calculate hours between start and end time strings */

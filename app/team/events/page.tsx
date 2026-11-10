@@ -1,98 +1,71 @@
 import Link from "next/link";
-import { redirect } from "next/navigation";
 import { supabase } from "@/lib/supabase";
-import { getCurrentStaff } from "@/lib/team/auth";
-import { firstName, scrub } from "@/lib/team/event-view";
-import { chicagoToday, eventDay, eventSchedule, formatClock, longDate } from "@/lib/team/time";
+import { requireStaff } from "@/lib/team/auth";
+import { firstName } from "@/lib/team/event-view";
+import { eventListItem, pastSection, upcomingSections, type EventListItem, type EventRowSource } from "@/lib/team/event-list";
+import { chicagoToday } from "@/lib/team/time";
 import TeamHeader from "../team-header";
+import EventList from "./event-list";
 
 export const dynamic = "force-dynamic";
 
-interface Row {
-  id: string;
-  event_date: string | null;
-  event_data: Record<string, unknown> | null;
-}
+const COLUMNS = "id, event_date, guest_count, package_type, event_data, status";
 
-interface Listed {
-  id: string;
-  day: string | null;
-  title: string;
-  when: string;
-}
-
-function listed(r: Row): Listed {
-  const ed = { ...(r.event_data ?? {}) };
-  if (!ed.event_date && r.event_date) ed.event_date = r.event_date;
-  const s = eventSchedule(ed);
-  const title = scrub(ed.event_name) || [firstName(ed.client_name), scrub(ed.event_type)].filter(Boolean).join(", ") || "Event";
-  return {
-    id: r.id,
-    day: eventDay(ed.event_date),
-    title,
-    when: [longDate(s.day) || String(ed.event_date ?? ""), s.arrivalMin !== null ? `arrive ${formatClock(s.arrivalMin)}` : ""]
-      .filter(Boolean)
-      .join(", "),
-  };
-}
-
-/** Upcoming events this staff member can open: every submitted event for admins, assigned events for bartenders. */
-async function upcoming(staffId: string, admin: boolean): Promise<Listed[]> {
-  let rows: Row[] = [];
+/** Events this staff member can open: every submitted event for admins, assigned events for bartenders. */
+async function visibleEvents(staffId: string, admin: boolean): Promise<EventListItem[]> {
   if (admin) {
-    const { data } = await supabase.from("sessions").select("id, event_date, event_data").eq("status", "submitted");
-    rows = (data as Row[]) ?? [];
-  } else {
-    const { data, error } = await supabase
-      .from("event_assignments")
-      .select("status, session:session_id (id, event_date, event_data, status)")
-      .eq("staff_id", staffId)
-      .neq("status", "declined");
-    if (!error && data) {
-      rows = data
-        .map((a) => (Array.isArray(a.session) ? a.session[0] : a.session) as (Row & { status: string }) | null)
-        .filter((s): s is Row & { status: string } => !!s && s.status === "submitted");
-    }
+    const { data } = await supabase.from("sessions").select(COLUMNS).eq("status", "submitted");
+    return ((data as EventRowSource[]) ?? []).map((r) => eventListItem(r));
   }
-  const today = chicagoToday();
-  return rows
-    .map(listed)
-    .filter((e) => !e.day || e.day >= today)
-    .sort((a, b) => (a.day ?? "9999").localeCompare(b.day ?? "9999"));
+  const { data, error } = await supabase
+    .from("event_assignments")
+    .select(`status, session:session_id (${COLUMNS})`)
+    .eq("staff_id", staffId)
+    .neq("status", "declined");
+  if (error || !data) return [];
+  return data.flatMap((a) => {
+    const s = (Array.isArray(a.session) ? a.session[0] : a.session) as (EventRowSource & { status: string }) | null;
+    return s && s.status === "submitted" ? [eventListItem(s, a.status as string)] : [];
+  });
 }
 
-export default async function TeamEventsPage() {
-  const staff = await getCurrentStaff();
-  if (!staff) redirect("/team?next=/team/events");
-  const events = await upcoming(staff.id, staff.role === "admin");
+export default async function TeamEventsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
+}) {
+  const past = (await searchParams).past === "1";
+  const staff = await requireStaff(past ? "/team/events?past=1" : "/team/events");
+  const admin = staff.role === "admin";
+  const events = await visibleEvents(staff.id, admin);
+  const today = chicagoToday();
+  const sections = past ? pastSection(events, today) : upcomingSections(events, today);
+  const hasPast = events.some((e) => e.day && e.day < today);
 
   return (
     <>
       <TeamHeader signedIn />
       <main className="max-w-2xl mx-auto px-4 py-6 space-y-4">
-        <div>
+        <div className="px-1">
           <h1 className="font-heading text-2xl font-bold text-[#2C2420]">Hi {firstName(staff.name) || "there"}</h1>
-          <p className="text-[15px] text-[#6B5D52]">{staff.role === "admin" ? "All upcoming events" : "Your upcoming events"}</p>
-        </div>
-        {events.length === 0 ? (
-          <p className="text-[15px] text-[#6B5D52] bg-[#F5F0EB] rounded-2xl border border-[#DDD5CC] px-4 py-4">
-            No upcoming events yet.
+          <p className="text-[15px] text-[#6B5D52]">
+            {past ? "Past events" : admin ? "All upcoming events" : "Your upcoming events"}
           </p>
-        ) : (
-          <ul className="space-y-2">
-            {events.map((e) => (
-              <li key={e.id}>
-                <Link
-                  href={`/team/e/${e.id}`}
-                  className="block bg-[#F5F0EB] rounded-2xl border border-[#DDD5CC] px-4 py-3 hover:border-[#B5845A] transition-colors"
-                >
-                  <span className="block font-heading font-bold text-[#2C2420]">{e.title}</span>
-                  <span className="block text-sm text-[#6B5D52]">{e.when}</span>
-                </Link>
-              </li>
-            ))}
-          </ul>
-        )}
+        </div>
+        <EventList sections={sections} empty={past ? "No past events." : "No upcoming events yet."} />
+        <div className="px-1 pt-2">
+          {past ? (
+            <Link href="/team/events" className="text-sm text-[#B5845A] underline">
+              Back to upcoming events
+            </Link>
+          ) : (
+            hasPast && (
+              <Link href="/team/events?past=1" className="text-sm text-[#B5845A] underline">
+                Past events
+              </Link>
+            )
+          )}
+        </div>
       </main>
     </>
   );

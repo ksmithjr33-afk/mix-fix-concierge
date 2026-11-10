@@ -2,9 +2,12 @@
 
 import { useState } from "react";
 import type { StaffEventView } from "@/lib/team/event-view";
-import type { ResolvedGroup } from "@/lib/team/checklist-config";
-import type { ShopItem, StaffShopping } from "@/lib/team/shopping";
-import type { CheckState, ListName } from "@/lib/team/checks";
+import { CHECKLIST_INTRO, CHECKLIST_TITLE, CONFIRM_LABEL, type ResolvedGroup } from "@/lib/team/checklist-config";
+import type { ShopItem, ShoppingGroup } from "@/lib/team/shopping";
+import { canConfirm, type CheckState, type ListName } from "@/lib/team/checks";
+import { timeLabel } from "@/lib/team/clock-label";
+import BarReadyCard, { type BarReadyProps } from "./bar-ready";
+
 
 type Tab = "details" | "checklist" | "shopping";
 
@@ -105,6 +108,7 @@ function Details({ v }: { v: StaffEventView }) {
         <Row label="Allergies" value={v.allergies.join(", ") || "None"} />
         <Row label="Beer and wine" value={v.beerAndWine} />
         <Row label="Special requests" value={v.specialRequests || "None"} />
+        <Row label="Client note on bottles" value={v.bottleNote} />
       </Section>
 
       {v.drinks.length > 0 && (
@@ -218,7 +222,12 @@ function CheckLine({
   );
 }
 
-function useChecks(sessionId: string, list: ListName, initial: Record<string, CheckState>) {
+function useChecks(
+  sessionId: string,
+  list: ListName,
+  initial: Record<string, CheckState>,
+  onToggle?: (checked: boolean) => void
+) {
   const [state, setState] = useState(initial);
   const [error, setError] = useState("");
   const toggle = async (key: string) => {
@@ -226,6 +235,7 @@ function useChecks(sessionId: string, list: ListName, initial: Record<string, Ch
     if (!before) return;
     const next = { checked: !before.checked, changed: false };
     setState((s) => ({ ...s, [key]: next }));
+    onToggle?.(next.checked);
     setError("");
     try {
       const res = await fetch("/api/team/checks", {
@@ -247,16 +257,48 @@ function Checklist({
   groups,
   initial,
   footer,
+  initialConfirmedAt,
 }: {
   sessionId: string;
   groups: ResolvedGroup[];
   initial: Record<string, CheckState>;
   footer: string;
+  initialConfirmedAt: string | null;
 }) {
-  const { state, toggle, error } = useChecks(sessionId, "checklist", initial);
+  const [confirmedAt, setConfirmedAt] = useState(initialConfirmedAt);
+  const [confirming, setConfirming] = useState(false);
+  const [confirmError, setConfirmError] = useState("");
+  // Unchecking any item clears the confirmation (the server clears it too).
+  const { state, toggle, error } = useChecks(sessionId, "checklist", initial, (checked) => {
+    if (!checked) setConfirmedAt(null);
+  });
+  const ready = canConfirm(state);
+
+  const confirm = async () => {
+    setConfirming(true);
+    setConfirmError("");
+    try {
+      const res = await fetch("/api/team/confirm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error ?? "Could not save.");
+      setConfirmedAt(data.confirmedAt);
+    } catch (err) {
+      setConfirmError(err instanceof Error ? err.message : "Could not save.");
+    } finally {
+      setConfirming(false);
+    }
+  };
+
   return (
     <div className="space-y-3">
-      <h2 className="font-heading text-xl font-bold text-[#2C2420] px-1">Who brings what</h2>
+      <div className="px-1">
+        <h2 className="font-heading text-xl font-bold text-[#2C2420]">{CHECKLIST_TITLE}</h2>
+        <p className="text-[15px] text-[#6B5D52]">{CHECKLIST_INTRO}</p>
+      </div>
       <Progress state={state} />
       {error && <p className="text-sm text-[#A0412D] px-1">{error}</p>}
       {groups.map((g) => (
@@ -285,6 +327,20 @@ function Checklist({
         </section>
       ))}
       <p className="text-sm text-[#6B5D52] px-1">{footer}</p>
+      {confirmedAt && ready ? (
+        <p className="w-full rounded-xl bg-[#8B9E7E] text-white py-3 text-center font-medium">Confirmed {timeLabel(confirmedAt)}</p>
+      ) : (
+        <button
+          type="button"
+          onClick={confirm}
+          disabled={!ready || confirming}
+          className="w-full rounded-xl bg-[#B5845A] text-white py-3 font-medium disabled:opacity-40 hover:bg-[#9A7049] transition-colors"
+        >
+          {confirming ? "Saving..." : CONFIRM_LABEL}
+        </button>
+      )}
+      {!ready && <p className="text-xs text-[#A39585] text-center">The button turns on when every item is checked.</p>}
+      {confirmError && <p className="text-sm text-[#A0412D] text-center">{confirmError}</p>}
     </div>
   );
 }
@@ -373,22 +429,27 @@ function MissingSheet({ sessionId, items, onClose }: { sessionId: string; items:
   );
 }
 
-function Shopping({ sessionId, shopping, initial }: { sessionId: string; shopping: StaffShopping; initial: Record<string, CheckState> }) {
+export interface ShoppingLayout {
+  banner: string | null;
+  groups: ShoppingGroup[];
+}
+
+function Shopping({ sessionId, shopping, initial }: { sessionId: string; shopping: ShoppingLayout; initial: Record<string, CheckState> }) {
   const { state, toggle, error } = useChecks(sessionId, "shopping", initial);
   const [missingOpen, setMissingOpen] = useState(false);
-  const groups: [string, ShopItem[]][] = [
-    ["Alcohol", shopping.alcohol],
-    ["Mixers, garnishes and supplies", shopping.supplies],
-  ];
-  const all = [...shopping.alcohol, ...shopping.supplies];
+  const all = shopping.groups.flatMap((g) => g.items);
 
   return (
     <div className="space-y-3">
+      {shopping.banner && (
+        <p className="bg-[#FFF8EC] rounded-2xl border border-[#E3C9A0] px-4 py-3 text-[15px] font-medium text-[#2C2420]">{shopping.banner}</p>
+      )}
       <Progress state={state} />
       {error && <p className="text-sm text-[#A0412D] px-1">{error}</p>}
-      {groups.map(([title, items]) => (
-        <section key={title} className={card}>
+      {shopping.groups.map(({ id, title, note, items }) => (
+        <section key={id} className={card}>
           <h3 className="font-heading text-base font-bold text-[#2C2420] mb-1">{title}</h3>
+          {note && <p className="text-sm text-[#6B5D52] mb-1">{note}</p>}
           {items.length === 0 ? (
             <p className="text-sm text-[#6B5D52] py-2">Nothing on this list for this package.</p>
           ) : (
@@ -417,15 +478,19 @@ export default function EventTabs({
   checklist,
   checklistState,
   checklistFooter,
+  confirmedAt,
   shopping,
   shoppingState,
+  barReady,
 }: {
   view: StaffEventView;
   checklist: ResolvedGroup[];
   checklistState: Record<string, CheckState>;
   checklistFooter: string;
-  shopping: StaffShopping;
+  confirmedAt: string | null;
+  shopping: ShoppingLayout;
   shoppingState: Record<string, CheckState>;
+  barReady: Omit<BarReadyProps, "sessionId"> & { show: boolean };
 }) {
   const [tab, setTab] = useState<Tab>("details");
   const tabs: [Tab, string][] = [
@@ -442,6 +507,8 @@ export default function EventTabs({
           {[view.date, view.arrival ? `arrive ${view.arrival}` : ""].filter(Boolean).join(", ")}
         </p>
       </div>
+
+      {barReady.show && <BarReadyCard sessionId={view.sessionId} {...barReady} />}
 
       <nav className="grid grid-cols-3 gap-1 bg-[#DDD5CC] p-1 rounded-xl" role="tablist">
         {tabs.map(([key, label]) => (
@@ -464,7 +531,13 @@ export default function EventTabs({
         <Details v={view} />
       </div>
       <div hidden={tab !== "checklist"}>
-        <Checklist sessionId={view.sessionId} groups={checklist} initial={checklistState} footer={checklistFooter} />
+        <Checklist
+          sessionId={view.sessionId}
+          groups={checklist}
+          initial={checklistState}
+          footer={checklistFooter}
+          initialConfirmedAt={confirmedAt}
+        />
       </div>
       <div hidden={tab !== "shopping"}>
         <Shopping sessionId={view.sessionId} shopping={shopping} initial={shoppingState} />

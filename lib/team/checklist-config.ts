@@ -1,4 +1,4 @@
-// "Who brings what" checklist. Edit the items here: the event page, the
+// "Do you have everything?" checklist. Edit the items here: the event page, the
 // checkbox keys, and the progress count all come from this file.
 
 export interface ChecklistSection {
@@ -16,7 +16,7 @@ export interface ChecklistGroup {
 export const CHECKLIST: ChecklistGroup[] = [
   {
     id: "company",
-    title: "The Mix Fix provides",
+    title: "From The Mix Fix",
     subtitle: "Issued by the company, returned after",
     sections: [
       { title: "Bar station", items: ["6 ft folding tables (2)", "Black tablecloths (2)", "Large ice cooler"] },
@@ -32,7 +32,7 @@ export const CHECKLIST: ChecklistGroup[] = [
   },
   {
     id: "staff",
-    title: "You bring",
+    title: "Your own tools",
     subtitle: "Your personal tools, every event",
     sections: [
       { title: "Mixing", items: ["Shaker tins (3)", "Jiggers", "Strainers", "Mesh strainer", "Stirring spoon", "Muddler"] },
@@ -40,6 +40,10 @@ export const CHECKLIST: ChecklistGroup[] = [
     ],
   },
 ];
+
+export const CHECKLIST_TITLE = "Do you have everything?";
+export const CHECKLIST_INTRO = "Go through the list and check off each item before you leave for the event.";
+export const CONFIRM_LABEL = "I have everything";
 
 /** On Premium Bar this line replaces the folding tables, as info with no checkbox. */
 export const FOLDING_TABLES = "6 ft folding tables (2)";

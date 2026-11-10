@@ -48,3 +48,22 @@ export function progress(state: Record<string, CheckState>): { checked: number; 
 export function progressLabel(p: { checked: number; total: number }): string {
   return `${p.checked} of ${p.total} checked`;
 }
+
+// "I have everything": a staff member confirms once every checklist box is
+// checked. Unchecking any item clears the confirmation.
+
+/** The button turns on only when there is at least one box and every box is checked. */
+export function canConfirm(state: Record<string, CheckState>): boolean {
+  const p = progress(state);
+  return p.total > 0 && p.checked === p.total;
+}
+
+/** A saved confirmation only counts while every box is still checked. */
+export function activeConfirmation(confirmedAt: string | null, state: Record<string, CheckState>): string | null {
+  return confirmedAt && canConfirm(state) ? confirmedAt : null;
+}
+
+/** Whether saving this checkbox clears the confirmation: any uncheck on the checklist does. */
+export function clearsConfirmation(list: ListName, checked: boolean): boolean {
+  return list === "checklist" && !checked;
+}

@@ -13,7 +13,7 @@ import {
 } from "@/lib/team/event-view";
 import { checklistFor, checklistKeys, type ResolvedGroup } from "@/lib/team/checklist-config";
 import { allShopItems, buildStaffShopping, type StaffShopping } from "@/lib/team/shopping";
-import { mergeChecks, type CheckRow, type CheckState, type ListName } from "@/lib/team/checks";
+import { activeConfirmation, canConfirm, clearsConfirmation, mergeChecks, progress, type CheckRow, type CheckState, type ListName } from "@/lib/team/checks";
 
 /** The staff member's assignment to an event. Null when there is none, or before the assignments table exists. */
 export async function getAssignment(sessionId: string, staffId: string): Promise<AssignmentLike | null> {
@@ -88,8 +88,24 @@ export interface EventPageData {
   view: StaffEventView;
   checklist: ResolvedGroup[];
   checklistState: Record<string, CheckState>;
+  confirmedAt: string | null;
   shopping: StaffShopping;
   shoppingState: Record<string, CheckState>;
+}
+
+function checklistState(pkg: unknown, rows: CheckRow[]): Record<string, CheckState> {
+  return mergeChecks(checklistKeys(pkg).map((key) => ({ key, quantity: "" })), rows, { trackChanges: false });
+}
+
+async function getConfirmation(staffId: string, sessionId: string): Promise<string | null> {
+  const { data, error } = await supabase
+    .from("staff_confirmations")
+    .select("confirmed_at")
+    .eq("staff_id", staffId)
+    .eq("session_id", sessionId)
+    .maybeSingle();
+  if (error) return null; // before the table exists
+  return (data?.confirmed_at as string | undefined) ?? null;
 }
 
 /**
@@ -106,9 +122,10 @@ export async function eventPageData(session: SessionRow, staff: StaffMember): Pr
   const shopping = buildStaffShopping(ed);
   const shopItems = allShopItems(shopping);
 
-  const [checklistRows, initialShopRows] = await Promise.all([
+  const [checklistRows, initialShopRows, confirmedAt] = await Promise.all([
     checkRows(staff.id, session.id, "checklist"),
     checkRows(staff.id, session.id, "shopping"),
+    getConfirmation(staff.id, session.id),
   ]);
   let shopRows = initialShopRows;
   if (shopRows.length === 0 && shopItems.length > 0) {
@@ -120,17 +137,45 @@ export async function eventPageData(session: SessionRow, staff: StaffMember): Pr
     if (error) console.error("staff_checks seed failed:", error.message);
   }
 
+  const clState = checklistState(view.package, checklistRows);
   return {
     view,
     checklist,
-    checklistState: mergeChecks(
-      checklistKeys(view.package).map((key) => ({ key, quantity: "" })),
-      checklistRows,
-      { trackChanges: false }
-    ),
+    checklistState: clState,
+    confirmedAt: activeConfirmation(confirmedAt, clState),
     shopping,
     shoppingState: mergeChecks(shopItems, shopRows, { trackChanges: true }),
   };
+}
+
+/** How many checklist and shopping items this staff member has checked right now. */
+export async function checkSnapshot(session: SessionRow, staff: StaffMember) {
+  const ed = session.event_data ?? {};
+  const [clRows, shopRows] = await Promise.all([
+    checkRows(staff.id, session.id, "checklist"),
+    checkRows(staff.id, session.id, "shopping"),
+  ]);
+  const cl = progress(checklistState(ed.package ?? session.package_type, clRows));
+  const sh = progress(mergeChecks(allShopItems(buildStaffShopping(ed)), shopRows, { trackChanges: true }));
+  return { checklistChecked: cl.checked, checklistTotal: cl.total, shoppingChecked: sh.checked, shoppingTotal: sh.total };
+}
+
+/** "I have everything": saved only when every checklist box is checked. Returns the confirmed time, or null. */
+export async function confirmChecklist(session: SessionRow, staff: StaffMember): Promise<string | null> {
+  const ed = session.event_data ?? {};
+  const state = checklistState(ed.package ?? session.package_type, await checkRows(staff.id, session.id, "checklist"));
+  if (!canConfirm(state)) return null;
+  const confirmedAt = new Date().toISOString();
+  const { error } = await supabase
+    .from("staff_confirmations")
+    .upsert({ staff_id: staff.id, session_id: session.id, confirmed_at: confirmedAt }, { onConflict: "staff_id,session_id" });
+  if (error) throw new Error(`staff_confirmations save failed: ${error.message}`);
+  return confirmedAt;
+}
+
+async function clearConfirmation(staffId: string, sessionId: string): Promise<void> {
+  const { error } = await supabase.from("staff_confirmations").delete().eq("staff_id", staffId).eq("session_id", sessionId);
+  if (error) console.error("staff_confirmations clear failed:", error.message);
 }
 
 /**
@@ -158,6 +203,7 @@ export async function saveCheck(
     { onConflict: "staff_id,session_id,list,item_key" }
   );
   if (error) throw new Error(`staff_checks save failed: ${error.message}`);
+  if (clearsConfirmation(list, checked)) await clearConfirmation(staff.id, session.id);
   return true;
 }
 
@@ -168,4 +214,19 @@ export async function activeAdmins(): Promise<StaffMember[]> {
     return [];
   }
   return (data as StaffMember[]) ?? [];
+}
+
+/** Keep a record of "Something is missing" reports, so the bar ready text can mention them. Never throws. */
+export async function recordMissing(sessionId: string, staffId: string, items: string[], note: string): Promise<void> {
+  const { error } = await supabase.from("missing_reports").insert({ session_id: sessionId, staff_id: staffId, items, note });
+  if (error) console.error("missing_reports insert failed:", error.message);
+}
+
+export async function hasMissingReports(sessionId: string): Promise<boolean> {
+  const { count, error } = await supabase
+    .from("missing_reports")
+    .select("id", { count: "exact", head: true })
+    .eq("session_id", sessionId);
+  if (error) return false;
+  return (count ?? 0) > 0;
 }

@@ -25,12 +25,20 @@ export default function Home() {
           </p>
 
           {/* CTA */}
-          <Link
-            href="/chat"
-            className="inline-block bg-[#B5845A] text-white text-base sm:text-lg font-medium px-8 sm:px-10 py-3.5 sm:py-4 rounded-2xl hover:bg-[#9A7049] transition-colors shadow-lg shadow-[#B5845A]/20"
-          >
-            Start Planning
-          </Link>
+          <div className="flex flex-col items-center gap-3">
+            <Link
+              href="/chat"
+              className="inline-block w-full max-w-xs bg-[#B5845A] text-white text-base sm:text-lg font-medium px-8 sm:px-10 py-3.5 sm:py-4 rounded-2xl hover:bg-[#9A7049] transition-colors shadow-lg shadow-[#B5845A]/20"
+            >
+              I&apos;m a client
+            </Link>
+            <Link
+              href="/team"
+              className="inline-block w-full max-w-xs border border-[#B5845A]/60 text-[#9A7049] text-sm sm:text-base font-medium px-8 py-3 rounded-2xl hover:bg-[#B5845A]/10 transition-colors"
+            >
+              Team sign in
+            </Link>
+          </div>
 
           {/* Stats */}
           <div className="flex items-center justify-center gap-4 sm:gap-10 pt-4">

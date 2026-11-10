@@ -2,6 +2,7 @@
 // Server only. Codes and session tokens are stored hashed.
 
 import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { sendStaffText } from "@/lib/team/sms";
 import type { StaffMember } from "@/lib/team/event-view";
@@ -42,7 +43,7 @@ export async function requestLoginCode(raw: unknown): Promise<void> {
   if (!staff && adminPhones().has(phone)) {
     const { data, error } = await supabase
       .from("staff")
-      .insert({ name: "Admin", phone, role: "admin", active: true })
+      .insert({ name: "", phone, role: "admin", active: true })
       .select(STAFF_COLUMNS)
       .single();
     if (error) throw new Error(`admin create failed: ${error.message}`);
@@ -148,4 +149,33 @@ export async function getCurrentStaff(): Promise<StaffMember | null> {
 export async function endSession(token: string | undefined): Promise<void> {
   if (!token) return;
   await supabase.from("staff_sessions").delete().eq("token_hash", hashToken(token));
+}
+
+/** Staff with no real name yet: admins added from ADMIN_PHONES start blank (older ones as "Admin"). */
+export function needsName(staff: Pick<StaffMember, "name">): boolean {
+  const n = staff.name.trim();
+  return !n || n.toLowerCase() === "admin";
+}
+
+/** First and last name, each 1 to 40 characters. Null when either is missing. */
+export function cleanName(first: unknown, last: unknown): string | null {
+  const f = String(first ?? "").replace(/\s+/g, " ").trim().slice(0, 40);
+  const l = String(last ?? "").replace(/\s+/g, " ").trim().slice(0, 40);
+  return f && l ? `${f} ${l}` : null;
+}
+
+/**
+ * The signed in staff member for a page. Sends them to sign in when signed
+ * out, and to the name form once when we do not know their name yet.
+ */
+export async function requireStaff(path: string): Promise<StaffMember> {
+  const staff = await getCurrentStaff();
+  if (!staff) redirect(`/team?next=${encodeURIComponent(path)}`);
+  if (needsName(staff)) redirect(`/team/welcome?next=${encodeURIComponent(path)}`);
+  return staff;
+}
+
+export async function saveStaffName(staffId: string, name: string): Promise<void> {
+  const { error } = await supabase.from("staff").update({ name }).eq("id", staffId);
+  if (error) throw new Error(`staff name save failed: ${error.message}`);
 }
