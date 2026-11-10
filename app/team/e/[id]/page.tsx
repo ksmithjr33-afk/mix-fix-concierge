@@ -1,13 +1,19 @@
 import { requireStaff } from "@/lib/team/auth";
-import { eventPageData, getAssignment, openEvent } from "@/lib/team/events";
+import { eventPageData, openEvent } from "@/lib/team/events";
 import { CHECKLIST_FOOTER } from "@/lib/team/checklist-config";
 import { barReadyEntries } from "@/lib/team/bar-ready-db";
 import { barReadyOpen } from "@/lib/team/bar-ready";
 import { shoppingGroups } from "@/lib/team/shopping";
+import { assignmentRef, clockView, punchesFor } from "@/lib/team/clock-db";
 import TeamHeader from "../../team-header";
 import EventTabs from "./event-tabs";
 
 export const dynamic = "force-dynamic";
+
+/** The render time, handed to the clock card so its first paint matches the server. */
+function serverNow(): number {
+  return Date.now();
+}
 
 // Only the staff view built in lib/team/event-view.ts (an allowlist) and the
 // lists reach the client component. The raw session row never does.
@@ -34,14 +40,19 @@ export default async function TeamEventPage({ params }: { params: Promise<{ id: 
   const [data, entries, assignment] = await Promise.all([
     eventPageData(access.session, staff),
     barReadyEntries(id, staff),
-    getAssignment(id, staff.id),
+    assignmentRef(id, staff.id),
   ]);
+  const punches = assignment ? await punchesFor(assignment.id) : [];
+  const renderedAt = serverNow();
+  const clockEd = { ...ed, event_date: ed.event_date ?? access.session.event_date };
   const open = barReadyOpen(ed);
   return (
     <>
       <TeamHeader signedIn admin={staff.role === "admin"} back={back} />
       <EventTabs
         offered={assignment?.status === "offered"}
+        clock={clockView(assignment, clockEd, punches)}
+        renderedAt={renderedAt}
         manageHref={staff.role === "admin" ? `/team/admin/e/${id}` : null}
         view={data.view}
         checklist={data.checklist}

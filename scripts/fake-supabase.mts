@@ -10,16 +10,25 @@ export const db: Record<string, Record<string, unknown>[]> = {};
 type Row = Record<string, unknown>;
 type Filter = (r: Row) => boolean;
 
+/** Unique keys the real tables have, so duplicate handling in the app is exercised. */
+const UNIQUE: Record<string, string[][]> = {
+  team_notices: [["key"]],
+  time_punches: [["assignment_id", "type"], ["client_id"]],
+  event_assignments: [["session_id", "staff_id"]],
+};
+
 const JOIN_TABLES: Record<string, string> = { staff: "staff", session: "sessions" };
 
-class Query implements PromiseLike<{ data: unknown; error: null; count?: number }> {
+type Result = { data: unknown; error: { message: string } | null; count?: number };
+
+class Query implements PromiseLike<Result> {
   private op: "select" | "insert" | "update" | "upsert" | "delete" = "select";
   private filters: Filter[] = [];
   private payload: Row | Row[] | null = null;
   private cols = "*";
   private mode: "many" | "single" | "maybe" = "many";
   private head = false;
-  private order: { col: string; asc: boolean }[] = [];
+  private orders: { col: string; asc: boolean }[] = [];
   private limitN: number | null = null;
   private conflict: string[] = [];
   private ignoreDuplicates = false;
@@ -60,7 +69,7 @@ class Query implements PromiseLike<{ data: unknown; error: null; count?: number 
     return this;
   }
   order(col: string, opts: { ascending?: boolean } = {}) {
-    this.order.push({ col, asc: opts.ascending !== false });
+    this.orders.push({ col, asc: opts.ascending !== false });
     return this;
   }
   limit(n: number) {
@@ -106,8 +115,17 @@ class Query implements PromiseLike<{ data: unknown; error: null; count?: number 
     return out;
   }
 
-  private run(): { data: unknown; error: null; count?: number } {
+  private run(): Result {
     const rows = db[this.table];
+    if (this.op === "insert") {
+      for (const p of Array.isArray(this.payload) ? this.payload : [this.payload!]) {
+        for (const key of UNIQUE[this.table] ?? []) {
+          if (key.every((c) => p[c] !== null && p[c] !== undefined) && rows.some((r) => key.every((c) => r[c] === p[c]))) {
+            return { data: null, error: { message: `duplicate key value violates unique constraint on ${key.join(", ")}` } };
+          }
+        }
+      }
+    }
     const match = (r: Row) => this.filters.every((f) => f(r));
     let result: Row[] = [];
     if (this.op === "insert" || this.op === "upsert") {
@@ -130,7 +148,7 @@ class Query implements PromiseLike<{ data: unknown; error: null; count?: number 
       db[this.table] = rows.filter((r) => !match(r));
     } else {
       result = rows.filter(match);
-      for (const o of [...this.order].reverse()) {
+      for (const o of [...this.orders].reverse()) {
         result.sort((a, b) => (String(a[o.col]) < String(b[o.col]) ? -1 : String(a[o.col]) > String(b[o.col]) ? 1 : 0) * (o.asc ? 1 : -1));
       }
       if (this.limitN !== null) result = result.slice(0, this.limitN);
@@ -141,7 +159,7 @@ class Query implements PromiseLike<{ data: unknown; error: null; count?: number 
     return { data: data[0] ?? null, error: null };
   }
 
-  then<A, B>(ok?: ((v: { data: unknown; error: null; count?: number }) => A) | null, bad?: ((e: unknown) => B) | null) {
+  then<A, B>(ok?: ((v: Result) => A) | null, bad?: ((e: unknown) => B) | null) {
     return Promise.resolve().then(() => this.run()).then(ok, bad);
   }
 }

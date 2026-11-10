@@ -9,7 +9,7 @@
     "lint": "eslint",
     "test:pricing": "node --no-warnings scripts/test-pricing.mts",
     "test:menu": "node --no-warnings scripts/test-menu.mts",
-    "test:team": "node --no-warnings scripts/test-team.mts && node --no-warnings scripts/test-admin-edit.mts"
+    "test:team": "node --no-warnings scripts/test-team.mts && node --no-warnings scripts/test-admin-edit.mts && node --no-warnings scripts/test-clock.mts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.80.0",

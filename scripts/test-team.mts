@@ -24,6 +24,7 @@ const time = await import("../lib/team/time.ts");
 const list = await import("../lib/team/event-list.ts");
 const bar = await import("../lib/team/bar-ready.ts");
 const asg = await import("../lib/team/assignments.ts");
+const clock = await import("../lib/team/clock.ts");
 const auth = { needsName: (s: { name: string }) => !s.name.trim() || s.name.trim().toLowerCase() === "admin" };
 const shoppingLib = await import("../lib/shopping-list.ts");
 
@@ -508,6 +509,71 @@ const hideAction = readFileSync(new URL("../app/team/admin/e/[id]/hide-action.ts
 check("Hiding asks to confirm first", hideAction.includes("Yes, hide it") && hideAction.indexOf("setConfirming(true)") > 0);
 const adminEventPage = readFileSync(new URL("../app/team/admin/e/[id]/page.tsx", import.meta.url), "utf8");
 check("A hidden event shows Unhide instead of the assign panel", /hidden \? \(\s*<HideAction sessionId=\{id\} hidden \/>/.test(adminEventPage));
+
+// ----- Phase 3: time clock rules -----
+const venue = { lat: 32.7767, lng: -96.797 }; // downtown Dallas
+const near = { lat: 32.7777, lng: -96.797, accuracy: 15 }; // about 110 m north
+const far = { lat: 32.7867, lng: -96.797, accuracy: 15 }; // about 1.1 km north
+check("Distance is in meters", Math.abs(clock.distanceMeters(venue, near) - 111) < 3, String(clock.distanceMeters(venue, near)));
+const clean = clock.punchFlags({ phone: near, event: venue, late: false });
+check("Within 300 m is clean", clean.flags.length === 0 && clean.distance === 111, JSON.stringify(clean));
+const farFlags = clock.punchFlags({ phone: far, event: venue, late: false });
+check("Farther than 300 m is flagged", farFlags.flags.includes("far") && farFlags.distance! > 1000);
+check("Exactly at the limit is clean", !clock.punchFlags({ phone: { lat: venue.lat + 300 / 111_195, lng: venue.lng, accuracy: 5 }, event: venue, late: false }).flags.includes("far"));
+check("No phone location is flagged, not refused", clock.punchFlags({ phone: null, event: venue, late: false }).flags.join() === "no_location");
+check("An address not on the map is flagged", clock.punchFlags({ phone: near, event: null, late: false }).flags.join() === "no_event_location");
+check("Bad coordinates count as no location", clock.cleanLocation({ lat: "x", lng: 1 }) === null && clock.cleanLocation({ lat: 91, lng: 0 }) === null && clock.cleanLocation(null) === null && clock.cleanLocation({ lat: null, lng: null }) === null);
+const recv = new Date("2026-12-12T23:00:00Z");
+check("A punch sent right away counts at the server time", clock.punchTime(new Date(recv.getTime() - 20_000).toISOString(), recv).punchedAt.getTime() === recv.getTime() && !clock.punchTime(new Date(recv.getTime() - 20_000).toISOString(), recv).late);
+const lateP = clock.punchTime("2026-12-12T22:30:00Z", recv);
+check("A queued punch keeps its tap time and is flagged sent late", lateP.late && lateP.punchedAt.toISOString() === "2026-12-12T22:30:00.000Z");
+check("A phone clock ahead of ours never makes a future punch", clock.punchTime("2026-12-13T01:00:00Z", recv).punchedAt.getTime() === recv.getTime());
+check("Sent late shows as a flag", clock.punchFlags({ phone: near, event: venue, late: true }).flags.includes("sent_late"));
+const evClock = { event_date: "2026-12-12", bar_service_start: "6:00pm", bar_service_end: "10:00pm", event_type: "Birthday" };
+check("Clock in opens 30 minutes before arrival", clock.clockInOpensAt(evClock)?.toISOString() === "2026-12-12T21:30:00.000Z"); // arrival 4:00 PM, opens 3:30 PM Chicago
+check("Weddings open 30 minutes before the 3 hour arrival", clock.clockInOpensAt({ ...evClock, event_type: "Wedding" })?.toISOString() === "2026-12-12T20:30:00.000Z");
+const opens = clock.clockInOpensAt(evClock);
+check("Clock in before the window is refused", !clock.checkPunch("in", [], new Date("2026-12-12T21:29:00Z"), opens).ok);
+check("Clock in in the window is allowed", clock.checkPunch("in", [], new Date("2026-12-12T21:30:00Z"), opens).ok);
+const inRow = [{ type: "in" as const, punched_at: "2026-12-12T21:45:00Z" }];
+check("No double clock in", !clock.checkPunch("in", inRow, new Date("2026-12-12T22:00:00Z"), opens).ok);
+check("No clock out before clock in", !clock.checkPunch("out", [], new Date("2026-12-12T22:00:00Z"), opens).ok);
+check("Clock out after clock in is allowed", clock.checkPunch("out", inRow, new Date("2026-12-13T05:00:00Z"), opens).ok);
+check("No double clock out", !clock.checkPunch("out", [...inRow, { type: "out", punched_at: "2026-12-13T05:00:00Z" }], new Date("2026-12-13T05:10:00Z"), opens).ok);
+check("A clock out time before the clock in is refused", !clock.checkPunch("out", inRow, new Date("2026-12-12T21:00:00Z"), opens).ok);
+check("Hours across midnight", clock.workedMinutes("2026-12-31T20:00:00-06:00", "2027-01-01T01:30:00-06:00") === 330 && clock.formatWorked(330) === "5h 30m");
+check("Hours are to the minute", clock.workedMinutes("2026-12-12T22:01:00Z", "2026-12-13T04:14:40Z") === 374);
+check("Hours across the fall time change", clock.workedMinutes("2026-11-01T00:30:00-05:00", "2026-11-01T02:30:00-06:00") === 180);
+check("Out before in counts as no time", clock.workedMinutes("2026-12-12T22:00:00Z", "2026-12-12T21:00:00Z") === 0);
+// Reminder: service ends 10:00 PM, plus an hour of breakdown, plus 30 minutes = 11:30 PM Chicago.
+check("Clock out reminder waits for end plus breakdown plus 30 minutes", !clock.clockOutReminderDue(evClock, new Date("2026-12-13T05:29:00Z")) && clock.clockOutReminderDue(evClock, new Date("2026-12-13T05:30:00Z")));
+check("Clock out reminder for service past midnight", clock.clockOutReminderAt({ ...evClock, bar_service_end: "1:00am" })?.toISOString() === "2026-12-13T08:30:00.000Z");
+check("Clock out reminder text", clock.clockOutReminderText({ firstName: "Jordan", title: "Justin · Wedding", link: "L" }) === "Hi Jordan, you are still clocked in for Justin · Wedding. Clock out here when you are done: L");
+// Late setup: service starts 6:00 PM Chicago, alert from 5:30 PM.
+const lsNo = { hasStaff: true, hasBarReady: false };
+check("Late setup alert from 30 minutes before service", !clock.lateSetupDue(evClock, new Date("2026-12-12T23:29:00Z"), lsNo) && clock.lateSetupDue(evClock, new Date("2026-12-12T23:30:00Z"), lsNo));
+check("No late setup alert once a bar ready check in is in", !clock.lateSetupDue(evClock, new Date("2026-12-12T23:45:00Z"), { hasStaff: true, hasBarReady: true }));
+check("No late setup alert without assigned staff", !clock.lateSetupDue(evClock, new Date("2026-12-12T23:45:00Z"), { hasStaff: false, hasBarReady: false }));
+check("No late setup alert for events long past", !clock.lateSetupDue(evClock, new Date("2026-12-13T03:00:00Z"), lsNo));
+check(
+  "Late setup text",
+  clock.lateSetupText({ title: "Justin · Wedding", startTime: "6:00 PM", link: "https://x/team/admin/e/s1" }) === "No bar ready check in yet for Justin · Wedding, service starts at 6:00 PM. https://x/team/admin/e/s1",
+);
+check("Nobody edits or approves their own time", !clock.canChangeTime("a1", "a1") && clock.canChangeTime("a1", "b1") && !clock.canChangeTime("", "b1"));
+const clockMig = readFileSync(new URL("../supabase/migrations/20261115_time_clock.sql", import.meta.url), "utf8");
+check("The database refuses own edits and approvals", clockMig.includes("check (edited_by <> staff_id)") && clockMig.includes("check (approved_by <> staff_id)"));
+check("The database refuses double punches", clockMig.includes("unique (assignment_id, type)"));
+check("Edits need a reason in the database", clockMig.includes("reason         text        not null check (length(btrim(reason)) >= 3)"));
+check("staff_id always comes from the assignment", clockMig.includes("new.staff_id := a.staff_id;"));
+const punchRoute = readFileSync(new URL("../app/api/team/punch/route.ts", import.meta.url), "utf8");
+check("/api/team/punch checks access before saving", punchRoute.includes("getCurrentStaff()") && punchRoute.indexOf("openEvent(") < punchRoute.indexOf("recordPunch(") && punchRoute.includes("status: 403"));
+const cronRoute = readFileSync(new URL("../app/api/cron/team/route.ts", import.meta.url), "utf8");
+check("The cron route needs the cron secret", cronRoute.includes("Bearer ${secret}") && cronRoute.includes("if (!secret ||"));
+check("The cron runs both jobs, each on its own", cronRoute.includes("Promise.allSettled([sendClockOutReminders(now), sendLateSetupAlerts(now)])"));
+const vercelJson = JSON.parse(readFileSync(new URL("../vercel.json", import.meta.url), "utf8"));
+check("Vercel cron every 15 minutes", vercelJson.crons?.[0]?.path === "/api/cron/team" && vercelJson.crons?.[0]?.schedule === "*/15 * * * *");
+check("Staff who clocked in cannot be removed", /removeStaff[\s\S]*?if \(await hasPunches\(session\.id, staffId\)\)/.test(asgDb));
+check("Staff who clocked in cannot decline", /response === "decline" && \(await hasPunches\(sessionId, staff\.id\)\)/.test(asgDb));
 
 if (failed > 0) {
   console.error(`\n${failed} of ${total} team checks failed.`);

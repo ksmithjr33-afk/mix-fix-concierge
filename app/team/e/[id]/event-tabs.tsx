@@ -8,6 +8,8 @@ import { canConfirm, type CheckState, type ListName } from "@/lib/team/checks";
 import { timeLabel } from "@/lib/team/clock-label";
 import BarReadyCard, { type BarReadyProps } from "./bar-ready";
 import RespondBanner from "./respond-banner";
+import ClockCard from "./clock-card";
+import type { ClockView } from "@/lib/team/clock-db";
 
 
 type Tab = "details" | "checklist" | "shopping";
@@ -485,8 +487,12 @@ export default function EventTabs({
   barReady,
   offered,
   manageHref,
+  clock,
+  renderedAt,
 }: {
   offered: boolean;
+  clock: ClockView;
+  renderedAt: number;
   manageHref: string | null;
   view: StaffEventView;
   checklist: ResolvedGroup[];
@@ -519,6 +525,8 @@ export default function EventTabs({
       </div>
 
       {offered && <RespondBanner sessionId={view.sessionId} />}
+
+      {clock.canPunch && <ClockCard sessionId={view.sessionId} initial={clock} renderedAt={renderedAt} />}
 
       {barReady.show && <BarReadyCard sessionId={view.sessionId} {...barReady} />}
 

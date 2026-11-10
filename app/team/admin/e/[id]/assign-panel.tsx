@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import type { AssigneeProgress } from "@/lib/team/assignments-db";
 import { timeLabel } from "@/lib/team/clock-label";
+import { FLAG_LABELS, formatWorked, type PunchFlag } from "@/lib/team/clock";
 
 const card = "bg-[#F5F0EB] rounded-2xl border border-[#DDD5CC] px-4 py-3 sm:px-5 sm:py-4";
 
@@ -100,6 +101,16 @@ export default function AssignPanel({
                       {p.confirmedAt ? `Has everything, confirmed ${timeLabel(p.confirmedAt)}` : "Has not confirmed the checklist"}
                       {p.barReadyAt ? ` · Bar ready ${timeLabel(p.barReadyAt)}` : ""}
                     </p>
+                    {(p.clockIn || p.clockOut) && (
+                      <p className="text-xs text-[#2C2420]">
+                        {p.clockIn ? `In ${timeLabel(p.clockIn)}` : "Not clocked in"}
+                        {p.clockOut ? ` · Out ${timeLabel(p.clockOut)}` : p.clockIn ? " · Still clocked in" : ""}
+                        {p.workedMinutes !== null ? ` · ${formatWorked(p.workedMinutes)}` : ""}
+                        {p.punchFlags.length > 0 && (
+                          <span className="text-[#9A7049]"> · {p.punchFlags.map((f) => FLAG_LABELS[f as PunchFlag] ?? f).join(", ")}</span>
+                        )}
+                      </p>
+                    )}
                   </>
                 )}
                 {removing === p.staffId ? (

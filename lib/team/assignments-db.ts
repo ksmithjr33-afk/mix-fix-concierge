@@ -11,6 +11,8 @@ import { eventTitle } from "@/lib/team/event-list";
 import { alertAdmins, checkSnapshot, getConfirmation, getSubmittedSession } from "@/lib/team/events";
 import { sendStaffText } from "@/lib/team/sms";
 import { isHidden } from "@/lib/team/hidden";
+import { hasPunches } from "@/lib/team/clock-db";
+import { workedMinutes } from "@/lib/team/clock";
 import { eventDay, eventSchedule, formatClock, shortDate } from "@/lib/team/time";
 import {
   assignText,
@@ -147,6 +149,10 @@ export async function assignStaff(session: SessionRow, staffId: string, admin: S
 
 /** Take a staff member off an event. They get a text unless they had already declined. */
 export async function removeStaff(session: SessionRow, staffId: string): Promise<ActionResult> {
+  // Time punches point at the assignment, so someone who clocked in stays on the event.
+  if (await hasPunches(session.id, staffId)) {
+    return { ok: false, error: "They have clocked in for this event, so they cannot be removed. Their time stays on the timesheet.", status: 409 };
+  }
   const { data, error } = await supabase
     .from("event_assignments")
     .delete()
@@ -175,6 +181,9 @@ export async function respondToAssignment(sessionId: string, staff: StaffMember,
     .maybeSingle();
   const status = (data?.status as AssignmentStatus | undefined) ?? null;
   if (!status) return { ok: false, error: "You are not assigned to this event.", status: 403 };
+  if (response === "decline" && (await hasPunches(sessionId, staff.id))) {
+    return { ok: false, error: "You have clocked in for this event, so it cannot be declined. Text us at 469 754 8512.", status: 409 };
+  }
   if (!canRespond(status, response)) {
     return { ok: false, error: status === "declined" ? "You already declined this event." : "You already accepted this event.", status: 409 };
   }
@@ -249,6 +258,10 @@ export interface AssigneeProgress {
   shopping: { checked: number; total: number };
   confirmedAt: string | null;
   barReadyAt: string | null;
+  clockIn: string | null;
+  clockOut: string | null;
+  workedMinutes: number | null;
+  punchFlags: string[];
 }
 
 /** Everyone on the event with their checklist, shopping, and check in progress. */
@@ -264,6 +277,9 @@ export async function assigneeProgress(session: SessionRow): Promise<AssigneePro
     .order("created_at", { ascending: true });
   const firstBar = new Map<string, string>();
   for (const b of (bar as { staff_id: string; created_at: string }[]) ?? []) if (!firstBar.has(b.staff_id)) firstBar.set(b.staff_id, b.created_at);
+
+  const { data: punchRows } = await supabase.from("time_punches").select("staff_id, type, punched_at, flags").eq("session_id", session.id);
+  const punches = (punchRows as { staff_id: string; type: "in" | "out"; punched_at: string; flags: string[] | null }[]) ?? [];
 
   const order: Record<AssignmentStatus, number> = { accepted: 0, offered: 1, declined: 2 };
   const out = await Promise.all(
@@ -282,6 +298,17 @@ export async function assigneeProgress(session: SessionRow): Promise<AssigneePro
         shopping: { checked: snap.shoppingChecked, total: snap.shoppingTotal },
         confirmedAt: snap.checklistChecked === snap.checklistTotal ? confirmedAt : null,
         barReadyAt: firstBar.get(r.staff_id) ?? null,
+        ...(() => {
+          const mine = punches.filter((p) => p.staff_id === r.staff_id);
+          const pin = mine.find((p) => p.type === "in")?.punched_at ?? null;
+          const pout = mine.find((p) => p.type === "out")?.punched_at ?? null;
+          return {
+            clockIn: pin,
+            clockOut: pout,
+            workedMinutes: pin && pout ? workedMinutes(pin, pout) : null,
+            punchFlags: [...new Set(mine.flatMap((p) => p.flags ?? []))],
+          };
+        })(),
       };
     })
   );
