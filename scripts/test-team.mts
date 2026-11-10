@@ -571,7 +571,7 @@ const cronRoute = readFileSync(new URL("../app/api/cron/team/route.ts", import.m
 check("The cron route needs the cron secret", cronRoute.includes("Bearer ${secret}") && cronRoute.includes("if (!secret ||"));
 check("The cron runs every job, each on its own", /Promise\.allSettled\(\[\s*sendClockOutReminders\(now\),\s*sendLateSetupAlerts\(now\),\s*sendShortShiftAlerts\(now\),\s*deliverShiftNotices\(now\)/.test(cronRoute) && cronRoute.includes("Promise.allSettled([fillMarkets()])"));
 const vercelJson = JSON.parse(readFileSync(new URL("../vercel.json", import.meta.url), "utf8"));
-check("Vercel cron every 15 minutes", vercelJson.crons?.[0]?.path === "/api/cron/team" && vercelJson.crons?.[0]?.schedule === "*/15 * * * *");
+check("Vercel cron every 5 minutes", vercelJson.crons?.[0]?.path === "/api/cron/team" && vercelJson.crons?.[0]?.schedule === "*/5 * * * *");
 check("Staff who clocked in cannot be removed", /removeStaff[\s\S]*?if \(await hasPunches\(session\.id, staffId\)\)/.test(asgDb));
 check("Staff who clocked in cannot decline", /response === "decline" && \(await hasPunches\(sessionId, staff\.id\)\)/.test(asgDb));
 

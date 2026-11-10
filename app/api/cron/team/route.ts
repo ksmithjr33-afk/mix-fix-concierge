@@ -13,7 +13,7 @@ async function fillMarkets(): Promise<number> {
 
 export const maxDuration = 60; // up to 10 address lookups a run, one a second on OpenStreetMap
 
-// Vercel cron, every 15 minutes (vercel.json). Vercel sends
+// Vercel cron, every 5 minutes (vercel.json). Vercel sends
 // "Authorization: Bearer <CRON_SECRET>"; anything else is refused.
 export async function GET(request: Request) {
   const secret = process.env.CRON_SECRET;
