@@ -10,6 +10,7 @@ import { bartendersNeeded, firstName, type StaffMember } from "@/lib/team/event-
 import { eventTitle } from "@/lib/team/event-list";
 import { alertAdmins, checkSnapshot, getConfirmation, getSubmittedSession } from "@/lib/team/events";
 import { sendStaffText } from "@/lib/team/sms";
+import { isHidden } from "@/lib/team/hidden";
 import { eventDay, eventSchedule, formatClock, shortDate } from "@/lib/team/time";
 import {
   assignText,
@@ -115,6 +116,7 @@ export type ActionResult = { ok: true } | { ok: false; error: string; status: nu
 
 /** Offer an event to a staff member and text them. Someone who declined can be offered it again. */
 export async function assignStaff(session: SessionRow, staffId: string, admin: StaffMember, origin: string): Promise<ActionResult> {
+  if (await isHidden(session.id)) return { ok: false, error: "This event is hidden. Unhide it before assigning staff.", status: 409 };
   const staff = await staffById(staffId);
   if (!staff || !staff.active) return { ok: false, error: "That person is not on the active team.", status: 404 };
   const { data: existing } = await supabase

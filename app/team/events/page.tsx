@@ -4,6 +4,8 @@ import { requireStaff } from "@/lib/team/auth";
 import { firstName } from "@/lib/team/event-view";
 import { eventListItem, pastSection, upcomingSections, type EventListItem, type EventRowSource } from "@/lib/team/event-list";
 import { chicagoToday } from "@/lib/team/time";
+import { hiddenEventIds } from "@/lib/team/hidden";
+import { withoutHidden } from "@/lib/team/assignments";
 import TeamHeader from "../team-header";
 import EventList from "./event-list";
 
@@ -42,7 +44,8 @@ export default async function TeamEventsPage({
   const past = (await searchParams).past === "1";
   const staff = await requireStaff(past ? "/team/events?past=1" : "/team/events");
   const admin = staff.role === "admin";
-  const events = await visibleEvents(staff.id, admin);
+  const [all, hidden] = await Promise.all([visibleEvents(staff.id, admin), hiddenEventIds()]);
+  const events = withoutHidden(all, hidden);
   const today = chicagoToday();
   const sections = past ? pastSection(events, today) : upcomingSections(events, today);
   const hasPast = events.some((e) => e.day && e.day < today);

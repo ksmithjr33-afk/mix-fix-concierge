@@ -7,6 +7,8 @@ import { bartendersNeeded, buildStaffEventView } from "@/lib/team/event-view";
 import { eventTitle } from "@/lib/team/event-list";
 import TeamHeader from "../../../team-header";
 import AssignPanel from "./assign-panel";
+import HideAction from "./hide-action";
+import { isHidden } from "@/lib/team/hidden";
 
 export const dynamic = "force-dynamic";
 
@@ -25,7 +27,7 @@ export default async function AdminEventPage({ params }: { params: Promise<{ id:
     );
   }
 
-  const [people, staff] = await Promise.all([assigneeProgress(session), listStaff()]);
+  const [people, staff, hidden] = await Promise.all([assigneeProgress(session), listStaff(), isHidden(id)]);
   const v = buildStaffEventView(session);
   const counts = staffingCounts(bartendersNeeded(session), people.map((p) => p.status));
   const onEvent = new Set(people.filter((p) => p.status !== "declined").map((p) => p.staffId));
@@ -49,13 +51,20 @@ export default async function AdminEventPage({ params }: { params: Promise<{ id:
             Open the event page
           </Link>
         </div>
-        <AssignPanel
-          sessionId={id}
-          summary={`${staffingLabel(counts)}${counts.accepted ? `, ${counts.accepted} accepted` : ""}${counts.stillNeeded ? ` · ${counts.stillNeeded} still needed` : ""}`}
-          covered={counts.needed !== null && counts.stillNeeded === 0}
-          people={people}
-          available={available}
-        />
+        {hidden ? (
+          <HideAction sessionId={id} hidden />
+        ) : (
+          <>
+            <AssignPanel
+              sessionId={id}
+              summary={`${staffingLabel(counts)}${counts.accepted ? `, ${counts.accepted} accepted` : ""}${counts.stillNeeded ? ` · ${counts.stillNeeded} still needed` : ""}`}
+              covered={counts.needed !== null && counts.stillNeeded === 0}
+              people={people}
+              available={available}
+            />
+            <HideAction sessionId={id} hidden={false} />
+          </>
+        )}
       </main>
     </>
   );

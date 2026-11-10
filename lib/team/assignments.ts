@@ -129,3 +129,17 @@ export async function notifyAssignedStaff(
     return 0;
   }
 }
+
+// ----- Hidden events -----
+
+export const HIDE_HAS_STAFF = "Remove the assigned staff first, then hide this event.";
+
+/** An event can be hidden only when nobody is assigned (offered or accepted). Declined rows do not count. */
+export function hideError(statuses: AssignmentStatus[]): string | null {
+  return statuses.some((s) => s !== "declined") ? HIDE_HAS_STAFF : null;
+}
+
+/** Drop hidden events from a list. */
+export function withoutHidden<T extends { id: string }>(items: T[], hidden: Set<string>): T[] {
+  return items.filter((i) => !hidden.has(i.id));
+}

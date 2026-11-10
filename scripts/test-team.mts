@@ -487,6 +487,28 @@ check("The chat route passes the link origin for staff texts", chatSrc.includes(
 const retrySrc = readFileSync(new URL("../app/api/update-webhook/route.ts", import.meta.url), "utf8");
 check("The manual retry does not text staff again", retrySrc.includes("deliverEventUpdates(sessionId, rows)") && !retrySrc.includes("staffOrigin"));
 
+// ----- Phase 2: hidden events -----
+check("An event with nobody assigned can be hidden", asg.hideError([]) === null && asg.hideError(["declined"]) === null);
+check("An event with assigned staff cannot be hidden", asg.hideError(["offered"]) === asg.HIDE_HAS_STAFF && asg.hideError(["declined", "accepted"]) === asg.HIDE_HAS_STAFF);
+check("The refusal says to remove them first", asg.HIDE_HAS_STAFF === "Remove the assigned staff first, then hide this event.");
+check("Hidden events drop out of a list", asg.withoutHidden([{ id: "a" }, { id: "b" }, { id: "c" }], new Set(["b"])).map((i) => i.id).join(",") === "a,c");
+const hiddenSrc = readFileSync(new URL("../lib/team/hidden.ts", import.meta.url), "utf8");
+check("Hiding refuses when staff are assigned", hiddenSrc.indexOf("hideError(") < hiddenSrc.indexOf('.from("team_hidden_events")\n    .upsert'));
+check("Hiding never deletes or edits the session", !/from\("sessions"\)/.test(hiddenSrc) && !/from\("event_assignments"\)\s*\.(delete|update)/.test(hiddenSrc));
+check("Unhiding only deletes the hidden row", /unhideEvent[\s\S]*from\("team_hidden_events"\)\.delete\(\)/.test(hiddenSrc));
+const hideRoute = readFileSync(new URL("../app/api/team/admin/hide/route.ts", import.meta.url), "utf8");
+check("/api/team/admin/hide is admin only", hideRoute.includes("getCurrentStaff()") && hideRoute.includes('role !== "admin"') && hideRoute.includes("status: 403"));
+check("Hidden events cannot be assigned", /assignStaff[\s\S]*?if \(await isHidden\(session\.id\)\) return \{ ok: false/.test(asgDb));
+const staffEventsSrc = readFileSync(new URL("../app/team/events/page.tsx", import.meta.url), "utf8");
+check("Hidden events are left out of /team/events", staffEventsSrc.includes("withoutHidden(all, hidden)"));
+const adminEventsSrc = readFileSync(new URL("../app/team/admin/events/page.tsx", import.meta.url), "utf8");
+check("Hidden events are left out of staffing and its needs count", adminEventsSrc.includes("const sessions = withoutHidden(allSessions, hidden);") && adminEventsSrc.indexOf("withoutHidden(allSessions") < adminEventsSrc.indexOf("const open ="));
+check("The staffing page links to Hidden events", adminEventsSrc.includes('href="/team/admin/events?hidden=1"'));
+const hideAction = readFileSync(new URL("../app/team/admin/e/[id]/hide-action.tsx", import.meta.url), "utf8");
+check("Hiding asks to confirm first", hideAction.includes("Yes, hide it") && hideAction.indexOf("setConfirming(true)") > 0);
+const adminEventPage = readFileSync(new URL("../app/team/admin/e/[id]/page.tsx", import.meta.url), "utf8");
+check("A hidden event shows Unhide instead of the assign panel", /hidden \? \(\s*<HideAction sessionId=\{id\} hidden \/>/.test(adminEventPage));
+
 if (failed > 0) {
   console.error(`\n${failed} of ${total} team checks failed.`);
   process.exit(1);
