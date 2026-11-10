@@ -5,5 +5,5 @@ export const UPDATE_OPENER = "I already submitted my event and want to make a ch
 
 export function updateGreeting(clientName: string | null | undefined): string {
   const first = (clientName ?? "").trim().split(/\s+/)[0];
-  return `Hey${first ? ` ${first}` : ""}! Your event details are locked in and listed below. What would you like to change?`;
+  return `Hey${first ? ` ${first}` : ""}! Your event details are listed below. What would you like to change?`;
 }

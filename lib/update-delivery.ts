@@ -123,7 +123,7 @@ export async function getUndeliveredUpdates(sessionId: string, updateIds?: strin
     .select("*")
     .eq("session_id", sessionId)
     .eq("webhook_sent", false)
-    // Initial submissions went out through the intake webhook, and signed change
+    // Initial submissions went out through the intake webhook, and old signed change
     // orders are applied by /api/manager-update, which never fires this webhook.
     .not("summary", "in", '("Initial submission","Change order signed")')
     .order("version", { ascending: true })

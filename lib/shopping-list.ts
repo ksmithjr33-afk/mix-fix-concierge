@@ -16,7 +16,7 @@ interface EventData {
   signature_drinks: SignatureDrink[] | undefined;
   beer: boolean;
   wine: boolean;
-  bartenders?: number | string; // saved when a change order is signed
+  bartenders?: number | string; // saved when a price change sets the count
   extra_bottles?: string;
   event_date?: string;
   bar_service_start?: string;

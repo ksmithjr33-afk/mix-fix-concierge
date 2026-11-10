@@ -12,13 +12,14 @@
 //     Was: TBD, client will provide later
 //     Now: Jazzy Fries
 //
-// Unapplied rows are titled EVENT CHANGE REQUEST with a
-// "Needs manager approval: ..." line right under the title. Change order rows
-// are titled CHANGE ORDER SENT with the price line under it.
+// Unapplied rows (extra drink requests) are titled EVENT CHANGE REQUEST with a
+// "Needs manager approval: ..." line right under the title. An update that
+// changed the price has the price line under the title, and one made inside six
+// days of the event says so.
 
 import { buildEventFields, buildNatalieSupplyList } from "@/lib/ghl-payload";
-import { approvalReason, changeBlocks, isChangeOrderRow, summarizeRow } from "@/lib/event-diff";
-import { pendingChangeFields, withHoursBooked } from "@/lib/change-order";
+import { approvalReason, changeBlocks, computeDeadlines, summarizeRow } from "@/lib/event-diff";
+import { pendingChangeFields, withHoursBooked } from "@/lib/price-change";
 import { parseEventDate } from "@/lib/event-date";
 import type { EventUpdateRow, SessionRow } from "@/lib/event-updates";
 
@@ -54,19 +55,20 @@ function clientLine(session: SessionRow | null): string {
   return [name, type, date, guests ? `${guests} guests` : ""].filter(Boolean).join(", ");
 }
 
+/** True when the update came in fewer than six days before the event (America/Chicago). */
+export function withinSixDays(row: EventUpdateRow, session: SessionRow | null): boolean {
+  const date = session?.event_data?.event_date ?? session?.event_date ?? null;
+  return computeDeadlines(date, new Date(row.created_at)).withinSixDays;
+}
+
 /** Plain text GHL note for one event_updates row. */
 export function buildUpdateNote(row: EventUpdateRow, session: SessionRow | null = null): string {
   const lines: string[] = [];
-  if (isChangeOrderRow(row) && !row.change_order) {
-    lines.push("CHANGE ORDER CANCELED", "Client went back to the booked details, nothing to sign");
-  } else if (isChangeOrderRow(row)) {
-    lines.push("CHANGE ORDER SENT", "Waiting on client signature, not applied yet");
-    if (row.change_order?.price_text) lines.push(row.change_order.price_text);
-  } else {
-    lines.push(row.applied ? `EVENT UPDATE v${row.version}` : "EVENT CHANGE REQUEST");
-    const reason = approvalReason(row);
-    if (reason) lines.push(`Needs manager approval: ${reason}`);
-  }
+  lines.push(row.applied ? `EVENT UPDATE v${row.version}` : "EVENT CHANGE REQUEST");
+  const reason = approvalReason(row);
+  if (reason) lines.push(`Needs manager approval: ${reason}`);
+  if (row.applied && row.change_order?.price_text) lines.push(`Price: ${row.change_order.price_text}`);
+  if (withinSixDays(row, session)) lines.push("Within 6 days of the event");
   if (row.change_approval_needed) lines.push("Change approval needed: client asked for something outside the rules");
   lines.push(noteTimestamp(row.created_at));
   const client = clientLine(session);
@@ -77,8 +79,6 @@ export function buildUpdateNote(row: EventUpdateRow, session: SessionRow | null 
 
 /** The plain text update_summary for a row, rebuilt from its changes so old rows get the current format. */
 export function buildUpdateSummary(row: EventUpdateRow): string {
-  // Change order rows keep the "Change order sent:" summary saved with them.
-  if (isChangeOrderRow(row) && row.summary) return row.summary;
   return summarizeRow(row);
 }
 
@@ -95,9 +95,11 @@ export function buildUpdatePayload(session: SessionRow, row: EventUpdateRow): Re
     update_version: row.version,
     update_summary: buildUpdateSummary(row),
     within_deadline: row.within_deadline,
-    // Change order rows carry the pending change as priced when it was sent.
-    needs_change_order: isChangeOrderRow(row) && !!row.change_order,
-    ...pendingChangeFields(isChangeOrderRow(row) ? row.change_order : session.pending_change, session),
+    within_six_days: withinSixDays(row, session),
+    // Every update applies right away, nothing waits on a signature.
+    needs_change_order: false,
+    // The price change saved with this update, so the team can charge or credit it.
+    ...pendingChangeFields(row.applied ? row.change_order : null, row.changes, session),
     payment_preference: (eventData.payment_preference as string | undefined) || "",
     change_approval_needed: row.change_approval_needed ? "Yes" : "No",
     booked_total: session.booked_price?.total ?? null,

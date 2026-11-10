@@ -1,6 +1,7 @@
-// Change order pricing. A confirmed change to a change order field (date, hours,
-// guest count, package, address, bartenders) is priced against what the client
-// booked and held on session.pending_change until they sign. Pure, no database.
+// Price changes. A change to a priced field (service times or hours, guest
+// count, bartenders, package) is priced against what the client booked. The bot
+// quotes it and gets a yes, then the change applies right away and the booked
+// price moves to the new total. Pure, no database.
 //
 //   delta      = engine(new) minus engine(original), both at standard prices,
 //                package part with the session's promo applied (RETURN5 5%,
@@ -14,7 +15,7 @@ import { calculateHours } from "@/lib/shopping-list";
 import {
   applyChanges,
   changeBlocks,
-  CHANGE_ORDER_FIELDS,
+  BOOKING_FIELDS,
   fieldLabel,
   formatValue,
   type EventData,
@@ -44,17 +45,22 @@ export interface BookedPrice {
   discount_amount: number | null;
   tip_jar: boolean;
   deposit_paid: number;
-  source: "create-session" | "computed" | "change-order";
+  source: "create-session" | "computed" | "change-order" | "update";
   basis?: PriceBasis | null; // the event the total was priced for, set once known
-  class49_used?: boolean; // CLASS49 already taken off a change order
+  class49_used?: boolean; // CLASS49 already taken off an earlier price change
   updated_at?: string;
 }
 
-export interface PendingChange {
-  changes: FieldChange[]; // old = event_data value, new = requested value
-  implied?: FieldChange[]; // changes the client did not ask for, shown but not applied from here
+/**
+ * One update's price change. Saved on the event_updates row (change_order
+ * column) and sent in the webhook as pending_change_* so the team can charge or
+ * credit the difference.
+ */
+export interface PriceChange {
+  changes: FieldChange[]; // the priced fields the client asked for, old = before this update
+  implied?: FieldChange[]; // what follows from them: hours from new times, bartenders for the guest count
   requested_at: string;
-  base_version: number;
+  base_version?: number;
   amount: number | null; // positive owes more, negative is a credit, null if not priceable
   new_total: number | null;
   package_price: number | null;
@@ -66,6 +72,9 @@ export interface PendingChange {
   booked_total: number | null;
   deposit_paid: number;
 }
+
+/** A change order held for signature, from before every update applied right away. Read only by /api/manager-update. */
+export type PendingChange = PriceChange;
 
 // ---------- parsing loose values from GHL and the bot ----------
 
@@ -134,10 +143,10 @@ export function impliedHoursChange(stored: EventData, changes: FieldChange[]): F
 
 /**
  * Changes the client did not ask for, up or down: hours from new service times,
- * and bartenders from the guest count. Shown on the change order next to what they asked for.
+ * and bartenders from the guest count. Quoted and saved with what they asked for.
  */
 export function impliedChanges(
-  p: Pick<PendingChange, "changes" | "basis">,
+  p: Pick<PriceChange, "changes" | "basis">,
   stored: EventData,
   bookedBartenders: number | null
 ): FieldChange[] {
@@ -157,12 +166,12 @@ export function impliedChanges(
 }
 
 /**
- * Everything signing writes to event_data: what the client asked for, the hours
- * their new times imply, and the bartender count the change order was priced with.
+ * Everything a priced update writes to event_data: what the client asked for,
+ * the hours their new times imply, and the bartender count it was priced with.
  */
-export function signedChanges(
+export function withImpliedChanges(
   stored: EventData,
-  p: Pick<PendingChange, "changes" | "basis">,
+  p: Pick<PriceChange, "changes" | "basis">,
   priorBartenders: number | null
 ): FieldChange[] {
   const out = [...p.changes];
@@ -241,31 +250,32 @@ export function computeBaseline(
   };
 }
 
-// ---------- pricing a change order ----------
+// ---------- pricing a change ----------
 
 export function priceText(amount: number | null, newTotal: number | null): string {
-  if (amount === null || newTotal === null) return "A manager will confirm the price for this change.";
-  if (amount > 0) return `The difference is ${money(amount)}. Your new total is ${money(newTotal)}, and the ${money(amount)} is added to your remaining balance.`;
-  if (amount < 0) return `That gives you a ${money(amount)} credit toward your remaining balance. Your new total is ${money(newTotal)}.`;
-  return `No change to your price. Your total stays ${money(newTotal)}.`;
+  if (amount === null || newTotal === null) return "We could not price this change automatically. Our team will confirm the price with you.";
+  if (amount > 0) return `The difference is ${money(amount)}, which brings your new total to ${money(newTotal)}.`;
+  if (amount < 0) return `That is a ${money(amount)} credit, which brings your new total to ${money(newTotal)}.`;
+  return `No change in price. Your total stays ${money(newTotal)}.`;
 }
 
 /**
- * Price the pending change set. original is what the booked total was priced
- * for, nextEvent is the event with every pending change applied.
+ * Price a change to the priced fields. original is what the booked total was
+ * priced for, stored is the event before the change, nextEvent is the event with
+ * the change applied, changes are the priced fields the client asked for.
  */
-export function buildPendingChange(args: {
+export function buildPriceChange(args: {
   booked: BookedPrice;
   original: PriceBasis | null;
-  stored: EventData; // the event as saved, before the pending changes
+  stored: EventData;
   nextEvent: EventData;
   session: SessionFields;
-  pending: FieldChange[];
-  baseVersion: number;
+  changes: FieldChange[];
+  baseVersion?: number;
   now?: Date;
-}): PendingChange {
-  const { booked, original, nextEvent, session, pending } = args;
-  const fields = new Set(pending.map((c) => c.field));
+}): PriceChange {
+  const { booked, original, nextEvent, session, changes } = args;
+  const fields = new Set(changes.map((c) => c.field));
   const deposit = booked.deposit_paid ?? DEFAULT_DEPOSIT;
 
   let amount: number | null = null;
@@ -277,9 +287,8 @@ export function buildPendingChange(args: {
 
   if (original && booked.total !== null) {
     const nextGuests = toCount(nextEvent.guest_count) ?? original.guests;
-    // Bartenders: what the client asked for in this change order, else the booked
-    // count, raised to the recommended staffing when the guest count goes up. A
-    // count saved by an earlier signing is the booked count, not a request.
+    // Bartenders: what the client asked for, else the booked count, raised to the
+    // recommended staffing when the guest count goes up.
     const bartenders =
       (fields.has("bartenders") ? toCount(nextEvent.bartenders) : null) ??
       (nextGuests > original.guests ? Math.max(original.bartenders, staffingFor(nextGuests)) : original.bartenders);
@@ -313,13 +322,13 @@ export function buildPendingChange(args: {
   }
 
   const implied = impliedChanges(
-    { changes: pending, basis: next },
+    { changes, basis: next },
     args.stored,
     toCount(args.stored.bartenders) ?? booked.bartenders ?? original?.bartenders ?? null
   );
 
   return {
-    changes: pending,
+    changes,
     implied,
     requested_at: (args.now ?? new Date()).toISOString(),
     base_version: args.baseVersion,
@@ -328,7 +337,7 @@ export function buildPendingChange(args: {
     package_price: newPackage,
     gratuity: newGratuity,
     price_text: priceText(amount, newTotal),
-    summary: changeBlocks([...pending, ...implied]).join("\n\n"),
+    summary: changeBlocks([...changes, ...implied]).join("\n\n"),
     basis: next,
     class49_applied: class49,
     booked_total: booked.total,
@@ -336,7 +345,23 @@ export function buildPendingChange(args: {
   };
 }
 
-const PENDING_VALUE_KEYS: Record<(typeof CHANGE_ORDER_FIELDS)[number], string> = {
+/** The booked price after a priced change applies. */
+export function bookedAfter(prior: BookedPrice, p: PriceChange, bartenders: number | null, nowIso: string): BookedPrice {
+  return {
+    ...prior,
+    package_price: p.package_price ?? prior.package_price,
+    gratuity: p.gratuity ?? prior.gratuity,
+    total: p.new_total ?? prior.total,
+    bartenders: bartenders ?? prior.bartenders,
+    source: "update",
+    // The next change is priced against the event as it is now.
+    basis: p.basis ?? prior.basis ?? null,
+    class49_used: Boolean(prior.class49_used || p.class49_applied),
+    updated_at: nowIso,
+  };
+}
+
+const PENDING_VALUE_KEYS: Record<(typeof BOOKING_FIELDS)[number], string> = {
   event_date: "pending_change_date",
   bar_service_start: "pending_change_start",
   bar_service_end: "pending_change_end",
@@ -353,55 +378,46 @@ type PayloadSession = SessionFields & {
   booked_price?: BookedPrice | null;
 };
 
-/** The implied changes saved with a change order, worked out for ones priced before they were saved. */
-function pendingImplied(p: PendingChange, session: PayloadSession): FieldChange[] {
-  if (p.implied) return p.implied;
-  const stored = withHoursBooked(session.event_data ?? {}, session);
-  return impliedChanges(p, stored, toCount(stored.bartenders) ?? session.booked_price?.bartenders ?? null);
-}
-
 /**
- * The event as it would be once signed: one key per change order field, plus
- * pending_change_fields naming the ones that change. Empty strings with no change order.
+ * The booking fields as they are after this update, one key each, plus
+ * pending_change_fields naming the ones this update changed.
  */
-function pendingValues(p: PendingChange | null | undefined, session: PayloadSession): Record<string, string> {
-  const out: Record<string, string> = { pending_change_fields: "" };
-  for (const field of CHANGE_ORDER_FIELDS) out[PENDING_VALUE_KEYS[field]] = "";
-  if (!p) return out;
-
+function bookingValues(changes: FieldChange[], session: PayloadSession): Record<string, string> {
   const stored = withHoursBooked(session.event_data ?? {}, session);
-  const bookedBartenders = toCount(stored.bartenders) ?? session.booked_price?.bartenders ?? null;
   const current: Record<string, unknown> = {
     ...stored,
     event_date: stored.event_date ?? session.event_date,
     guest_count: stored.guest_count ?? session.guest_count,
     package: stored.package ?? session.package_type,
-    bartenders: stored.bartenders ?? p.basis?.bartenders ?? bookedBartenders,
+    bartenders: stored.bartenders ?? session.booked_price?.bartenders ?? null,
   };
-
-  // The same list the summary prints, so the summary and these fields cannot disagree.
-  const pending = new Map([...p.changes, ...pendingImplied(p, session)].map((c) => [c.field, c.new]));
-
+  const touched = new Set(changes.map((c) => c.field));
+  const out: Record<string, string> = {};
   const changed: string[] = [];
-  for (const field of CHANGE_ORDER_FIELDS) {
-    if (pending.has(field)) changed.push(field);
-    out[PENDING_VALUE_KEYS[field]] = String((pending.has(field) ? pending.get(field) : current[field]) ?? "");
+  for (const field of BOOKING_FIELDS) {
+    if (touched.has(field)) changed.push(field);
+    out[PENDING_VALUE_KEYS[field]] = String(current[field] ?? "");
   }
   out.pending_change_fields = changed.join(", ");
   return out;
 }
 
-/** Every pending_change_* key for the GHL payload, present even when nothing is pending. */
+/**
+ * Every pending_change_* key for the GHL payload. The values are the event after
+ * this update, the money keys come from the update's price change (empty when it
+ * changed nothing priced) so the team can charge or credit the difference.
+ */
 export function pendingChangeFields(
-  p: PendingChange | null | undefined,
+  p: PriceChange | null | undefined,
+  changes: FieldChange[],
   session: PayloadSession
 ): Record<string, unknown> {
+  const booking = changes.filter((c) => (BOOKING_FIELDS as readonly string[]).includes(c.field));
   return {
-    ...pendingValues(p, session),
+    ...bookingValues(booking, session),
     pending_change_amount: p?.amount ?? null,
     pending_change_price_text: p?.price_text ?? "",
-    // Rebuilt so change orders already pending get the current format.
-    pending_change_summary: p ? changeBlocks([...p.changes, ...pendingImplied(p, session)]).join("\n\n") : "",
+    pending_change_summary: booking.length > 0 ? changeBlocks(booking).join("\n\n") : "",
     pending_change_new_total: p?.new_total ?? null,
     pending_change_package_price: p?.package_price ?? null,
     pending_change_gratuity: p?.gratuity ?? null,

@@ -5,22 +5,27 @@ import { supabase } from "@/lib/supabase";
 import {
   applyChanges,
   computeDeadlines,
+  isPricedField,
   planUpdate,
-  replayHistory,
   snapshotChanges,
-  summarizeChanges,
+  summarizeRow,
+  type Deadlines,
   type EventData,
   type FieldChange,
   type PlannedRow,
 } from "@/lib/event-diff";
 import {
   basisFromEvent,
-  buildPendingChange,
+  bookedAfter,
+  buildPriceChange,
   computeBaseline,
+  withImpliedChanges,
+  toCount,
   withHoursBooked,
   type BookedPrice,
   type PendingChange,
-} from "@/lib/change-order";
+  type PriceChange,
+} from "@/lib/price-change";
 
 export const SESSION_COLUMNS =
   "id, name, email, event_date, package_type, guest_count, event_name, hours_booked, status, event_data, version, submitted_at, updated_at";
@@ -39,7 +44,8 @@ export interface SessionRow {
   version: number;
   submitted_at: string | null;
   updated_at: string | null;
-  // Read with select("*"), so missing until the change order migration runs.
+  // Read with select("*"). pending_change is only set by change orders from
+  // before every update applied right away, read by /api/manager-update.
   pending_change?: PendingChange | null;
   booked_price?: BookedPrice | null;
 }
@@ -54,7 +60,7 @@ export interface EventUpdateRow {
   summary: string | null;
   within_deadline: boolean | null;
   applied: boolean;
-  change_order?: PendingChange | null; // set on change order rows: the pending change as priced then
+  change_order?: PriceChange | null; // the update's price change, when it changed a priced field
   change_approval_needed?: boolean | null; // the bot passed something to management
 }
 
@@ -132,8 +138,12 @@ export interface ApplyResult {
   version: number;
   updatedAt: string | null;
   rows: EventUpdateRow[];
-  pendingChange: PendingChange | null; // the session's pending change order after this update
-  changeOrderSent: boolean; // this update created or changed the pending change order
+  priceChange: PriceChange | null; // the price change saved with this update
+  // Set when the update changed the price but the bot had not quoted this new
+  // total. Nothing was saved: the bot states the price and asks for a yes first.
+  needsQuote: PriceChange | null;
+  refusedDrinks: boolean; // drink changes inside the six day cutoff, dropped
+  withinSixDays: boolean;
   paymentPreference: string | null;
 }
 
@@ -142,7 +152,7 @@ function toInsert(
   row: PlannedRow,
   version: number,
   source: "concierge" | "manager",
-  extra: { change_order?: PendingChange | null; change_approval_needed?: boolean } = {}
+  extra: { price?: PriceChange | null; change_approval_needed?: boolean } = {}
 ) {
   const insert: Record<string, unknown> = {
     session_id: sessionId,
@@ -153,37 +163,122 @@ function toInsert(
     within_deadline: row.within_deadline,
     applied: row.applied,
   };
-  // Only written when set, so updates keep working before the migration adds these columns.
-  if (extra.change_order) insert.change_order = extra.change_order;
+  // The change_order column holds the update's price change. Only written when set.
+  if (extra.price) insert.change_order = extra.price;
   if (extra.change_approval_needed) insert.change_approval_needed = true;
   return insert;
 }
 
 /**
  * What the client booked. Sessions created before booked prices were stored get
- * one computed from the original (version 1) event with the engine.
+ * one computed from the event as it stands with the engine.
  */
-async function resolveBookedPrice(
-  session: SessionRow
-): Promise<{ booked: BookedPrice | null; original: EventData; computed: boolean }> {
-  const history = await getEventUpdates(session.id);
-  const original = replayHistory(history, 1) ?? session.event_data ?? {};
+function resolveBookedPrice(session: SessionRow, current: EventData): { booked: BookedPrice | null; computed: boolean } {
   if (session.booked_price && session.booked_price.total !== null && session.booked_price.total !== undefined) {
-    return { booked: session.booked_price, original, computed: false };
+    return { booked: session.booked_price, computed: false };
   }
-  const computed = computeBaseline(original, session, {
+  const computed = computeBaseline(current, session, {
     promoCode: session.booked_price?.promo_code ?? null,
     tipJar: session.booked_price?.tip_jar ?? true,
   });
   if (computed && session.booked_price?.deposit_paid) computed.deposit_paid = session.booked_price.deposit_paid;
-  return { booked: computed, original, computed: computed !== null };
+  return { booked: computed, computed: computed !== null };
+}
+
+interface PreparedUpdate {
+  current: EventData;
+  deadlines: Deadlines;
+  applied: PlannedRow | null; // what applies now, implied hours and bartenders included
+  requests: PlannedRow | null;
+  next: EventData;
+  price: PriceChange | null;
+  booked: BookedPrice | null;
+  bookedComputed: boolean;
+  refusedDrinks: boolean;
+}
+
+/** Plan and price an update without saving anything. */
+function prepareUpdate(
+  session: SessionRow & { event_data: EventData },
+  partial: EventData,
+  options: { managerRequest?: string | null; now?: Date }
+): PreparedUpdate {
+  // Sessions submitted before hours_booked was saved get it filled in here.
+  const current = withHoursBooked(session.event_data, session);
+  const deadlines = computeDeadlines(current.event_date ?? session.event_date, options.now);
+  const plan = planUpdate(current, partial, { managerRequest: options.managerRequest, deadlines });
+
+  let applied = plan.applied;
+  let next = plan.next;
+  let price: PriceChange | null = null;
+  let booked: BookedPrice | null = null;
+  let bookedComputed = false;
+
+  const asked = applied?.changes ?? [];
+  const priced = asked.filter((c) => isPricedField(c.field));
+  if (priced.length > 0) {
+    ({ booked, computed: bookedComputed } = resolveBookedPrice(session, current));
+    const original =
+      booked?.basis ??
+      (booked ? basisFromEvent(current, session, { tipJar: booked.tip_jar, bartenders: booked.bartenders }) : null);
+    price = buildPriceChange({
+      booked: booked ?? {
+        package_price: null, gratuity: null, total: null, bartenders: null, promo_code: null,
+        custom_price: null, discount_amount: null, tip_jar: true, deposit_paid: 150, source: "computed",
+      },
+      original,
+      stored: current,
+      nextEvent: next,
+      session,
+      changes: priced,
+      baseVersion: session.version,
+      now: options.now,
+    });
+    // Hours follow new times, and bartenders follow what the change was priced with.
+    const all = withImpliedChanges(current, { changes: asked, basis: price.basis }, booked?.bartenders ?? original?.bartenders ?? null);
+    if (all.length > asked.length) {
+      next = applyChanges(current, all);
+      applied = { changes: all, applied: true, within_deadline: true, summary: summarizeRow({ changes: all, applied: true, within_deadline: true }) };
+    }
+  }
+
+  return { current, deadlines, applied, requests: plan.requests, next, price, booked, bookedComputed, refusedDrinks: plan.refusedDrinks };
+}
+
+export interface QuoteResult {
+  price: PriceChange | null; // null when nothing priced changes
+  refusedDrinks: boolean;
+  withinSixDays: boolean;
+  changes: FieldChange[]; // what would apply, implied changes included
+}
+
+/** Price a proposed update for the bot to quote. Saves nothing. Null if the session is not submitted. */
+export async function quoteEventUpdate(sessionId: string, partial: EventData, now?: Date): Promise<QuoteResult | null> {
+  const session = await getSession(sessionId);
+  if (!session || session.status !== "submitted" || !session.event_data) return null;
+  const prep = prepareUpdate(session as SessionRow & { event_data: EventData }, partial, { now });
+  return {
+    price: prep.price,
+    refusedDrinks: prep.refusedDrinks,
+    withinSixDays: prep.deadlines.withinSixDays,
+    changes: prep.applied?.changes ?? [],
+  };
+}
+
+/** True when the bot quoted this price change's new total before saving. */
+export function quoteMatches(price: PriceChange, quotedNewTotal: unknown): boolean {
+  if (price.new_total === null) return true; // nothing to quote, our team confirms the price
+  const n = typeof quotedNewTotal === "number" ? quotedNewTotal : toCount(quotedNewTotal);
+  return n !== null && Math.round(n) === Math.round(price.new_total);
 }
 
 /**
- * Diff a partial event against the session's current event_data, merge what is
- * allowed now and bump the version, hold change order fields on
- * session.pending_change with their price, and record late drink changes and
- * manager requests as unapplied rows. Returns null if the session is not submitted.
+ * Apply a confirmed update right away: merge it into event_data and bump the
+ * version, price any priced field against what the client booked and move the
+ * booked price to the new total, and record extra drink requests as unapplied
+ * rows. Drink changes inside the six day cutoff are dropped. With
+ * requireQuote, an update that changes the price saves nothing unless
+ * quotedNewTotal matches. Returns null if the session is not submitted.
  */
 export async function applyEventUpdate(
   sessionId: string,
@@ -192,6 +287,8 @@ export async function applyEventUpdate(
     managerRequest?: string | null;
     changeApprovalNeeded?: boolean;
     source?: "concierge" | "manager";
+    requireQuote?: boolean;
+    quotedNewTotal?: unknown;
     now?: Date;
   } = {}
 ): Promise<ApplyResult | null> {
@@ -201,70 +298,42 @@ export async function applyEventUpdate(
     const session = await getSession(sessionId);
     if (!session || session.status !== "submitted" || !session.event_data) return null;
 
-    // Sessions submitted before hours_booked was saved get it filled in here.
-    const current = withHoursBooked(session.event_data, session);
-    const deadlines = computeDeadlines(current.event_date ?? session.event_date, options.now);
-    const plan = planUpdate(current, partial, {
-      managerRequest: options.managerRequest,
-      deadlines,
-      pending: session.pending_change?.changes ?? null,
-    });
-
+    const prep = prepareUpdate(session as SessionRow & { event_data: EventData }, partial, options);
+    const { current, applied, requests, next, price, booked } = prep;
     let version = session.version;
     let updatedAt = session.updated_at ?? session.submitted_at;
-    const sessionUpdate: Record<string, unknown> = {};
+    const base = {
+      priceChange: null,
+      needsQuote: null,
+      refusedDrinks: prep.refusedDrinks,
+      withinSixDays: prep.deadlines.withinSixDays,
+      paymentPreference: (current.payment_preference as string | undefined) || null,
+    };
 
-    // Change order: price every pending field against what the client booked.
-    let pendingChange: PendingChange | null = session.pending_change ?? null;
-    let changeOrderRow: PlannedRow | null = null;
-    if (plan.pendingChanges) {
-      if (plan.pendingChanges.length === 0) {
-        pendingChange = null; // the client went back to the booked details
-        changeOrderRow = {
-          changes: plan.changeOrder,
-          applied: false,
-          within_deadline: null,
-          summary: `Change order canceled, back to the booked details:\n\n${summarizeChanges(plan.changeOrder, null, 440)}`,
-        };
-      } else {
-        const { booked, original, computed } = await resolveBookedPrice(session);
-        if (computed && booked) sessionUpdate.booked_price = booked;
-        const originalBasis =
-          booked?.basis ??
-          (booked ? basisFromEvent(original, session, { tipJar: booked.tip_jar, bartenders: booked.bartenders }) : null);
-        pendingChange = buildPendingChange({
-          booked: booked ?? {
-            package_price: null, gratuity: null, total: null, bartenders: null, promo_code: null,
-            custom_price: null, discount_amount: null, tip_jar: true, deposit_paid: 150, source: "computed",
-          },
-          original: originalBasis,
-          stored: plan.next,
-          nextEvent: applyChanges(plan.next, plan.pendingChanges),
-          session,
-          pending: plan.pendingChanges,
-          baseVersion: version,
-          now: options.now,
-        });
-        const head = `Change order sent: ${pendingChange.price_text}`;
-        changeOrderRow = {
-          changes: plan.changeOrder,
-          applied: false,
-          within_deadline: null,
-          summary: `${head}\n\n${summarizeChanges(plan.changeOrder, null, Math.max(120, 500 - head.length - 2))}`,
-        };
-      }
-      sessionUpdate.pending_change = pendingChange;
+    if (price && options.requireQuote && !quoteMatches(price, options.quotedNewTotal)) {
+      return { ...base, eventData: current, version, updatedAt, rows: [], needsQuote: price };
     }
 
-    if (plan.applied) {
-      sessionUpdate.event_data = plan.next;
+    const nowIso = new Date().toISOString();
+    const sessionUpdate: Record<string, unknown> = {};
+    if (applied) {
+      sessionUpdate.event_data = next;
       sessionUpdate.version = version + 1;
-    } else if (Object.keys(sessionUpdate).length > 0 && current !== session.event_data) {
+      // Keep the summary columns in step with the event.
+      const touched = new Set(applied.changes.map((c) => c.field));
+      if (touched.has("event_date")) sessionUpdate.event_date = next.event_date;
+      if (touched.has("guest_count")) sessionUpdate.guest_count = String(next.guest_count ?? "");
+      if (touched.has("package")) sessionUpdate.package_type = next.package;
+      if (touched.has("hours_booked")) sessionUpdate.hours_booked = String(next.hours_booked ?? "");
+      if (price && booked) {
+        sessionUpdate.booked_price =
+          price.new_total !== null ? bookedAfter(booked, price, toCount(next.bartenders), nowIso) : booked;
+      }
+    } else if (requests && current !== session.event_data) {
       sessionUpdate.event_data = current;
     }
 
     if (Object.keys(sessionUpdate).length > 0) {
-      const nowIso = new Date().toISOString();
       sessionUpdate.updated_at = nowIso;
       // Only succeeds if nobody bumped the version since we read it.
       const { data, error } = await supabase
@@ -275,18 +344,14 @@ export async function applyEventUpdate(
         .select("id");
       if (error) throw new Error(`sessions update failed: ${error.message}`);
       if (!data || data.length === 0) continue;
-      if (plan.applied) version += 1;
+      if (applied) version += 1;
       updatedAt = nowIso;
     }
 
     const approval = { change_approval_needed: options.changeApprovalNeeded === true };
     const inserts = [
-      plan.applied ? toInsert(sessionId, plan.applied, version, source, approval) : null,
-      changeOrderRow
-        ? toInsert(sessionId, changeOrderRow, version, source, { ...approval, change_order: pendingChange })
-        : null,
-      plan.late ? toInsert(sessionId, plan.late, version, source, approval) : null,
-      plan.requests ? toInsert(sessionId, plan.requests, version, source, approval) : null,
+      applied ? toInsert(sessionId, applied, version, source, { ...approval, price }) : null,
+      requests ? toInsert(sessionId, requests, version, source, approval) : null,
     ].filter((r): r is Record<string, unknown> => r !== null);
 
     let rows: EventUpdateRow[] = [];
@@ -296,17 +361,35 @@ export async function applyEventUpdate(
       rows = (data as EventUpdateRow[]) ?? [];
     }
 
-    const eventData = plan.applied ? plan.next : current;
+    const eventData = applied ? next : current;
     return {
+      ...base,
       eventData,
       version,
       updatedAt,
       rows,
-      pendingChange,
-      changeOrderSent: changeOrderRow !== null,
+      priceChange: applied ? price : null,
       paymentPreference: (eventData.payment_preference as string | undefined) || null,
     };
   }
 
   throw new Error("event update kept conflicting with a concurrent update");
+}
+
+/**
+ * Every change applied in this chat, oldest first: applied rows after
+ * startVersion, with the booked total before the first price change and after
+ * the last one.
+ */
+export async function changesSince(
+  sessionId: string,
+  startVersion: number
+): Promise<{ changes: FieldChange[]; totalBefore: number | null; totalAfter: number | null }> {
+  const rows = (await getEventUpdates(sessionId)).filter((r) => r.applied && r.version > startVersion && r.version > 1);
+  const priced = rows.map((r) => r.change_order).filter((p): p is PriceChange => !!p && p.new_total !== null);
+  return {
+    changes: rows.flatMap((r) => r.changes),
+    totalBefore: priced[0]?.booked_total ?? null,
+    totalAfter: priced.at(-1)?.new_total ?? null,
+  };
 }

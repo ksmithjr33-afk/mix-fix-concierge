@@ -319,9 +319,9 @@ export default function CompletePage() {
           </div>
           <p className="text-sm text-[#6B5D52] mt-6 pt-4 border-t border-[#DDD5CC] leading-relaxed">
             Need to change something? Use the View or update your event button
-            on this page. Drink and ingredient changes lock the Monday before
-            your event, drink name changes lock the Wednesday before. Questions?
-            Text us at 469 754 8512.
+            on this page. You can change anything up to 6 days before your
+            event. After that, you can still change everything except your
+            drink menu. Questions? Text us at 469 754 8512.
           </p>
         </section>
 

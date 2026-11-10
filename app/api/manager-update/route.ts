@@ -1,4 +1,6 @@
-// Applies a signed change order. GHL calls this when the client signs:
+// Legacy: update mode now applies every change right away and never sets
+// pending_change, so nothing depends on this route. It stays for change orders
+// saved before that. Applies a signed change order:
 //   POST /api/manager-update
 //   X-Manager-Secret: <MANAGER_UPDATE_SECRET>
 //   { "email": "client@example.com" }
@@ -14,7 +16,7 @@ import { supabase } from "@/lib/supabase";
 import { applyChanges, type EventData } from "@/lib/event-diff";
 import { buildEventFields, buildNatalieSupplyList } from "@/lib/ghl-payload";
 import type { SessionRow } from "@/lib/event-updates";
-import { signedChanges, toCount, withHoursBooked, type BookedPrice } from "@/lib/change-order";
+import { withImpliedChanges, toCount, withHoursBooked, type BookedPrice } from "@/lib/price-change";
 
 function secretMatches(given: string | null): boolean {
   const expected = process.env.MANAGER_UPDATE_SECRET;
@@ -69,7 +71,7 @@ export async function POST(request: Request) {
     const prior: Partial<BookedPrice> = session.booked_price ?? {};
     // Stored hours and bartenders follow what was signed, even when the client did not ask for them directly.
     const stored = withHoursBooked(session.event_data, session);
-    const changes = signedChanges(stored, pending, prior.bartenders ?? null);
+    const changes = withImpliedChanges(stored, pending, prior.bartenders ?? null);
     const next: EventData = applyChanges(stored, changes);
     const version = session.version + 1;
     const nowIso = new Date().toISOString();

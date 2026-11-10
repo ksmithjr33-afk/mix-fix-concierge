@@ -208,6 +208,147 @@ for (const [guests, whole] of [[25, 1], [100, 2], [300, 6]]) {
   check(`Dive Bar signature Pina Colada supply list has ${whole} pineapple for ${guests} guests`, new RegExp(`pineapple — ${whole} whole`, "i").test(text), lineWith(text, "pineapple —") || "no line");
 }
 
+// ----- Update mode: changes apply right away, drinks lock inside 6 days -----
+const diff = await import("../lib/event-diff.ts");
+const pricing = await import("../lib/pricing.ts");
+const priceChange = await import("../lib/price-change.ts");
+const notes = await import("../lib/update-notes.ts");
+const { buildUpdatePrompt } = await import("../lib/update-prompt.ts");
+const { CHANGE_DEADLINES } = await import("../lib/system-prompt.ts");
+const { readFileSync } = await import("node:fs");
+
+// 9 PM in Dallas on Nov 9 is already Nov 10 in UTC: the cutoff counts Dallas days.
+const NOW = new Date("2026-11-10T03:00:00Z");
+const d6 = diff.computeDeadlines("2026-11-15", NOW);
+const d5 = diff.computeDeadlines("2026-11-14", NOW);
+check("Cutoff counts days in America/Chicago", d6.today === "2026-11-09", d6.today);
+check("6 days before the event is not within six days", d6.daysUntil === 6 && !d6.withinSixDays, JSON.stringify(d6));
+check("5 days before the event is within six days", d5.daysUntil === 5 && d5.withinSixDays, JSON.stringify(d5));
+check("Last drink change day is 6 days before the event", d6.lastDrinkChangeDay === "2026-11-09", String(d6.lastDrinkChangeDay));
+check("An unreadable event date never locks the drink menu", !diff.computeDeadlines(null, NOW).withinSixDays);
+
+const stored = {
+  event_date: "2026-11-14",
+  package: "Full Bar",
+  guest_count: 100,
+  bar_service_start: "6:00 PM",
+  bar_service_end: "10:00 PM",
+  hours_booked: 4,
+  day_of_contact_name: "Sam",
+  signature_drinks: [MARGARITA, NO_MINT, BLOODY],
+};
+const swapped = [PINA, NO_MINT, BLOODY];
+const inside = diff.planUpdate(stored, { guest_count: 120, signature_drinks: swapped, day_of_contact_name: "Jordan" }, { deadlines: d5 });
+check("Inside 6 days a drink change is refused", inside.refusedDrinks && !inside.applied!.changes.some((c) => c.field.startsWith("signature_drinks")));
+check("Inside 6 days the drinks on file stay the same", (inside.next.signature_drinks as { name: string }[])[0].name === "Margarita");
+check("Inside 6 days other changes still apply now", inside.next.guest_count === 120 && inside.next.day_of_contact_name === "Jordan" && inside.applied!.applied);
+check("A refused drink change is not sent to a manager", inside.requests === null);
+const insideExtra = diff.planUpdate(stored, { signature_drinks: [...stored.signature_drinks, PINA] }, { deadlines: d5 });
+check("Inside 6 days extra drinks are refused, not relayed", insideExtra.refusedDrinks && insideExtra.requests === null && insideExtra.applied === null);
+const insideDive = diff.planUpdate(stored, { dive_menu_requested: true }, { deadlines: d5 });
+check("Inside 6 days a Dive Bar menu request is refused", insideDive.refusedDrinks && insideDive.applied === null);
+
+const outside = diff.planUpdate(stored, { signature_drinks: swapped, event_date: "2026-11-21", guest_count: 150 }, { deadlines: d6 });
+check("6 or more days out a drink change applies", !outside.refusedDrinks && (outside.next.signature_drinks as { name: string }[])[0].name === "Pina Colada");
+check("Date and guest count apply now, nothing held", outside.next.event_date === "2026-11-21" && outside.next.guest_count === 150 && outside.applied!.applied);
+check("No pending change or change order fields are left in the plan", !("pendingChanges" in outside) && !("changeOrder" in outside));
+
+// Pricing a change against what the client booked.
+const basis = { package: "Full Bar", guests: 100, hours: 4, isWedding: false, bartenders: 2, tipJar: true, woodenBar: true };
+const engine = pricing.priceEvent(basis)!;
+const booked = {
+  package_price: engine.packagePrice, gratuity: engine.gratuity, total: engine.total, bartenders: 2, promo_code: null,
+  custom_price: null, discount_amount: null, tip_jar: true, deposit_paid: 150, source: "create-session" as const, basis,
+};
+const quote = (changes: { field: string; old: unknown; new: unknown }[]) =>
+  priceChange.buildPriceChange({
+    booked, original: basis, stored, nextEvent: diff.applyChanges(stored, changes), session: {}, changes,
+  });
+const more = quote([{ field: "guest_count", old: 100, new: 150 }]);
+const after150 = pricing.priceEvent({ ...basis, guests: 150, bartenders: Math.max(2, pricing.staffingFor(150)) })!;
+check("More guests: difference comes from the pricing engine", more.amount !== null && more.amount > 0 && more.new_total === booked.total + more.amount, JSON.stringify({ amount: more.amount, total: more.new_total }));
+check("More guests: new total matches the engine total", more.new_total === Math.max(booked.total, after150.total) || more.new_total === booked.total + (after150.packagePrice - engine.packagePrice) + Math.max(0, after150.gratuity - engine.gratuity), `${more.new_total} vs ${after150.total}`);
+check("Price text states the difference and the new total", more.price_text.includes(priceChange.money(more.amount!)) && more.price_text.includes(priceChange.money(more.new_total!)), more.price_text);
+const shift = quote([{ field: "bar_service_start", old: "6:00 PM", new: "7:00 PM" }, { field: "bar_service_end", old: "10:00 PM", new: "11:00 PM" }]);
+check("Time shift with the same hours is no change in price", shift.amount === 0 && shift.price_text.startsWith("No change in price"), shift.price_text);
+const longer = quote([{ field: "bar_service_end", old: "10:00 PM", new: "11:00 PM" }]);
+check("A longer service prices the extra hour and implies the new hours", (longer.amount ?? 0) > 0 && longer.implied!.some((c) => c.field === "hours_booked" && c.new === 5));
+const fewer = quote([{ field: "guest_count", old: 100, new: 60 }]);
+check("Fewer guests is a credit or no change, never a charge", (fewer.amount ?? 1) <= 0, String(fewer.amount));
+const moved = priceChange.bookedAfter(booked, more, 3, "2026-11-09T00:00:00Z");
+check("Booked price moves to the new total", moved.total === more.new_total && moved.source === "update" && moved.basis?.guests === 150);
+
+// Webhook payload for an applied price change.
+const applied = { ...stored, guest_count: 150, event_date: "2026-11-14" };
+const session = {
+  id: "s1", name: "Test", email: "t@example.com", event_date: "2026-11-14", package_type: "Full Bar", guest_count: "150",
+  event_name: null, hours_booked: "4", status: "submitted" as const, event_data: applied, version: 3,
+  submitted_at: null, updated_at: null, booked_price: moved,
+};
+const row = {
+  id: "r1", session_id: "s1", version: 3, created_at: NOW.toISOString(), source: "concierge" as const,
+  changes: [{ field: "guest_count", old: 100, new: 150 }], summary: null, within_deadline: true, applied: true,
+  change_order: more,
+};
+console.log = () => {};
+const payload = notes.buildUpdatePayload(session, row);
+const note = notes.buildUpdateNote(row, session);
+console.log = quiet;
+check("Payload: event_update_applied is true", payload.event_update_applied === true);
+check("Payload: needs_change_order is always false", payload.needs_change_order === false);
+check("Payload: pending_change_amount and new total carry the price change", payload.pending_change_amount === more.amount && payload.pending_change_new_total === more.new_total);
+check("Payload: price text and payment preference are sent", payload.pending_change_price_text === more.price_text && "payment_preference" in payload);
+check("Payload: within_six_days is true inside the cutoff", payload.within_six_days === true);
+check("Payload: booked total is the new total", payload.booked_total === more.new_total);
+check("Payload: changed booking fields are named", payload.pending_change_fields === "guest_count" && payload.pending_change_guest_count === "150");
+const farRow = { ...row, created_at: "2026-11-01T18:00:00Z", change_order: null, changes: [{ field: "day_of_contact_name", old: "Sam", new: "Jordan" }] };
+console.log = () => {};
+const farPayload = notes.buildUpdatePayload(session, farRow);
+console.log = quiet;
+check("Payload: within_six_days is false 6 or more days out", farPayload.within_six_days === false);
+check("Payload: no price change sends empty money keys", farPayload.pending_change_amount === null && farPayload.pending_change_price_text === "");
+check("Note says the update applied and has no signing wording", note.startsWith("EVENT UPDATE v3") && !/sign|change order/i.test(note), note);
+check("Note flags an update within 6 days", note.includes("Within 6 days of the event"));
+
+// Prompts and pages.
+const NO_SIGNING = /\b(to sign|sign (it|the|a)|signing|signed|signature to)\b|change order|take effect|takes effect|taking effect/i;
+const promptOpen = buildUpdatePrompt(stored, 3, d6, { booked });
+const promptLocked = buildUpdatePrompt(stored, 3, d5, { booked, recap: { lines: ["Guest count: from 100 to 150"], totalBefore: 1749, totalAfter: 2100 } });
+check("Update prompt has no signing or change order wording", !NO_SIGNING.test(promptOpen), promptOpen.match(NO_SIGNING)?.[0]);
+check("Intake change deadline copy has no signing wording", !NO_SIGNING.test(CHANGE_DEADLINES));
+check("Intake change deadline copy uses the 6 day rule", CHANGE_DEADLINES.includes("up to 6 days before your event") && CHANGE_DEADLINES.includes("everything except your drink menu"));
+check("Update prompt carries the exact drink lock message", promptLocked.includes(diff.DRINKS_LOCKED_MESSAGE));
+check("Drink lock message is word for word", diff.DRINKS_LOCKED_MESSAGE === "We are within 6 days of your event, so your drink menu is locked in. Our team has already started preparing for it.");
+check("Locked prompt says within 6 days", promptLocked.includes("WITHIN 6 DAYS") && promptLocked.includes("LOCKED"));
+check("Open prompt says the drink menu is open", promptOpen.includes("drink menu is OPEN"));
+check("Prompt tells the bot to quote with the pricing engine before saving", promptOpen.includes("quote_price_change") && promptOpen.includes("quoted_new_total"));
+check("Prompt says a time shift with the same hours is no change in price", promptOpen.includes("There is no change in price."));
+check("Prompt refuses locked drinks without relaying or noting", promptOpen.includes("do NOT pass it to management, and do NOT note it anywhere"));
+check("Prompt recap lists the chat's changes", promptLocked.includes("Guest count: from 100 to 150") && promptLocked.includes("Total: from $1,749 to $2,100"));
+check("Prompt has no Monday or Wednesday drink deadline", !/Monday before|Wednesday before/.test(promptOpen + CHANGE_DEADLINES));
+
+const recap = diff.recapLines([
+  { field: "guest_count", old: 100, new: 120 },
+  { field: "guest_count", old: 120, new: 150 },
+  { field: "day_of_contact_name", old: "Sam", new: "Jordan" },
+  { field: "signature_drinks[0]", old: MARGARITA, new: PINA },
+  { field: "special_requests", old: "", new: "We will provide the cups." },
+  { field: "theme", old: "Gold", new: "Gold" },
+]);
+check("Recap: one line per field, first old value to last new value", recap.includes("Guest count: from 100 to 150") && !recap.some((l) => l.includes("120")), recap.join(" | "));
+check("Recap: drinks by name, no oz amounts", recap.includes("Drink 1: from Margarita to Pina Colada") && !recap.some((l) => /\boz\b/.test(l)), recap.join(" | "));
+check("Recap: notes show what was added", recap.some((l) => l.startsWith('Special requests: added "We will provide the cups."')));
+check("Recap: unchanged fields drop out", !recap.some((l) => l.startsWith("Theme")));
+
+const completePage = readFileSync(new URL("../app/complete/page.tsx", import.meta.url), "utf8").replace(/\s+/g, " ");
+const updatePage = readFileSync(new URL("../app/s/update-mode.tsx", import.meta.url), "utf8").replace(/\s+/g, " ");
+for (const [name, text] of [["Completion page", completePage], ["Update page", updatePage]]) {
+  check(`${name} has the 6 day deadline copy`, text.includes("up to 6 days before your event") && text.includes("everything except your drink menu"));
+  check(`${name} has no signing or old deadline wording`, !NO_SIGNING.test(text.replace(/signature_drinks|Signature Drinks|signature menu/gi, "")) && !/Monday before|Wednesday before/.test(text));
+}
+check("Update page sends the chat start version for the recap", updatePage.includes("chatStartVersion"));
+check("Update page refreshes event details on save", /parsed\.event === "updated"[^}]*setEventData/.test(updatePage));
+
 if (failed > 0) {
   console.error(`\n${failed} of ${total} menu checks failed.`);
   process.exit(1);

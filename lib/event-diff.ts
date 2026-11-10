@@ -1,6 +1,6 @@
 // Pure update mode logic: diff a partial event against the current event_data,
-// sort each change by deadline, split out requests a manager has to handle, and
-// rebuild any version from event_updates history. No database access here, see
+// refuse drink changes inside the six day cutoff, split out requests a manager
+// has to handle, and rebuild any version from event_updates history. No database access here, see
 // lib/event-updates.ts for that.
 
 import { parseEventDate } from "@/lib/event-date";
@@ -44,7 +44,7 @@ export const UPDATABLE_FIELDS = [
   "event_name",
   "dive_menu_requested",
   "signature_drinks",
-  // Change order fields not covered above
+  // Priced or schedule fields not covered above
   "event_date",
   "hours_booked",
   "package",
@@ -54,12 +54,11 @@ export const UPDATABLE_FIELDS = [
 ] as const;
 
 /**
- * Fields that change the price or the agreement. A confirmed change to any of
- * these is not applied to event_data: it is held on session.pending_change
- * until the client signs the change order (see app/api/manager-update). Summaries
- * and the webhook list them in this order.
+ * Booking fields: the date, schedule, size, package, and address. Summaries and
+ * the webhook list them first, in this order, and the webhook sends each one's
+ * value after the update as pending_change_<field>.
  */
-export const CHANGE_ORDER_FIELDS = [
+export const BOOKING_FIELDS = [
   "event_date",
   "bar_service_start",
   "bar_service_end",
@@ -70,9 +69,37 @@ export const CHANGE_ORDER_FIELDS = [
   "event_address",
 ] as const;
 
-export function isChangeOrderField(field: string): boolean {
-  return (CHANGE_ORDER_FIELDS as readonly string[]).includes(field);
+/**
+ * Fields that change the price. The bot quotes the difference from the pricing
+ * engine and gets a yes before saving a change to any of them. A time shift that
+ * keeps the same hours prices as no change.
+ */
+export const PRICED_FIELDS = [
+  "bar_service_start",
+  "bar_service_end",
+  "hours_booked",
+  "guest_count",
+  "bartenders",
+  "package",
+] as const;
+
+export function isPricedField(field: string): boolean {
+  return (PRICED_FIELDS as readonly string[]).includes(field);
 }
+
+/** Fields that make up the drink menu, locked inside the six day cutoff. */
+export const DRINK_FIELDS = ["signature_drinks", "dive_menu_requested"] as const;
+
+export function isDrinkField(field: string): boolean {
+  return field.startsWith("signature_drinks") || (DRINK_FIELDS as readonly string[]).includes(field);
+}
+
+/** What the client hears when they try to change drinks inside the cutoff. */
+export const DRINKS_LOCKED_MESSAGE =
+  "We are within 6 days of your event, so your drink menu is locked in. Our team has already started preparing for it.";
+
+/** Days before the event that drink changes are still allowed. */
+export const DRINK_CUTOFF_DAYS = 6;
 
 const FIELD_LABELS: Record<string, string> = {
   guest_count: "Guest count",
@@ -133,10 +160,9 @@ export function sameValue(a: unknown, b: unknown): boolean {
 export interface Deadlines {
   today: string; // YYYY-MM-DD in America/Chicago
   eventDay: string | null;
-  drinksLockDate: string | null; // Monday before the event
-  namesLockDate: string | null; // Wednesday before the event
-  drinksOpen: boolean;
-  namesOpen: boolean;
+  daysUntil: number | null; // calendar days from today to the event day
+  lastDrinkChangeDay: string | null; // the last day drinks can change, 6 days before the event
+  withinSixDays: boolean; // fewer than 6 days out: everything but drinks can still change
   eventPassed: boolean;
 }
 
@@ -153,46 +179,32 @@ function toYmd(y: number, m: number, d: number): string {
   return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
 }
 
-/** The most recent given weekday strictly before the event day (0 Sunday, 1 Monday...). */
-function weekdayBefore(eventDay: string, weekday: number): string {
-  const [y, m, d] = eventDay.split("-").map(Number);
-  const t = new Date(Date.UTC(y, m - 1, d));
-  do {
-    t.setUTCDate(t.getUTCDate() - 1);
-  } while (t.getUTCDay() !== weekday);
-  return toYmd(t.getUTCFullYear(), t.getUTCMonth() + 1, t.getUTCDate());
+function ymdToUtc(ymd: string): number {
+  const [y, m, d] = ymd.split("-").map(Number);
+  return Date.UTC(y, m - 1, d);
 }
 
 /**
- * Drinks and ingredients lock at the end of the Monday before the event, drink
- * names at the end of the Wednesday before. An unparseable event date counts as
- * locked so a manager confirms drink changes.
+ * Six or more days before the event date (America/Chicago) everything can change.
+ * Fewer than six days out everything but the drink menu can. An unreadable event
+ * date never counts as inside the cutoff, so the client is not told something false.
  */
 export function computeDeadlines(eventDate: unknown, now: Date = new Date()): Deadlines {
   const today = chicagoToday(now);
   const parsed = parseEventDate(typeof eventDate === "string" ? eventDate : null);
   if (!parsed) {
-    return {
-      today,
-      eventDay: null,
-      drinksLockDate: null,
-      namesLockDate: null,
-      drinksOpen: false,
-      namesOpen: false,
-      eventPassed: false,
-    };
+    return { today, eventDay: null, daysUntil: null, lastDrinkChangeDay: null, withinSixDays: false, eventPassed: false };
   }
   const eventDay = toYmd(parsed.getFullYear(), parsed.getMonth() + 1, parsed.getDate());
-  const drinksLockDate = weekdayBefore(eventDay, 1);
-  const namesLockDate = weekdayBefore(eventDay, 3);
+  const daysUntil = Math.round((ymdToUtc(eventDay) - ymdToUtc(today)) / 86_400_000);
+  const last = new Date(ymdToUtc(eventDay) - DRINK_CUTOFF_DAYS * 86_400_000);
   return {
     today,
     eventDay,
-    drinksLockDate,
-    namesLockDate,
-    drinksOpen: today <= drinksLockDate,
-    namesOpen: today <= namesLockDate,
-    eventPassed: today > eventDay,
+    daysUntil,
+    lastDrinkChangeDay: toYmd(last.getUTCFullYear(), last.getUTCMonth() + 1, last.getUTCDate()),
+    withinSixDays: daysUntil < DRINK_CUTOFF_DAYS,
+    eventPassed: daysUntil < 0,
   };
 }
 
@@ -329,11 +341,11 @@ export function changeBlock(c: FieldChange): string | null {
   return was === "None" ? `${label}\n  Now: ${now}` : `${label}\n  Was: ${was}\n  Now: ${now}`;
 }
 
-/** Change order fields first in their fixed order, everything else as it came. */
+/** Booking fields first in their fixed order, everything else as it came. */
 function sortChanges(changes: FieldChange[]): FieldChange[] {
   const rank = (c: FieldChange) => {
-    const i = (CHANGE_ORDER_FIELDS as readonly string[]).indexOf(c.field);
-    return i === -1 ? CHANGE_ORDER_FIELDS.length : i;
+    const i = (BOOKING_FIELDS as readonly string[]).indexOf(c.field);
+    return i === -1 ? BOOKING_FIELDS.length : i;
   };
   return [...changes].sort((a, b) => rank(a) - rank(b));
 }
@@ -349,25 +361,19 @@ export function changeBlocks(changes: FieldChange[]): string[] {
 }
 
 /**
- * Why an unapplied row needs a manager: late drink changes are past the drink
- * deadline, manager_request rows are hours changes or other requests. Null for
- * applied rows.
+ * Why an unapplied row needs a manager: manager_request rows are extra drinks or
+ * other requests. Rows saved before every update applied right away may also be
+ * past the old drink deadline. Null for applied rows.
  */
 export function approvalReason(r: { applied: boolean; within_deadline: boolean | null; changes: FieldChange[] }): string | null {
   if (r.applied) return null;
   if (r.within_deadline === false) return "past drink deadline";
-  if (isChangeOrderRow(r)) return "change order, waiting on client signature";
   const requests = r.changes.filter((c) => c.field === "manager_request").map((c) => String(c.new ?? ""));
   const reasons: string[] = [];
   if (requests.some((t) => t.startsWith("Extend bar service"))) reasons.push("hours change");
   if (requests.some((t) => t.startsWith("Add drinks beyond"))) reasons.push("extra drinks");
   if (reasons.length < requests.length || reasons.length === 0) reasons.push("client request");
   return reasons.join(", ");
-}
-
-/** An unapplied row made only of change order fields: a change order sent to the client to sign. */
-export function isChangeOrderRow(r: { applied: boolean; within_deadline: boolean | null; changes: FieldChange[] }): boolean {
-  return !r.applied && r.within_deadline === null && r.changes.length > 0 && r.changes.every((c) => isChangeOrderField(c.field));
 }
 
 export const SUMMARY_MAX = 500;
@@ -489,14 +495,10 @@ export interface PlannedRow {
 export interface UpdatePlan {
   next: EventData;
   applied: PlannedRow | null; // merged now, bumps the version
-  late: PlannedRow | null; // past the drink deadlines, a manager confirms
   requests: PlannedRow | null; // extra drinks beyond the package: a manager reaches out
-  // Change order fields this update touched, old = the stored event_data value,
-  // or the pending value when going back to the stored one. Empty if none changed.
-  changeOrder: FieldChange[];
-  // Every pending change order field after this update, old = event_data.
-  // Null when this update did not touch a change order field.
-  pendingChanges: FieldChange[] | null;
+  // Drink menu changes asked for inside the six day cutoff. Not saved, not noted,
+  // not sent anywhere: the client is told the drink menu is locked.
+  refusedDrinks: boolean;
 }
 
 function diffDrinks(oldDrinks: Drink[], newDrinks: Drink[]): FieldChange[] {
@@ -519,10 +521,14 @@ function row(changes: FieldChange[], applied: boolean, within: boolean | null): 
   return { changes, applied, within_deadline: within, summary: summarizeRow({ changes, applied, within_deadline: within }) };
 }
 
+/**
+ * Every confirmed change applies now. Inside the six day cutoff, drink menu
+ * changes (and extra drink requests) are dropped and flagged as refused.
+ */
 export function planUpdate(
   current: EventData,
   partial: EventData,
-  options: { managerRequest?: string | null; deadlines: Deadlines; pending?: FieldChange[] | null }
+  options: { managerRequest?: string | null; deadlines: Deadlines }
 ): UpdatePlan {
   const { deadlines } = options;
   const updates: EventData = {};
@@ -533,27 +539,6 @@ export function planUpdate(
   const requests: FieldChange[] = [];
   if (options.managerRequest && options.managerRequest.trim()) {
     requests.push({ field: "manager_request", old: null, new: options.managerRequest.trim() });
-  }
-
-  // Date, hours, guest count, package, address, and bartenders become a change
-  // order the client signs. They are held as pending, never applied here.
-  const pendingMap = new Map<string, FieldChange>();
-  for (const c of options.pending ?? []) pendingMap.set(c.field, c);
-  const changeOrder: FieldChange[] = [];
-  for (const key of CHANGE_ORDER_FIELDS) {
-    if (!(key in updates)) continue;
-    const value = updates[key];
-    delete updates[key];
-    const before = pendingMap.has(key) ? pendingMap.get(key)!.new : current[key];
-    if (sameValue(before, value)) continue; // already on file or already pending
-    if (sameValue(current[key], value)) {
-      changeOrder.push({ field: key, old: before ?? null, new: value });
-      pendingMap.delete(key); // back to the booked value
-    } else {
-      const change = { field: key, old: current[key] ?? null, new: value };
-      changeOrder.push(change);
-      pendingMap.set(key, change);
-    }
   }
 
   // Drinks beyond the package count are a manager request.
@@ -581,23 +566,65 @@ export function planUpdate(
   }
   if (newDrinks) changes.push(...diffDrinks(currentDrinks, newDrinks));
 
-  const now: FieldChange[] = [];
-  const late: FieldChange[] = [];
-  for (const c of changes) {
-    const isDrink = c.field.startsWith("signature_drinks[");
-    const isName = isDrink && c.field.endsWith(".name");
-    const open = isName ? deadlines.namesOpen : isDrink ? deadlines.drinksOpen : !deadlines.eventPassed;
-    (open ? now : late).push(c);
+  // Inside the cutoff the drink menu is locked: drop drink changes and extra drink requests.
+  let refusedDrinks = false;
+  let kept = changes;
+  let keptRequests = requests;
+  if (deadlines.withinSixDays) {
+    kept = changes.filter((c) => !isDrinkField(c.field));
+    keptRequests = requests.filter((c) => !String(c.new).startsWith("Add drinks beyond"));
+    refusedDrinks = kept.length < changes.length || keptRequests.length < requests.length;
   }
 
   return {
-    next: applyChanges(current, now),
-    applied: row(now, true, true),
-    late: row(late, false, false),
-    requests: row(requests, false, null),
-    changeOrder,
-    // Was always reads the stored value, including for fields pending from earlier updates.
-    pendingChanges:
-      changeOrder.length > 0 ? [...pendingMap.values()].map((c) => ({ ...c, old: current[c.field] ?? null })) : null,
+    next: applyChanges(current, kept),
+    applied: row(kept, true, true),
+    requests: row(keptRequests, false, null),
+    refusedDrinks,
   };
+}
+
+// ---------- recap ----------
+
+const RECAP_LONG_TEXT = LONG_TEXT_FIELDS;
+
+/** A drink as the client sees it in a recap: the name only, never oz amounts. */
+function drinkName(v: unknown): string {
+  if (!v || typeof v !== "object") return formatValue(v);
+  return plain(String((v as Drink).name ?? "Unnamed drink"));
+}
+
+/**
+ * Consolidate the changes saved in one chat: per field, the value before the
+ * first change and after the last one. Fields that ended where they started drop out.
+ */
+export function consolidateChanges(changes: FieldChange[]): FieldChange[] {
+  const byField = new Map<string, FieldChange>();
+  for (const c of changes) {
+    if (c.field === "manager_request") continue;
+    const prior = byField.get(c.field);
+    byField.set(c.field, prior ? { field: c.field, old: prior.old, new: c.new } : { field: c.field, old: c.old, new: c.new });
+  }
+  return sortChanges([...byField.values()].filter((c) => !sameValue(c.old, c.new)));
+}
+
+/** One plain text recap line per change, old value to new value, for the client. */
+export function recapLines(changes: FieldChange[]): string[] {
+  return consolidateChanges(changes).flatMap((c) => {
+    const label = fieldLabel(c.field);
+    if (RECAP_LONG_TEXT.has(c.field)) {
+      const { added, removed } = sentenceDiff(c.old, c.new);
+      const parts = [
+        added.length > 0 ? `added "${added.join(" ")}"` : "",
+        removed.length > 0 ? `removed "${removed.join(" ")}"` : "",
+      ].filter(Boolean);
+      return parts.length > 0 ? [`${label}: ${parts.join(", ")}`] : [];
+    }
+    const isDrink = c.field.startsWith("signature_drinks[");
+    const show = (v: unknown) => (isDrink ? drinkName(v) : formatValue(v));
+    if (isDrink && isEmpty(c.old)) return [`${label}: added ${show(c.new)}`];
+    if (isDrink && isEmpty(c.new)) return [`${label}: removed ${show(c.old)}`];
+    const was = show(c.old);
+    return [was === "None" ? `${label}: now ${show(c.new)}` : `${label}: from ${was} to ${show(c.new)}`];
+  });
 }

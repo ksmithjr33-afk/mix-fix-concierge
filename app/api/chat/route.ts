@@ -6,21 +6,26 @@ import {
   approvalReason,
   changeBlocks,
   computeDeadlines,
-  isChangeOrderRow,
+  DRINKS_LOCKED_MESSAGE,
+  PRICED_FIELDS,
+  recapLines,
   UPDATABLE_FIELDS,
   type EventData,
 } from "@/lib/event-diff";
 import {
   applyEventUpdate,
   type ApplyResult,
+  changesSince,
   getSession,
+  quoteEventUpdate,
+  type QuoteResult,
   recordSubmission,
   type SessionRow,
 } from "@/lib/event-updates";
 import { UPDATE_OPENER } from "@/lib/update-mode-shared";
 import { deliverEventUpdates } from "@/lib/update-delivery";
 import { allowedMenus, createMenuFilter, type MenuKey } from "@/lib/menu-markers";
-import { DEFAULT_DEPOSIT, impliedLine, money, paymentPhrase } from "@/lib/change-order";
+import { DEFAULT_DEPOSIT, impliedLine, money, paymentPhrase, type PriceChange } from "@/lib/price-change";
 
 const anthropic = new Anthropic();
 
@@ -128,7 +133,7 @@ const submitProperties = submitEventDataTool.input_schema.properties as Record<s
 const updateEventDataTool: Anthropic.Tool = {
   name: "update_event_data",
   description:
-    "Record a change to this already submitted event. Call it only after the client confirmed the change. Include ONLY the fields that changed. When any drink changes, send the complete signature_drinks array. Anything the client tells you that no other field covers (for example 'I will provide the cups') goes in special_requests as the complete existing text plus the new note. Date, service times or hours, guest count, package, address, and bartenders are change orders: send the new values in their fields, the system prices them and holds them until the client signs. Use manager_request only for drinks beyond the package count. Set change_approval_needed when you passed something along to management under the CONDUCT RULE.",
+    "Save a change to this already submitted event. It applies right away. Call it only after the client clearly said yes. Include ONLY the fields that changed. When any drink changes, send the complete signature_drinks array. Anything the client tells you that no other field covers (for example 'I will provide the cups') goes in special_requests as the complete existing text plus the new note. A change to guest count, service times or hours, bartenders, or package must be quoted with quote_price_change first, and quoted_new_total must be the new total you quoted. Use manager_request only for drinks beyond the package count. Set change_approval_needed when you passed something along to management under the CONDUCT RULE.",
   input_schema: {
     type: "object",
     additionalProperties: false,
@@ -144,6 +149,10 @@ const updateEventDataTool: Anthropic.Tool = {
         type: "string",
         description: 'How the client wants the remaining balance handled. One of: "Auto charge now", "Auto charge on <date>", "Auto charge on due date", "Payment link", "Payment plan: <split>".',
       },
+      quoted_new_total: {
+        type: "number",
+        description: "The new total from quote_price_change that you stated and the client said yes to. Required when guest count, times, hours, bartenders, or package change.",
+      },
       manager_request: {
         type: "string",
         description: "Drinks beyond the package count, exactly as the client asked. Quote no prices.",
@@ -153,6 +162,21 @@ const updateEventDataTool: Anthropic.Tool = {
         description: "True when this call records something passed along to management under the CONDUCT RULE (in special_requests).",
       },
     },
+  },
+};
+
+// Prices a proposed change without saving it, so the bot can state the
+// difference and new total and get a yes before calling update_event_data.
+const quotePriceChangeTool: Anthropic.Tool = {
+  name: "quote_price_change",
+  description:
+    "Price a proposed change to guest count, service times or hours, bartenders, or package with our pricing engine. Saves nothing. Call it before confirming any such change, with ONLY the new values, then state the difference and new total from the result and ask the client for a clear yes.",
+  input_schema: {
+    type: "object",
+    additionalProperties: false,
+    properties: Object.fromEntries(
+      PRICED_FIELDS.map((field) => [field, (updateEventDataTool.input_schema.properties as Record<string, unknown>)[field]])
+    ),
   },
 };
 
@@ -256,49 +280,89 @@ async function saveUpdateMessages(sessionId: string, messages: ChatMessage[]) {
   if (error) console.error("conversation_logs update_messages error:", error);
 }
 
-/**
- * What update_event_data actually recorded, handed back to the model so its
- * confirmation repeats exactly what was saved and never claims more.
- */
-function updateToolResult(result: ApplyResult | null): string {
-  if (!result) {
-    return "TOOL RESULT: NOTHING was recorded, this event could not be updated right now. Tell the client honestly that the change did not go through and a manager will follow up. Do not say it was saved.";
-  }
-  if (result.rows.length === 0) {
-    return "TOOL RESULT: NOTHING was recorded because every value sent already matches what is on file. Tell the client it is already on file. Do not say you updated or saved anything.";
-  }
-  const parts = result.rows.map((r) => {
-    const details = changeBlocks(r.changes).join("\n\n");
-    if (isChangeOrderRow(r)) {
-      if (!r.change_order) return `CHANGE ORDER CANCELED, the client is back to the booked details, nothing to sign:\n${details}`;
-      return `CHANGE ORDER SAVED, NOT APPLIED until the client signs it:\n${details}`;
-    }
-    return r.applied
-      ? `SAVED, the event is now version ${r.version}:\n${details}`
-      : `NOT SAVED YET, sent to a manager for approval (${approvalReason(r)}):\n${details}`;
-  });
-  if (result.changeOrderSent && result.pendingChange) {
-    const p = result.pendingChange;
-    const phrase = paymentPhrase(result.paymentPreference);
+/** The money lines the bot reads from a price change. */
+function priceLines(p: PriceChange): string[] {
+  return [
+    `price: ${p.price_text}`,
+    `difference: ${p.amount === null ? "unknown, our team will confirm the price" : p.amount === 0 ? "0, no change in price" : `${p.amount} (${p.amount < 0 ? "credit of " : ""}${money(p.amount)})`}`,
+    `new_total: ${p.new_total === null ? "unknown" : `${p.new_total} (${money(p.new_total)})`}`,
+    `implied_changes: ${p.implied?.length ? p.implied.map(impliedLine).join("; ") : "none"}`,
+  ];
+}
+
+/** What quote_price_change priced, handed back so the bot states it and asks for a yes. */
+function quoteToolResult(quote: QuoteResult | null): string {
+  if (!quote) return "TOOL RESULT: This event could not be priced right now. Tell the client our team will confirm the price, and do not quote anything.";
+  const parts: string[] = [];
+  if (quote.refusedDrinks) parts.push(`DRINK MENU LOCKED, within 6 days of the event. Say exactly: "${DRINKS_LOCKED_MESSAGE}"`);
+  if (!quote.price) {
+    parts.push("NOTHING TO PRICE: these values are already on file or do not change the price. Do not quote a price.");
+  } else {
     parts.push(
       [
-        `CHANGE ORDER PRICING (the whole pending change order): ${p.price_text}`,
-        `pending_change_amount: ${p.amount === null ? "unknown, a manager will confirm the price" : `${p.amount} (${p.amount < 0 ? "credit of " : ""}${money(p.amount)})`}`,
-        `payment_preference: ${result.paymentPreference ? `${result.paymentPreference} (say "${phrase}")` : "blank"}`,
-        `implied_changes: ${p.implied?.length ? p.implied.map(impliedLine).join("; ") : "none"}`,
+        "QUOTE, NOTHING SAVED YET. State the change, the difference, and the new total in one yes or no question. When the client clearly says yes, call update_event_data with the same values and quoted_new_total set to new_total.",
+        ...priceLines(quote.price),
       ].join("\n")
     );
   }
   return `TOOL RESULT:\n\n${parts.join("\n\n")}`;
 }
 
-function updateModeResponse(session: SessionRow, messages: ChatMessage[]) {
+/**
+ * What update_event_data actually recorded, handed back to the model so its
+ * confirmation repeats exactly what was saved and never claims more.
+ */
+function updateToolResult(result: ApplyResult | null): string {
+  if (!result) {
+    return "TOOL RESULT: NOTHING was recorded, this event could not be updated right now. Tell the client honestly that the change did not go through and our team will follow up. Do not say it was saved.";
+  }
+  const parts: string[] = [];
+  if (result.needsQuote) {
+    parts.push(
+      [
+        "NOTHING SAVED: this change affects the price and the client has not said yes to this price yet. State the change, the difference, and the new total below in one yes or no question. When they clearly say yes, call update_event_data again with quoted_new_total set to new_total.",
+        ...priceLines(result.needsQuote),
+      ].join("\n")
+    );
+    return `TOOL RESULT:\n\n${parts.join("\n\n")}`;
+  }
+  if (result.refusedDrinks) {
+    parts.push(`DRINK CHANGE NOT SAVED, the drink menu is locked within 6 days of the event. Say exactly: "${DRINKS_LOCKED_MESSAGE}"`);
+  }
+  if (result.rows.length === 0 && !result.refusedDrinks) {
+    return "TOOL RESULT: NOTHING was recorded because every value sent already matches what is on file. Tell the client it is already on file. Do not say you updated or saved anything.";
+  }
+  for (const r of result.rows) {
+    const details = changeBlocks(r.changes).join("\n\n");
+    parts.push(
+      r.applied
+        ? `SAVED AND APPLIED NOW, the event is now version ${r.version}:\n${details}`
+        : `NOT SAVED, sent to a manager (${approvalReason(r)}):\n${details}`
+    );
+  }
+  if (result.priceChange) {
+    const phrase = paymentPhrase(result.paymentPreference);
+    parts.push(
+      [
+        "PRICE CHANGE SAVED:",
+        ...priceLines(result.priceChange),
+        `payment_preference: ${result.paymentPreference ? `${result.paymentPreference} (say "${phrase}")` : "blank"}`,
+      ].join("\n")
+    );
+  }
+  return `TOOL RESULT:\n\n${parts.join("\n\n")}`;
+}
+
+async function updateModeResponse(session: SessionRow, messages: ChatMessage[], chatStartVersion: number) {
   const eventData = session.event_data as EventData;
   const deadlines = computeDeadlines(eventData.event_date ?? session.event_date);
+  // Every change saved since this chat opened, for the final recap.
+  const since = await changesSince(session.id, chatStartVersion).catch(() => null);
   const system = buildUpdatePrompt(eventData, session.version, deadlines, {
-    pendingChange: session.pending_change ?? null,
     booked: session.booked_price ?? null,
+    recap: since ? { lines: recapLines(since.changes), totalBefore: since.totalBefore, totalAfter: since.totalAfter } : null,
   });
+  const tools = [quotePriceChangeTool, updateEventDataTool];
   const history: Anthropic.MessageParam[] = messages.map((m: ChatMessage) => ({
     role: m.role as "user" | "assistant",
     content: m.content,
@@ -308,7 +372,7 @@ function updateModeResponse(session: SessionRow, messages: ChatMessage[]) {
     model: "claude-sonnet-4-6",
     max_tokens: 4096,
     system,
-    tools: [updateEventDataTool],
+    tools,
     messages: history,
   });
 
@@ -336,56 +400,69 @@ function updateModeResponse(session: SessionRow, messages: ChatMessage[]) {
         menuFilter.flush();
 
         const finalMessage = await stream.finalMessage();
-        const toolUse = finalMessage.content.find(
-          (block): block is Anthropic.ToolUseBlock =>
-            block.type === "tool_use" && block.name === "update_event_data"
+        const toolUses = finalMessage.content.filter(
+          (block): block is Anthropic.ToolUseBlock => block.type === "tool_use"
         );
 
-        if (toolUse) {
-          const {
-            manager_request: managerRequest,
-            change_approval_needed: changeApprovalNeeded,
-            ...partial
-          } = toolUse.input as Record<string, unknown>;
-          const result = await applyEventUpdate(session.id, partial, {
-            managerRequest: typeof managerRequest === "string" ? managerRequest : null,
-            changeApprovalNeeded: changeApprovalNeeded === true,
-          });
-
-          if (result && result.rows.length > 0) {
-            // Send the GHL note and update webhook before telling the client the
-            // update is saved, the same way intake awaits its completion side effects.
-            await deliverEventUpdates(session.id, result.rows);
-
-            send(controller, {
-              event: "updated",
-              eventData: result.eventData,
-              version: result.version,
-              updatedAt: result.updatedAt,
-              updates: result.rows.map((r) => ({
-                version: r.version,
-                applied: r.applied,
-                within_deadline: r.within_deadline,
-                summary: r.summary,
-              })),
+        if (toolUses.length > 0) {
+          const toolResults: Anthropic.ToolResultBlockParam[] = [];
+          let lastApply: ApplyResult | null | undefined;
+          let lastQuote: QuoteResult | null | undefined;
+          for (const toolUse of toolUses) {
+            const input = toolUse.input as Record<string, unknown>;
+            if (toolUse.name === "quote_price_change") {
+              lastQuote = await quoteEventUpdate(session.id, input).catch((err) => {
+                console.error("quote_price_change failed:", err);
+                return null;
+              });
+              toolResults.push({ type: "tool_result", tool_use_id: toolUse.id, content: quoteToolResult(lastQuote) });
+              continue;
+            }
+            const {
+              manager_request: managerRequest,
+              change_approval_needed: changeApprovalNeeded,
+              quoted_new_total: quotedNewTotal,
+              ...partial
+            } = input;
+            const result = await applyEventUpdate(session.id, partial, {
+              managerRequest: typeof managerRequest === "string" ? managerRequest : null,
+              changeApprovalNeeded: changeApprovalNeeded === true,
+              requireQuote: true,
+              quotedNewTotal,
             });
+            lastApply = result;
+
+            if (result && result.rows.length > 0) {
+              // Refresh the event details on the page as soon as the save lands.
+              send(controller, {
+                event: "updated",
+                eventData: result.eventData,
+                version: result.version,
+                updatedAt: result.updatedAt,
+                updates: result.rows.map((r) => ({
+                  version: r.version,
+                  applied: r.applied,
+                  summary: r.summary,
+                })),
+              });
+              // Send the GHL note and update webhook before the bot confirms the change.
+              await deliverEventUpdates(session.id, result.rows);
+            }
+            toolResults.push({ type: "tool_result", tool_use_id: toolUse.id, content: updateToolResult(result) });
           }
 
-          // Second turn: the model sees what was actually recorded and confirms
+          // Second turn: the model sees what was priced or recorded and says
           // exactly that, so nothing is announced before the tool returns.
           const followUp = anthropic.messages.stream({
             model: "claude-sonnet-4-6",
             max_tokens: 1024,
             system,
-            tools: [updateEventDataTool],
+            tools,
             tool_choice: { type: "none" },
             messages: [
               ...history,
               { role: "assistant", content: finalMessage.content },
-              {
-                role: "user",
-                content: [{ type: "tool_result", tool_use_id: toolUse.id, content: updateToolResult(result) }],
-              },
+              { role: "user", content: toolResults },
             ],
           });
           let separated = !fullText.trim();
@@ -399,15 +476,27 @@ function updateModeResponse(session: SessionRow, messages: ChatMessage[]) {
           menuFilter.flush();
 
           if (!fullText.slice(beforeConfirmation).trim()) {
-            const text = !result
-              ? "Sorry, that change did not go through. A manager will follow up with you."
-              : result.rows.length === 0
-                ? "That is already on file. Anything else you would like to change?"
-                : result.changeOrderSent && result.pendingChange
-                  ? "Saved. We will text and email you a short change order to sign. The new details take effect once you sign."
-                  : result.rows.some((r) => r.applied)
-                  ? "That change is saved. Anything else you would like to change?"
-                  : "I have sent that to a manager who will reach out to you shortly. Anything else you would like to change?";
+            let text: string;
+            if (lastApply === undefined) {
+              text = lastQuote?.price
+                ? `${lastQuote.price.price_text} Should I make that change?`
+                : lastQuote?.refusedDrinks
+                  ? DRINKS_LOCKED_MESSAGE
+                  : "Anything else you would like to change?";
+            } else if (!lastApply) {
+              text = "Sorry, that change did not go through. Our team will follow up with you.";
+            } else if (lastApply.needsQuote) {
+              text = `${lastApply.needsQuote.price_text} Should I make that change?`;
+            } else if (lastApply.rows.length === 0) {
+              text = lastApply.refusedDrinks ? DRINKS_LOCKED_MESSAGE : "That is already on file. Anything else you would like to change?";
+            } else {
+              const saved = lastApply.rows.some((r) => r.applied)
+                ? "That change is saved."
+                : "I have sent that to a manager who will reach out to you shortly.";
+              text = [lastApply.refusedDrinks ? DRINKS_LOCKED_MESSAGE : "", saved, "Anything else you would like to change?"]
+                .filter(Boolean)
+                .join(" ");
+            }
             const chunk = fullText.trim() ? `\n\n${text}` : text;
             fullText += chunk;
             send(controller, { text: chunk });
@@ -438,14 +527,15 @@ function updateModeResponse(session: SessionRow, messages: ChatMessage[]) {
 }
 
 export async function POST(request: Request) {
-  const { messages, sessionId, clientName, email } = await request.json();
+  const { messages, sessionId, clientName, email, chatStartVersion } = await request.json();
 
   // Sessions that already submitted their event get update mode instead of intake.
   let session: SessionRow | null = null;
   if (sessionId) {
     session = await getSession(sessionId);
     if (session?.status === "submitted" && session.event_data) {
-      return updateModeResponse(session, messages);
+      const start = typeof chatStartVersion === "number" ? chatStartVersion : session.version;
+      return updateModeResponse(session, messages, start);
     }
   }
 

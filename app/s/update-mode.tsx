@@ -49,6 +49,8 @@ export default function UpdateMode({
   const [eventData, setEventData] = useState<EventData>(initialEventData);
   const [version, setVersion] = useState(initialVersion);
   const [updatedAt, setUpdatedAt] = useState(initialUpdatedAt);
+  // The version this chat opened on: the final recap covers every change saved after it.
+  const [chatStartVersion] = useState(initialVersion);
   const [input, setInput] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -71,6 +73,7 @@ export default function UpdateMode({
         body: JSON.stringify({
           messages: [{ role: "user", content: UPDATE_OPENER }, ...visible],
           sessionId,
+          chatStartVersion,
         }),
       });
       const reader = res.body?.getReader();
@@ -166,6 +169,10 @@ export default function UpdateMode({
         <section className="flex flex-col h-[60dvh] min-h-[360px] bg-[#F5F0EB] rounded-2xl border border-[#DDD5CC] overflow-hidden">
           <div className="px-4 py-2.5 border-b border-[#DDD5CC]">
             <h1 className="font-heading text-base font-bold text-[#2C2420]">Update your event</h1>
+            <p className="text-xs text-[#6B5D52] mt-0.5 leading-snug">
+              Change anything up to 6 days before your event. After that, you can still change everything
+              except your drink menu.
+            </p>
           </div>
           <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 py-3 space-y-3">
             {messages

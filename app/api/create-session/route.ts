@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 import crypto from "crypto";
-import { DEFAULT_DEPOSIT, toBool, toMoney, type BookedPrice } from "@/lib/change-order";
+import { DEFAULT_DEPOSIT, toBool, toMoney, type BookedPrice } from "@/lib/price-change";
 
 function generateId(): string {
   return crypto.randomBytes(4).toString("hex"); // 8 hex chars
@@ -13,8 +13,8 @@ export async function POST(req: NextRequest) {
 
     const { name, email, event_date, package_type, guest_count, event_name, hours_booked } = body;
 
-    // What the client booked, from the quote tool through GHL. Change orders are
-    // priced against this. Values may arrive as "$1,749" or "Yes", so parse loosely.
+    // What the client booked, from the quote tool through GHL. Price changes in
+    // update mode are priced against this. Values may arrive as "$1,749" or "Yes", so parse loosely.
     const total = toMoney(body.total);
     const promo = typeof body.promo_code === "string" && body.promo_code.trim() ? body.promo_code.trim().toUpperCase() : null;
     const priceKeys = ["package_price", "gratuity", "total", "bartenders", "promo_code", "custom_price", "discount_amount", "tip_jar", "deposit_paid"];
