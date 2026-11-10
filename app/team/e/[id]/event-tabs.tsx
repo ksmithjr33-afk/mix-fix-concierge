@@ -1,0 +1,474 @@
+"use client";
+
+import { useState } from "react";
+import type { StaffEventView } from "@/lib/team/event-view";
+import type { ResolvedGroup } from "@/lib/team/checklist-config";
+import type { ShopItem, StaffShopping } from "@/lib/team/shopping";
+import type { CheckState, ListName } from "@/lib/team/checks";
+
+type Tab = "details" | "checklist" | "shopping";
+
+const card = "bg-[#F5F0EB] rounded-2xl border border-[#DDD5CC] px-4 py-3 sm:px-5 sm:py-4";
+
+function Row({ label, value, children }: { label: string; value?: string; children?: React.ReactNode }) {
+  if (!value && !children) return null;
+  return (
+    <div className="py-2.5 border-b border-[#DDD5CC] last:border-0">
+      <dt className="text-xs text-[#A39585] uppercase tracking-wide mb-0.5">{label}</dt>
+      <dd className="text-[15px] text-[#2C2420] whitespace-pre-wrap break-words">{children ?? value}</dd>
+    </div>
+  );
+}
+
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section className={card}>
+      <h3 className="font-heading text-base font-bold text-[#2C2420] mb-1">{title}</h3>
+      <dl>{children}</dl>
+    </section>
+  );
+}
+
+function telHref(phone: string): string {
+  return `tel:${phone.replace(/[^\d+]/g, "")}`;
+}
+
+function Details({ v }: { v: StaffEventView }) {
+  return (
+    <div className="space-y-3">
+      {v.whatChanged.length > 0 && (
+        <section className="bg-[#FFF8EC] rounded-2xl border border-[#E3C9A0] px-4 py-3 sm:px-5 sm:py-4">
+          <h3 className="font-heading text-base font-bold text-[#2C2420] mb-1">What changed</h3>
+          <ul className="space-y-1">
+            {v.whatChanged.map((line, i) => (
+              <li key={i} className="text-[15px] text-[#2C2420] break-words">
+                {line}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      <Section title="Event">
+        <Row label="Event" value={[v.eventName, v.eventType].filter(Boolean).join(", ")} />
+        <Row label="Client" value={v.clientFirstName} />
+        <Row label="Date" value={v.date} />
+        <Row label="Arrive by" value={v.arrival} />
+        <Row label="Bar service" value={v.serviceStart && v.serviceEnd ? `${v.serviceStart} to ${v.serviceEnd}` : v.serviceStart} />
+        <Row label="Guest count" value={v.guestCount} />
+        <Row label="Package" value={v.package} />
+        <Row label="Bartenders" value={v.bartenders !== null ? String(v.bartenders) : ""} />
+        <Row label="Also working" value={v.teammates.join(", ")} />
+      </Section>
+
+      <Section title="Location">
+        {v.address && (
+          <Row label="Address">
+            {v.mapsUrl ? (
+              <a href={v.mapsUrl} target="_blank" rel="noopener noreferrer" className="text-[#B5845A] underline">
+                {v.address}
+              </a>
+            ) : (
+              v.address
+            )}
+          </Row>
+        )}
+        <Row label="Venue type" value={v.venueType} />
+        <Row label="Bar setting" value={v.barSetting} />
+        <Row label="Bar on site" value={v.barOnSite} />
+        <Row label="Bar floor access" value={v.barFloorAccess} />
+        <Row label="Bar details" value={v.barDetails} />
+        <Row label="Parking" value={v.parking} />
+      </Section>
+
+      <Section title="Day of contact">
+        <Row label="Contact" value={v.dayOfContact.name} />
+        <Row label="Phone">
+          {v.dayOfContact.phone ? (
+            <a href={telHref(v.dayOfContact.phone)} className="text-[#B5845A] underline">
+              {v.dayOfContact.phone}
+            </a>
+          ) : (
+            <span className="text-[#6B5D52]">{v.dayOfContact.phoneNote}</span>
+          )}
+        </Row>
+        <Row label="The Mix Fix">
+          <a href={telHref(v.mixFixLine)} className="text-[#B5845A] underline">
+            {v.mixFixLine}
+          </a>
+        </Row>
+      </Section>
+
+      <Section title="Style and notes">
+        <Row label="Theme" value={v.theme} />
+        <Row label="Colors" value={v.colors} />
+        <Row label="Allergies" value={v.allergies.join(", ") || "None"} />
+        <Row label="Beer and wine" value={v.beerAndWine} />
+        <Row label="Special requests" value={v.specialRequests || "None"} />
+      </Section>
+
+      {v.drinks.length > 0 && (
+        <section className={card}>
+          <h3 className="font-heading text-base font-bold text-[#2C2420] mb-2">Signature drinks</h3>
+          <ul className="space-y-3">
+            {v.drinks.map((d, i) => (
+              <li key={i} className="border-b border-[#DDD5CC] last:border-0 pb-3 last:pb-0">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-heading font-bold text-[#B5845A]">{d.name}</span>
+                  {d.kind && <span className="text-xs text-[#A39585] bg-[#E8DDD5] px-2 py-0.5 rounded-full shrink-0">{d.kind}</span>}
+                </div>
+                <ul className="mt-1 text-sm text-[#2C2420] space-y-0.5">
+                  {d.ingredients.map((ing, j) => (
+                    <li key={j}>{ing}</li>
+                  ))}
+                </ul>
+                {d.method && <p className="text-sm text-[#6B5D52] mt-1">Method: {d.method}</p>}
+                {d.garnish && <p className="text-sm text-[#6B5D52]">Garnish: {d.garnish}</p>}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {v.classics && (
+        <section className={card}>
+          <h3 className="font-heading text-base font-bold text-[#2C2420]">Classics menu</h3>
+          <p className="text-sm text-[#6B5D52] mb-2">No signature menu. Guests order these classics at the bar.</p>
+          <div className="space-y-3">
+            {v.classics.map((g) => (
+              <div key={g.title}>
+                <h4 className="text-xs text-[#A39585] uppercase tracking-wide mb-1">{g.title}</h4>
+                <ul className="space-y-1.5">
+                  {g.drinks.map((d) => (
+                    <li key={d.name} className="text-sm text-[#2C2420]">
+                      <span className="font-bold">{d.name}:</span> {d.recipe}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {v.lastUpdated && <p className="text-xs text-[#A39585] px-1">Last updated {v.lastUpdated}</p>}
+    </div>
+  );
+}
+
+function Progress({ state }: { state: Record<string, CheckState> }) {
+  const values = Object.values(state);
+  const checked = values.filter((s) => s.checked).length;
+  const total = values.length;
+  return (
+    <div className="sticky top-0 z-10 bg-[#E8DDD5] pt-1 pb-2">
+      <div className="flex items-center justify-between text-sm text-[#2C2420] mb-1">
+        <span className="font-medium">
+          {checked} of {total} checked
+        </span>
+      </div>
+      <div className="h-1.5 rounded-full bg-[#DDD5CC] overflow-hidden">
+        <div className="h-full bg-[#8B9E7E] transition-all" style={{ width: `${total ? (checked / total) * 100 : 0}%` }} />
+      </div>
+    </div>
+  );
+}
+
+function CheckLine({
+  label,
+  detail,
+  state,
+  onToggle,
+}: {
+  label: string;
+  detail?: string;
+  state: CheckState;
+  onToggle: () => void;
+}) {
+  return (
+    <li>
+      <button
+        type="button"
+        onClick={onToggle}
+        className="w-full flex items-start gap-3 py-2.5 text-left border-b border-[#DDD5CC] last:border-0"
+        aria-pressed={state.checked}
+      >
+        <span
+          className={`mt-0.5 w-6 h-6 rounded-md border-2 flex items-center justify-center shrink-0 ${
+            state.checked ? "bg-[#8B9E7E] border-[#8B9E7E] text-white" : "border-[#A39585] bg-white"
+          }`}
+        >
+          {state.checked && (
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M5 12l5 5L20 7" />
+            </svg>
+          )}
+        </span>
+        <span className="flex-1 min-w-0">
+          <span className={`text-[15px] ${state.checked ? "text-[#6B5D52] line-through" : "text-[#2C2420]"}`}>{label}</span>
+          {state.changed && (
+            <span className="ml-2 align-middle text-[11px] font-bold uppercase tracking-wide text-[#A0412D] bg-[#F6E3DC] px-1.5 py-0.5 rounded">
+              changed
+            </span>
+          )}
+          {detail && <span className="block text-sm text-[#6B5D52]">{detail}</span>}
+        </span>
+      </button>
+    </li>
+  );
+}
+
+function useChecks(sessionId: string, list: ListName, initial: Record<string, CheckState>) {
+  const [state, setState] = useState(initial);
+  const [error, setError] = useState("");
+  const toggle = async (key: string) => {
+    const before = state[key];
+    if (!before) return;
+    const next = { checked: !before.checked, changed: false };
+    setState((s) => ({ ...s, [key]: next }));
+    setError("");
+    try {
+      const res = await fetch("/api/team/checks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId, list, key, checked: next.checked }),
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? "Could not save.");
+    } catch (err) {
+      setState((s) => ({ ...s, [key]: before }));
+      setError(err instanceof Error ? err.message : "Could not save.");
+    }
+  };
+  return { state, toggle, error };
+}
+
+function Checklist({
+  sessionId,
+  groups,
+  initial,
+  footer,
+}: {
+  sessionId: string;
+  groups: ResolvedGroup[];
+  initial: Record<string, CheckState>;
+  footer: string;
+}) {
+  const { state, toggle, error } = useChecks(sessionId, "checklist", initial);
+  return (
+    <div className="space-y-3">
+      <h2 className="font-heading text-xl font-bold text-[#2C2420] px-1">Who brings what</h2>
+      <Progress state={state} />
+      {error && <p className="text-sm text-[#A0412D] px-1">{error}</p>}
+      {groups.map((g) => (
+        <section key={g.id} className={card}>
+          <h3 className="font-heading text-base font-bold text-[#2C2420]">{g.title}</h3>
+          <p className="text-sm text-[#6B5D52] mb-2">{g.subtitle}</p>
+          {g.sections.map((s) => (
+            <div key={s.title} className="mt-2">
+              <h4 className="text-xs text-[#A39585] uppercase tracking-wide">{s.title}</h4>
+              <ul>
+                {s.lines.map((l) =>
+                  l.info ? (
+                    <li key={l.key} className="flex items-start gap-3 py-2.5 border-b border-[#DDD5CC] last:border-0">
+                      <span className="mt-0.5 w-6 h-6 rounded-full bg-[#E8DDD5] text-[#B5845A] text-sm font-bold flex items-center justify-center shrink-0">
+                        i
+                      </span>
+                      <span className="text-[15px] text-[#2C2420]">{l.label}</span>
+                    </li>
+                  ) : (
+                    <CheckLine key={l.key} label={l.label} state={state[l.key] ?? { checked: false, changed: false }} onToggle={() => toggle(l.key)} />
+                  )
+                )}
+              </ul>
+            </div>
+          ))}
+        </section>
+      ))}
+      <p className="text-sm text-[#6B5D52] px-1">{footer}</p>
+    </div>
+  );
+}
+
+function itemDetail(i: ShopItem): string {
+  return [i.quantity, i.brand].filter(Boolean).join(", ");
+}
+
+function MissingSheet({ sessionId, items, onClose }: { sessionId: string; items: ShopItem[]; onClose: () => void }) {
+  const [picked, setPicked] = useState<string[]>([]);
+  const [note, setNote] = useState("");
+  const [status, setStatus] = useState<"idle" | "sending" | "sent">("idle");
+  const [error, setError] = useState("");
+
+  const send = async () => {
+    setStatus("sending");
+    setError("");
+    try {
+      const res = await fetch("/api/team/missing", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId, keys: picked, note }),
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? "Could not send.");
+      setStatus("sent");
+    } catch (err) {
+      setStatus("idle");
+      setError(err instanceof Error ? err.message : "Could not send.");
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-end sm:items-center justify-center" onClick={onClose}>
+      <div
+        className="w-full sm:max-w-md max-h-[85dvh] flex flex-col bg-[#F5F0EB] rounded-t-2xl sm:rounded-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="px-4 py-3 border-b border-[#DDD5CC] flex items-center justify-between">
+          <h3 className="font-heading text-base font-bold text-[#2C2420]">Something is missing</h3>
+          <button type="button" onClick={onClose} className="text-sm text-[#6B5D52]">
+            Close
+          </button>
+        </div>
+        {status === "sent" ? (
+          <div className="px-4 py-6 text-center space-y-3">
+            <p className="text-[15px] text-[#2C2420]">Sent to the team. Someone will text you back.</p>
+            <button type="button" onClick={onClose} className="rounded-xl bg-[#B5845A] text-white px-6 py-2.5 font-medium">
+              Done
+            </button>
+          </div>
+        ) : (
+          <>
+            <ul className="flex-1 overflow-y-auto px-4">
+              {items.map((i) => (
+                <CheckLine
+                  key={i.key}
+                  label={i.item}
+                  detail={itemDetail(i)}
+                  state={{ checked: picked.includes(i.key), changed: false }}
+                  onToggle={() => setPicked((p) => (p.includes(i.key) ? p.filter((k) => k !== i.key) : [...p, i.key]))}
+                />
+              ))}
+            </ul>
+            <div className="px-4 py-3 border-t border-[#DDD5CC] space-y-2">
+              <textarea
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                placeholder="Add a note (optional)"
+                rows={2}
+                className="w-full resize-none rounded-xl border border-[#DDD5CC] bg-[#E8DDD5] px-3.5 py-2.5 text-[16px] text-[#2C2420] placeholder:text-[#A39585] focus:outline-none focus:ring-2 focus:ring-[#B5845A]/30"
+              />
+              {error && <p className="text-sm text-[#A0412D]">{error}</p>}
+              <button
+                type="button"
+                onClick={send}
+                disabled={status === "sending" || (picked.length === 0 && !note.trim())}
+                className="w-full rounded-xl bg-[#B5845A] text-white py-3 font-medium disabled:opacity-40"
+              >
+                {status === "sending" ? "Sending..." : `Text the team${picked.length ? ` (${picked.length})` : ""}`}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function Shopping({ sessionId, shopping, initial }: { sessionId: string; shopping: StaffShopping; initial: Record<string, CheckState> }) {
+  const { state, toggle, error } = useChecks(sessionId, "shopping", initial);
+  const [missingOpen, setMissingOpen] = useState(false);
+  const groups: [string, ShopItem[]][] = [
+    ["Alcohol", shopping.alcohol],
+    ["Mixers, garnishes and supplies", shopping.supplies],
+  ];
+  const all = [...shopping.alcohol, ...shopping.supplies];
+
+  return (
+    <div className="space-y-3">
+      <Progress state={state} />
+      {error && <p className="text-sm text-[#A0412D] px-1">{error}</p>}
+      {groups.map(([title, items]) => (
+        <section key={title} className={card}>
+          <h3 className="font-heading text-base font-bold text-[#2C2420] mb-1">{title}</h3>
+          {items.length === 0 ? (
+            <p className="text-sm text-[#6B5D52] py-2">Nothing on this list for this package.</p>
+          ) : (
+            <ul>
+              {items.map((i) => (
+                <CheckLine key={i.key} label={i.item} detail={itemDetail(i)} state={state[i.key] ?? { checked: false, changed: false }} onToggle={() => toggle(i.key)} />
+              ))}
+            </ul>
+          )}
+        </section>
+      ))}
+      <button
+        type="button"
+        onClick={() => setMissingOpen(true)}
+        className="w-full rounded-xl border-2 border-[#B5845A] text-[#B5845A] py-3 font-medium hover:bg-[#F5F0EB]"
+      >
+        Something is missing
+      </button>
+      {missingOpen && <MissingSheet sessionId={sessionId} items={all} onClose={() => setMissingOpen(false)} />}
+    </div>
+  );
+}
+
+export default function EventTabs({
+  view,
+  checklist,
+  checklistState,
+  checklistFooter,
+  shopping,
+  shoppingState,
+}: {
+  view: StaffEventView;
+  checklist: ResolvedGroup[];
+  checklistState: Record<string, CheckState>;
+  checklistFooter: string;
+  shopping: StaffShopping;
+  shoppingState: Record<string, CheckState>;
+}) {
+  const [tab, setTab] = useState<Tab>("details");
+  const tabs: [Tab, string][] = [
+    ["details", "Details"],
+    ["checklist", "Checklist"],
+    ["shopping", "Shopping list"],
+  ];
+
+  return (
+    <main className="max-w-2xl mx-auto px-4 py-4 sm:py-6 space-y-4">
+      <div className="px-1">
+        <h1 className="font-heading text-2xl font-bold text-[#2C2420] break-words">{view.eventName || view.eventType || "Event"}</h1>
+        <p className="text-[15px] text-[#6B5D52]">
+          {[view.date, view.arrival ? `arrive ${view.arrival}` : ""].filter(Boolean).join(", ")}
+        </p>
+      </div>
+
+      <nav className="grid grid-cols-3 gap-1 bg-[#DDD5CC] p-1 rounded-xl" role="tablist">
+        {tabs.map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            role="tab"
+            aria-selected={tab === key}
+            onClick={() => setTab(key)}
+            className={`py-2 rounded-lg text-sm font-medium transition-colors ${
+              tab === key ? "bg-[#F5F0EB] text-[#2C2420] shadow-sm" : "text-[#6B5D52]"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </nav>
+
+      <div hidden={tab !== "details"}>
+        <Details v={view} />
+      </div>
+      <div hidden={tab !== "checklist"}>
+        <Checklist sessionId={view.sessionId} groups={checklist} initial={checklistState} footer={checklistFooter} />
+      </div>
+      <div hidden={tab !== "shopping"}>
+        <Shopping sessionId={view.sessionId} shopping={shopping} initial={shoppingState} />
+      </div>
+    </main>
+  );
+}

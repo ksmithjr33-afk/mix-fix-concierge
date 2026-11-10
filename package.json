@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "test:pricing": "node --no-warnings scripts/test-pricing.mts",
-    "test:menu": "node --no-warnings scripts/test-menu.mts"
+    "test:menu": "node --no-warnings scripts/test-menu.mts",
+    "test:team": "node --no-warnings scripts/test-team.mts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.80.0",
