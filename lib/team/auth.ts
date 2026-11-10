@@ -179,3 +179,10 @@ export async function saveStaffName(staffId: string, name: string): Promise<void
   const { error } = await supabase.from("staff").update({ name }).eq("id", staffId);
   if (error) throw new Error(`staff name save failed: ${error.message}`);
 }
+
+/** For admin pages: signed in, named, and an admin. Bartenders go to their own events. */
+export async function requireAdmin(path: string): Promise<StaffMember> {
+  const staff = await requireStaff(path);
+  if (staff.role !== "admin") redirect("/team/events");
+  return staff;
+}

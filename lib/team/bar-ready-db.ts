@@ -6,7 +6,7 @@ import { supabase } from "@/lib/supabase";
 import type { SessionRow } from "@/lib/event-updates";
 import { firstName, type StaffMember } from "@/lib/team/event-view";
 import { eventTitle } from "@/lib/team/event-list";
-import { activeAdmins, checkSnapshot, hasMissingReports } from "@/lib/team/events";
+import { alertAdmins, checkSnapshot, hasMissingReports } from "@/lib/team/events";
 import { sendStaffText } from "@/lib/team/sms";
 import {
   BAR_PHOTO_BUCKET,
@@ -151,6 +151,6 @@ export async function submitBarReady(opts: {
     missingReported: missing,
     link: opts.eventLink,
   });
-  const admins = await activeAdmins();
+  const admins = await alertAdmins();
   await Promise.all(admins.map((a) => sendStaffText(a.phone, a.name, message)));
 }

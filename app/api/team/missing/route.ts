@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getCurrentStaff } from "@/lib/team/auth";
-import { activeAdmins, openEvent, recordMissing } from "@/lib/team/events";
+import { alertAdmins, openEvent, recordMissing } from "@/lib/team/events";
 import { allShopItems, buildStaffShopping } from "@/lib/team/shopping";
 import { firstName, scrub } from "@/lib/team/event-view";
 import { eventDay, shortDate } from "@/lib/team/time";
@@ -31,7 +31,7 @@ export async function POST(request: Request) {
     ].filter(Boolean);
 
     await recordMissing(sessionId, staff.id, items.map((i) => i.item), noteText);
-    const admins = await activeAdmins();
+    const admins = await alertAdmins();
     const sent = await Promise.all(admins.map((a) => sendStaffText(a.phone, a.name, lines.join("\n"))));
     console.log(`[team] missing items for ${sessionId} from ${staff.id}: ${items.length} items, ${sent.filter(Boolean).length}/${admins.length} texts sent`);
     return NextResponse.json({ ok: true });

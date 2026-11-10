@@ -353,7 +353,7 @@ function updateToolResult(result: ApplyResult | null): string {
   return `TOOL RESULT:\n\n${parts.join("\n\n")}`;
 }
 
-async function updateModeResponse(session: SessionRow, messages: ChatMessage[], chatStartVersion: number) {
+async function updateModeResponse(session: SessionRow, messages: ChatMessage[], chatStartVersion: number, origin: string) {
   const eventData = session.event_data as EventData;
   const deadlines = computeDeadlines(eventData.event_date ?? session.event_date);
   // Every change saved since this chat opened, for the final recap.
@@ -446,7 +446,8 @@ async function updateModeResponse(session: SessionRow, messages: ChatMessage[], 
                 })),
               });
               // Send the GHL note and update webhook before the bot confirms the change.
-              await deliverEventUpdates(session.id, result.rows);
+              // Assigned staff get a text with their event page link; it never blocks the update.
+              await deliverEventUpdates(session.id, result.rows, { staffOrigin: origin });
             }
             toolResults.push({ type: "tool_result", tool_use_id: toolUse.id, content: updateToolResult(result) });
           }
@@ -535,7 +536,7 @@ export async function POST(request: Request) {
     session = await getSession(sessionId);
     if (session?.status === "submitted" && session.event_data) {
       const start = typeof chatStartVersion === "number" ? chatStartVersion : session.version;
-      return updateModeResponse(session, messages, start);
+      return updateModeResponse(session, messages, start, new URL(request.url).origin);
     }
   }
 

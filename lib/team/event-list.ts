@@ -20,6 +20,8 @@ export interface EventListItem {
   detail: string;
   search: string; // lower case text the search box matches
   status?: string; // the bartender's assignment status, when there is one
+  href?: string; // defaults to the staff event page
+  badge?: { text: string; tone: "ok" | "warn" | "muted" };
 }
 
 /** "Justin · Wedding": client first name and event type. */

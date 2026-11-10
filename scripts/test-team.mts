@@ -23,6 +23,7 @@ const shop = await import("../lib/team/shopping.ts");
 const time = await import("../lib/team/time.ts");
 const list = await import("../lib/team/event-list.ts");
 const bar = await import("../lib/team/bar-ready.ts");
+const asg = await import("../lib/team/assignments.ts");
 const auth = { needsName: (s: { name: string }) => !s.name.trim() || s.name.trim().toLowerCase() === "admin" };
 const shoppingLib = await import("../lib/shopping-list.ts");
 
@@ -380,6 +381,111 @@ const barDb = readFileSync(new URL("../lib/team/bar-ready-db.ts", import.meta.ur
 check("Bar photos are shown through signed URLs only", barDb.includes("createSignedUrls(") && !barDb.includes("getPublicUrl"));
 const eventPage = readFileSync(new URL("../app/team/e/[id]/page.tsx", import.meta.url), "utf8");
 check("Event page loads bar photos only after the access check", eventPage.indexOf("openEvent(") < eventPage.indexOf("barReadyEntries("));
+
+// ----- Phase 2: admin alerts -----
+const admins = [
+  { id: "a1", role: "admin", active: true, alerts: true },
+  { id: "a2", role: "admin", active: true, alerts: false },
+  { id: "a3", role: "admin", active: false, alerts: true },
+  { id: "a4", role: "admin", active: true, alerts: null },
+  { id: "a5", role: "admin", active: true },
+  { id: "b1", role: "bartender", active: true, alerts: true },
+];
+check("Alert texts go only to active admins with alerts on", asg.alertRecipients(admins).map((a) => a.id).join(",") === "a1,a4,a5");
+check("Alerts are on by default", asg.alertRecipients([{ id: "x", role: "admin", active: true }]).length === 1);
+const eventsLib = readFileSync(new URL("../lib/team/events.ts", import.meta.url), "utf8");
+check("alertAdmins filters by the alerts setting", /export async function alertAdmins[\s\S]*?alertRecipients\(/.test(eventsLib) && !eventsLib.includes("activeAdmins"));
+const missingSrc = readFileSync(new URL("../app/api/team/missing/route.ts", import.meta.url), "utf8");
+const asgDb = readFileSync(new URL("../lib/team/assignments-db.ts", import.meta.url), "utf8");
+check("Missing items text uses alertAdmins", missingSrc.includes("await alertAdmins()"));
+check("Bar ready text uses alertAdmins", barDb.includes("await alertAdmins()"));
+check("Decline text uses alertAdmins", /response === "decline"[\s\S]*?await alertAdmins\(\)/.test(asgDb));
+const migration = readdirSync(new URL("../supabase/migrations/", import.meta.url)).map((f) => readFileSync(new URL(`../supabase/migrations/${f}`, import.meta.url), "utf8")).join("\n");
+check("The alerts column defaults to on", /add column if not exists alerts boolean not null default true/.test(migration));
+
+// ----- Phase 2: assignments -----
+check("Offered staff can accept or decline", asg.canRespond("offered", "accept") && asg.canRespond("offered", "decline"));
+check("Accepted staff can still decline but not accept again", asg.canRespond("accepted", "decline") && !asg.canRespond("accepted", "accept"));
+check("Declined staff cannot respond", !asg.canRespond("declined", "accept") && !asg.canRespond("declined", "decline"));
+check("Staff with no assignment cannot respond", !asg.canRespond(null, "accept"));
+check("Responses set the status", asg.statusAfter("accept") === "accepted" && asg.statusAfter("decline") === "declined");
+const c3 = asg.staffingCounts(3, ["accepted", "offered", "declined"]);
+check("Counts: declined staff do not count as assigned", c3.assigned === 2 && c3.accepted === 1 && c3.offered === 1 && c3.declined === 1 && c3.stillNeeded === 1);
+check("Counts: label", asg.staffingLabel(c3) === "2 of 3 assigned");
+check("Counts: never below zero", asg.staffingCounts(1, ["accepted", "accepted"]).stillNeeded === 0);
+check("Counts: unknown need", asg.staffingCounts(null, ["offered"]).stillNeeded === 0 && asg.staffingLabel(asg.staffingCounts(null, ["offered"])) === "1 assigned");
+check("Bartenders needed uses the saved count, then the staffing rule", view.bartendersNeeded({ id: "x", event_data: { bartenders: 3, guest_count: 50 } }) === 3 && view.bartendersNeeded({ id: "x", event_data: { guest_count: 150 } }) === 2);
+check(
+  "Assign text",
+  asg.assignText({ firstName: "Jordan", date: "Sat, Dec 12", arrival: "4:00 PM", link: "https://x/team/e/s1" }) ===
+    "Hi Jordan, you have a new Mix Fix event on Sat, Dec 12, arrive 4:00 PM. Accept or decline here: https://x/team/e/s1",
+);
+check("Removal text", asg.removalText({ firstName: "Jordan", date: "Sat, Dec 12" }).startsWith("Hi Jordan, you are no longer scheduled for the Mix Fix event on Sat, Dec 12."));
+check("Decline text links to the admin event page", asg.declineText({ firstName: "Jordan", title: "Justin · Wedding", date: "Sat, Dec 12", link: "https://x/team/admin/e/s1" }).includes("Jordan declined Justin · Wedding on Sat, Dec 12"));
+check("Update text", asg.updateText({ date: "Sat, Dec 12", link: "https://x/team/e/s1" }) === "Your event on Sat, Dec 12 was updated. Check your event page: https://x/team/e/s1");
+check("Assign and decline texts carry no client last name", !asg.assignText({ firstName: "Jordan", date: "d", arrival: "a", link: "l" }).includes("Butler"));
+
+// ----- Phase 2: staff list -----
+const vs = asg.validateStaffInput({ first: " Jordan ", last: "Lee", phone: "(214) 555-0101", role: "bartender" }, codes.normalizePhone);
+check("Staff form cleans the name and phone", vs.ok && vs.value.name === "Jordan Lee" && vs.value.phone === "+12145550101");
+check("Staff form needs a first and last name", !asg.validateStaffInput({ first: "Jordan", last: "", phone: "2145550101" }, codes.normalizePhone).ok);
+check("Staff form needs a real phone", !asg.validateStaffInput({ first: "A", last: "B", phone: "555" }, codes.normalizePhone).ok);
+check("Staff form refuses an unknown role", !asg.validateStaffInput({ first: "A", last: "B", phone: "2145550101", role: "owner" }, codes.normalizePhone).ok);
+check("Admins cannot deactivate themselves", asg.selfChangeError("a1", "a1", { active: false }) !== null);
+check("Admins cannot drop their own admin role", asg.selfChangeError("a1", "a1", { role: "bartender" }) !== null);
+check("Admins can change other people", asg.selfChangeError("a1", "b1", { active: false, role: "bartender" }) === null);
+check("Admins can edit their own name and alerts", asg.selfChangeError("a1", "a1", { role: "admin" }) === null);
+check("Deactivating signs the person out", asgDb.includes('if (patch.active === false) await supabase.from("staff_sessions").delete()'));
+
+// ----- Phase 2: admin routes and pages are admin only -----
+for (const route of ["admin/staff", "admin/assign"]) {
+  const src = readFileSync(new URL(`../app/api/team/${route}/route.ts`, import.meta.url), "utf8");
+  check(`/api/team/${route} is admin only`, src.includes("getCurrentStaff()") && src.includes('role !== "admin"') && src.includes("status: 403"));
+}
+for (const page of ["admin/events/page.tsx", "admin/e/[id]/page.tsx", "admin/staff/page.tsx"]) {
+  const src = readFileSync(new URL(`../app/team/${page}`, import.meta.url), "utf8");
+  check(`/team/${page.replace("/page.tsx", "")} requires an admin`, src.includes("await requireAdmin("));
+}
+check("requireAdmin sends bartenders away", authSrc.includes('if (staff.role !== "admin") redirect("/team/events")'));
+const respondSrc = readFileSync(new URL("../app/api/team/respond/route.ts", import.meta.url), "utf8");
+check("/api/team/respond needs a signed in staff member", respondSrc.includes("getCurrentStaff()") && respondSrc.includes("status: 401"));
+check("Responding needs an assignment", /if \(!status\) return \{ ok: false, error: "You are not assigned to this event.", status: 403 \}/.test(asgDb));
+for (const dir of ["../app/team/admin/events/", "../app/team/admin/e/[id]/", "../app/team/admin/staff/"]) {
+  for (const file of readdirSync(new URL(dir, import.meta.url)).filter((f) => f.endsWith(".tsx"))) {
+    const src = readFileSync(new URL(`${dir}${file}`, import.meta.url), "utf8");
+    check(`${dir.replace("../", "")}${file} reads no client email or pricing fields`, !/\.(email|booked_price|payment_preference|promo_code|gratuity|deposit_paid)\b/.test(src));
+  }
+}
+
+// ----- Phase 2: texts on client updates -----
+const sentTo: string[] = [];
+const okDeps = {
+  assignedStaff: async () => [{ phone: "+12145550101", name: "Jordan Lee" }, { phone: "+12145550103", name: "Sam Diaz" }],
+  send: async (phone: string, _n: string, msg: string) => (sentTo.push(`${phone}|${msg}`), true),
+};
+const upd = { id: "s1", event_data: { event_date: "2026-12-12" } };
+const nSent = await asg.notifyAssignedStaff(upd, ["guest_count"], "https://x", okDeps);
+check("A client update texts every assigned staff member", nSent === 2 && sentTo.every((t) => t.endsWith("|Your event on Sat, Dec 12 was updated. Check your event page: https://x/team/e/s1")), sentTo.join(" / "));
+sentTo.length = 0;
+check("Updates staff cannot see send no text", (await asg.notifyAssignedStaff(upd, ["payment_preference", "email"], "https://x", okDeps)) === 0 && sentTo.length === 0);
+const quiet = console.error;
+console.error = () => {};
+let threw = false;
+try {
+  const r1 = await asg.notifyAssignedStaff(upd, ["guest_count"], "https://x", { assignedStaff: async () => { throw new Error("db down"); }, send: okDeps.send });
+  const r2 = await asg.notifyAssignedStaff(upd, ["guest_count"], "https://x", { assignedStaff: okDeps.assignedStaff, send: async () => { throw new Error("sms down"); } });
+  check("A failed lookup or text never throws", r1 === 0 && r2 === 0);
+} catch {
+  threw = true;
+}
+console.error = quiet;
+check("Update texts never block the update", !threw);
+const deliverySrc = readFileSync(new URL("../lib/update-delivery.ts", import.meta.url), "utf8");
+check("Update delivery sends staff texts alongside the GHL delivery", deliverySrc.includes("notifyStaffOfUpdate(session, changedFields, opts.staffOrigin).catch(() => 0)"));
+const chatSrc = readFileSync(new URL("../app/api/chat/route.ts", import.meta.url), "utf8");
+check("The chat route passes the link origin for staff texts", chatSrc.includes("deliverEventUpdates(session.id, result.rows, { staffOrigin: origin })"));
+const retrySrc = readFileSync(new URL("../app/api/update-webhook/route.ts", import.meta.url), "utf8");
+check("The manual retry does not text staff again", retrySrc.includes("deliverEventUpdates(sessionId, rows)") && !retrySrc.includes("staffOrigin"));
 
 if (failed > 0) {
   console.error(`\n${failed} of ${total} team checks failed.`);

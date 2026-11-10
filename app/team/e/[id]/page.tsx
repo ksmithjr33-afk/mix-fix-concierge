@@ -1,5 +1,5 @@
 import { requireStaff } from "@/lib/team/auth";
-import { eventPageData, openEvent } from "@/lib/team/events";
+import { eventPageData, getAssignment, openEvent } from "@/lib/team/events";
 import { CHECKLIST_FOOTER } from "@/lib/team/checklist-config";
 import { barReadyEntries } from "@/lib/team/bar-ready-db";
 import { barReadyOpen } from "@/lib/team/bar-ready";
@@ -20,7 +20,7 @@ export default async function TeamEventPage({ params }: { params: Promise<{ id: 
   if (!access.ok) {
     return (
       <>
-        <TeamHeader signedIn back={back} />
+        <TeamHeader signedIn admin={staff.role === "admin"} back={back} />
         <main className="max-w-md mx-auto px-4 py-10 text-center">
           <p className="text-[15px] text-[#6B5D52]">
             {access.reason === "not_found" ? "We could not find that event." : "You are not assigned to this event."}
@@ -31,12 +31,18 @@ export default async function TeamEventPage({ params }: { params: Promise<{ id: 
   }
 
   const ed = access.session.event_data ?? {};
-  const [data, entries] = await Promise.all([eventPageData(access.session, staff), barReadyEntries(id, staff)]);
+  const [data, entries, assignment] = await Promise.all([
+    eventPageData(access.session, staff),
+    barReadyEntries(id, staff),
+    getAssignment(id, staff.id),
+  ]);
   const open = barReadyOpen(ed);
   return (
     <>
-      <TeamHeader signedIn back={back} />
+      <TeamHeader signedIn admin={staff.role === "admin"} back={back} />
       <EventTabs
+        offered={assignment?.status === "offered"}
+        manageHref={staff.role === "admin" ? `/team/admin/e/${id}` : null}
         view={data.view}
         checklist={data.checklist}
         checklistState={data.checklistState}

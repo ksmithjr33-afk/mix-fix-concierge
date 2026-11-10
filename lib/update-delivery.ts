@@ -8,6 +8,7 @@ import { supabase } from "@/lib/supabase";
 import { createNoteByEmail } from "@/lib/ghl-api";
 import { getSession, type EventUpdateRow, type SessionRow } from "@/lib/event-updates";
 import { buildUpdateNote, buildUpdatePayload } from "@/lib/update-notes";
+import { notifyStaffOfUpdate } from "@/lib/team/assignments-db";
 
 export interface DeliveryResult {
   id: string;
@@ -84,8 +85,16 @@ async function deliverRow(session: SessionRow, row: EventUpdateRow & { note_crea
 /**
  * Send each row's note and webhook payload. The payload carries the session's
  * current event_data, so the session is read fresh here. Never throws.
+ *
+ * With staffOrigin (the chat route passes it), each assigned staff member also
+ * gets a text with a link to their event page. The manual retry leaves it out
+ * so a retry never texts staff twice. A text failure never blocks delivery.
  */
-export async function deliverEventUpdates(sessionId: string, rows: EventUpdateRow[]): Promise<DeliveryResult[]> {
+export async function deliverEventUpdates(
+  sessionId: string,
+  rows: EventUpdateRow[],
+  opts: { staffOrigin?: string } = {}
+): Promise<DeliveryResult[]> {
   if (rows.length === 0) return [];
   const session = await getSession(sessionId);
   if (!session || !session.event_data) {
@@ -99,6 +108,11 @@ export async function deliverEventUpdates(sessionId: string, rows: EventUpdateRo
     }));
   }
 
+  const changedFields = rows.filter((r) => r.applied).flatMap((r) => (r.changes ?? []).map((c) => c.field));
+  const staffTexts = opts.staffOrigin
+    ? notifyStaffOfUpdate(session, changedFields, opts.staffOrigin).catch(() => 0)
+    : Promise.resolve(0);
+
   const results: DeliveryResult[] = [];
   for (const row of rows) {
     try {
@@ -109,6 +123,8 @@ export async function deliverEventUpdates(sessionId: string, rows: EventUpdateRo
       results.push({ id: row.id, version: row.version, note_created: false, webhook_sent: false, error });
     }
   }
+  const texted = await staffTexts;
+  if (texted > 0) console.log(`[update-webhook] session ${sessionId}: texted ${texted} assigned staff`);
   return results;
 }
 

@@ -176,7 +176,8 @@ const STAFF_CHANGE_FIELDS = new Set([
   "drinking_pace",
 ]);
 
-function staffChange(field: string): boolean {
+/** True for fields staff see, so client updates to anything else do not text them. */
+export function staffChange(field: string): boolean {
   return STAFF_CHANGE_FIELDS.has(field) || field.startsWith("signature_drinks[");
 }
 
@@ -191,6 +192,13 @@ export function showDayOfPhone(ed: Record<string, unknown>, now: Date): boolean 
   const start = s.start ?? (s.day ? eventSchedule({ ...ed, bar_service_start: "12:00 AM" }).start : null);
   if (!start) return false;
   return now.getTime() >= start.getTime() - PHONE_LEAD_MS;
+}
+
+/** Bartenders the event needs: the saved count, else the booked count, else the staffing rule for the guest count. */
+export function bartendersNeeded(session: SessionLike): number | null {
+  const ed = session.event_data ?? {};
+  const guests = toCount(ed.guest_count) ?? toCount(session.guest_count);
+  return toCount(ed.bartenders) ?? toCount(session.booked_price?.bartenders) ?? (guests ? staffingFor(guests) : null);
 }
 
 export function buildStaffEventView(
@@ -229,7 +237,7 @@ export function buildStaffEventView(
     parking: scrub(ed.parking_info),
     guestCount: guests,
     package: pkg,
-    bartenders: toCount(ed.bartenders) ?? toCount(session.booked_price?.bartenders) ?? (toCount(guests) ? staffingFor(toCount(guests)!) : null),
+    bartenders: bartendersNeeded(session),
     teammates: opts.teammates ?? [],
     theme: scrub(ed.theme),
     colors: scrub(ed.event_colors),

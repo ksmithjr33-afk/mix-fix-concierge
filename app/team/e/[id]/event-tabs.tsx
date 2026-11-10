@@ -7,6 +7,7 @@ import type { ShopItem, ShoppingGroup } from "@/lib/team/shopping";
 import { canConfirm, type CheckState, type ListName } from "@/lib/team/checks";
 import { timeLabel } from "@/lib/team/clock-label";
 import BarReadyCard, { type BarReadyProps } from "./bar-ready";
+import RespondBanner from "./respond-banner";
 
 
 type Tab = "details" | "checklist" | "shopping";
@@ -482,7 +483,11 @@ export default function EventTabs({
   shopping,
   shoppingState,
   barReady,
+  offered,
+  manageHref,
 }: {
+  offered: boolean;
+  manageHref: string | null;
   view: StaffEventView;
   checklist: ResolvedGroup[];
   checklistState: Record<string, CheckState>;
@@ -506,7 +511,14 @@ export default function EventTabs({
         <p className="text-[15px] text-[#6B5D52]">
           {[view.date, view.arrival ? `arrive ${view.arrival}` : ""].filter(Boolean).join(", ")}
         </p>
+        {manageHref && (
+          <a href={manageHref} className="inline-block mt-1 text-sm text-[#B5845A] underline">
+            Manage staff for this event
+          </a>
+        )}
       </div>
+
+      {offered && <RespondBanner sessionId={view.sessionId} />}
 
       {barReady.show && <BarReadyCard sessionId={view.sessionId} {...barReady} />}
 

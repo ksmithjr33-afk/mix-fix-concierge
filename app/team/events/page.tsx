@@ -14,8 +14,13 @@ const COLUMNS = "id, event_date, guest_count, package_type, event_data, status";
 /** Events this staff member can open: every submitted event for admins, assigned events for bartenders. */
 async function visibleEvents(staffId: string, admin: boolean): Promise<EventListItem[]> {
   if (admin) {
-    const { data } = await supabase.from("sessions").select(COLUMNS).eq("status", "submitted");
-    return ((data as EventRowSource[]) ?? []).map((r) => eventListItem(r));
+    // Every event, with the admin's own assignment status where they are on one.
+    const [{ data }, { data: mine }] = await Promise.all([
+      supabase.from("sessions").select(COLUMNS).eq("status", "submitted"),
+      supabase.from("event_assignments").select("session_id, status").eq("staff_id", staffId),
+    ]);
+    const own = new Map(((mine as { session_id: string; status: string }[]) ?? []).map((a) => [a.session_id, a.status]));
+    return ((data as EventRowSource[]) ?? []).map((r) => eventListItem(r, own.get(r.id)));
   }
   const { data, error } = await supabase
     .from("event_assignments")
@@ -44,7 +49,7 @@ export default async function TeamEventsPage({
 
   return (
     <>
-      <TeamHeader signedIn />
+      <TeamHeader signedIn admin={admin} />
       <main className="max-w-2xl mx-auto px-4 py-6 space-y-4">
         <div className="px-1">
           <h1 className="font-heading text-2xl font-bold text-[#2C2420]">Hi {firstName(staff.name) || "there"}</h1>
@@ -52,7 +57,7 @@ export default async function TeamEventsPage({
             {past ? "Past events" : admin ? "All upcoming events" : "Your upcoming events"}
           </p>
         </div>
-        <EventList sections={sections} empty={past ? "No past events." : "No upcoming events yet."} />
+        <EventList sections={sections} empty={past ? "No past events." : "No upcoming events yet."} respond={!past} />
         <div className="px-1 pt-2">
           {past ? (
             <Link href="/team/events" className="text-sm text-[#B5845A] underline">

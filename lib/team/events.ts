@@ -11,6 +11,7 @@ import {
   type StaffEventView,
   type StaffMember,
 } from "@/lib/team/event-view";
+import { alertRecipients } from "@/lib/team/assignments";
 import { checklistFor, checklistKeys, type ResolvedGroup } from "@/lib/team/checklist-config";
 import { allShopItems, buildStaffShopping, type StaffShopping } from "@/lib/team/shopping";
 import { activeConfirmation, canConfirm, clearsConfirmation, mergeChecks, progress, type CheckRow, type CheckState, type ListName } from "@/lib/team/checks";
@@ -97,7 +98,7 @@ function checklistState(pkg: unknown, rows: CheckRow[]): Record<string, CheckSta
   return mergeChecks(checklistKeys(pkg).map((key) => ({ key, quantity: "" })), rows, { trackChanges: false });
 }
 
-async function getConfirmation(staffId: string, sessionId: string): Promise<string | null> {
+export async function getConfirmation(staffId: string, sessionId: string): Promise<string | null> {
   const { data, error } = await supabase
     .from("staff_confirmations")
     .select("confirmed_at")
@@ -207,13 +208,17 @@ export async function saveCheck(
   return true;
 }
 
-export async function activeAdmins(): Promise<StaffMember[]> {
-  const { data, error } = await supabase.from("staff").select("id, name, phone, role, active").eq("role", "admin").eq("active", true);
+/**
+ * Admins who get alert texts (declines, missing items, bar ready): active
+ * admins with alerts on. Alerts count as on until the column exists.
+ */
+export async function alertAdmins(): Promise<StaffMember[]> {
+  const { data, error } = await supabase.from("staff").select("*").eq("role", "admin").eq("active", true);
   if (error) {
     console.error("admin lookup failed:", error.message);
     return [];
   }
-  return (data as StaffMember[]) ?? [];
+  return alertRecipients((data as (StaffMember & { alerts?: boolean | null })[]) ?? []);
 }
 
 /** Keep a record of "Something is missing" reports, so the bar ready text can mention them. Never throws. */
