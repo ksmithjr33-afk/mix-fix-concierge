@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import type { TimesheetRow } from "@/lib/team/timesheet";
-import { OWN_APPROVE_MESSAGE, staffTotals, toChicagoLocal, weekApproval } from "@/lib/team/timesheet";
+import { OWN_APPROVE_MESSAGE, rowHistory, staffTotals, toChicagoLocal, weekApproval } from "@/lib/team/timesheet";
 import { FLAG_LABELS, formatWorked, type PunchFlag } from "@/lib/team/clock";
 import { timeLabel } from "@/lib/team/clock-label";
 
@@ -92,7 +92,10 @@ function Row({ row, meId, onRows }: { row: TimesheetRow; meId: string; onRows: (
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [showHistory, setShowHistory] = useState(false);
+  const [reopening, setReopening] = useState(false);
+  const [reopenReason, setReopenReason] = useState("");
   const own = row.staffId === meId;
+  const history = rowHistory(row);
 
   return (
     <li className="py-3">
@@ -131,24 +134,72 @@ function Row({ row, meId, onRows }: { row: TimesheetRow; meId: string; onRows: (
       )}
       {row.approved && (
         <p className="text-xs text-[#6B5D52] mt-1">
-          Approved by {row.approved.byName} {timeLabel(row.approved.at)}. Locked.
+          Approved by {row.approved.byName} {timeLabel(row.approved.at)}. Locked until reopened.
         </p>
       )}
-      {row.edits.length > 0 && (
+      {history.length > 0 && (
         <button type="button" onClick={() => setShowHistory((v) => !v)} className="text-xs text-[#6B5D52] underline mt-1">
-          {showHistory ? "Hide edit history" : `Edit history (${row.edits.length})`}
+          {showHistory ? "Hide history" : `History (${history.length})`}
         </button>
       )}
       {showHistory && (
         <ul className="mt-1 space-y-1">
-          {row.edits.map((e, i) => (
-            <li key={i} className="text-xs text-[#6B5D52]">
-              {e.byName} {e.action === "add" ? "added" : "corrected"} clock {e.type}
-              {e.oldAt ? ` from ${timeLabel(e.oldAt)}` : ""} to {timeLabel(e.newAt)}: &ldquo;{e.reason}&rdquo; ({timeLabel(e.at)})
-            </li>
-          ))}
+          {history.map((h, i) =>
+            h.kind === "edit" ? (
+              <li key={i} className="text-xs text-[#6B5D52]">
+                {h.edit.byName} {h.edit.action === "add" ? "added" : "corrected"} clock {h.edit.type}
+                {h.edit.oldAt ? ` from ${timeLabel(h.edit.oldAt)}` : ""} to {timeLabel(h.edit.newAt)}: &ldquo;{h.edit.reason}&rdquo; ({timeLabel(h.edit.at)})
+              </li>
+            ) : (
+              <li key={i} className="text-xs text-[#9A7049]">
+                {h.reopen.byName} reopened it {timeLabel(h.reopen.at)}: &ldquo;{h.reopen.reason}&rdquo;. It had been approved by {h.reopen.approvedByName} {timeLabel(h.reopen.approvedAt)}.
+              </li>
+            )
+          )}
         </ul>
       )}
+      {row.approved &&
+        (own ? (
+          <p className="text-xs text-[#9A7049] mt-2">This is your own time. You cannot reopen it. Ask another admin.</p>
+        ) : reopening ? (
+          <div className="mt-2 rounded-xl border border-[#E3C9A0] bg-[#FFF8EC] px-3 py-3 space-y-2">
+            <label className="block text-xs text-[#A39585] uppercase tracking-wide">
+              Why reopen? (required)
+              <textarea rows={2} maxLength={500} className={`${input} mt-1 resize-none`} placeholder="Clock out was wrong, they left at 11:15" value={reopenReason} onChange={(e) => setReopenReason(e.target.value)} />
+            </label>
+            <p className="text-xs text-[#6B5D52]">This removes the approval so the row can be corrected and approved again. The reopen stays in the history.</p>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                disabled={busy || reopenReason.trim().length < 3}
+                onClick={async () => {
+                  setBusy(true);
+                  setError("");
+                  try {
+                    const r = await post({ action: "reopen", assignmentId: row.assignmentId, reason: reopenReason });
+                    setReopening(false);
+                    setReopenReason("");
+                    onRows(r.rows);
+                  } catch (err) {
+                    setError(err instanceof Error ? err.message : "Could not reopen.");
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+                className="rounded-lg bg-[#B5845A] text-white px-4 py-2 text-sm font-medium disabled:opacity-40"
+              >
+                {busy ? "Reopening..." : "Reopen"}
+              </button>
+              <button type="button" onClick={() => setReopening(false)} className="text-sm text-[#6B5D52] underline px-2">
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button type="button" onClick={() => setReopening(true)} className="text-sm text-[#B5845A] underline mt-2">
+            Reopen
+          </button>
+        ))}
       {!row.approved &&
         (own ? (
           <p className="text-xs text-[#9A7049] mt-2">This is your own time. You cannot edit or approve it. Ask another admin.</p>
@@ -266,7 +317,7 @@ export default function TimesheetWeek({ initial, meId, from, to }: { initial: Ti
             ))}
           </ul>
         )}
-        <p className="text-xs text-[#A39585] mt-2">Nobody can edit or approve their own time. Edits need a reason, and approved rows lock.</p>
+        <p className="text-xs text-[#A39585] mt-2">Nobody can edit, approve or reopen their own time. Edits and reopens need a reason, and approved rows lock until reopened.</p>
       </section>
 
       <section className={card}>

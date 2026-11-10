@@ -1,7 +1,7 @@
 // In-memory stand-in for the Supabase client, for tests that run the real
 // update path without a database. Supports the query shapes the app uses:
 // select (with "alias:fk (cols)" joins), eq, neq, in, is, gte, order, limit,
-// maybeSingle, single, insert, update, upsert, delete, and head counts.
+// maybeSingle, single, insert, update, upsert, delete, head counts, and rpc.
 
 import { randomUUID } from "node:crypto";
 
@@ -175,7 +175,11 @@ class Query implements PromiseLike<Result> {
   }
 }
 
+/** Database functions for supabase.rpc(), set by the tests. */
+export const rpcs: Record<string, (args: Record<string, unknown>) => { data: unknown; error: { message: string } | null }> = {};
+
 export const supabase = {
   from: (table: string) => new Query(table),
+  rpc: async (name: string, args: Record<string, unknown> = {}) => (rpcs[name] ? rpcs[name](args) : { data: null, error: { message: `function ${name} does not exist` } }),
   storage: { from: () => ({ upload: async () => ({ error: null }), remove: async () => ({ error: null }), createSignedUrls: async () => ({ data: [], error: null }) }) },
 };

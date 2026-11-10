@@ -1,4 +1,4 @@
-// Timesheets: the pure rules, then edits and approvals run through the real
+// Timesheets: the pure rules, then edits, approvals and reopens run through the real
 // code against the in-memory database, with guards standing in for the
 // database constraints and the approved-row lock.
 // Run: node --no-warnings scripts/test-timesheet.mts
@@ -17,7 +17,7 @@ const out = console.log;
 console.log = () => {};
 console.warn = () => {};
 
-const { db, guards } = await import("./fake-supabase.mts");
+const { db, guards, rpcs, supabase } = await import("./fake-supabase.mts");
 const ts = await import("../lib/team/timesheet.ts");
 const tsDb = await import("../lib/team/timesheet-db.ts");
 const time = await import("../lib/team/time.ts");
@@ -90,9 +90,24 @@ const row = (o: Partial<import("../lib/team/timesheet.ts").TimesheetRow>): impor
   flags: [],
   edits: [],
   editedByAdmin: false,
+  reopens: [],
   approved: null,
   ...o,
 });
+check("An admin can reopen someone else's approved row", ts.checkReopen("a1", { staffId: "b1", approved: { byName: "C", at: "x" } }, "Clock out was wrong").ok);
+check("Nobody reopens their own time, with a clear message", msg(ts.checkReopen("b1", { staffId: "b1", approved: { byName: "C", at: "x" } }, "Clock out was wrong")) === ts.OWN_REOPEN_MESSAGE);
+check("The own reopen message says what to do", ts.OWN_REOPEN_MESSAGE === "You cannot reopen your own time. Ask another admin to reopen it.");
+check("A reopen needs a reason", msg(ts.checkReopen("a1", { staffId: "b1", approved: { byName: "C", at: "x" } }, " ok ")) === "Give a reason for reopening.");
+check("Only an approved row can be reopened", msg(ts.checkReopen("a1", { staffId: "b1", approved: null }, "Clock out was wrong")) === "This row is not approved.");
+check("Own time is refused before anything else on reopen", msg(ts.checkReopen("b1", { staffId: "b1", approved: null }, "")) === ts.OWN_REOPEN_MESSAGE);
+check("The locked message points to reopen", ts.LOCKED_MESSAGE === "This row is approved and locked. Reopen it to make changes.");
+check("The database own reopen error maps to the message", ts.ownTimeConstraint('violates check constraint "time_reopens_not_own"') === "reopen");
+const hist = ts.rowHistory({
+  edits: [{ type: "out", action: "add", oldAt: null, newAt: "x", reason: "a", byName: "K", at: "2026-12-13T10:00:00Z" }, { type: "in", action: "correct", oldAt: "x", newAt: "y", reason: "c", byName: "K", at: "2026-12-14T10:00:00Z" }],
+  reopens: [{ reason: "b", byName: "P", at: "2026-12-13T12:00:00Z", approvedByName: "K", approvedAt: "2026-12-13T11:00:00Z" }],
+});
+check("Edits and reopens show in one history, oldest first", hist.map((h) => h.kind).join() === "edit,reopen,edit", JSON.stringify(hist));
+
 const plan = ts.weekApproval("a1", [
   row({ assignmentId: "r1" }),
   row({ assignmentId: "r2", staffId: "a1" }),
@@ -166,6 +181,7 @@ function reset() {
   ];
   db.time_edits = [];
   db.time_approvals = [];
+  db.time_reopens = [];
 }
 // Stand-ins for the database rules, so the app's handling of a refusal is exercised too.
 guards.push((table, op, rows) => {
@@ -175,6 +191,31 @@ guards.push((table, op, rows) => {
     return `timesheet row ${rows[0].assignment_id} is approved and locked`;
   return null;
 });
+// Stand-in for reopen_timesheet_row() and the approval trigger: an approval is
+// removed only by the reopen function, after it logs the reopen.
+let reopening: string | null = null;
+guards.push((table, op, rows) => {
+  if (table === "time_approvals" && (op === "update" || (op === "delete" && !rows.every((r) => r.assignment_id === reopening)))) return `timesheet row ${rows[0]?.assignment_id} is approved and locked`;
+  if (table === "time_reopens" && (op === "update" || op === "delete")) return "reopen history cannot be changed";
+  return null;
+});
+const rpcCalls: Record<string, unknown>[] = [];
+rpcs.reopen_timesheet_row = (args) => {
+  rpcCalls.push(args);
+  const by = db.staff.find((x) => x.id === args.p_reopened_by);
+  if (!by || by.role !== "admin" || !by.active) return { data: null, error: { message: "only an admin can reopen a timesheet row" } };
+  const ap = db.time_approvals.find((x) => x.assignment_id === args.p_assignment_id);
+  if (!ap) return { data: null, error: { message: `timesheet row ${args.p_assignment_id} is not approved` } };
+  if (ap.staff_id === args.p_reopened_by) return { data: null, error: { message: 'new row for relation "time_reopens" violates check constraint "time_reopens_not_own"' } };
+  const reason = String(args.p_reason ?? "").trim();
+  if (reason.length < 3) return { data: null, error: { message: 'violates check constraint "time_reopens_reason_check"' } };
+  const r = { id: `r${db.time_reopens.length + 1}`, assignment_id: ap.assignment_id, staff_id: ap.staff_id, reopened_by: args.p_reopened_by, reason, approved_by: ap.approved_by, approved_at: ap.approved_at, created_at: new Date().toISOString() };
+  db.time_reopens.push(r);
+  reopening = String(ap.assignment_id);
+  db.time_approvals = db.time_approvals.filter((x) => x.assignment_id !== ap.assignment_id);
+  reopening = null;
+  return { data: r, error: null };
+};
 
 reset();
 const week = ts.weekRange(day);
@@ -236,6 +277,45 @@ guards.unshift((table, op) => (table === "time_edits" && op === "insert" ? 'new 
 const backstopAdd = await tsDb.editPunch(admin, "as1", "out", local("23:00"), "Forgot to clock out");
 guards.shift();
 check("A refused edit row removes the added punch", !backstopAdd.ok && !db.time_punches.some((x) => x.assignment_id === "as1" && x.type === "out"));
+
+// ----- Reopen -----
+reset();
+db.time_punches.push({ id: "p9", assignment_id: "as1", staff_id: "b1", session_id: "s1", type: "out", punched_at: local("23:00").toISOString(), flags: [], source: "phone" });
+await tsDb.approveRows(admin2, ["as1", "as2"]);
+check("Setup: both rows approved by the other admin", db.time_approvals.length === 2);
+const plainDelete = await supabase.from("time_approvals").delete().eq("assignment_id", "as1");
+check("A plain delete cannot remove an approval", !!plainDelete.error && db.time_approvals.length === 2);
+
+const ownReopen = await tsDb.reopenRow(admin, "as2", "My clock out was wrong");
+check("Reopening your own row is refused with the message", !ownReopen.ok && ownReopen.status === 403 && ownReopen.error === ts.OWN_REOPEN_MESSAGE && db.time_approvals.length === 2 && db.time_reopens.length === 0);
+check("The own reopen is refused before the database is asked", rpcCalls.length === 0);
+const noWhy = await tsDb.reopenRow(admin, "as1", "  ");
+check("Reopening needs a reason", !noWhy.ok && noWhy.status === 400 && db.time_approvals.length === 2 && rpcCalls.length === 0);
+const notApproved = await tsDb.reopenRow(admin, "as4", "Wrong hours");
+check("A row that is not approved cannot be reopened", !notApproved.ok && rpcCalls.length === 0);
+
+const reopened = await tsDb.reopenRow(admin, "as1", "  Clock out was wrong, left at 11:30  ");
+check("Another admin reopens the row", reopened.ok && !db.time_approvals.some((x) => x.assignment_id === "as1") && db.time_approvals.length === 1, JSON.stringify(reopened));
+check("The reopen goes through the database function", rpcCalls.length === 1 && rpcCalls[0].p_assignment_id === "as1" && rpcCalls[0].p_reopened_by === "a1");
+const log = db.time_reopens[0];
+check("The reopen is logged with who and why, and which approval it undid", log?.reopened_by === "a1" && log?.reason === "Clock out was wrong, left at 11:30" && log?.approved_by === "a2" && !!log?.created_at, JSON.stringify(log));
+check("The reopened row shows as not approved, with its reopen history", reopened.ok && reopened.rows[0].approved === null && reopened.rows[0].reopens.length === 1 && reopened.rows[0].reopens[0].byName === "Kenneth Smith" && reopened.rows[0].reopens[0].approvedByName === "Pat Jones");
+check("The reopen answer tells the admin what next", reopened.ok && reopened.message === "Reopened. Correct the row, then approve it again.");
+
+const fixed = await tsDb.editPunch(admin, "as1", "out", local("23:30"), "Left at 11:30");
+check("The reopened row can be corrected", fixed.ok && db.time_punches.find((x) => x.id === "p9")!.punched_at === local("23:30").toISOString());
+const reapproved = await tsDb.approveRows(admin2, ["as1"]);
+check("And approved again", reapproved.ok && db.time_approvals.some((x) => x.assignment_id === "as1" && x.approved_by === "a2"));
+const lockedAgain = await tsDb.editPunch(admin, "as1", "out", local("23:45"), "Another fix");
+check("Approved again, it is locked again", !lockedAgain.ok && lockedAgain.error === ts.LOCKED_MESSAGE);
+const histRow = (await tsDb.timesheetRows(week.from, week.to)).find((r) => r.assignmentId === "as1")!;
+check("History shows the reopen between the approval and the correction", ts.rowHistory(histRow).map((h) => h.kind).join() === "reopen,edit", JSON.stringify(ts.rowHistory(histRow)));
+const changeLog = await supabase.from("time_reopens").delete().eq("assignment_id", "as1");
+check("Reopen history cannot be removed", !!changeLog.error && db.time_reopens.length === 1);
+
+// A database refusal reaches the admin as a clear message.
+const inactive = await tsDb.reopenRow({ ...admin, id: "a9", active: true }, "as2", "Wrong hours");
+check("Someone the database does not know as an active admin cannot reopen", !inactive.ok && inactive.error === "Admins only." && db.time_approvals.some((x) => x.assignment_id === "as2"), JSON.stringify(inactive));
 
 // Approved rows load as approved.
 reset();

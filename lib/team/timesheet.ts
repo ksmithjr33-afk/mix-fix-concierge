@@ -7,7 +7,8 @@ import { chicagoInstant } from "@/lib/team/time";
 
 export const OWN_EDIT_MESSAGE = "You cannot edit your own time. Ask another admin to make this change.";
 export const OWN_APPROVE_MESSAGE = "You cannot approve your own time. Ask another admin to approve it.";
-export const LOCKED_MESSAGE = "This row is approved and locked.";
+export const OWN_REOPEN_MESSAGE = "You cannot reopen your own time. Ask another admin to reopen it.";
+export const LOCKED_MESSAGE = "This row is approved and locked. Reopen it to make changes.";
 export const MIN_REASON = 3;
 
 // ----- Weeks (Monday to Sunday, America/Chicago dates) -----
@@ -64,6 +65,14 @@ export interface EditSummary {
   at: string;
 }
 
+export interface ReopenSummary {
+  reason: string;
+  byName: string;
+  at: string;
+  approvedByName: string; // the approval it undid
+  approvedAt: string;
+}
+
 export interface TimesheetRow {
   assignmentId: string;
   staffId: string;
@@ -80,6 +89,7 @@ export interface TimesheetRow {
   flags: PunchFlag[]; // every flag on either punch
   edits: EditSummary[];
   editedByAdmin: boolean;
+  reopens: ReopenSummary[];
   approved: { byName: string; at: string } | null;
 }
 
@@ -158,6 +168,22 @@ export function checkApprove(actorId: string, row: Pick<TimesheetRow, "staffId" 
   return { ok: true };
 }
 
+/** Reopening an approved row: never your own, only when approved, and with a reason. */
+export function checkReopen(actorId: string, row: Pick<TimesheetRow, "staffId" | "approved">, reason: string): Check {
+  if (!canChangeTime(actorId, row.staffId)) return { ok: false, error: OWN_REOPEN_MESSAGE };
+  if (!row.approved) return { ok: false, error: "This row is not approved." };
+  if (reason.trim().length < MIN_REASON) return { ok: false, error: "Give a reason for reopening." };
+  return { ok: true };
+}
+
+/** Edits and reopens in one list, oldest first, for the row's history. */
+export function rowHistory(row: Pick<TimesheetRow, "edits" | "reopens">): ({ kind: "edit"; at: string; edit: EditSummary } | { kind: "reopen"; at: string; reopen: ReopenSummary })[] {
+  return [
+    ...row.edits.map((edit) => ({ kind: "edit" as const, at: edit.at, edit })),
+    ...row.reopens.map((reopen) => ({ kind: "reopen" as const, at: reopen.at, reopen })),
+  ].sort((a, b) => a.at.localeCompare(b.at));
+}
+
 /** Approve a whole week: every row that passes checkApprove. The rest are listed with why. */
 export function weekApproval(actorId: string, rows: TimesheetRow[]): { approve: string[]; skipped: { assignmentId: string; reason: string }[] } {
   const approve: string[] = [];
@@ -172,9 +198,10 @@ export function weekApproval(actorId: string, rows: TimesheetRow[]): { approve: 
 }
 
 /** The database check constraints use these names. A hit means someone tried their own time. */
-export function ownTimeConstraint(message: string): "edit" | "approve" | null {
+export function ownTimeConstraint(message: string): "edit" | "approve" | "reopen" | null {
   if (/time_edits_not_own|time_punches_own_or_admin/.test(message)) return "edit";
   if (/time_approvals_not_own/.test(message)) return "approve";
+  if (/time_reopens_not_own/.test(message)) return "reopen";
   return null;
 }
 

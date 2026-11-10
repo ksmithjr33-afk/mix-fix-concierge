@@ -3,7 +3,8 @@
 // The app checks every rule first (lib/team/timesheet.ts) and shows a clear
 // message. The database is the backstop: check constraints refuse edits and
 // approvals of your own time, a trigger refuses changes to an approved row,
-// and staff_id always comes from the assignment.
+// an approval can only be removed by reopen_timesheet_row() (which logs the
+// reopen first), and staff_id always comes from the assignment.
 
 import { supabase } from "@/lib/supabase";
 import type { StaffMember } from "@/lib/team/event-view";
@@ -13,15 +14,18 @@ import type { PunchFlag, PunchType } from "@/lib/team/clock";
 import {
   checkApprove,
   checkEdit,
+  checkReopen,
   LOCKED_MESSAGE,
   OWN_APPROVE_MESSAGE,
   OWN_EDIT_MESSAGE,
+  OWN_REOPEN_MESSAGE,
   ownTimeConstraint,
   rowMinutes,
   sortRows,
   weekApproval,
   type EditSummary,
   type PunchSummary,
+  type ReopenSummary,
   type TimesheetRow,
 } from "@/lib/team/timesheet";
 
@@ -48,6 +52,15 @@ interface EditDb {
   new_punched_at: string;
   reason: string;
   edited_by: string;
+  created_at: string;
+}
+
+interface ReopenDb {
+  assignment_id: string;
+  reopened_by: string;
+  reason: string;
+  approved_by: string;
+  approved_at: string;
   created_at: string;
 }
 
@@ -86,20 +99,22 @@ async function buildRows(filter: { from: string; to: string } | { assignmentIds:
 
   const aIds = assignments.map((a) => a.id);
   if (aIds.length === 0) return [];
-  const [punchRes, approvalRes, editRes] = await Promise.all([
+  const [punchRes, approvalRes, editRes, reopenRes] = await Promise.all([
     supabase.from("time_punches").select("id, assignment_id, type, punched_at, flags, source").in("assignment_id", aIds),
     supabase.from("time_approvals").select("assignment_id, approved_by, approved_at").in("assignment_id", aIds),
     supabase.from("time_edits").select("assignment_id, type, action, old_punched_at, new_punched_at, reason, edited_by, created_at").in("assignment_id", aIds),
+    supabase.from("time_reopens").select("assignment_id, reopened_by, reason, approved_by, approved_at, created_at").in("assignment_id", aIds),
   ]);
   const punches = (punchRes.data as PunchDb[]) ?? [];
   const approvals = (approvalRes.data as { assignment_id: string; approved_by: string; approved_at: string }[]) ?? [];
   const edits = (editRes.data as EditDb[]) ?? [];
+  const reopens = (reopenRes.data as ReopenDb[]) ?? [];
 
   // Declined rows only show if someone punched against them (which the app prevents).
   const withPunches = new Set(punches.map((p) => p.assignment_id));
   const kept = assignments.filter((a) => a.status === "accepted" || withPunches.has(a.id));
 
-  const staffIds = [...new Set([...kept.map((a) => a.staff_id), ...approvals.map((a) => a.approved_by), ...edits.map((e) => e.edited_by)])];
+  const staffIds = [...new Set([...kept.map((a) => a.staff_id), ...approvals.map((a) => a.approved_by), ...edits.map((e) => e.edited_by), ...reopens.flatMap((r) => [r.reopened_by, r.approved_by])])];
   const { data: staffRows } = staffIds.length ? await supabase.from("staff").select("id, name, phone").in("id", staffIds) : { data: [] };
   const staff = new Map(((staffRows as { id: string; name: string; phone: string }[]) ?? []).map((s) => [s.id, s]));
   const bySession = new Map(sessions.map((s) => [s.id, s]));
@@ -125,6 +140,16 @@ async function buildRows(filter: { from: string; to: string } | { assignmentIds:
         byName: staff.get(e.edited_by)?.name || "An admin",
         at: e.created_at,
       }));
+    const myReopens: ReopenSummary[] = reopens
+      .filter((r) => r.assignment_id === a.id)
+      .sort((x, y) => x.created_at.localeCompare(y.created_at))
+      .map((r) => ({
+        reason: r.reason,
+        byName: staff.get(r.reopened_by)?.name || "An admin",
+        at: r.created_at,
+        approvedByName: staff.get(r.approved_by)?.name || "An admin",
+        approvedAt: r.approved_at,
+      }));
     const approval = approvals.find((x) => x.assignment_id === a.id);
     const person = staff.get(a.staff_id);
     return [
@@ -144,6 +169,7 @@ async function buildRows(filter: { from: string; to: string } | { assignmentIds:
         flags: [...new Set([...(clockIn?.flags ?? []), ...(clockOut?.flags ?? [])])],
         edits: myEdits,
         editedByAdmin: myEdits.length > 0,
+        reopens: myReopens,
         approved: approval ? { byName: staff.get(approval.approved_by)?.name || "An admin", at: approval.approved_at } : null,
       },
     ];
@@ -158,10 +184,14 @@ export function timesheetRows(from: string, to: string): Promise<TimesheetRow[]>
 export type ActionResult = { ok: true; rows: TimesheetRow[]; message?: string } | { ok: false; error: string; status: number };
 
 /** A database refusal as the message the admin should see. */
-function refusal(message: string, kind: "edit" | "approve"): string {
+function refusal(message: string, kind: "edit" | "approve" | "reopen"): string {
   const own = ownTimeConstraint(message);
   if (own === "edit") return OWN_EDIT_MESSAGE;
   if (own === "approve") return OWN_APPROVE_MESSAGE;
+  if (own === "reopen") return OWN_REOPEN_MESSAGE;
+  if (/is not approved/i.test(message)) return "This row is not approved.";
+  if (/only an admin can reopen/i.test(message)) return "Admins only.";
+  if (/time_reopens_reason_check/.test(message)) return "Give a reason for reopening.";
   if (/approved and locked/i.test(message)) return LOCKED_MESSAGE;
   if (/duplicate key|unique/i.test(message)) return kind === "approve" ? "This row is already approved." : "That punch already exists. Correct it instead.";
   if (/reason_check/.test(message)) return "Give a reason for the change.";
@@ -247,4 +277,26 @@ export async function approveRows(actor: StaffMember, assignmentIds: string[]): 
   if (incomplete) parts.push(`${incomplete} ${incomplete === 1 ? "row needs" : "rows need"} a clock in or out first.`);
   if (failures.length) parts.push(`${failures.length} could not be saved.`);
   return { ok: true, rows: await buildRows({ assignmentIds }), message: parts.join(" ") };
+}
+
+/**
+ * Reopen an approved row, with a reason. The database function logs who
+ * reopened it, when, why, and which approval it undid, then removes the
+ * approval, all in one transaction. It is the only way to remove an approval.
+ */
+export async function reopenRow(actor: StaffMember, assignmentId: string, reason: string): Promise<ActionResult> {
+  const [row] = await buildRows({ assignmentIds: [assignmentId] });
+  if (!row) return { ok: false, error: "We could not find that timesheet row.", status: 404 };
+  const check = checkReopen(actor.id, row, reason);
+  if (!check.ok) return { ok: false, error: check.error, status: check.error === OWN_REOPEN_MESSAGE ? 403 : 400 };
+  const { error } = await supabase.rpc("reopen_timesheet_row", {
+    p_assignment_id: assignmentId,
+    p_reopened_by: actor.id,
+    p_reason: reason.trim().slice(0, 500),
+  });
+  if (error) {
+    const msg = refusal(error.message, "reopen");
+    return { ok: false, error: msg || "Could not reopen. Try again.", status: msg === OWN_REOPEN_MESSAGE ? 403 : 409 };
+  }
+  return { ok: true, rows: await buildRows({ assignmentIds: [assignmentId] }), message: "Reopened. Correct the row, then approve it again." };
 }
