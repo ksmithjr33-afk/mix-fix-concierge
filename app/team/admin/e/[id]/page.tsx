@@ -6,6 +6,7 @@ import { staffingCounts, staffingLabel } from "@/lib/team/assignments";
 import { bartendersNeeded, buildStaffEventView } from "@/lib/team/event-view";
 import { eventTitle } from "@/lib/team/event-list";
 import TeamHeader from "../../../team-header";
+import { unreadByEvent } from "@/lib/team/chat-db";
 import AssignPanel from "./assign-panel";
 import HideAction from "./hide-action";
 import EditEvent, { type EditValues } from "./edit-event";
@@ -31,7 +32,7 @@ const str = (v: unknown) => (v === null || v === undefined ? "" : String(v));
 
 export default async function AdminEventPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  await requireAdmin(`/team/admin/e/${encodeURIComponent(id)}`);
+  const me = await requireAdmin(`/team/admin/e/${encodeURIComponent(id)}`);
   const back = { href: "/team/admin/events", label: "Staffing" };
   const session = await getSubmittedSession(id);
   if (!session) {
@@ -44,7 +45,15 @@ export default async function AdminEventPage({ params }: { params: Promise<{ id:
   }
 
   await ensureMarket(session); // works out the market from the address the first time, and after an address change
-  const [people, staff, hidden, panel, handoffs] = await Promise.all([assigneeProgress(session), listStaff(), isHidden(id), postPanel(session), handoffPanel(session)]);
+  const [people, staff, hidden, panel, handoffs, unread] = await Promise.all([
+    assigneeProgress(session),
+    listStaff(),
+    isHidden(id),
+    postPanel(session),
+    handoffPanel(session),
+    unreadByEvent(me.id, [id]),
+  ]);
+  const chatUnread = unread.get(id) ?? 0;
   const v = buildStaffEventView(session);
   const marketSource = (session as { team_market_source?: string | null }).team_market_source ?? null;
   const counts = staffingCounts(bartendersNeeded(session), people.map((p) => p.status));
@@ -81,9 +90,15 @@ export default async function AdminEventPage({ params }: { params: Promise<{ id:
           </p>
           <p className="text-[15px] text-[#6B5D52]">{[v.market, v.guestCount ? `${v.guestCount} guests` : "", v.package].filter(Boolean).join(" · ")}</p>
           {v.timeZone !== "America/Chicago" && <p className="text-sm text-[#9A7049]">Times are Pacific time.</p>}
-          <Link href={`/team/e/${id}`} className="inline-block mt-1 text-sm text-[#B5845A] underline">
-            Open the event page
-          </Link>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mt-2">
+            <Link href={`/team/e/${id}?tab=chat`} className="inline-flex items-center gap-1.5 rounded-lg bg-[#2C2420] text-white px-3 py-1.5 text-sm font-medium">
+              Message team
+              {chatUnread > 0 && <span className="rounded-full bg-[#A0412D] px-1.5 text-[11px] font-bold">{chatUnread} unread</span>}
+            </Link>
+            <Link href={`/team/e/${id}`} className="text-sm text-[#B5845A] underline">
+              Open the event page
+            </Link>
+          </div>
         </div>
         {hidden ? (
           <>

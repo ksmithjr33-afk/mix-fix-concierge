@@ -184,9 +184,14 @@ function StaffRow({ s, meId, onSaved }: { s: StaffRecord; meId: string; onSaved:
           </p>
           <p className="text-sm text-[#6B5D52]">Markets: {marketNames(s.markets) || "None"}</p>
         </div>
-        <button type="button" onClick={() => setEditing(true)} className="shrink-0 text-sm text-[#B5845A] underline">
-          Edit
-        </button>
+        <div className="shrink-0 flex flex-col items-end gap-1">
+          <button type="button" onClick={() => setEditing(true)} className="text-sm text-[#B5845A] underline">
+            Edit
+          </button>
+          <a href={`/team/admin/preview/${s.id}`} className="text-sm text-[#B5845A] underline">
+            Preview as
+          </a>
+        </div>
       </div>
       <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5">
         {s.role === "admin" && s.active && <Toggle on={s.alerts} label="Alerts" disabled={busy} onChange={(alerts) => patch({ alerts })} />}

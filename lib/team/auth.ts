@@ -5,6 +5,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { sendStaffText } from "@/lib/team/sms";
+import { applyViewMode, VIEW_COOKIE, type ViewedStaff } from "@/lib/team/view-mode";
 import type { StaffMember } from "@/lib/team/event-view";
 import {
   adminPhones,
@@ -131,8 +132,19 @@ export const sessionCookieOptions = {
   maxAge: SESSION_DAYS * 86_400,
 };
 
-/** The signed in staff member, or null. Inactive staff are signed out. */
-export async function getCurrentStaff(): Promise<StaffMember | null> {
+/**
+ * The signed in staff member, or null. Inactive staff are signed out. An
+ * admin with Bartender view on comes back as a bartender (bartenderView set),
+ * so every page and route treats them as one.
+ */
+export async function getCurrentStaff(): Promise<ViewedStaff | null> {
+  const staff = await getSignedInStaff();
+  if (!staff) return null;
+  return applyViewMode(staff, (await cookies()).get(VIEW_COOKIE)?.value);
+}
+
+/** The signed in staff member with their real role, ignoring Bartender view. Only the view switch uses this. */
+export async function getSignedInStaff(): Promise<StaffMember | null> {
   const token = (await cookies()).get(SESSION_COOKIE)?.value;
   if (!token) return null;
   const { data, error } = await supabase
@@ -168,7 +180,7 @@ export function cleanName(first: unknown, last: unknown): string | null {
  * The signed in staff member for a page. Sends them to sign in when signed
  * out, and to the name form once when we do not know their name yet.
  */
-export async function requireStaff(path: string): Promise<StaffMember> {
+export async function requireStaff(path: string): Promise<ViewedStaff> {
   const staff = await getCurrentStaff();
   if (!staff) redirect(`/team?next=${encodeURIComponent(path)}`);
   if (needsName(staff)) redirect(`/team/welcome?next=${encodeURIComponent(path)}`);
@@ -181,7 +193,7 @@ export async function saveStaffName(staffId: string, name: string): Promise<void
 }
 
 /** For admin pages: signed in, named, and an admin. Bartenders go to their own events. */
-export async function requireAdmin(path: string): Promise<StaffMember> {
+export async function requireAdmin(path: string): Promise<ViewedStaff> {
   const staff = await requireStaff(path);
   if (staff.role !== "admin") redirect("/team/events");
   return staff;

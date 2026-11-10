@@ -102,8 +102,17 @@ export default function EventList({ sections, empty, respond = false }: { sectio
                   const status = statusOf(e);
                   const offered = respond && status === "offered";
                   return (
-                    <li key={e.id}>
-                      <Link href={e.href ?? `/team/e/${e.id}`} className="flex items-start gap-3 px-3 py-2.5 hover:bg-[#EFE7DF] transition-colors">
+                    <li key={e.id} className="relative">
+                      {e.chat && (
+                        <Link
+                          href={e.chat.href}
+                          className="absolute right-3 bottom-2 z-10 text-[11px] font-medium text-[#9A7049] underline"
+                          aria-label={e.chat.unread ? `Message team, ${e.chat.unread} unread` : "Message team"}
+                        >
+                          Chat{e.chat.unread ? ` (${e.chat.unread})` : ""}
+                        </Link>
+                      )}
+                      <Link href={e.href ?? `/team/e/${e.id}`} className={`flex items-start gap-3 px-3 py-2.5 hover:bg-[#EFE7DF] transition-colors ${e.chat ? "pb-6" : ""}`}>
                         <span className="w-[4.5rem] shrink-0 pt-0.5 text-sm font-medium text-[#2C2420] tabular-nums">
                           {e.arrival || "TBD"}
                           <span className="block text-[10px] font-normal uppercase tracking-wide text-[#A39585]">arrive</span>

@@ -9,6 +9,9 @@ import { withoutHidden } from "@/lib/team/assignments";
 import TeamHeader from "../team-header";
 import EventList from "./event-list";
 import { openShiftsFor } from "@/lib/team/shifts-db";
+import { assignedEventItems } from "@/lib/team/my-events";
+import { calendarGrid, calMode, isYmd } from "@/lib/team/calendar";
+import CalendarView, { ListCalendarToggle } from "../calendar-view";
 
 export const dynamic = "force-dynamic";
 
@@ -26,16 +29,7 @@ async function visibleEvents(staffId: string, admin: boolean): Promise<EventList
     const own = new Map(((mine as { session_id: string; status: string }[]) ?? []).map((a) => [a.session_id, a.status]));
     return ((data as EventRowSource[]) ?? []).map((r) => eventListItem(r, own.get(r.id)));
   }
-  const { data, error } = await supabase
-    .from("event_assignments")
-    .select(`status, session:session_id (${COLUMNS})`)
-    .eq("staff_id", staffId)
-    .neq("status", "declined");
-  if (error || !data) return [];
-  return data.flatMap((a) => {
-    const s = (Array.isArray(a.session) ? a.session[0] : a.session) as (EventRowSource & { status: string }) | null;
-    return s && s.status === "submitted" ? [eventListItem(s, a.status as string)] : [];
-  });
+  return assignedEventItems(staffId);
 }
 
 export default async function TeamEventsPage({
@@ -45,7 +39,8 @@ export default async function TeamEventsPage({
 }) {
   const params = await searchParams;
   const tab = params.tab === "open" ? "open" : "mine";
-  const past = tab === "mine" && params.past === "1";
+  const calendar = tab === "mine" && params.layout === "calendar";
+  const past = tab === "mine" && !calendar && params.past === "1";
   const staff = await requireStaff(tab === "open" ? "/team/events?tab=open" : past ? "/team/events?past=1" : "/team/events");
   const admin = staff.role === "admin";
   const shifts = await openShiftsFor(staff);
@@ -54,6 +49,16 @@ export default async function TeamEventsPage({
   const today = chicagoToday();
   const sections = past ? pastSection(events, today) : upcomingSections(events, today);
   const hasPast = events.some((e) => e.day && e.day < today);
+  const mode = calMode(params.cal);
+  const anchor = isYmd(params.d) ? params.d : today;
+  const calLink = (o: { mode?: "week" | "month"; d?: string }) => {
+    const q = new URLSearchParams({ layout: "calendar" });
+    const m = o.mode ?? mode;
+    const d = o.d === "today" ? today : (o.d ?? anchor);
+    if (m !== "week") q.set("cal", m);
+    if (d !== today) q.set("d", d);
+    return `/team/events?${q.toString()}`;
+  };
 
   return (
     <>
@@ -102,9 +107,20 @@ export default async function TeamEventsPage({
             </ul>
           )
         ) : (
-          <EventList sections={sections} empty={past ? "No past events." : "No upcoming events yet."} respond={!past} />
+          <>
+            {!past && (
+              <div className="px-1">
+                <ListCalendarToggle calendar={calendar} listHref="/team/events" calendarHref={calLink({})} />
+              </div>
+            )}
+            {calendar ? (
+              <CalendarView grid={calendarGrid(mode, anchor, today, events)} link={calLink} empty={admin ? "No events in this range." : "None of your events fall in this range."} />
+            ) : (
+              <EventList sections={sections} empty={past ? "No past events." : "No upcoming events yet."} respond={!past} />
+            )}
+          </>
         )}
-        <div className="px-1 pt-2" hidden={tab === "open"}>
+        <div className="px-1 pt-2" hidden={tab === "open" || calendar}>
           {past ? (
             <Link href="/team/events" className="text-sm text-[#B5845A] underline">
               Back to upcoming events

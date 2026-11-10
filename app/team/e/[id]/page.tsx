@@ -7,6 +7,7 @@ import { shoppingGroups } from "@/lib/team/shopping";
 import { assignmentRef, clockView, punchesFor } from "@/lib/team/clock-db";
 import { eventData } from "@/lib/team/markets";
 import { myHandoff, teammateChoices } from "@/lib/team/shifts-db";
+import { markThreadRead, threadMessages, unreadByEvent } from "@/lib/team/chat-db";
 import TeamHeader from "../../team-header";
 import EventTabs from "./event-tabs";
 
@@ -19,8 +20,15 @@ function serverNow(): number {
 
 // Only the staff view built in lib/team/event-view.ts (an allowlist) and the
 // lists reach the client component. The raw session row never does.
-export default async function TeamEventPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function TeamEventPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
+}) {
   const { id } = await params;
+  const chatTab = (await searchParams).tab === "chat";
   const staff = await requireStaff(`/team/e/${encodeURIComponent(id)}`);
   const back = { href: "/team/events", label: staff.role === "admin" ? "All events" : "Your events" };
 
@@ -39,11 +47,14 @@ export default async function TeamEventPage({ params }: { params: Promise<{ id: 
   }
 
   const ed = eventData(access.session);
-  const [data, entries, assignment] = await Promise.all([
+  const [data, entries, assignment, messages, unread] = await Promise.all([
     eventPageData(access.session, staff),
     barReadyEntries(id, staff),
     assignmentRef(id, staff.id),
+    threadMessages(id, staff),
+    unreadByEvent(staff.id, [id]),
   ]);
+  if (chatTab) await markThreadRead(id, staff.id);
   const punches = assignment ? await punchesFor(assignment.id) : [];
   const accepted = assignment?.status === "accepted";
   const [handoff, teammates] = accepted ? await Promise.all([myHandoff(id, staff.id), teammateChoices(access.session, staff.id)]) : [null, []];
@@ -53,6 +64,8 @@ export default async function TeamEventPage({ params }: { params: Promise<{ id: 
     <>
       <TeamHeader signedIn admin={staff.role === "admin"} back={back} />
       <EventTabs
+        initialTab={chatTab ? "chat" : "details"}
+        chat={{ sessionId: id, initial: messages, unread: unread.get(id) ?? 0, timeZone: data.view.timeZone }}
         offered={assignment?.status === "offered"}
         giveUp={accepted ? { sessionId: id, handoff, teammates, canStart: punches.length === 0 } : null}
         clock={clockView(assignment, ed, punches)}

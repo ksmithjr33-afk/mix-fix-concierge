@@ -11,9 +11,10 @@ import RespondBanner from "./respond-banner";
 import ClockCard from "./clock-card";
 import GiveUp, { type GiveUpProps } from "./give-up";
 import type { ClockView } from "@/lib/team/clock-db";
+import ChatThread, { type ChatProps } from "./chat-thread";
 
 
-type Tab = "details" | "checklist" | "shopping";
+type Tab = "details" | "checklist" | "shopping" | "chat";
 
 const card = "bg-[#F5F0EB] rounded-2xl border border-[#DDD5CC] px-4 py-3 sm:px-5 sm:py-4";
 
@@ -493,7 +494,11 @@ export default function EventTabs({
   clock,
   renderedAt,
   giveUp,
+  chat,
+  initialTab = "details",
 }: {
+  chat: ChatProps;
+  initialTab?: Tab;
   giveUp: GiveUpProps | null;
   offered: boolean;
   clock: ClockView;
@@ -508,11 +513,13 @@ export default function EventTabs({
   shoppingState: Record<string, CheckState>;
   barReady: Omit<BarReadyProps, "sessionId"> & { show: boolean };
 }) {
-  const [tab, setTab] = useState<Tab>("details");
+  const [tab, setTab] = useState<Tab>(initialTab);
+  const [chatUnread, setChatUnread] = useState(initialTab === "chat" ? 0 : chat.unread);
   const tabs: [Tab, string][] = [
     ["details", "Details"],
     ["checklist", "Checklist"],
-    ["shopping", "Shopping list"],
+    ["shopping", "Shopping"],
+    ["chat", `Chat${chatUnread ? ` (${chatUnread})` : ""}`],
   ];
 
   return (
@@ -537,14 +544,17 @@ export default function EventTabs({
 
       {barReady.show && <BarReadyCard sessionId={view.sessionId} {...barReady} />}
 
-      <nav className="grid grid-cols-3 gap-1 bg-[#DDD5CC] p-1 rounded-xl" role="tablist">
+      <nav className="grid grid-cols-4 gap-1 bg-[#DDD5CC] p-1 rounded-xl" role="tablist">
         {tabs.map(([key, label]) => (
           <button
             key={key}
             type="button"
             role="tab"
             aria-selected={tab === key}
-            onClick={() => setTab(key)}
+            onClick={() => {
+              setTab(key);
+              if (key === "chat") setChatUnread(0);
+            }}
             className={`py-2 rounded-lg text-sm font-medium transition-colors ${
               tab === key ? "bg-[#F5F0EB] text-[#2C2420] shadow-sm" : "text-[#6B5D52]"
             }`}
@@ -574,6 +584,9 @@ export default function EventTabs({
       </div>
       <div hidden={tab !== "shopping"}>
         <Shopping sessionId={view.sessionId} shopping={shopping} initial={shoppingState} />
+      </div>
+      <div hidden={tab !== "chat"}>
+        <ChatThread {...chat} active={tab === "chat"} />
       </div>
     </main>
   );

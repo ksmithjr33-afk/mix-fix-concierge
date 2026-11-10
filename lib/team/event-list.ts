@@ -25,6 +25,7 @@ export interface EventListItem {
   href?: string; // defaults to the staff event page
   badge?: { text: string; tone: "ok" | "warn" | "muted" };
   market?: Market | null;
+  chat?: { href: string; unread: number }; // admins: the event's team chat
 }
 
 /** "Justin · Wedding": client first name and event type. */

@@ -16,6 +16,9 @@ const UNIQUE: Record<string, string[][]> = {
   time_punches: [["assignment_id", "type"], ["client_id"]],
   event_assignments: [["session_id", "staff_id"]],
   time_approvals: [["assignment_id"]],
+  announcement_recipients: [["announcement_id", "staff_id"]],
+  event_message_reads: [["session_id", "staff_id"]],
+  event_chat_notices: [["session_id", "staff_id"]],
 };
 
 /** Tests can stand in for database constraints and triggers: return an error message to refuse a write. */
