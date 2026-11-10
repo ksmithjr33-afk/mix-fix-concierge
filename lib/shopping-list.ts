@@ -1958,8 +1958,10 @@ export function formatShoppingListForNote(
   if (eventData.theme) lines.push(`Theme: ${eventData.theme}`);
   if (eventData.event_colors) lines.push(`Colors: ${eventData.event_colors}`);
 
-  // LIQUOR
+  // LIQUOR, with the client's extra bottle request when there is a real one
   const spiritItems = getSpiritBottles(drinks, guestCount, pace, hours, eventData);
+  const extraBottle = extraBottleItem(eventData);
+  if (extraBottle) spiritItems.push(extraBottle);
   const grouped = new Map<string, ShoppingListItem[]>();
   for (const item of items) {
     const list = grouped.get(item.category) ?? [];

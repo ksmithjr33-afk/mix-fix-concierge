@@ -301,6 +301,17 @@ for (const pkg of ["Full Bar", "Tailored Bar", "Dive Bar"]) {
   const noteEmail = shoppingLib.generateClientShoppingListEmail(shoppingLib.generateShoppingList(withNote as never), withNote as never, "Alex");
   check(`${pkg}: a bottle note stays out of the client shopping list email`, !noteEmail.includes("hard seltzer") && !noteEmail.includes("Extra bottle requested"));
 }
+for (const pkg of ["Full Bar", "Tailored Bar", "Dive Bar"]) {
+  const withBottle = { ...ed, package: pkg, extra_bottles: "Fireball" };
+  const note = shoppingLib.formatShoppingListForNote(shoppingLib.generateShoppingList(withBottle as never), withBottle as never);
+  const liquor = note.slice(note.indexOf("LIQUOR"), note.indexOf("\n\n", note.indexOf("LIQUOR") + 8));
+  check(`${pkg}: a real extra bottle is on the team GHL note under LIQUOR`, note.includes("LIQUOR") && liquor.includes("Fireball") && liquor.includes("Extra bottle requested by client"), liquor);
+  const withNote = { ...ed, package: pkg, wine: true, extra_bottles: NOTE };
+  const noteText = shoppingLib.formatShoppingListForNote(shoppingLib.generateShoppingList(withNote as never), withNote as never);
+  check(`${pkg}: a bottle note stays out of the team GHL note`, !noteText.includes("hard seltzer") && !noteText.includes("Extra bottle requested"));
+}
+const plainNote = shoppingLib.formatShoppingListForNote(shoppingLib.generateShoppingList(ed as never), ed as never);
+check("No extra bottle line on the GHL note when the client asked for none", !plainNote.includes("Extra bottle requested"));
 const plainEmail = shoppingLib.generateClientShoppingListEmail(shoppingLib.generateShoppingList(ed as never), ed as never, "Alex");
 check("No extra bottle line when the client asked for none", !plainEmail.includes("Extra bottle requested"));
 
