@@ -7,6 +7,7 @@ export const dynamic = "force-dynamic";
 // The staff member's own pages.
 const PAGES: { href: string; title: string; detail: string }[] = [
   { href: "/team/availability", title: "Availability", detail: "Mark the days you cannot work." },
+  { href: "/team/record", title: "My record", detail: "Events worked, on time, bar ready, closeouts, and handoffs." },
 ];
 
 export default async function MePage() {

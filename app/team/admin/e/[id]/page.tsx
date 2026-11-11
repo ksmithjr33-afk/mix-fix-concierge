@@ -20,6 +20,7 @@ import ShiftPanel from "./shift-panel";
 import { eventDayOf, unavailableOn } from "@/lib/team/availability-db";
 import { closeoutsFor } from "@/lib/team/closeout-db";
 import Closeouts from "./closeouts";
+import { compactLines } from "@/lib/team/reliability-db";
 
 export const dynamic = "force-dynamic";
 
@@ -56,7 +57,15 @@ export default async function AdminEventPage({ params }: { params: Promise<{ id:
     handoffPanel(session),
     unreadByEvent(me.id, [id]),
   ]);
-  const closeouts = await closeoutsFor(id);
+  const [closeouts, records] = await Promise.all([
+    closeoutsFor(id),
+    compactLines([
+      ...staff.filter((s) => s.active).map((s) => s.id),
+      ...handoffs.flatMap((h) => [h.fromStaffId, h.teammateStaffId ?? ""]).filter(Boolean),
+      ...panel.requesters.map((r) => r.staffId),
+      ...handoffs.flatMap((h) => h.requesters.map((r) => r.staffId)),
+    ]),
+  ]);
   const away = await unavailableOn(eventDayOf(session));
   const chatUnread = unread.get(id) ?? 0;
   const v = buildStaffEventView(session);
@@ -80,7 +89,7 @@ export default async function AdminEventPage({ params }: { params: Promise<{ id:
   const onEvent = new Set(people.filter((p) => p.status !== "declined").map((p) => p.staffId));
   const available = staff
     .filter((s) => s.active && !onEvent.has(s.id))
-    .map((s) => ({ id: s.id, name: s.name || s.phone, role: s.role, declined: people.some((p) => p.staffId === s.id), markets: s.markets, unavailable: away.has(s.id) }));
+    .map((s) => ({ id: s.id, name: s.name || s.phone, role: s.role, declined: people.some((p) => p.staffId === s.id), markets: s.markets, unavailable: away.has(s.id), record: records[s.id] }));
 
   return (
     <>
@@ -122,7 +131,7 @@ export default async function AdminEventPage({ params }: { params: Promise<{ id:
               timeZone={v.timeZone}
               market={panel.market}
             />
-            <ShiftPanel sessionId={id} panel={panel} handoffs={handoffs} marketSource={marketSource} timeZone={v.timeZone} />
+            <ShiftPanel sessionId={id} panel={panel} handoffs={handoffs} marketSource={marketSource} timeZone={v.timeZone} records={records} />
             <EditEvent sessionId={id} version={session.version} initial={editValues} packages={packages} />
             <HideAction sessionId={id} hidden={false} />
           </>

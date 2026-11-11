@@ -3,6 +3,7 @@ import { listStaff } from "@/lib/team/assignments-db";
 import TeamHeader from "../../team-header";
 import StaffManager from "./staff-manager";
 import { upcomingUnavailableByStaff } from "@/lib/team/availability-db";
+import { compactLines } from "@/lib/team/reliability-db";
 import { rangeLabel } from "@/lib/team/availability";
 import { chicagoToday } from "@/lib/team/time";
 
@@ -11,9 +12,11 @@ export const dynamic = "force-dynamic";
 export default async function AdminStaffPage() {
   const me = await requireAdmin("/team/admin/staff");
   const [staff, away] = await Promise.all([listStaff(), upcomingUnavailableByStaff(chicagoToday())]);
+  const records = await compactLines(staff.map((s) => s.id));
   // One line per person per topic, shown under their name.
   const notes: Record<string, string[]> = {};
   const add = (id: string, line: string) => (notes[id] = [...(notes[id] ?? []), line]);
+  for (const s of staff) add(s.id, `Record: ${records[s.id]}`);
   for (const [id, rows] of away) {
     const shown = rows.slice(0, 3).map(rangeLabel).join("; ");
     add(id, `Unavailable: ${shown}${rows.length > 3 ? ` and ${rows.length - 3} more` : ""}`);

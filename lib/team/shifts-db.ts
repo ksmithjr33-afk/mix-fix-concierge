@@ -619,6 +619,8 @@ export interface PostPanel {
 
 export interface HandoffPanelRow {
   id: string;
+  fromStaffId: string;
+  teammateStaffId: string | null;
   mode: HandoffMode;
   status: HandoffRow["status"];
   urgent: boolean;
@@ -684,6 +686,8 @@ export async function handoffPanel(session: SessionRow): Promise<HandoffPanelRow
         status: h.status,
         urgent: h.urgent,
         reason: h.reason,
+        fromStaffId: h.from_staff_id,
+        teammateStaffId: h.to_staff_id ?? null,
         fromName: people.get(h.from_staff_id)?.name || "Unknown staff member",
         teammateName: h.to_staff_id ? people.get(h.to_staff_id)?.name || "" : "",
         teammateUnavailable: !!h.to_staff_id && away.has(h.to_staff_id),

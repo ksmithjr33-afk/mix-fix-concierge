@@ -5,6 +5,8 @@ import { todayFor, upcomingUnavailable } from "@/lib/team/availability-db";
 import { rangeLabel } from "@/lib/team/availability";
 import { staffMarketsOf, marketLabel } from "@/lib/team/markets";
 import TeamHeader from "../../../team-header";
+import RecordCard from "../../../record-card";
+import { staffRecord } from "@/lib/team/reliability-db";
 
 export const dynamic = "force-dynamic";
 
@@ -26,7 +28,7 @@ export default async function StaffDetailPage({ params }: { params: Promise<{ id
     );
   }
   const today = await todayFor(id);
-  const away = await upcomingUnavailable(id, today);
+  const [away, record] = await Promise.all([upcomingUnavailable(id, today), staffRecord(id)]);
   return (
     <>
       <TeamHeader signedIn admin back={back} />
@@ -40,6 +42,8 @@ export default async function StaffDetailPage({ params }: { params: Promise<{ id
             Preview as
           </Link>
         </div>
+
+        <RecordCard record={record} />
 
         <section className={card} aria-label="Availability">
           <h2 className="font-heading text-base font-bold text-[#2C2420] mb-2">Availability</h2>

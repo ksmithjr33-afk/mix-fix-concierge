@@ -226,6 +226,11 @@ export async function respondToAssignment(sessionId: string, staff: StaffMember,
     .eq("session_id", sessionId)
     .eq("staff_id", staff.id);
   if (error) throw new Error(`respond failed: ${error.message}`);
+  if (response === "decline" && status === "accepted") {
+    // A late drop, for the reliability record. Separate, so it never blocks the decline.
+    const { error: dropErr } = await supabase.from("event_assignments").update({ dropped_at: new Date().toISOString() }).eq("session_id", sessionId).eq("staff_id", staff.id);
+    if (dropErr) console.error("[team] recording the late drop failed:", dropErr.message);
+  }
 
   if (response === "decline") {
     await cancelHandoffsFor(sessionId, staff.id).catch((err) => console.error("[team] closing a handoff failed:", err));
