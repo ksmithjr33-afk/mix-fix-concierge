@@ -5,6 +5,8 @@ import TeamHeader from "../../team-header";
 import ShiftCard from "../shift-card";
 import RequestButton from "./request-button";
 import { certNoticeForPost } from "@/lib/team/certs-db";
+import { myEstimateForPost } from "@/lib/team/pay-db";
+import { PAY_LABEL } from "@/lib/team/pay";
 
 export const dynamic = "force-dynamic";
 
@@ -13,7 +15,7 @@ export default async function ShiftPage({ params }: { params: Promise<{ id: stri
   const { id } = await params;
   const staff = await requireStaff(`/team/shifts/${encodeURIComponent(id)}`);
   const page = await shiftForStaff(id, staff);
-  const cert = page.state === "open" ? await certNoticeForPost(id, staff.id) : null;
+  const [cert, pay] = page.state === "open" ? await Promise.all([certNoticeForPost(id, staff.id), myEstimateForPost(staff.id, id)]) : [null, null];
   const back = { href: "/team/events?tab=open", label: "Open shifts" };
 
   return (
@@ -38,6 +40,11 @@ export default async function ShiftPage({ params }: { params: Promise<{ id: stri
               <p className="text-[15px] text-[#6B5D52]">{page.item.shift.date}</p>
             </div>
             <ShiftCard shift={page.item.shift} sameDay={page.item.sameDay} />
+            {pay && (
+              <p className="rounded-2xl bg-[#E4EBDF] text-[#2C2420] px-4 py-3 text-[15px]">
+                <span className="font-heading font-bold">{pay}</span> <span className="text-sm text-[#55684A]">{PAY_LABEL}</span>
+              </p>
+            )}
             {cert && (
               <p className={`rounded-2xl px-4 py-3 text-[15px] ${cert.blocked ? "bg-[#F6E3DC] text-[#A0412D]" : "bg-[#FFF8EC] border border-[#E3C9A0] text-[#2C2420]"}`}>
                 {cert.text}{" "}

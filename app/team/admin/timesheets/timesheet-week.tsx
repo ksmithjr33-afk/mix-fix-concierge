@@ -1,5 +1,6 @@
 "use client";
 
+import { money, payCents, rateText } from "@/lib/team/pay";
 import { useMemo, useState } from "react";
 import type { TimesheetRow } from "@/lib/team/timesheet";
 import { OWN_APPROVE_MESSAGE, rowHistory, staffTotals, toLocal, weekApproval } from "@/lib/team/timesheet";
@@ -88,7 +89,7 @@ function EditForm({ row, onSaved, onCancel }: { row: TimesheetRow; onSaved: (row
   );
 }
 
-function Row({ row, meId, onRows }: { row: TimesheetRow; meId: string; onRows: (rows: TimesheetRow[], message?: string) => void }) {
+function Row({ row, meId, onRows, rate }: { row: TimesheetRow; meId: string; onRows: (rows: TimesheetRow[], message?: string) => void; rate?: number }) {
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -114,6 +115,11 @@ function Row({ row, meId, onRows }: { row: TimesheetRow; meId: string; onRows: (
         </div>
         <span className="shrink-0 text-right">
           <span className="block font-heading font-bold text-[#2C2420] tabular-nums">{row.minutes === null ? "--" : formatWorked(row.minutes)}</span>
+          {rate && row.minutes !== null ? (
+            <span className="block text-xs text-[#6B5D52] tabular-nums">
+              × {rateText(rate)} = {money(payCents(rate, row.minutes) ?? 0)}
+            </span>
+          ) : null}
           {row.approved ? (
             <span className="block text-[11px] font-bold uppercase tracking-wide text-[#55684A]">Approved</span>
           ) : (
@@ -248,7 +254,7 @@ function Row({ row, meId, onRows }: { row: TimesheetRow; meId: string; onRows: (
   );
 }
 
-export default function TimesheetWeek({ initial, meId, from, to }: { initial: TimesheetRow[]; meId: string; from: string; to: string }) {
+export default function TimesheetWeek({ initial, meId, from, to, rates = {} }: { initial: TimesheetRow[]; meId: string; from: string; to: string; rates?: Record<string, number> }) {
   const [rows, setRows] = useState(initial);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
@@ -273,6 +279,7 @@ export default function TimesheetWeek({ initial, meId, from, to }: { initial: Ti
                 <span>{t.staffName}</span>
                 <span className="tabular-nums">
                   {formatWorked(t.minutes)}
+                  {rates[t.staffId] ? ` · ${money(payCents(rates[t.staffId], t.minutes) ?? 0)}` : ""}
                   {t.open > 0 && <span className="text-xs text-[#A0412D]"> · {t.open} incomplete</span>}
                 </span>
               </li>
@@ -315,7 +322,7 @@ export default function TimesheetWeek({ initial, meId, from, to }: { initial: Ti
         ) : (
           <ul className="divide-y divide-[#DDD5CC]">
             {rows.map((r) => (
-              <Row key={r.assignmentId} row={r} meId={meId} onRows={merge} />
+              <Row key={r.assignmentId} row={r} meId={meId} onRows={merge} rate={rates[r.staffId]} />
             ))}
           </ul>
         )}

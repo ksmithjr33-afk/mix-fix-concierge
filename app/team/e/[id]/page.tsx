@@ -5,6 +5,7 @@ import { barReadyEntries } from "@/lib/team/bar-ready-db";
 import { barReadyOpen } from "@/lib/team/bar-ready";
 import { closeoutState } from "@/lib/team/closeout-db";
 import { companyGear } from "@/lib/team/closeout";
+import { myEstimate } from "@/lib/team/pay-db";
 import { shoppingGroups } from "@/lib/team/shopping";
 import { assignmentRef, clockView, punchesFor } from "@/lib/team/clock-db";
 import { eventData } from "@/lib/team/markets";
@@ -60,6 +61,8 @@ export default async function TeamEventPage({
   if (chatTab) await markThreadRead(id, staff.id);
   const punches = assignment ? await punchesFor(assignment.id) : [];
   const accepted = assignment?.status === "accepted";
+  // Only the viewer's own estimate, and only on an event they are on.
+  const pay = assignment && assignment.status !== "declined" ? await myEstimate(staff.id, access.session) : null;
   const [handoff, teammates] = accepted ? await Promise.all([myHandoff(id, staff.id), teammateChoices(access.session, staff.id)]) : [null, []];
   const renderedAt = serverNow();
   const open = barReadyOpen(ed);
@@ -88,6 +91,7 @@ export default async function TeamEventPage({
           entries,
           timeZone: data.view.timeZone,
         }}
+        pay={pay}
         closeout={
           closeout.open && staff.role !== "admin"
             ? { canSubmit: closeout.canSubmit, mine: closeout.mine, gear: companyGear(), timeZone: data.view.timeZone }

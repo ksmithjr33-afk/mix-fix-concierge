@@ -7,6 +7,8 @@ import { compactLines } from "@/lib/team/reliability-db";
 import { certLinesByStaff, certsEnforced, onboardingProgress } from "@/lib/team/certs-db";
 import { ONBOARDING } from "@/lib/team/cert-config";
 import EnforceToggle from "./enforce-toggle";
+import { ratesFor } from "@/lib/team/pay-db";
+import { rateText } from "@/lib/team/pay";
 import { rangeLabel } from "@/lib/team/availability";
 import { chicagoToday } from "@/lib/team/time";
 
@@ -21,6 +23,7 @@ export default async function AdminStaffPage() {
     onboardingProgress(staff.map((s) => s.id)),
     certsEnforced(),
   ]);
+  const rates = await ratesFor(me, staff.map((s) => s.id));
   // One line per person per topic, shown under their name.
   const notes: Record<string, string[]> = {};
   const add = (id: string, line: string) => (notes[id] = [...(notes[id] ?? []), line]);
@@ -28,6 +31,7 @@ export default async function AdminStaffPage() {
     add(s.id, `Record: ${records[s.id]}`);
     if (certLines[s.id]) add(s.id, `Certification: ${certLines[s.id]}`);
     if (s.role !== "admin") add(s.id, `Onboarding: ${onboard.get(s.id) ?? 0} of ${ONBOARDING.length}`);
+    add(s.id, `Rate: ${rates.get(s.id) ? rateText(rates.get(s.id)!) : "not set"}`);
   }
   for (const [id, rows] of away) {
     const shown = rows.slice(0, 3).map(rangeLabel).join("; ");

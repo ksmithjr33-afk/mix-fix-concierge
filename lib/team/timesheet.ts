@@ -230,6 +230,8 @@ export const CSV_COLUMNS = [
   "Edited by admin",
   "Approved by",
   "Time zone",
+  "Hourly rate",
+  "Pay (hours x rate)",
 ] as const;
 
 /** One CSV cell. Quoted when needed, and text that a spreadsheet would run as a formula is made plain. */
@@ -269,7 +271,8 @@ export const FLAG_CSV: Record<string, string> = {
   edited: "corrected by admin",
 };
 
-export function timesheetCsv(rows: TimesheetRow[]): string {
+/** Admin CSV. `rates` is hourly cents by staff id; blank columns for anyone without a rate. */
+export function timesheetCsv(rows: TimesheetRow[], rates: Map<string, number> = new Map()): string {
   const lines = [CSV_COLUMNS.map(csvCell).join(",")];
   for (const r of rows) {
     lines.push(
@@ -287,6 +290,8 @@ export function timesheetCsv(rows: TimesheetRow[]): string {
         r.editedByAdmin ? "Yes" : "No",
         r.approved?.byName ?? "",
         zoneShort(r.timeZone || TZ),
+        rates.get(r.staffId) ? (rates.get(r.staffId)! / 100).toFixed(2) : "",
+        rates.get(r.staffId) && r.minutes !== null ? ((rates.get(r.staffId)! * r.minutes) / 6000).toFixed(2) : "",
       ]
         .map(csvCell)
         .join(",")

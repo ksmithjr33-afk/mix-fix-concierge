@@ -491,6 +491,7 @@ export default function EventTabs({
   shoppingState,
   barReady,
   closeout = null,
+  pay = null,
   offered,
   manageHref,
   clock,
@@ -515,6 +516,7 @@ export default function EventTabs({
   shoppingState: Record<string, CheckState>;
   barReady: Omit<BarReadyProps, "sessionId"> & { show: boolean };
   closeout?: Omit<CloseoutProps, "sessionId"> | null;
+  pay?: string | null; // the viewer's own estimated pay
 }) {
   const [tab, setTab] = useState<Tab>(initialTab);
   const [chatUnread, setChatUnread] = useState(initialTab === "chat" ? 0 : chat.unread);
@@ -532,6 +534,11 @@ export default function EventTabs({
         <p className="text-[15px] text-[#6B5D52]">
           {[view.date, view.arrival ? `arrive ${view.arrival}` : ""].filter(Boolean).join(", ")}
         </p>
+        {pay && (
+          <p className="text-sm text-[#55684A]">
+            <span className="font-semibold">{pay}</span> estimated pay, before taxes and tips
+          </p>
+        )}
         {manageHref && (
           <a href={manageHref} className="inline-block mt-1 text-sm text-[#B5845A] underline">
             Manage staff for this event

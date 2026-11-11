@@ -13,6 +13,9 @@ import { CERT_TYPES, ONBOARDING } from "@/lib/team/cert-config";
 import { longDate } from "@/lib/team/time";
 import CertUpload from "../../../certifications/cert-upload";
 import CertReview from "./cert-review";
+import RateForm from "./rate-form";
+import { rateFor } from "@/lib/team/pay-db";
+import { PAY_LABEL } from "@/lib/team/pay";
 
 export const dynamic = "force-dynamic";
 
@@ -36,6 +39,7 @@ export default async function StaffDetailPage({ params }: { params: Promise<{ id
   const today = await todayFor(id);
   const [away, record, certs, standings, onboard] = await Promise.all([upcomingUnavailable(id, today), staffRecord(id), certRows([id]), myStandings(id), onboardingDone(id)]);
   const needed = [...new Set(standings.map((s) => s.standing.certType))];
+  const rate = await rateFor(id); // admins only: this page is behind requireAdmin
   return (
     <>
       <TeamHeader signedIn admin back={back} />
@@ -51,6 +55,12 @@ export default async function StaffDetailPage({ params }: { params: Promise<{ id
         </div>
 
         <RecordCard record={record} />
+
+        <section className={card} aria-label="Pay">
+          <h2 className="font-heading text-base font-bold text-[#2C2420] mb-1">Hourly rate</h2>
+          <p className="text-sm text-[#6B5D52] mb-2">Only admins and {person.name?.split(" ")[0] || "this person"} see it. Used for the {PAY_LABEL.toLowerCase()}.</p>
+          <RateForm staffId={id} initial={rate ? (rate / 100).toFixed(2) : ""} />
+        </section>
 
         <section className={card} aria-label="Certifications">
           <h2 className="font-heading text-base font-bold text-[#2C2420] mb-1">Certifications</h2>

@@ -131,15 +131,15 @@ const csv = ts.timesheetCsv([
 const lines = csv.split("\r\n");
 check(
   "CSV header has every column",
-  lines[0] === "Staff name,Staff phone,Event date,Event name,Scheduled start,Scheduled end,Clock in,Clock out,Hours,Flags,Edited by admin,Approved by,Time zone",
+  lines[0] === "Staff name,Staff phone,Event date,Event name,Scheduled start,Scheduled end,Clock in,Clock out,Hours,Flags,Edited by admin,Approved by,Time zone,Hourly rate,Pay (hours x rate)",
   lines[0],
 );
 check(
   "CSV row: phone, schedule, Chicago times, decimal hours, flags, edited yes",
-  lines[1] === "Jordan Lee,(214) 555-0101,2026-12-12,Justin · Birthday,6:00 PM,10:00 PM,2026-12-12 6:00 PM,2026-12-12 11:30 PM,5.50,away from event; corrected by admin,Yes,Pat Jones,CT",
+  lines[1] === "Jordan Lee,(214) 555-0101,2026-12-12,Justin · Birthday,6:00 PM,10:00 PM,2026-12-12 6:00 PM,2026-12-12 11:30 PM,5.50,away from event; corrected by admin,Yes,Pat Jones,CT,,",
   lines[1],
 );
-check("CSV edited is No when nothing was edited, hours blank until clock out", lines[2].endsWith(",,No,,CT") && lines[2].includes(",2026-12-12 6:00 PM,,,"), lines[2]);
+check("CSV edited is No when nothing was edited, hours blank until clock out", lines[2].endsWith(",,No,,CT,,") && lines[2].includes(",2026-12-12 6:00 PM,,,"), lines[2]);
 check("CSV stops spreadsheet formulas", lines[2].startsWith(`"'=HYPERLINK(""x"")"`), lines[2]);
 check("CSV quotes commas", lines[2].includes('"Smith, Wedding"'));
 check("CSV phone is readable and stays text", ts.csvPhone("+12145550101") === "(214) 555-0101" && ts.csvPhone("+447700900123") === "+447700900123");

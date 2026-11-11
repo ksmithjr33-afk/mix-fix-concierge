@@ -157,6 +157,7 @@ export default function EventList({ sections, empty, respond = false, select }: 
                             )}
                           </span>
                           <span className="block text-sm text-[#6B5D52] break-words">{e.detail}</span>
+                          {e.pay && <span className="block text-xs text-[#55684A]">{e.pay} estimated pay, before taxes and tips</span>}
                         </span>
                       </Link>
                       {offered && <Respond e={e} onDone={(next) => setStatuses((m) => ({ ...m, [e.id]: next }))} />}

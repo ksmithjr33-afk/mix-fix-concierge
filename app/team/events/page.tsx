@@ -10,6 +10,7 @@ import TeamHeader from "../team-header";
 import EventList from "./event-list";
 import { openShiftsFor } from "@/lib/team/shifts-db";
 import { myCertNotices } from "@/lib/team/certs-db";
+import { myEstimates } from "@/lib/team/pay-db";
 import { assignedEventItems } from "@/lib/team/my-events";
 import { calendarGrid, calLinksOf, calMode, isYmd } from "@/lib/team/calendar";
 import CalendarView, { ListCalendarToggle } from "../calendar-view";
@@ -47,7 +48,10 @@ export default async function TeamEventsPage({
   const shifts = await openShiftsFor(staff);
   const certNotes = tab === "open" && !admin ? await myCertNotices(staff.id) : { enforced: false, lines: [] };
   const [all, hidden] = await Promise.all([visibleEvents(staff.id, admin), hiddenEventIds()]);
-  const events = withoutHidden(all, hidden);
+  const visible = withoutHidden(all, hidden);
+  // The viewer's own estimated pay, only on events they are on. Never anyone else's.
+  const pay = await myEstimates(staff.id, visible.filter((e) => e.status === "accepted" || e.status === "offered").map((e) => e.id));
+  const events = visible.map((e) => (pay[e.id] && (e.status === "accepted" || e.status === "offered") ? { ...e, pay: pay[e.id] } : e));
   const today = chicagoToday();
   const sections = past ? pastSection(events, today) : upcomingSections(events, today);
   const hasPast = events.some((e) => e.day && e.day < today);

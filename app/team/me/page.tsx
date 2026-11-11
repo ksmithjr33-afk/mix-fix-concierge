@@ -9,6 +9,7 @@ const PAGES: { href: string; title: string; detail: string }[] = [
   { href: "/team/availability", title: "Availability", detail: "Mark the days you cannot work." },
   { href: "/team/onboarding", title: "Getting started", detail: "Five short steps for new bartenders." },
   { href: "/team/certifications", title: "My certifications", detail: "Upload your TABC or California RBS and see when it expires." },
+  { href: "/team/pay", title: "My pay", detail: "Estimated pay by event, week, and month." },
   { href: "/team/record", title: "My record", detail: "Events worked, on time, bar ready, closeouts, and handoffs." },
 ];
 

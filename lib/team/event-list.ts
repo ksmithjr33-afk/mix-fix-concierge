@@ -26,6 +26,7 @@ export interface EventListItem {
   badge?: { text: string; tone: "ok" | "warn" | "muted" };
   market?: Market | null;
   chat?: { href: string; unread: number }; // admins: the event's team chat
+  pay?: string; // the viewer's own estimated pay, "$187.50"
 }
 
 /** "Justin · Wedding": client first name and event type. */

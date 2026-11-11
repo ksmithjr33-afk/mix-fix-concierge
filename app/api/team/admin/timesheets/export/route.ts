@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getCurrentStaff } from "@/lib/team/auth";
 import { timesheetRows } from "@/lib/team/timesheet-db";
 import { isYmd, timesheetCsv } from "@/lib/team/timesheet";
+import { ratesFor } from "@/lib/team/pay-db";
 
 const MAX_DAYS = 366;
 
@@ -17,7 +18,8 @@ export async function GET(request: Request) {
   const days = (Date.parse(to) - Date.parse(from)) / 86_400_000;
   if (days > MAX_DAYS) return NextResponse.json({ error: "Pick a range of a year or less." }, { status: 400 });
   try {
-    const csv = timesheetCsv(await timesheetRows(from, to));
+    const rows = await timesheetRows(from, to);
+    const csv = timesheetCsv(rows, await ratesFor(staff, rows.map((r) => r.staffId)));
     return new NextResponse(csv, {
       headers: {
         "Content-Type": "text/csv; charset=utf-8",

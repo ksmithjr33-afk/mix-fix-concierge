@@ -5,6 +5,7 @@ import { isYmd, weekLabel, weekRange } from "@/lib/team/timesheet";
 import { chicagoToday } from "@/lib/team/time";
 import TeamHeader from "../../team-header";
 import TimesheetWeek from "./timesheet-week";
+import { ratesFor } from "@/lib/team/pay-db";
 
 export const dynamic = "force-dynamic";
 
@@ -19,6 +20,7 @@ export default async function TimesheetsPage({
   const week = weekRange(asked);
   const me = await requireAdmin(`/team/admin/timesheets?week=${week.from}`);
   const rows = await timesheetRows(week.from, week.to);
+  const rates = Object.fromEntries(await ratesFor(me, rows.map((r) => r.staffId)));
 
   return (
     <>
@@ -36,7 +38,7 @@ export default async function TimesheetsPage({
             </Link>
           </div>
         </div>
-        <TimesheetWeek key={week.from} initial={rows} meId={me.id} from={week.from} to={week.to} />
+        <TimesheetWeek key={week.from} initial={rows} meId={me.id} from={week.from} to={week.to} rates={rates} />
       </main>
     </>
   );
