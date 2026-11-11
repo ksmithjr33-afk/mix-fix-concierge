@@ -38,7 +38,9 @@ export default function AssignPanel({
   available,
   timeZone,
   market,
+  showProgress = true,
 }: {
+  showProgress?: boolean; // the manager view shows checklist progress and punches on Day of instead
   timeZone: string;
   market: string | null;
   sessionId: string;
@@ -104,7 +106,7 @@ export default function AssignPanel({
                   </div>
                   <span className={`shrink-0 text-[11px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded ${STATUS[p.status].cls}`}>{STATUS[p.status].text}</span>
                 </div>
-                {p.status !== "declined" && (
+                {showProgress && p.status !== "declined" && (
                   <>
                     <Bar label="Checklist" checked={p.checklist.checked} total={p.checklist.total} />
                     <Bar label="Shopping list" checked={p.shopping.checked} total={p.shopping.total} />

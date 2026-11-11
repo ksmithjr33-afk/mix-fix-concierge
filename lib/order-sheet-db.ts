@@ -11,8 +11,8 @@ import {
   byStore,
   calculatedLines,
   FIELD_NAMES,
+  DELIVERY_STORE,
   isSection,
-  isStore,
   itemKey,
   recipes,
   sheetHeader,
@@ -27,7 +27,9 @@ import {
   type SheetHeader,
   type SheetLine,
   type Store,
+  type StoreInfo,
 } from "@/lib/order-sheet";
+import { addStore, listStores, rememberLegendName } from "@/lib/order-sheet-stores";
 
 type EventData = Record<string, unknown>;
 
@@ -46,7 +48,10 @@ export interface SheetMeta {
   note: string;
   noteBy: string | null;
   noteAt: string | null;
-  deliveryDayOf: boolean;
+  // The old "Delivery to event on day of" checkbox, ticked before it became a
+  // store. Kept so the legend still shows it until someone sets it on lines.
+  legacyDelivery: boolean;
+  legendNames: Record<Store, string>; // "(Taylor)" next to each legend entry, this event only
 }
 
 export interface SheetView {
@@ -56,6 +61,7 @@ export interface SheetView {
   sheet: Sheet;
   byStore: ReturnType<typeof byStore>;
   meta: SheetMeta;
+  stores: StoreInfo[]; // every store, retired ones too, in list order
   suggestions: boolean; // the team setting
 }
 
@@ -71,10 +77,38 @@ async function savedRows(sessionId: string): Promise<SavedLine[]> {
   return (data as SavedLine[]) ?? [];
 }
 
-async function meta(sessionId: string): Promise<SheetMeta> {
+interface MetaRow {
+  note?: string | null;
+  note_by_name?: string | null;
+  note_at?: string | null;
+  delivery_day_of?: boolean | null;
+  legend_names?: Record<string, unknown> | null;
+}
+
+async function metaRow(sessionId: string): Promise<MetaRow> {
   const { data } = await supabase.from("order_sheet_meta").select("*").eq("session_id", sessionId).maybeSingle();
-  const m = (data ?? {}) as { note?: string | null; note_by_name?: string | null; note_at?: string | null; delivery_day_of?: boolean | null };
-  return { note: m.note ?? "", noteBy: m.note_by_name ?? null, noteAt: m.note_at ?? null, deliveryDayOf: m.delivery_day_of === true };
+  return (data ?? {}) as MetaRow;
+}
+
+/** Each store's legend name on this event: the one set here, or the one used on the last event. */
+function legendNames(m: MetaRow, stores: StoreInfo[]): Record<Store, string> {
+  const set = m.legend_names && typeof m.legend_names === "object" ? m.legend_names : {};
+  const out: Record<Store, string> = {};
+  for (const s of stores) {
+    const v = Object.prototype.hasOwnProperty.call(set, s.id) ? String(set[s.id] ?? "") : s.lastLegendName;
+    if (v) out[s.id] = v;
+  }
+  return out;
+}
+
+function meta(m: MetaRow, stores: StoreInfo[]): SheetMeta {
+  return {
+    note: m.note ?? "",
+    noteBy: m.note_by_name ?? null,
+    noteAt: m.note_at ?? null,
+    legacyDelivery: m.delivery_day_of === true,
+    legendNames: legendNames(m, stores),
+  };
 }
 
 /**
@@ -86,25 +120,43 @@ async function lastStores(sessionId: string): Promise<Map<string, Store>> {
   const out = new Map<string, Store>();
   if (error || !data) return out;
   const rows = (data as { session_id: string; store: unknown; store_item: string | null; store_at: string | null }[])
-    .filter((r) => isStore(r.store) && r.store_item)
+    .filter((r) => typeof r.store === "string" && r.store && r.store_item)
     .sort((a, b) => String(a.store_at ?? "").localeCompare(String(b.store_at ?? "")));
   for (const r of rows) out.set(r.store_item!, r.store as Store); // later ones win
   return out;
 }
 
-async function build(session: SessionLike): Promise<{ calc: CalcLine[]; saved: SavedLine[]; sheet: Sheet; suggestions: boolean }> {
+interface Built {
+  calc: CalcLine[];
+  saved: SavedLine[];
+  sheet: Sheet;
+  suggestions: boolean;
+  stores: StoreInfo[];
+  meta: MetaRow;
+}
+
+async function build(session: SessionLike): Promise<Built> {
   const ed = eventDataOf(session);
   const calc = calculatedLines(ed);
-  const [saved, suggestions] = await Promise.all([savedRows(session.id), teamSetting(SUGGEST_STORES_KEY)]);
+  const [saved, suggestions, stores, m] = await Promise.all([savedRows(session.id), teamSetting(SUGGEST_STORES_KEY), listStores(), metaRow(session.id)]);
   const last = suggestions ? await lastStores(session.id) : new Map<string, Store>();
-  const sheet = buildSheet(calc, saved, (name) => last.get(itemKey(name)) ?? null);
-  return { calc, saved, sheet, suggestions };
+  const sheet = buildSheet(calc, saved, (name) => last.get(itemKey(name)) ?? null, stores, m.delivery_day_of === true ? [DELIVERY_STORE] : []);
+  return { calc, saved, sheet, suggestions, stores, meta: m };
 }
 
 export async function getSheetView(session: SessionLike): Promise<SheetView> {
   const ed = eventDataOf(session);
-  const [{ sheet, suggestions }, m] = await Promise.all([build(session), meta(session.id)]);
-  return { sessionId: session.id, header: sheetHeader(ed), recipes: recipes(ed), sheet, byStore: byStore(sheet), meta: m, suggestions };
+  const { sheet, suggestions, stores, meta: m } = await build(session);
+  return {
+    sessionId: session.id,
+    header: sheetHeader(ed),
+    recipes: recipes(ed),
+    sheet,
+    byStore: byStore(sheet, stores),
+    meta: meta(m, stores),
+    stores,
+    suggestions,
+  };
 }
 
 /**
@@ -196,7 +248,7 @@ async function rowFor(sessionId: string, t: Target): Promise<SavedLine | null> {
 const calcFields = (c: CalcLine): Fields => ({ name: c.name, quantity: c.quantity, size: c.size, detail: c.detail });
 
 export async function applySheetAction(session: SessionLike, editor: Editor, body: Record<string, unknown>): Promise<ActionResult> {
-  const { calc, saved, sheet } = await build(session);
+  const { calc, saved, sheet, stores, meta: m } = await build(session);
   const now = new Date().toISOString();
   const who = { by: editor.id, name: editor.name || "Admin" };
   const bad = (error: string, status = 400): ActionResult => ({ ok: false, error, status });
@@ -293,8 +345,9 @@ export async function applySheetAction(session: SessionLike, editor: Editor, bod
     case "store": {
       const t = findTarget(body.ref, calc, saved, sheet);
       if (!t?.line) return bad("That line is no longer on the sheet. Reload the page.", 404);
-      const store = body.store === null || body.store === "" ? null : body.store;
-      if (store !== null && !isStore(store)) return bad("Pick a store from the list.");
+      const store = body.store === null || body.store === "" ? null : typeof body.store === "string" ? body.store : "?";
+      // A retired store stays on a line that already has it, but is not offered on new lines.
+      if (store !== null && !(offered(stores, store) || (t.line.store === store && stores.some((s) => s.id === store)))) return bad("Pick a store from the list.");
       const row = await rowFor(session.id, t);
       if (!row) return bad("Could not save. Try again.", 500);
       await updateRow(row.id, storePatch(store, t.line.fields.name, who, now));
@@ -302,8 +355,8 @@ export async function applySheetAction(session: SessionLike, editor: Editor, bod
     }
     case "section_store": {
       if (!isSection(body.section)) return bad("Pick a section.");
-      const store = body.store === null || body.store === "" ? null : body.store;
-      if (store !== null && !isStore(store)) return bad("Pick a store from the list.");
+      const store = body.store === null || body.store === "" ? null : typeof body.store === "string" ? body.store : "?";
+      if (store !== null && !offered(stores, store)) return bad("Pick a store from the list.");
       const lines = sheet.sections.find((s) => s.id === body.section)!.lines;
       for (const l of lines) {
         const t = findTarget(l.ref, calc, saved, sheet);
@@ -330,17 +383,53 @@ export async function applySheetAction(session: SessionLike, editor: Editor, bod
       if (error) return bad("Could not save. Try again.", 500);
       break;
     }
-    case "delivery": {
+    case "clear_legacy_delivery": {
+      // The old checkbox, once someone has set Delivery to event on day of on the lines it meant.
       const { error } = await supabase
         .from("order_sheet_meta")
-        .upsert({ session_id: session.id, delivery_day_of: body.on === true, delivery_by_name: who.name, delivery_at: now, updated_at: now }, { onConflict: "session_id" });
+        .upsert({ session_id: session.id, delivery_day_of: false, delivery_by_name: who.name, delivery_at: now, updated_at: now }, { onConflict: "session_id" });
       if (error) return bad("Could not save. Try again.", 500);
+      break;
+    }
+    case "legend_name": {
+      if (typeof body.store !== "string" || !stores.some((s) => s.id === body.store)) return bad("Pick a store from the list.");
+      const name = text(body.name).slice(0, 40);
+      const names = { ...(m.legend_names && typeof m.legend_names === "object" ? m.legend_names : {}), [body.store]: name };
+      const { error } = await supabase
+        .from("order_sheet_meta")
+        .upsert({ session_id: session.id, legend_names: names, updated_at: now }, { onConflict: "session_id" });
+      if (error) return bad("Could not save. Try again.", 500);
+      await rememberLegendName(body.store, name);
+      break;
+    }
+    case "add_store": {
+      // "Add a store" at the bottom of the store list: the new store goes on the
+      // team's list for every event, and onto the line (or section) it was added from.
+      const r = await addStore({ name: body.name, color: body.color });
+      if (!r.ok) return bad(r.error, r.status);
+      const added = r.store!.id;
+      const t = body.ref ? findTarget(body.ref, calc, saved, sheet) : null;
+      if (t?.line) {
+        const row = await rowFor(session.id, t);
+        if (row) await updateRow(row.id, storePatch(added, t.line.fields.name, who, now));
+      } else if (isSection(body.section)) {
+        for (const l of sheet.sections.find((s) => s.id === body.section)!.lines) {
+          const lt = findTarget(l.ref, calc, saved, sheet);
+          const row = lt ? await rowFor(session.id, lt) : null;
+          if (row) await updateRow(row.id, storePatch(added, l.fields.name, who, now));
+        }
+      }
       break;
     }
     default:
       return bad("Unknown action.");
   }
   return { ok: true, view: await getSheetView(session) };
+}
+
+/** A store that can be picked for a line: on the list and not retired. */
+function offered(stores: StoreInfo[], id: unknown): id is Store {
+  return typeof id === "string" && stores.some((s) => s.id === id && !s.retired);
 }
 
 function storePatch(store: Store | null, name: string, who: { by: string; name: string }, now: string) {

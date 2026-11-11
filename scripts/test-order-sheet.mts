@@ -19,6 +19,9 @@ process.env.GHL_UPDATE_WEBHOOK_URL = "https://hooks.test/update";
 const { db } = await import("./fake-supabase.mts");
 const stub = await import("./stub-next.mts");
 const os = await import("../lib/order-sheet.ts");
+const shared = await import("../lib/order-sheet-shared.ts");
+const stores = await import("../lib/order-sheet-stores.ts");
+const storesRoute = await import("../app/api/team/admin/stores/route.ts");
 const osdb = await import("../lib/order-sheet-db.ts");
 const cl = await import("../lib/client-list.ts");
 const cldb = await import("../lib/client-list-db.ts");
@@ -108,7 +111,7 @@ for (const pkg of ["Full Bar", "Tailored Bar", "Dive Bar", "Beer and Wine"]) {
   const ed = eventData(pkg, pkg === "Dive Bar" ? { signature_drinks: [] } : {});
   const calc = os.calculatedLines(ed);
   const sheet = os.buildSheet(calc, []);
-  check(`${pkg}: the five sections in the samples' order`, sheet.sections.map((s) => s.title).join(" | ") === "LIQUOR | MIXERS AND JUICES | PRODUCE AND GARNISHES | BASELINE MIXERS | ICE AND BAR SUPPLIES");
+  check(`${pkg}: the five sections in the samples' order`, sheet.sections.map((s) => s.title).join(" | ") === "LIQUOR | MIXERS AND JUICES | PRODUCE AND GARNISHES | ICE & BAR SUPPLIES | BASELINE MIXERS");
   check(`${pkg}: every calculated line is on the sheet exactly once`, calc.length > 0 && calc.every((c) => sheet.sections.flatMap((s) => s.lines).filter((l) => l.ref === `k:${c.key}`).length === 1) && sheet.sections.flatMap((s) => s.lines).length === calc.length);
   // Every item of the client's list and of Natalie's supply list, by name.
   const clientLines = cl.clientList(ed).sections.flatMap((s) => s.lines).map((l) => l.split(" — ")[0].trim().toLowerCase());
@@ -141,6 +144,24 @@ const [hy, hm, hd] = addDays(time.chicagoToday(), 20).split("-").map(Number);
 check("Header: date (package) guests, hours", h.line === `${hm}/${hd}/${String(hy).slice(2)} (Full Bar) 100 guests, 4 hours`, h.line);
 check("Header: theme and colors when present", h.theme === "Garden party" && h.colors === "Sage and gold");
 check("Header: no theme line when there is none", os.sheetHeader(eventData("Full Bar", { theme: "", event_colors: "" })).theme === "");
+// Each line is one line of text worded like the samples, nothing empty shown, numbers unchanged.
+for (const pkg of ["Full Bar", "Dive Bar", "Tailored Bar", "Premium Bar", "Bartender Only"]) {
+  const lines = os.buildSheet(os.calculatedLines(eventData(pkg)), []).sections.flatMap((s) => s.lines);
+  check(`${pkg}: no empty parentheses, placeholders, or trailing dash on any line`, lines.every((l) => !/\(\s*\)|— *$|—\s*—|\bsize\b|brand or note/i.test(l.text) && !l.text.includes("( ")), lines.map((l) => l.text).filter((t) => /\(\s*\)|— *$/.test(t)).join(" / "));
+  check(`${pkg}: every number in the calculated fields is on the line as it was`, lines.every((l) => [l.fields.quantity, l.fields.size].join(" ").match(/\d+(?:\.\d+)?/g)?.every((n) => l.text.includes(n)) ?? true));
+}
+const word = (name: string, quantity: string, size: string, detail: string, section: string) => os.lineText({ name, quantity, size, detail }, section as never);
+check("Wording: Lime juice — 4 x 32 oz bottles", word("Lime juice", "4 bottles", "32 oz", "", "mixers") === "Lime juice — 4 x 32 oz bottles");
+check("Wording: 1 bottle (48 oz) reads 1 x 48 oz bottle", word("Lemon juice", "1 bottle", "48 oz", "", "mixers") === "Lemon juice — 1 x 48 oz bottle");
+check("Wording: Limes — 24 count", word("Limes", "24 count", "", "", "produce") === "Limes — 24 count");
+check("Wording: Coke — 1 case (24 pack)", word("Coke", "1 case", "24 pack", "", "baseline") === "Coke — 1 case (24 pack)");
+check(
+  "Wording: liquor keeps (750 ml) and the brands after a dash",
+  word("Tequila reposado", "15 bottles", "750 ml", "Clase Azul Reposado or Espolòn Reposado", "liquor") === "Tequila reposado — 15 bottles (750 ml) — Clase Azul Reposado or Espolòn Reposado"
+);
+check("Wording: Ice — 12 x 16 lb bags (estimated for mixing only)", word("Ice", "12 bags", "16 lb", "estimated for mixing only", "ice") === "Ice — 12 x 16 lb bags (estimated for mixing only)");
+check("Wording: a line with only a name shows only the name", word("Edible flowers", "", "", "", "produce") === "Edible flowers");
+check("Recipes: a 9 oz martini is marked (martini)", os.recipes(eventData("Full Bar", { signature_drinks: [MARTINI, MULE] })).map((r) => r.martini).join() === "true,false");
 const rs = os.recipes(eventData("Full Bar", { signature_drinks: [MULE, MARTINI] }));
 check("Recipes: each drink with its cup, ingredients, and garnish", rs.length === 2 && rs[0].name === "Mule" && rs[0].ingredients.length === 3 && rs[0].garnish === "lime wheel");
 check("Cup size: a drink topped with ginger beer is 12 oz", os.cupSize(MULE) === "12 oz");
@@ -233,14 +254,22 @@ await act({ action: "store", ref: ours[0].ref, store: "walmart" });
 await act({ action: "store", ref: ours[1].ref, store: "amazon" });
 v = await act({ action: "store", ref: ours[2].ref, store: "specs" });
 const colorOf = (ref: string) => allLines(v).find((l) => l.ref === ref)!.highlight;
-check("Walmart is light blue", colorOf(ours[0].ref) === os.STORE_INFO.walmart.color && os.STORE_INFO.walmart.color === "#BDE8F6");
-check("Amazon is orange", colorOf(ours[1].ref) === os.STORE_INFO.amazon.color && os.STORE_INFO.amazon.color === "#FFCF94");
-check("Spec's is yellow", colorOf(ours[2].ref) === os.STORE_INFO.specs.color && os.STORE_INFO.specs.color === "#FFF07D");
-check("Sam's Club is green", os.STORE_INFO.sams.color === "#BFEBB4");
-check("Every highlight matches its store", allLines(v).every((l) => (l.store ? l.highlight === os.STORE_INFO[l.store].color : l.highlight === null)));
-check("The legend lists only the stores in use", JSON.stringify(v.sheet.legend) === JSON.stringify(["walmart", "amazon", "specs"]));
+const storeById = (id: string) => v.stores.find((s) => s.id === id)!;
+check(
+  "The store list starts with Isabel's five, in her legend order",
+  v.stores.map((s) => `${s.name} ${s.color}`).join(" | ") === "Spec's pickup #FF9900 | Sam's Club delivery #00FFFF | Amazon #C000C0 | Walmart pickup #00FF00 | Delivery to event on day of #FFFF00"
+);
+check("Walmart pickup is green", colorOf(ours[0].ref) === "#00FF00");
+check("Amazon is magenta with white text", colorOf(ours[1].ref) === "#C000C0" && allLines(v).find((l) => l.ref === ours[1].ref)!.textColor === "#FFFFFF");
+check("Spec's pickup is orange with black text", colorOf(ours[2].ref) === "#FF9900" && allLines(v).find((l) => l.ref === ours[2].ref)!.textColor === "#000000");
+check("Sam's Club delivery is light blue, Delivery to event on day of is yellow", storeById("sams").color === "#00FFFF" && storeById("delivery").color === "#FFFF00");
+check("Every highlight matches its store", allLines(v).every((l) => (l.store ? l.highlight === storeById(l.store).color : l.highlight === null)));
+check("Every palette color keeps its text readable (4.5:1 or better)", os.PALETTE.every((p) => shared.contrastOn(p.color) >= 4.5));
+check("White text on dark highlights, black on light ones", shared.textOn("#1F2A6B") === "#FFFFFF" && shared.textOn("#FFFF00") === "#000000");
+check("The palette has no color twice", new Set(os.PALETTE.map((p) => p.color)).size === os.PALETTE.length);
+check("The legend lists only the stores in use, in list order", JSON.stringify(v.sheet.legend) === JSON.stringify(["specs", "amazon", "walmart"]));
 const notSet = allLines(v).filter((l) => !l.store).length;
-check("Counts at the top: each store in use, then not set", JSON.stringify(v.sheet.counts.map((c) => `${c.label} ${c.count}`)) === JSON.stringify(["Walmart 1", "Amazon 1", "Spec's 1", `not set ${notSet}`]));
+check("Counts at the top: each store in use, then not set", JSON.stringify(v.sheet.counts.map((c) => `${c.label} ${c.count}`)) === JSON.stringify(["Spec's pickup 1", "Amazon 1", "Walmart pickup 1", `not set ${notSet}`]));
 v = await act({ action: "section_store", section: "mixers", store: "sams" });
 check("Set all in this section", v.sheet.sections.find((s) => s.id === "mixers")!.lines.every((l) => l.store === "sams"));
 v = await act({ action: "store", ref: ours[0].ref, store: "" });
@@ -300,8 +329,109 @@ const statuses = await osdb.orderStatuses([S("s1"), S("s2")]);
 check("The admin events list gets each event's order status", statuses.get("s1") === "all_ordered" && statuses.get("s2") === "not_started");
 v = await act({ action: "ordered", ref: toOrder[0].ref, on: false });
 check("Unchecking Ordered clears who and when", !allLines(v).find((l) => l.ref === toOrder[0].ref)!.orderedBy);
-v = await act({ action: "delivery", on: true });
-check("Delivery to event on day of is saved", v.meta.deliveryDayOf);
+v = await act({ action: "store", ref: toOrder[1].ref, store: "delivery" });
+check("Delivery to event on day of is a store a line can have", allLines(v).find((l) => l.ref === toOrder[1].ref)!.store === "delivery" && v.sheet.legend.includes("delivery"));
+check("The old Delivery checkbox action is gone", !(await osdb.applySheetAction(S(), editor, { action: "delivery", on: true })).ok);
+
+// ----- Stores the team manages -----
+reset();
+v = await view();
+let mine = allLines(v).filter((l) => !l.clientBuys);
+v = await act({ action: "add_store", name: "Costco pickup", color: "#E0201B", ref: mine[0].ref });
+const costco = v.stores.find((s) => s.name === "Costco pickup")!;
+check("Add a store from the sheet: it joins the list", !!costco && costco.color === "#E0201B" && !costco.retired && v.stores.length === 6);
+let costcoLine = allLines(v).find((l) => l.ref === mine[0].ref)!;
+check("The new store is set on the line it was added from, in its color", costcoLine.store === costco.id && costcoLine.highlight === "#E0201B" && costcoLine.textColor === "#FFFFFF");
+check("The new store shows on the legend, the counts, and By store", v.sheet.legend.includes(costco.id) && v.sheet.counts.some((c) => c.label === "Costco pickup" && c.count === 1) && v.byStore.some((g) => g.title === "Costco pickup" && g.lines.length === 1));
+let other2 = await view("s2");
+check("The new store is offered on every event", other2.stores.some((s) => s.id === costco.id));
+const s2Line = allLines(other2).filter((l) => !l.clientBuys)[1];
+other2 = await act({ action: "store", ref: s2Line.ref, store: costco.id }, "s2");
+check("Another event can use the new store", allLines(other2).find((l) => l.ref === s2Line.ref)!.store === costco.id);
+v = await act({ action: "section_store", section: "ice", store: costco.id });
+check("Set all in this section works with an added store", v.sheet.sections.find((s) => s.id === "ice")!.lines.every((l) => l.store === costco.id));
+check("Suggestions work with an added store", allLines(await view("s2")).some((l) => l.suggestion === costco.id));
+
+// Two stores never share a color.
+let r1 = await stores.addStore({ name: "Kroger", color: "#ff9900" });
+check("A new store cannot take a color already in use", !r1.ok && /already uses that color/.test(r1.ok ? "" : r1.error));
+r1 = await stores.updateStore("amazon", { color: "#E0201B" });
+check("A store cannot be recolored to another store's color", !r1.ok);
+r1 = await stores.addStore({ name: "Kroger", color: "#123456" });
+check("A color outside the palette is refused", !r1.ok);
+r1 = await stores.addStore({ name: "costco PICKUP", color: "#1F4FE0" });
+check("Two active stores cannot share a name", !r1.ok);
+r1 = await stores.updateStore("amazon", { color: "#1F4FE0", name: "Amazon Prime" });
+check("A starting store can be renamed and recolored", r1.ok && r1.stores.find((s) => s.id === "amazon")!.name === "Amazon Prime" && r1.stores.find((s) => s.id === "amazon")!.color === "#1F4FE0");
+const allColors = (await stores.listStores()).map((s) => s.color);
+check("No two stores share a color", new Set(allColors).size === allColors.length);
+const mig = src("supabase/migrations/20261127_order_sheet_stores.sql");
+check(
+  "The database replaces the fixed four with a stores table, keeps every selection, and enforces one color per store",
+  mig.includes("drop constraint if exists order_sheet_lines_store_check") &&
+    mig.includes("references public.order_sheet_stores (id)") &&
+    mig.includes("create unique index if not exists order_sheet_stores_color_idx") &&
+    ["'specs'", "'sams'", "'amazon'", "'walmart'", "'delivery'"].every((id) => mig.includes(id)) &&
+    !mig.includes("drop column")
+);
+
+// Reorder.
+r1 = await stores.moveStore(costco.id, "up");
+check("Move a store up the list", r1.ok && r1.stores.findIndex((s) => s.id === costco.id) === 4);
+check("The legend follows the list order", (await view()).sheet.legend.indexOf(costco.id) < (await view()).sheet.legend.indexOf("walmart") || !(await view()).sheet.legend.includes("walmart"));
+
+// Retire: stays on old sheets, not offered on new lines.
+r1 = await stores.updateStore(costco.id, { retired: true });
+check("Retire a store", r1.ok && r1.stores.find((s) => s.id === costco.id)!.retired);
+v = await view();
+costcoLine = allLines(v).find((l) => l.ref === mine[0].ref)!;
+check("A retired store still shows on a sheet that used it", costcoLine.store === costco.id && costcoLine.highlight === "#E0201B" && v.sheet.legend.includes(costco.id));
+mine = allLines(v).filter((l) => !l.clientBuys && l.store !== costco.id);
+check("A retired store cannot be set on a new line", !(await osdb.applySheetAction(S(), editor, { action: "store", ref: mine[0].ref, store: costco.id })).ok);
+check("A retired store cannot be set on a whole section", !(await osdb.applySheetAction(S(), editor, { action: "section_store", section: "mixers", store: costco.id })).ok);
+check("A retired store is never suggested", allLines(await view("s2")).every((l) => l.suggestion !== costco.id));
+check("A retired store keeps its color, so no new store can take it", !(await stores.addStore({ name: "Target", color: "#E0201B" })).ok);
+r1 = await stores.updateStore(costco.id, { retired: false });
+check("Bring a retired store back", r1.ok && !r1.stores.find((s) => s.id === costco.id)!.retired);
+
+// Legend names.
+v = await act({ action: "legend_name", store: "specs", name: "Taylor" });
+check("A legend name shows on this event", v.meta.legendNames.specs === "Taylor");
+let s2v2 = await view("s2");
+check("The next event starts with the name used last", s2v2.meta.legendNames.specs === "Taylor");
+s2v2 = await act({ action: "legend_name", store: "specs", name: "" }, "s2");
+check("Clearing it on one event leaves the others", !s2v2.meta.legendNames.specs && (await view()).meta.legendNames.specs === "Taylor");
+await act({ action: "legend_name", store: "sams", name: "Aidan" }, "s2");
+check("Each store has its own name", (await view()).meta.legendNames.sams === "Aidan" && (await view()).meta.legendNames.specs === "Taylor");
+
+// The old Delivery checkbox carries over.
+reset();
+db.order_sheet_meta = [{ session_id: "s1", note: "", delivery_day_of: true }];
+v = await view();
+check("A sheet that had Delivery ticked still shows it on the legend", v.meta.legacyDelivery && v.sheet.legend.includes("delivery"));
+v = await act({ action: "clear_legacy_delivery" });
+check("Clearing the old tick takes it off the legend once nothing uses it", !v.meta.legacyDelivery && !v.sheet.legend.includes("delivery"));
+
+// The stores route is admins only.
+reset();
+const storePost = (body: Record<string, unknown>) => storesRoute.POST(new Request("https://plan.test/api/team/admin/stores", { method: "POST", body: JSON.stringify(body) }));
+const signInAs = (staffId: string, token: string) => {
+  db.staff_sessions.push({ token_hash: codes.hashToken(token), staff_id: staffId, expires_at: new Date(Date.now() + 86_400_000).toISOString() });
+  stub.stubCookies.clear();
+  stub.stubCookies.set(codes.SESSION_COOKIE, token);
+};
+stub.stubCookies.clear();
+check("Signed out: the stores route says 401", (await storePost({ action: "add", name: "Kroger", color: "#1F4FE0" })).status === 401);
+signInAs("bart-1", "b-token");
+check("Bartender: the stores route says 403", (await storePost({ action: "add", name: "Kroger", color: "#1F4FE0" })).status === 403 && !(db.order_sheet_stores ?? []).some((s) => s.name === "Kroger"));
+signInAs("admin-1", "a-token");
+stub.stubCookies.set("mf_team_view", "bartender");
+check("Admin in Bartender view: the stores route says 403", (await storePost({ action: "add", name: "Kroger", color: "#1F4FE0" })).status === 403);
+stub.stubCookies.delete("mf_team_view");
+const added2 = await storePost({ action: "add", name: "Kroger", color: "#1F4FE0" });
+check("Admin: the stores route adds a store", added2.status === 200 && (db.order_sheet_stores ?? []).some((s) => s.name === "Kroger"));
+check("The Manage stores page is admins only", src("app/team/admin/stores/page.tsx").includes('await requireAdmin("/team/admin/stores")'));
+stub.stubCookies.clear();
 
 // ----- order_sheet_url in the GHL payloads -----
 reset();
@@ -354,10 +484,19 @@ db.staff.find((s) => s.id === "admin-1")!.active = false;
 check("Deactivated staff are signed out of it", (await post(body)).status === 401);
 
 const pageSrc = src("app/team/admin/e/[id]/order/page.tsx");
-check("The page checks admin before reading the sheet", pageSrc.indexOf("await requireAdmin(") > 0 && pageSrc.indexOf("await requireAdmin(") < pageSrc.indexOf("getSheetView("));
-check("The admin event page links to the Order sheet", src("app/team/admin/e/[id]/page.tsx").includes("/order`") && src("app/team/admin/e/[id]/page.tsx").includes("Order sheet"));
+check("The order sheet link checks admin, then opens the Order sheet tab", pageSrc.indexOf("await requireAdmin(") > 0 && pageSrc.indexOf("await requireAdmin(") < pageSrc.indexOf('redirect(managerHref(id, "order"))'));
+const managerSrc = src("app/team/admin/e/[id]/page.tsx");
+check("The manager view checks admin before reading the sheet", managerSrc.indexOf("await requireAdmin(") > 0 && managerSrc.indexOf("await requireAdmin(") < managerSrc.indexOf("getSheetView("));
+check("The Order sheet tab shows the full order sheet", managerSrc.includes("order: <OrderSheet initial={sheet}"));
 const ui = src("app/team/admin/e/[id]/order/order-sheet.tsx");
-check("The sheet has Sheet and By store views, Print or save as PDF, Reset to calculated, Keep mine and Use new", ["By store", "Print or save as PDF", "Reset to calculated", "Keep mine", "Use new", "Delivery to event on day of", "Set all in this section to"].every((t) => ui.includes(t)));
+check(
+  "The sheet has Sheet and By store views, Print or save as PDF, Reset to calculated, Keep mine and Use new, Set all, Add a store, Manage stores",
+  ["By store", "Print or save as PDF", "Reset to calculated", "Keep mine", "Use new", "Set all in this section to", "Add a store", "Manage stores", "Add a line", "client buys"].every((t) => ui.includes(t))
+);
+check("No controls on a line at rest: no Edit name, no store dropdown, no placeholders", !ui.includes("Edit name") && !ui.includes('placeholder="size"') && !ui.includes('placeholder="brand or note"') && !ui.includes("StoreSelect"));
+check("The Delivery checkbox is gone from the sheet", !ui.includes('action: "delivery"') && !ui.includes("deliveryDayOf"));
+check("The store list offers no retired store, except the one a line already has", ui.includes("stores.filter((s) => !s.retired || s.id === current)"));
+check("The page is a plain white Arial page", src("app/globals.css").includes(".doc-page") && src("app/globals.css").includes("font-family: Arial"));
 check("Print hides the app menus", src("app/team/team-header.tsx").includes("print:hidden"));
 const eventsPage = src("app/team/admin/events/page.tsx");
 check("The admin events list shows order status and has a date range filter", eventsPage.includes("orderStatuses(") && eventsPage.includes('name="from"') && eventsPage.includes('name="to"'));

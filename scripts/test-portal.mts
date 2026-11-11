@@ -326,8 +326,12 @@ const tabs = src("app/team/e/[id]/event-tabs.tsx");
 check("The event page has a Chat tab with an unread count", tabs.includes('["chat", `Chat${chatUnread ? ` (${chatUnread})` : ""}`]') && tabs.includes("<ChatThread"));
 check("Message team links open the chat tab", src("app/team/e/[id]/page.tsx").includes('initialTab={chatTab ? "chat" : "details"}'));
 const adminEvent = src("app/team/admin/e/[id]/page.tsx");
-check("The admin event page has Message team with the unread count", adminEvent.includes("Message team") && adminEvent.includes("href={`/team/e/${id}?tab=chat`}") && adminEvent.includes("{chatUnread} unread"));
-check("Staffing list and calendar link to each event's chat with its unread count", staffingSrc.includes("chat: { href: `/team/e/${s.id}?tab=chat`, unread: unread.get(s.id) ?? 0 }") && listSrc.includes("e.chat.href") && calSrc.includes("e.chat.href"));
+const managerChat = src("app/team/admin/e/[id]/manager-chat.tsx");
+check(
+  "The manager view's Chat tab has Message team with the unread count",
+  managerChat.includes("Message team") && managerChat.includes("{props.unread} unread") && managerChat.includes("<ChatThread") && adminEvent.includes("chat: <ManagerChat") && adminEvent.includes("chat: chatUnread")
+);
+check("Staffing list and calendar link to each event's chat tab with its unread count", staffingSrc.includes("chat: { href: `/team/admin/e/${s.id}?tab=chat`, unread: unread.get(s.id) ?? 0 }") && listSrc.includes("e.chat.href") && calSrc.includes("e.chat.href"));
 const chatRoute = src("app/api/team/chat/route.ts");
 check("The chat route needs a sign in and thread access", chatRoute.includes("getCurrentStaff()") && chatRoute.includes("status: 401") && chatRoute.includes("threadAccess(sessionId, staff)"));
 

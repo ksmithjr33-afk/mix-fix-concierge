@@ -11,8 +11,8 @@
 import { calculateHours, formatPackageLabel, generateNatalieSupplyList } from "@/lib/shopping-list";
 import { parseEventDate } from "@/lib/event-date";
 import { clientList, quietly } from "@/lib/client-list";
-import { SECTIONS, STORE_INFO, STORES, isSection, type SectionId, type Store } from "@/lib/order-sheet-shared";
-export { SECTIONS, STORE_INFO, STORES, isSection, isStore, type SectionId, type Store } from "@/lib/order-sheet-shared";
+import { DEFAULT_STORES, SECTIONS, isSection, lineText, textOn, type SectionId, type Store, type StoreInfo } from "@/lib/order-sheet-shared";
+export { DEFAULT_STORES, DELIVERY_STORE, PALETTE, SECTIONS, isSection, lineText, textOn, type SectionId, type Store, type StoreInfo } from "@/lib/order-sheet-shared";
 
 type EventData = Record<string, unknown>;
 
@@ -169,6 +169,7 @@ export interface Recipe {
   name: string;
   mocktail: boolean;
   cup: "9 oz" | "12 oz";
+  martini: boolean; // a 9 oz drink served up, shown "9 oz cup (martini)" like the samples
   ingredients: string[];
   garnish: string;
 }
@@ -181,6 +182,7 @@ function ingredientsOf(d: Record<string, unknown>): string[] {
 }
 
 const UP_DRINK = /\b(martini|coupe|straight up|served up|neat|nick (and|&) nora|cosmo|cosmopolitan|lemon drop|manhattan|old fashioned|carajillo)\b/;
+const SERVED_UP = /\b(martini|coupe|straight up|served up|nick (and|&) nora|cosmo|cosmopolitan|lemon drop|manhattan)\b/;
 const LONG_DRINK = /\b(top|topped|soda|tonic|ginger beer|ginger ale|prosecco|champagne|sparkling|cola|coke|sprite|squirt|lemonade|beer|tea)\b/;
 
 /**
@@ -208,6 +210,7 @@ export function recipes(ed: EventData): Recipe[] {
         name: String(d.name ?? "Unnamed drink"),
         mocktail: d.is_mocktail === true,
         cup: cupSize(d),
+        martini: cupSize(d) === "9 oz" && SERVED_UP.test(`${d.name ?? ""} ${d.method ?? ""} ${d.glass ?? ""}`.toLowerCase()),
         ingredients: ingredientsOf(d),
         garnish: /^(none|no garnish)$/i.test(garnish) ? "" : garnish,
       };
@@ -262,7 +265,8 @@ export interface SheetLine {
   orderedBy: string | null;
   orderedAt: string | null;
   highlight: string | null; // the store's color, none when no store is set
-  text: string;
+  textColor: string | null; // white on dark highlights, black on light ones
+  text: string; // the line as the samples word it: "Lime juice — 4 x 32 oz bottles"
 }
 
 export interface SheetSection {
@@ -274,8 +278,8 @@ export interface SheetSection {
 export interface Sheet {
   sections: SheetSection[];
   removed: SheetLine[]; // calculated lines an admin removed, so they can be put back
-  counts: { store: Store | null; label: string; count: number }[]; // Walmart 14 · Sam's Club 6 · not set 3
-  legend: Store[]; // only the stores in use
+  counts: { store: Store | null; label: string; count: number }[]; // Walmart pickup 14 · Sam's Club delivery 6 · not set 3
+  legend: Store[]; // only the stores in use, in list order
   progress: { ordered: number; total: number }; // lines we buy; the client's own lines are not ours to order
   status: OrderStatus;
 }
@@ -288,10 +292,6 @@ export const STATUS_LABEL: Record<OrderStatus, string> = {
   all_ordered: "all ordered",
   nothing_to_order: "client buys all",
 };
-
-export function lineText(f: Fields): string {
-  return `${f.name} — ${f.quantity}${f.size ? ` (${f.size})` : ""}${f.detail ? ` — ${f.detail}` : ""}`;
-}
 
 export function sameFields(a: Fields | null, b: Fields | null): boolean {
   return !!a && !!b && FIELD_NAMES.every((k) => (a[k] ?? "") === (b[k] ?? ""));
@@ -315,6 +315,7 @@ function toLine(o: {
   clientBuys: boolean;
   gone: boolean;
   suggest: (name: string) => Store | null;
+  stores: Map<Store, StoreInfo>;
 }): SheetLine {
   const s = o.saved;
   const fallback = o.calc ?? s?.base ?? { name: "", quantity: "", size: "", detail: "" };
@@ -326,7 +327,9 @@ function toLine(o: {
   };
   const edited = o.kind === "calc" && s ? FIELD_NAMES.filter((k) => s[k] !== null && s[k] !== undefined) : [];
   const conflict = o.calc && edited.length > 0 && s?.base && !sameFields(s.base, o.calc) ? { mine: fields, calc: o.calc } : null;
-  const store = s?.store ?? null;
+  const info = s?.store ? o.stores.get(s.store) : undefined;
+  const store = info ? info.id : null;
+  const suggestion = store ? null : o.suggest(fields.name);
   return {
     ref: o.ref,
     section: o.section,
@@ -342,17 +345,26 @@ function toLine(o: {
     store,
     storeBy: s?.store_by_name ?? null,
     storeAt: s?.store_at ?? null,
-    suggestion: store ? null : o.suggest(fields.name),
+    suggestion: suggestion && o.stores.get(suggestion) && !o.stores.get(suggestion)!.retired ? suggestion : null,
     ordered: s?.ordered === true,
     orderedBy: s?.ordered_by_name ?? null,
     orderedAt: s?.ordered_at ?? null,
-    highlight: store ? STORE_INFO[store].color : null,
-    text: lineText(fields),
+    highlight: info ? info.color : null,
+    textColor: info ? textOn(info.color) : null,
+    text: lineText(fields, o.section),
   };
 }
 
 /** The sheet: calculated lines with this event's saved edits on top, added lines, counts, legend, and progress. */
-export function buildSheet(calc: CalcLine[], saved: SavedLine[], suggest: (name: string) => Store | null = () => null): Sheet {
+export function buildSheet(
+  calc: CalcLine[],
+  saved: SavedLine[],
+  suggest: (name: string) => Store | null = () => null,
+  storeList: StoreInfo[] = DEFAULT_STORES,
+  extraLegend: Store[] = []
+): Sheet {
+  const stores = new Map(storeList.map((s) => [s.id, s]));
+  const ordered = [...storeList].sort((a, b) => a.position - b.position);
   const byKey = new Map(saved.filter((s) => s.line_key).map((s) => [s.line_key!, s]));
   const calcKeys = new Set(calc.map((c) => c.key));
   const sections: SheetSection[] = SECTIONS.map((s) => ({ id: s.id, title: s.title, lines: [] }));
@@ -361,7 +373,7 @@ export function buildSheet(calc: CalcLine[], saved: SavedLine[], suggest: (name:
 
   for (const c of calc) {
     const s = byKey.get(c.key);
-    const line = toLine({ ref: `k:${c.key}`, section: c.section, kind: "calc", calc: { name: c.name, quantity: c.quantity, size: c.size, detail: c.detail }, saved: s, clientBuys: c.clientBuys, gone: false, suggest });
+    const line = toLine({ ref: `k:${c.key}`, section: c.section, kind: "calc", calc: { name: c.name, quantity: c.quantity, size: c.size, detail: c.detail }, saved: s, clientBuys: c.clientBuys, gone: false, suggest, stores });
     (s?.removed ? removed : at(c.section).lines).push(line);
   }
   // Edited or ordered lines an update took off the calculation: flagged, not dropped silently.
@@ -369,19 +381,19 @@ export function buildSheet(calc: CalcLine[], saved: SavedLine[], suggest: (name:
     if (s.kind !== "calc" || !s.line_key || calcKeys.has(s.line_key) || s.removed) continue;
     if (!hasOverride(s) && !s.ordered) continue;
     at(isSection(s.section) ? s.section : "mixers").lines.push(
-      toLine({ ref: `k:${s.line_key}`, section: s.section, kind: "calc", calc: null, saved: s, clientBuys: false, gone: true, suggest })
+      toLine({ ref: `k:${s.line_key}`, section: s.section, kind: "calc", calc: null, saved: s, clientBuys: false, gone: true, suggest, stores })
     );
   }
   for (const s of [...saved].filter((x) => x.kind === "added").sort((a, b) => a.created_at.localeCompare(b.created_at))) {
     if (s.removed) continue;
     at(isSection(s.section) ? s.section : "mixers").lines.push(
-      toLine({ ref: `i:${s.id}`, section: s.section, kind: "added", calc: null, saved: s, clientBuys: false, gone: false, suggest })
+      toLine({ ref: `i:${s.id}`, section: s.section, kind: "added", calc: null, saved: s, clientBuys: false, gone: false, suggest, stores })
     );
   }
 
   const all = sections.flatMap((s) => s.lines);
   const counts = [
-    ...STORES.map((st) => ({ store: st as Store | null, label: STORE_INFO[st].label, count: all.filter((l) => l.store === st).length })).filter((c) => c.count > 0),
+    ...ordered.map((st) => ({ store: st.id as Store | null, label: st.name, count: all.filter((l) => l.store === st.id).length })).filter((c) => c.count > 0),
     { store: null, label: "not set", count: all.filter((l) => !l.store).length },
   ];
   const ours = all.filter((l) => !l.clientBuys);
@@ -390,7 +402,7 @@ export function buildSheet(calc: CalcLine[], saved: SavedLine[], suggest: (name:
     sections,
     removed,
     counts,
-    legend: STORES.filter((st) => all.some((l) => l.store === st)),
+    legend: ordered.filter((st) => all.some((l) => l.store === st.id) || extraLegend.includes(st.id)).map((st) => st.id),
     progress,
     status: orderStatus(progress),
   };
@@ -403,10 +415,13 @@ export function orderStatus(p: { ordered: number; total: number }): OrderStatus 
 }
 
 /** The By store view: the same lines as the sheet, under each store in use, then the ones with no store. */
-export function byStore(sheet: Sheet): { store: Store | null; title: string; lines: SheetLine[] }[] {
+export function byStore(sheet: Sheet, storeList: StoreInfo[] = DEFAULT_STORES): { store: Store | null; title: string; lines: SheetLine[] }[] {
   const all = sheet.sections.flatMap((s) => s.lines);
   return [
-    ...STORES.map((st) => ({ store: st as Store | null, title: STORE_INFO[st].label, lines: all.filter((l) => l.store === st) })).filter((g) => g.lines.length > 0),
+    ...[...storeList]
+      .sort((a, b) => a.position - b.position)
+      .map((st) => ({ store: st.id as Store | null, title: st.name, lines: all.filter((l) => l.store === st.id) }))
+      .filter((g) => g.lines.length > 0),
     { store: null, title: "Not set", lines: all.filter((l) => !l.store) },
   ];
 }

@@ -106,7 +106,7 @@ export default async function AdminEventsPage({
     ]
       .filter(Boolean)
       .join(" · ");
-    return { ...item, href: `/team/admin/e/${s.id}`, badge: { text, tone }, chat: { href: `/team/e/${s.id}?tab=chat`, unread: unread.get(s.id) ?? 0 } };
+    return { ...item, href: `/team/admin/e/${s.id}`, badge: { text, tone }, chat: { href: `/team/admin/e/${s.id}?tab=chat`, unread: unread.get(s.id) ?? 0 } };
   });
   const unstaffed = sessions.filter((s) => {
     const day = eventListItem(s).day;

@@ -19,6 +19,7 @@ const UNIQUE: Record<string, string[][]> = {
   announcement_recipients: [["announcement_id", "staff_id"]],
   event_message_reads: [["session_id", "staff_id"]],
   event_chat_notices: [["session_id", "staff_id"]],
+  order_sheet_stores: [["color"]],
 };
 
 /** Tests can stand in for database constraints and triggers: return an error message to refuse a write. */

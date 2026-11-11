@@ -509,7 +509,12 @@ check("The staffing page links to Hidden events", adminEventsSrc.includes('href=
 const hideAction = readFileSync(new URL("../app/team/admin/e/[id]/hide-action.tsx", import.meta.url), "utf8");
 check("Hiding asks to confirm first", hideAction.includes("Yes, hide it") && hideAction.indexOf("setConfirming(true)") > 0);
 const adminEventPage = readFileSync(new URL("../app/team/admin/e/[id]/page.tsx", import.meta.url), "utf8");
-check("A hidden event shows Unhide instead of the assign panel", /hidden \? \(\s*<>[\s\S]*?<HideAction sessionId=\{id\} hidden \/>\s*<\/>\s*\) : \(/.test(adminEventPage) && adminEventPage.indexOf("<AssignPanel") > adminEventPage.indexOf("<HideAction sessionId={id} hidden />"));
+check(
+  "A hidden event shows Unhide instead of the assign panel",
+  /team: hidden \? \(\s*<p[\s\S]*?Unhide it on Details[\s\S]*?\) : \(\s*<>\s*<AssignPanel/.test(adminEventPage) &&
+    adminEventPage.includes("<HideAction sessionId={id} hidden={hidden} />") &&
+    adminEventPage.includes("{!hidden && <EditEvent")
+);
 
 // ----- Phase 3: time clock rules -----
 const venue = { lat: 32.7767, lng: -96.797 }; // downtown Dallas

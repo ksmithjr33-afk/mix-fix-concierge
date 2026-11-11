@@ -42,7 +42,7 @@ function telHref(phone: string): string {
   return `tel:${phone.replace(/[^\d+]/g, "")}`;
 }
 
-function Details({ v }: { v: StaffEventView }) {
+export function Details({ v }: { v: StaffEventView }) {
   return (
     <div className="space-y-3">
       {v.whatChanged.length > 0 && (
@@ -493,7 +493,7 @@ export default function EventTabs({
   closeout = null,
   pay = null,
   offered,
-  manageHref,
+  managerHref,
   clock,
   renderedAt,
   giveUp,
@@ -506,7 +506,7 @@ export default function EventTabs({
   offered: boolean;
   clock: ClockView;
   renderedAt: number;
-  manageHref: string | null;
+  managerHref: string | null; // an admin looking at the bartender view of this event: the way back
   view: StaffEventView;
   checklist: ResolvedGroup[];
   checklistState: Record<string, CheckState>;
@@ -539,9 +539,9 @@ export default function EventTabs({
             <span className="font-semibold">{pay}</span> estimated pay, before taxes and tips
           </p>
         )}
-        {manageHref && (
-          <a href={manageHref} className="inline-block mt-1 text-sm text-[#B5845A] underline">
-            Manage staff for this event
+        {managerHref && (
+          <a href={managerHref} className="inline-block mt-1 text-sm text-[#B5845A] underline">
+            Back to manager view
           </a>
         )}
       </div>

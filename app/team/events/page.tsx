@@ -29,7 +29,8 @@ async function visibleEvents(staffId: string, admin: boolean): Promise<EventList
       supabase.from("event_assignments").select("session_id, status").eq("staff_id", staffId),
     ]);
     const own = new Map(((mine as { session_id: string; status: string }[]) ?? []).map((a) => [a.session_id, a.status]));
-    return ((data as EventRowSource[]) ?? []).map((r) => eventListItem(r, own.get(r.id)));
+    // Admins open the manager view of each event.
+    return ((data as EventRowSource[]) ?? []).map((r) => ({ ...eventListItem(r, own.get(r.id)), href: `/team/admin/e/${r.id}` }));
   }
   return assignedEventItems(staffId);
 }

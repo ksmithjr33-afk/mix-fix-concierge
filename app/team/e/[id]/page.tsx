@@ -1,4 +1,6 @@
+import { redirect } from "next/navigation";
 import { requireStaff } from "@/lib/team/auth";
+import { eventLanding } from "@/lib/team/manager-tabs";
 import { eventPageData, openEvent } from "@/lib/team/events";
 import { CHECKLIST_FOOTER } from "@/lib/team/checklist-config";
 import { barReadyEntries } from "@/lib/team/bar-ready-db";
@@ -31,8 +33,15 @@ export default async function TeamEventPage({
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }) {
   const { id } = await params;
-  const chatTab = (await searchParams).tab === "chat";
-  const staff = await requireStaff(`/team/e/${encodeURIComponent(id)}`);
+  const query = await searchParams;
+  const chatTab = query.tab === "chat";
+  const asBartender = query.as === "bartender";
+  const staff = await requireStaff(`/team/e/${encodeURIComponent(id)}${chatTab ? "?tab=chat" : asBartender ? "?as=bartender" : ""}`);
+  // Admins land on the manager view of the event from any link (texts, lists,
+  // the calendar), unless they asked for the bartender view of it. An admin in
+  // Bartender view comes back as a bartender here, so they stay on this page.
+  const landing = eventLanding(staff, id, query);
+  if (landing) redirect(landing);
   const back = { href: "/team/events", label: staff.role === "admin" ? "All events" : "Your events" };
 
   const access = await openEvent(id, staff);
@@ -76,7 +85,7 @@ export default async function TeamEventPage({
         giveUp={accepted ? { sessionId: id, handoff, teammates, canStart: punches.length === 0 } : null}
         clock={clockView(assignment, ed, punches)}
         renderedAt={renderedAt}
-        manageHref={staff.role === "admin" ? `/team/admin/e/${id}` : null}
+        managerHref={staff.role === "admin" ? `/team/admin/e/${encodeURIComponent(id)}` : null}
         view={data.view}
         checklist={data.checklist}
         checklistState={data.checklistState}

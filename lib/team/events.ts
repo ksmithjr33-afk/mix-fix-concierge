@@ -235,3 +235,34 @@ export async function hasMissingReports(sessionId: string): Promise<boolean> {
   if (error) return false;
   return (count ?? 0) > 0;
 }
+
+/** The event details for the admin manager view: everyone on the event as "Also working", and what the last update changed. */
+export async function managerEventView(session: SessionRow) {
+  const [mates, update] = await Promise.all([teammates(session.id, ""), latestUpdate(session.id)]);
+  return buildStaffEventView(session, { teammates: mates, latestUpdate: update });
+}
+
+export interface MissingReport {
+  id: string;
+  staffFirstName: string;
+  items: string[];
+  note: string;
+  createdAt: string;
+}
+
+/** Every "Something is missing" report for the event, newest first. Admins only. */
+export async function missingReports(sessionId: string): Promise<MissingReport[]> {
+  const { data, error } = await supabase.from("missing_reports").select("*").eq("session_id", sessionId).order("created_at", { ascending: false });
+  if (error || !data) return [];
+  const rows = data as { id: string; staff_id: string; items: unknown; note: string | null; created_at: string }[];
+  const ids = [...new Set(rows.map((r) => r.staff_id))];
+  const { data: staff } = ids.length ? await supabase.from("staff").select("id, name").in("id", ids) : { data: [] };
+  const names = new Map(((staff as { id: string; name: string }[]) ?? []).map((s) => [s.id, firstName(s.name)]));
+  return rows.map((r) => ({
+    id: r.id,
+    staffFirstName: names.get(r.staff_id) || "A bartender",
+    items: Array.isArray(r.items) ? r.items.map(String) : [],
+    note: r.note ?? "",
+    createdAt: r.created_at,
+  }));
+}
