@@ -7,8 +7,12 @@
 import { supabase } from "@/lib/supabase";
 import { createNoteByEmail } from "@/lib/ghl-api";
 import { getSession, type EventUpdateRow, type SessionRow } from "@/lib/event-updates";
+import { eventTimeZone } from "@/lib/team/markets";
 import { buildUpdateNote, buildUpdatePayload } from "@/lib/update-notes";
 import { notifyStaffOfUpdate } from "@/lib/team/assignments-db";
+import { deliveryFields, type DeliveryListOptions } from "@/lib/client-list-db";
+import { computeDeadlines } from "@/lib/event-diff";
+import { syncOrderSheet } from "@/lib/order-sheet-db";
 
 export interface DeliveryResult {
   id: string;
@@ -18,7 +22,7 @@ export interface DeliveryResult {
   error: string | null;
 }
 
-async function postWebhook(url: string, payload: Record<string, unknown>): Promise<string | null> {
+export async function postWebhook(url: string, payload: Record<string, unknown>): Promise<string | null> {
   try {
     const res = await fetch(url, {
       method: "POST",
@@ -33,7 +37,11 @@ async function postWebhook(url: string, payload: Record<string, unknown>): Promi
   }
 }
 
-async function deliverRow(session: SessionRow, row: EventUpdateRow & { note_created?: boolean }): Promise<DeliveryResult> {
+async function deliverRow(
+  session: SessionRow,
+  row: EventUpdateRow & { note_created?: boolean },
+  extra: Record<string, unknown> = {}
+): Promise<DeliveryResult> {
   const tag = `[update-webhook] session ${session.id} update ${row.id} v${row.version}`;
   const errors: string[] = [];
 
@@ -56,7 +64,7 @@ async function deliverRow(session: SessionRow, row: EventUpdateRow & { note_crea
   if (!webhookUrl) {
     errors.push("GHL_UPDATE_WEBHOOK_URL is not set in this environment, payload NOT sent");
   } else {
-    const webhookError = await postWebhook(webhookUrl, buildUpdatePayload(session, row));
+    const webhookError = await postWebhook(webhookUrl, buildUpdatePayload(session, row, extra));
     webhookSent = webhookError === null;
     if (webhookError) errors.push(webhookError);
   }
@@ -89,11 +97,16 @@ async function deliverRow(session: SessionRow, row: EventUpdateRow & { note_crea
  * With staffOrigin (the chat route passes it), each assigned staff member also
  * gets a text with a link to their event page. The manual retry leaves it out
  * so a retry never texts staff twice. A text failure never blocks delivery.
+ *
+ * Each payload carries the client shopping list fields (decided once per
+ * update, see deliveryFields) and the order sheet link. clientList says who
+ * caused the update: the client (the default), an admin edit and whether its
+ * "Send updated list to client" box was on, or an approved held change.
  */
 export async function deliverEventUpdates(
   sessionId: string,
   rows: EventUpdateRow[],
-  opts: { staffOrigin?: string } = {}
+  opts: { staffOrigin?: string; clientList?: DeliveryListOptions } = {}
 ): Promise<DeliveryResult[]> {
   if (rows.length === 0) return [];
   const session = await getSession(sessionId);
@@ -113,10 +126,19 @@ export async function deliverEventUpdates(
     ? notifyStaffOfUpdate(session, changedFields, opts.staffOrigin).catch(() => 0)
     : Promise.resolve(0);
 
+  // Hand edits on the order sheet are kept; lines that left the calculation are tidied up.
+  await syncOrderSheet(session).catch((err) => console.error(`[update-webhook] session ${sessionId} order sheet sync failed:`, err));
+
+  const locked = computeDeadlines(session.event_data.event_date ?? session.event_date, new Date(), eventTimeZone(session)).withinSixDays;
+  const listFields = await deliveryFields(session, rows, opts.clientList ?? { mode: "client" }, locked).catch((err) => {
+    console.error(`[update-webhook] session ${sessionId} client list decision failed:`, err);
+    return new Map<string, Record<string, unknown>>();
+  });
+
   const results: DeliveryResult[] = [];
   for (const row of rows) {
     try {
-      results.push(await deliverRow(session, row));
+      results.push(await deliverRow(session, row, { list_change_declined: false, ...((listFields.get(row.id) ?? {}) as Record<string, unknown>) }));
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
       console.error(`[update-webhook] session ${sessionId} update ${row.id} failed:`, error);

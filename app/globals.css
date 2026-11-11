@@ -27,3 +27,17 @@ body {
 input, textarea, select {
   font-size: 16px !important;
 }
+
+/* Order sheet printing: keep the store highlights, no app chrome. */
+@media print {
+  @page {
+    margin: 0.5in;
+  }
+  body {
+    background: #fff !important;
+  }
+  .print-exact {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}

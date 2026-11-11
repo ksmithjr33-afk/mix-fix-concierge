@@ -20,6 +20,9 @@ import { eventData, isMarket, MARKETS, MARKET_INFO, sessionMarket } from "@/lib/
 import { calendarGrid, calLinksOf, calMode, isYmd } from "@/lib/team/calendar";
 import { unreadByEvent } from "@/lib/team/chat-db";
 import { ListCalendarToggle } from "../../calendar-view";
+import { orderStatuses } from "@/lib/order-sheet-db";
+import { STATUS_LABEL } from "@/lib/order-sheet";
+import { sessionsWithPendingHolds } from "@/lib/client-list-db";
 
 export const dynamic = "force-dynamic";
 
@@ -35,6 +38,9 @@ export default async function AdminEventsPage({
   const params = await searchParams;
   const view: View = params.hidden === "1" ? "hidden" : params.past === "1" ? "past" : "upcoming";
   const marketFilter = isMarket(params.market) ? params.market : null;
+  // Date range filter on the event day, either end optional.
+  const from = isYmd(params.from) ? params.from : null;
+  const to = isYmd(params.to) ? params.to : null;
   const calendar = view === "upcoming" && params.layout === "calendar";
   const admin = await requireAdmin(view === "upcoming" ? "/team/admin/events" : `/team/admin/events?${view}=1`);
   const [{ data }, hidden] = await Promise.all([supabase.from("sessions").select("*").eq("status", "submitted"), hiddenEventIds()]);
@@ -68,11 +74,18 @@ export default async function AdminEventsPage({
   const visible = withoutHidden(allSessions, hidden);
   // New events get a market from their address, a few per page load (the cron does the rest).
   await ensureMarkets(visible.filter((s) => (eventListItem(s).day ?? "9999") >= today), 3);
-  const sessions = marketFilter ? visible.filter((s) => sessionMarket(s) === marketFilter) : visible;
-  const [counts, unread, availability] = await Promise.all([
+  const inRange = (s: SessionRow) => {
+    const day = eventListItem(s).day;
+    if (!from && !to) return true;
+    return !!day && (!from || day >= from) && (!to || day <= to);
+  };
+  const sessions = (marketFilter ? visible.filter((s) => sessionMarket(s) === marketFilter) : visible).filter(inRange);
+  const [counts, unread, availability, orders, heldLists] = await Promise.all([
     staffingByEvent(sessions),
     unreadByEvent(admin.id, sessions.map((s) => s.id)),
     view === "upcoming" ? availableCounts(sessions) : Promise.resolve(new Map<string, number | null>()),
+    orderStatuses(sessions),
+    sessionsWithPendingHolds(sessions.map((s) => s.id)),
   ]);
   const { data: postRows, error: postErr } = await supabase.from("shift_posts").select("session_id, kind").eq("status", "posted");
   const posted = new Set(postErr ? [] : ((postRows as { session_id: string; kind: string }[]) ?? []).filter((p) => p.kind === "open").map((p) => p.session_id));
@@ -88,6 +101,8 @@ export default async function AdminEventsPage({
       sessionMarket(s) ? "" : "no market",
       // Bartenders in the event's market who did not mark the day unavailable.
       typeof availability.get(s.id) === "number" && (item.day ?? "") >= today ? `${availability.get(s.id)} available` : "",
+      orders.has(s.id) ? STATUS_LABEL[orders.get(s.id)!] : "",
+      heldLists.has(s.id) ? "list change waiting" : "",
     ]
       .filter(Boolean)
       .join(" · ");
@@ -99,10 +114,12 @@ export default async function AdminEventsPage({
   }).length;
   const mode = calMode(params.cal);
   const anchor = isYmd(params.d) ? params.d : today;
-  const href = (o: { past?: boolean; market?: string | null; layout?: "calendar" | null; cal?: string; d?: string }) => {
+  const href = (o: { past?: boolean; market?: string | null; layout?: "calendar" | null; cal?: string; d?: string; dates?: boolean }) => {
     const q = new URLSearchParams();
     if (o.past) q.set("past", "1");
     if (o.market) q.set("market", o.market);
+    if (o.dates !== false && from) q.set("from", from);
+    if (o.dates !== false && to) q.set("to", to);
     if (o.layout) q.set("layout", o.layout);
     if (o.layout && o.cal && o.cal !== "week") q.set("cal", o.cal);
     if (o.layout && o.d && o.d !== today) q.set("d", o.d);
@@ -157,6 +174,27 @@ export default async function AdminEventsPage({
             </Link>
           ))}
         </nav>
+        <form method="get" action="/team/admin/events" className="px-1 flex flex-wrap items-end gap-2" aria-label="Date range">
+          {view === "past" && <input type="hidden" name="past" value="1" />}
+          {marketFilter && <input type="hidden" name="market" value={marketFilter} />}
+          {calendar && <input type="hidden" name="layout" value="calendar" />}
+          <label className="text-xs text-[#A39585] uppercase tracking-wide">
+            From
+            <input type="date" name="from" defaultValue={from ?? ""} className="block rounded-lg border border-[#DDD5CC] bg-white px-2 py-1 text-[#2C2420]" />
+          </label>
+          <label className="text-xs text-[#A39585] uppercase tracking-wide">
+            To
+            <input type="date" name="to" defaultValue={to ?? ""} className="block rounded-lg border border-[#DDD5CC] bg-white px-2 py-1 text-[#2C2420]" />
+          </label>
+          <button type="submit" className="rounded-lg bg-[#2C2420] text-white px-3 py-1.5 text-sm">
+            Filter dates
+          </button>
+          {(from || to) && (
+            <Link href={href({ past: view === "past", market: marketFilter, layout: calendar ? "calendar" : null, dates: false })} className="text-sm text-[#B5845A] underline pb-1.5">
+              Clear dates
+            </Link>
+          )}
+        </form>
         {view === "upcoming" && (
           <div className="px-1">
             <ListCalendarToggle calendar={calendar} listHref={href({ market: marketFilter })} calendarHref={calLink({})} />

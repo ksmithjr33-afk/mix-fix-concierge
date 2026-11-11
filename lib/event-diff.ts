@@ -160,7 +160,7 @@ export function sameValue(a: unknown, b: unknown): boolean {
 // ---------- deadlines ----------
 
 export interface Deadlines {
-  today: string; // YYYY-MM-DD in America/Chicago
+  today: string; // YYYY-MM-DD in the event's market time zone
   eventDay: string | null;
   daysUntil: number | null; // calendar days from today to the event day
   lastDrinkChangeDay: string | null; // the last day drinks can change, 6 days before the event
@@ -168,9 +168,9 @@ export interface Deadlines {
   eventPassed: boolean;
 }
 
-export function chicagoToday(now: Date): string {
+export function chicagoToday(now: Date, tz: string = "America/Chicago"): string {
   return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "America/Chicago",
+    timeZone: tz,
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
@@ -187,12 +187,14 @@ function ymdToUtc(ymd: string): number {
 }
 
 /**
- * Six or more days before the event date (America/Chicago) everything can change.
- * Fewer than six days out everything but the drink menu can. An unreadable event
- * date never counts as inside the cutoff, so the client is not told something false.
+ * Six or more days before the event date everything can change. Fewer than six
+ * days out everything but the drink menu can, and the client shopping list is
+ * locked. Days are counted in the event's market time zone (tz, America/Chicago
+ * when the event has no market yet). An unreadable event date never counts as
+ * inside the cutoff, so the client is not told something false.
  */
-export function computeDeadlines(eventDate: unknown, now: Date = new Date()): Deadlines {
-  const today = chicagoToday(now);
+export function computeDeadlines(eventDate: unknown, now: Date = new Date(), tz: string = "America/Chicago"): Deadlines {
+  const today = chicagoToday(now, tz);
   const parsed = parseEventDate(typeof eventDate === "string" ? eventDate : null);
   if (!parsed) {
     return { today, eventDay: null, daysUntil: null, lastDrinkChangeDay: null, withinSixDays: false, eventPassed: false };

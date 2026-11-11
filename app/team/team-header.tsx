@@ -25,7 +25,7 @@ export default async function TeamHeader({
   return (
     <>
       {bartenderView && (
-        <div className="flex items-center justify-between gap-3 px-3 sm:px-4 py-2 bg-[#2C2420] text-white">
+        <div className="flex items-center justify-between gap-3 px-3 sm:px-4 py-2 bg-[#2C2420] text-white print:hidden">
           <p className="text-sm">
             <span className="font-bold">Bartender view.</span> <span className="text-white/80">You see the portal as a bartender does.</span>
           </p>
@@ -37,7 +37,7 @@ export default async function TeamHeader({
           </form>
         </div>
       )}
-      <header className="flex items-center justify-between gap-3 px-3 sm:px-4 py-2 sm:py-3 bg-[#F5F0EB] border-b border-[#DDD5CC]">
+      <header className="flex items-center justify-between gap-3 px-3 sm:px-4 py-2 sm:py-3 bg-[#F5F0EB] border-b border-[#DDD5CC] print:hidden">
         <div className="flex items-center gap-3 min-w-0">
           <Link href="/team/events" className="shrink-0">
             <img src="/logo.png" alt="The Mix Fix" className="h-8 sm:h-10" />

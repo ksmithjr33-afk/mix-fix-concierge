@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { buildEventFields } from "@/lib/ghl-payload";
 import { createNoteByEmail } from "@/lib/ghl-api";
+import { completionFields } from "@/lib/client-list-db";
 
 const anthropic = new Anthropic();
 
@@ -60,7 +61,7 @@ Return only the summary paragraph, no preamble or labels.`,
 
 export async function POST(request: Request) {
   try {
-    const { eventData, conversationTranscript, clientEmail } = await request.json();
+    const { eventData, conversationTranscript, clientEmail, sessionId } = await request.json();
 
     const webhookUrl = process.env.GHL_WEBHOOK_URL;
     if (!webhookUrl) {
@@ -87,11 +88,30 @@ export async function POST(request: Request) {
 
     const isabelSummary = fields.isabel_summary;
 
+    // The client shopping list: the first list goes out on completion (held for
+    // review when a drink has a custom recipe), decided once per event. Read
+    // from the saved session, never from the request body.
+    const listFields =
+      typeof sessionId === "string" && sessionId
+        ? await completionFields(sessionId).catch((err) => {
+            console.error("client list completion decision failed:", err);
+            return null;
+          })
+        : null;
+
     const payload: Record<string, unknown> = {
       ...cleanEventData,
       conversation_transcript: conversationTranscript || null,
       conversation_summary: conversationSummary,
       ...fields,
+      client_shopping_list_send: false,
+      client_shopping_list_reason: "",
+      client_shopping_list_changes: "",
+      client_shopping_list_url: "",
+      client_shopping_list_text: "",
+      list_change_declined: false,
+      order_sheet_url: "",
+      ...(listFields ?? {}),
     };
 
     // Ensure email is always present — use eventData.email if the AI included it,

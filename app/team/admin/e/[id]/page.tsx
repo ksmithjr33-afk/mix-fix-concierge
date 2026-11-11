@@ -22,6 +22,9 @@ import { closeoutsFor } from "@/lib/team/closeout-db";
 import Closeouts from "./closeouts";
 import { compactLines } from "@/lib/team/reliability-db";
 import { certIssues } from "@/lib/team/certs-db";
+import ClientListPanel from "./client-list-panel";
+import { autoSendOn, holdsFor, listLog } from "@/lib/client-list-db";
+import { clientList, clientListText } from "@/lib/client-list";
 
 export const dynamic = "force-dynamic";
 
@@ -64,7 +67,14 @@ export default async function AdminEventPage({ params }: { params: Promise<{ id:
     ...panel.requesters.map((r) => r.staffId),
     ...handoffs.flatMap((h) => h.requesters.map((r) => r.staffId)),
   ];
-  const [closeouts, records, certs] = await Promise.all([closeoutsFor(id), compactLines(lookIds), certIssues(lookIds, panel.market)]);
+  const [closeouts, records, certs, autoSend, pendingHolds, listEntries] = await Promise.all([
+    closeoutsFor(id),
+    compactLines(lookIds),
+    certIssues(lookIds, panel.market),
+    autoSendOn(),
+    holdsFor(id, "pending"),
+    listLog(id),
+  ]);
   const away = await unavailableOn(eventDayOf(session));
   const chatUnread = unread.get(id) ?? 0;
   const v = buildStaffEventView(session);
@@ -108,12 +118,39 @@ export default async function AdminEventPage({ params }: { params: Promise<{ id:
               Message team
               {chatUnread > 0 && <span className="rounded-full bg-[#A0412D] px-1.5 text-[11px] font-bold">{chatUnread} unread</span>}
             </Link>
+            <Link href={`/team/admin/e/${id}/order`} className="inline-flex items-center rounded-lg border-2 border-[#B5845A] text-[#9A7049] px-3 py-1 text-sm font-medium">
+              Order sheet
+            </Link>
             <Link href={`/team/e/${id}`} className="text-sm text-[#B5845A] underline">
               Open the event page
             </Link>
           </div>
         </div>
         {closeouts.length > 0 && <Closeouts closeouts={closeouts} timeZone={v.timeZone} />}
+        <ClientListPanel
+          sessionId={id}
+          autoSend={autoSend}
+          timeZone={v.timeZone}
+          listText={clientListText(clientList(session.event_data ?? {}))}
+          holds={pendingHolds.map((h) => ({
+            id: h.id,
+            kind: h.kind,
+            createdAt: h.created_at,
+            summary: h.summary ?? "",
+            listChanges: h.list_changes ?? "",
+            price: h.price?.price_text ?? "",
+          }))}
+          log={listEntries.map((l) => ({
+            id: l.id,
+            at: l.created_at,
+            action: l.action,
+            reason: l.reason ?? "",
+            detail: l.detail,
+            changes: l.changes ?? "",
+            by: l.by_name ?? "",
+            dryRun: l.dry_run,
+          }))}
+        />
         {hidden ? (
           <>
             <p className="text-sm text-[#6B5D52] px-1">Market: {marketLabel(panel.market)}. Hidden events cannot be posted.</p>

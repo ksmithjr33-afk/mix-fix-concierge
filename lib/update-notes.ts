@@ -22,6 +22,7 @@ import { approvalReason, changeBlocks, computeDeadlines, summarizeRow } from "@/
 import { pendingChangeFields, withHoursBooked } from "@/lib/price-change";
 import { parseEventDate } from "@/lib/event-date";
 import type { EventUpdateRow, SessionRow } from "@/lib/event-updates";
+import { eventTimeZone } from "@/lib/team/markets";
 
 /** "Nov 4, 2026, 9:10 PM" in Dallas time. */
 function noteTimestamp(iso: string): string {
@@ -55,10 +56,10 @@ function clientLine(session: SessionRow | null): string {
   return [name, type, date, guests ? `${guests} guests` : ""].filter(Boolean).join(", ");
 }
 
-/** True when the update came in fewer than six days before the event (America/Chicago). */
+/** True when the update came in fewer than six days before the event (in the event's market time zone). */
 export function withinSixDays(row: EventUpdateRow, session: SessionRow | null): boolean {
   const date = session?.event_data?.event_date ?? session?.event_date ?? null;
-  return computeDeadlines(date, new Date(row.created_at)).withinSixDays;
+  return computeDeadlines(date, new Date(row.created_at), session ? eventTimeZone(session) : undefined).withinSixDays;
 }
 
 /** Plain text GHL note for one event_updates row. */
@@ -84,7 +85,7 @@ export function buildUpdateSummary(row: EventUpdateRow): string {
 }
 
 /** GHL webhook payload for one update: the merged event plus regenerated documents. */
-export function buildUpdatePayload(session: SessionRow, row: EventUpdateRow): Record<string, unknown> {
+export function buildUpdatePayload(session: SessionRow, row: EventUpdateRow, extra: Record<string, unknown> = {}): Record<string, unknown> {
   const eventData = withHoursBooked(session.event_data ?? {}, session);
   const { cleanEventData, fields } = buildEventFields(eventData);
   const payload: Record<string, unknown> = {
@@ -107,6 +108,8 @@ export function buildUpdatePayload(session: SessionRow, row: EventUpdateRow): Re
     // Who made the change, so the team can tell an admin edit from a client change.
     updated_by: row.updated_by === "admin" ? "admin" : "client",
     updated_by_name: row.updated_by === "admin" ? row.updated_by_name || "" : "",
+    // The client shopping list fields and order_sheet_url, from deliverEventUpdates.
+    ...extra,
   };
   if (!payload.email && session.email) payload.email = session.email;
   return payload;

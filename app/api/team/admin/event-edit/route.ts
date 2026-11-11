@@ -30,6 +30,7 @@ export async function POST(request: Request) {
       price: body.price,
       expectedVersion: body.version,
       origin: new URL(request.url).origin,
+      sendList: body.sendList,
     });
     if (!r.ok) return NextResponse.json({ error: r.error }, { status: r.status });
     return NextResponse.json({ ok: true, version: r.version });

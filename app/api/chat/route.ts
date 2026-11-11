@@ -27,6 +27,8 @@ import { deliverEventUpdates } from "@/lib/update-delivery";
 import { allowedMenus, createMenuFilter, type MenuKey } from "@/lib/menu-markers";
 import { applyDiveSetMenu, DIVE_MENU_SET_MESSAGE } from "@/lib/dive-menu";
 import { DEFAULT_DEPOSIT, impliedLine, money, paymentPhrase, type PriceChange } from "@/lib/price-change";
+import { LIST_CHANGE_HELD_MESSAGE } from "@/lib/client-list";
+import { eventTimeZone } from "@/lib/team/markets";
 
 const anthropic = new Anthropic();
 
@@ -250,6 +252,7 @@ async function fireCompletion(
       eventData,
       conversationTranscript: transcript,
       clientEmail,
+      sessionId,
     }),
   });
 
@@ -297,6 +300,9 @@ function quoteToolResult(quote: QuoteResult | null): string {
   const parts: string[] = [];
   if (quote.diveMenuSet) parts.push(`DRINK MENU SET, Dive Bar has a set menu and drinks cannot be changed. Say exactly: "${DIVE_MENU_SET_MESSAGE}"`);
   else if (quote.refusedDrinks) parts.push(`DRINK MENU LOCKED, within 6 days of the event. Say exactly: "${DRINKS_LOCKED_MESSAGE}"`);
+  if (quote.listHold) {
+    parts.push(`SHOPPING LIST LOCKED, within 6 days of the event. This change would change the client's shopping list, so after they say yes it goes to our team for approval instead of saving. Tell them that when you ask, and after update_event_data say exactly: "${LIST_CHANGE_HELD_MESSAGE}"`);
+  }
   if (!quote.price) {
     parts.push("NOTHING TO PRICE: these values are already on file or do not change the price. Do not quote a price.");
   } else {
@@ -333,7 +339,10 @@ function updateToolResult(result: ApplyResult | null): string {
   } else if (result.refusedDrinks) {
     parts.push(`DRINK CHANGE NOT SAVED, the drink menu is locked within 6 days of the event. Say exactly: "${DRINKS_LOCKED_MESSAGE}"`);
   }
-  if (result.rows.length === 0 && !result.refusedDrinks && !result.diveMenuSet) {
+  if (result.held) {
+    parts.push(`NOT SAVED YET, HELD FOR APPROVAL: within 6 days of the event this change would change the client's shopping list, so our team approves or declines it first. Do not say it was saved. Say exactly: "${LIST_CHANGE_HELD_MESSAGE}"`);
+  }
+  if (result.rows.length === 0 && !result.refusedDrinks && !result.diveMenuSet && !result.held) {
     return "TOOL RESULT: NOTHING was recorded because every value sent already matches what is on file. Tell the client it is already on file. Do not say you updated or saved anything.";
   }
   for (const r of result.rows) {
@@ -359,7 +368,7 @@ function updateToolResult(result: ApplyResult | null): string {
 
 async function updateModeResponse(session: SessionRow, messages: ChatMessage[], chatStartVersion: number, origin: string) {
   const eventData = session.event_data as EventData;
-  const deadlines = computeDeadlines(eventData.event_date ?? session.event_date);
+  const deadlines = computeDeadlines(eventData.event_date ?? session.event_date, undefined, eventTimeZone(session));
   // Every change saved since this chat opened, for the final recap.
   const since = await changesSince(session.id, chatStartVersion).catch(() => null);
   const system = buildUpdatePrompt(eventData, session.version, deadlines, {
@@ -435,6 +444,7 @@ async function updateModeResponse(session: SessionRow, messages: ChatMessage[], 
               quotedNewTotal,
             });
             lastApply = result;
+            if (result?.held) send(controller, { event: "held" });
 
             if (result && result.rows.length > 0) {
               // Refresh the event details on the page as soon as the save lands.
@@ -494,6 +504,8 @@ async function updateModeResponse(session: SessionRow, messages: ChatMessage[], 
               text = "Sorry, that change did not go through. Our team will follow up with you.";
             } else if (lastApply.needsQuote) {
               text = `${lastApply.needsQuote.price_text} Should I make that change?`;
+            } else if (lastApply.held && lastApply.rows.length === 0) {
+              text = `${LIST_CHANGE_HELD_MESSAGE} Anything else you would like to change?`;
             } else if (lastApply.rows.length === 0) {
               text = lastApply.diveMenuSet ? DIVE_MENU_SET_MESSAGE : lastApply.refusedDrinks ? DRINKS_LOCKED_MESSAGE : "That is already on file. Anything else you would like to change?";
             } else {

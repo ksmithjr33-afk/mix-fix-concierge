@@ -5,7 +5,9 @@ import { supabase } from "@/lib/supabase";
 import {
   applyChanges,
   computeDeadlines,
+  isDrinkField,
   isPricedField,
+  UPDATABLE_FIELDS,
   planUpdate,
   snapshotChanges,
   summarizeRow,
@@ -26,6 +28,8 @@ import {
   type PendingChange,
   type PriceChange,
 } from "@/lib/price-change";
+import { eventTimeZone } from "@/lib/team/markets";
+import { autoSendOn, holdChange, listWouldChange } from "@/lib/client-list-db";
 
 export const SESSION_COLUMNS =
   "id, name, email, event_date, package_type, guest_count, event_name, hours_booked, status, event_data, version, submitted_at, updated_at";
@@ -155,6 +159,9 @@ export interface ApplyResult {
   diveMenuSet: boolean; // drink changes on Dive Bar, which has a set menu, dropped
   withinSixDays: boolean;
   paymentPreference: string | null;
+  // Inside six days, a client change that would change their shopping list is
+  // not saved: it waits for an admin to approve or decline it (auto send on only).
+  held: { id: string; listChanges: string } | null;
 }
 
 function toInsert(
@@ -222,7 +229,8 @@ function prepareUpdate(
 ): PreparedUpdate {
   // Sessions submitted before hours_booked was saved get it filled in here.
   const current = withHoursBooked(session.event_data, session);
-  const deadlines = computeDeadlines(current.event_date ?? session.event_date, options.now);
+  // Days are counted in the event's market time zone.
+  const deadlines = computeDeadlines(current.event_date ?? session.event_date, options.now, eventTimeZone(session));
   // Admins are not bound by the six day cutoff.
   const planDeadlines = options.ignoreCutoff ? { ...deadlines, withinSixDays: false } : deadlines;
   const plan = planUpdate(current, partial, { managerRequest: options.managerRequest, deadlines: planDeadlines });
@@ -266,6 +274,7 @@ function prepareUpdate(
 
 export interface QuoteResult {
   price: PriceChange | null; // null when nothing priced changes
+  listHold: boolean; // saving it will hold it for admin approval: it changes the shopping list inside six days
   refusedDrinks: boolean;
   diveMenuSet: boolean;
   withinSixDays: boolean;
@@ -282,8 +291,11 @@ export async function quoteEventUpdate(
   const session = await getSession(sessionId);
   if (!session || session.status !== "submitted" || !session.event_data) return null;
   const prep = prepareUpdate(session as SessionRow & { event_data: EventData }, partial, { now, ignoreCutoff: opts.ignoreCutoff });
+  const listHold =
+    !opts.ignoreCutoff && prep.deadlines.withinSixDays && !!prep.applied && listWouldChange(prep.current, prep.next).changed && (await autoSendOn());
   return {
     price: prep.price,
+    listHold,
     refusedDrinks: prep.refusedDrinks,
     diveMenuSet: prep.diveMenuSet,
     withinSixDays: prep.deadlines.withinSixDays,
@@ -336,7 +348,8 @@ export async function applyEventUpdate(
       throw new VersionConflictError();
     }
     const prep = prepareUpdate(session as SessionRow & { event_data: EventData }, partial, options);
-    const { current, applied, requests, next, booked } = prep;
+    const { current, requests, booked } = prep;
+    let { applied, next } = prep;
     const price = prep.price && options.priceOverride ? options.priceOverride(prep.price) : prep.price;
     let version = session.version;
     let updatedAt = session.updated_at ?? session.submitted_at;
@@ -347,10 +360,37 @@ export async function applyEventUpdate(
       diveMenuSet: prep.diveMenuSet,
       withinSixDays: prep.deadlines.withinSixDays,
       paymentPreference: (current.payment_preference as string | undefined) || null,
+      held: null as ApplyResult["held"],
     };
 
     if (price && options.requireQuote && !quoteMatches(price, options.quotedNewTotal)) {
       return { ...base, eventData: current, version, updatedAt, rows: [], needsQuote: price };
+    }
+
+    // Inside six days the client's shopping list is locked: a client change that
+    // would change it waits for an admin instead of saving. Manager requests in
+    // the same update are still recorded below. Admin edits are never held.
+    if (applied && source === "concierge" && !options.ignoreCutoff && prep.deadlines.withinSixDays) {
+      const would = listWouldChange(current, next);
+      if (would.changed && (await autoSendOn())) {
+        const heldPartial = Object.fromEntries(
+          Object.entries(partial).filter(([k, v]) => (UPDATABLE_FIELDS as readonly string[]).includes(k) && v !== undefined && !isDrinkField(k))
+        );
+        const hold = await holdChange({
+          sessionId,
+          partial: heldPartial,
+          changes: applied.changes,
+          summary: applied.summary,
+          listChanges: would.changes,
+          price,
+          baseVersion: version,
+        });
+        if (hold) {
+          base.held = { id: hold.id, listChanges: would.changes };
+          applied = null;
+          next = current;
+        }
+      }
     }
 
     const nowIso = new Date().toISOString();

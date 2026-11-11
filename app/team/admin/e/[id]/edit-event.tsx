@@ -26,6 +26,8 @@ interface Preview {
   engineAmount: number | null;
   engineNewTotal: number | null;
   engineText: string;
+  listChanges: string;
+  autoSend: boolean;
 }
 
 const input =
@@ -55,6 +57,7 @@ export default function EditEvent({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [saved, setSaved] = useState("");
+  const [sendList, setSendList] = useState(true);
 
   const changes = useMemo(() => {
     const out: Partial<EditValues> = {};
@@ -63,11 +66,11 @@ export default function EditEvent({
   }, [v, initial]);
   const changedFields = Object.keys(changes) as Field[];
   const pricedChange = changedFields.some((f) => PRICED.includes(f));
-  const pricedKey = JSON.stringify(PRICED.map((f) => changes[f] ?? null));
+  const changesKey = JSON.stringify(changes);
 
-  // The engine's price for the edit, refreshed as the priced fields change.
+  // The engine's price and the shopping list change for the edit, refreshed as the fields change.
   useEffect(() => {
-    if (!pricedChange) return;
+    if (changedFields.length === 0) return;
     const t = setTimeout(async () => {
       try {
         const res = await fetch("/api/team/admin/event-edit", {
@@ -85,8 +88,8 @@ export default function EditEvent({
       }
     }, 400);
     return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- refetch only when a priced field changes
-  }, [pricedKey, pricedChange, sessionId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- refetch only when the changes do
+  }, [changesKey, sessionId]);
 
   const set = (k: Field) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => setV({ ...v, [k]: e.target.value });
 
@@ -102,6 +105,7 @@ export default function EditEvent({
           version,
           changes,
           price: pricedChange ? { mode, total: mode === "manual" ? manual : undefined } : { mode: "keep" },
+          sendList,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -110,6 +114,7 @@ export default function EditEvent({
       setOpen(false);
       setMode("");
       setManual("");
+      setSendList(true);
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not save.");
@@ -247,6 +252,20 @@ export default function EditEvent({
                   autoFocus
                 />
               )}
+            </span>
+          </label>
+        </fieldset>
+      )}
+
+      {changedFields.length > 0 && preview?.listChanges && (
+        <fieldset className="rounded-xl border border-[#DDD5CC] bg-white px-3 py-3 space-y-2">
+          <legend className="px-1 text-sm font-bold text-[#2C2420]">Client shopping list</legend>
+          <p className="text-sm text-[#6B5D52] whitespace-pre-line">This edit changes the client&apos;s list:{"\n"}{preview.listChanges}</p>
+          <label className="flex items-start gap-2 text-[15px] text-[#2C2420]">
+            <input type="checkbox" className="mt-1 h-5 w-5 accent-[#B5845A]" checked={sendList} onChange={(e) => setSendList(e.target.checked)} />
+            <span>
+              Send updated list to client
+              {!preview.autoSend && <span className="block text-sm text-[#6B5D52]">Auto send client shopping list is off, so nothing goes to the client either way.</span>}
             </span>
           </label>
         </fieldset>

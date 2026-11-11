@@ -66,6 +66,11 @@ export interface MarketSession {
   team_market_address?: string | null;
 }
 
+/** The event's market time zone, America/Chicago before it has a market. */
+export function eventTimeZone(s: object): string {
+  return marketTz(sessionMarket(s));
+}
+
 /** The event's market, from the session row (team_market), or null when it has none yet. */
 export function sessionMarket(s: object): Market | null {
   const m = (s as { team_market?: unknown }).team_market;

@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { SESSION_COLUMNS, type SessionRow } from "@/lib/event-updates";
 import UpdateMode from "./update-mode";
+import { clientCanSeeList, holdsFor } from "@/lib/client-list-db";
 
 // The booking fields /chat takes as query params for intake.
 const INTAKE_PARAMS = [
@@ -78,11 +79,11 @@ export default async function ShortRedirectPage({
 
   // Submitted sessions open in update mode: chat on top, event summary below.
   if (data.status === "submitted" && data.event_data) {
-    const { data: log } = await supabase
-      .from("conversation_logs")
-      .select("update_messages")
-      .eq("session_id", sessionId)
-      .maybeSingle();
+    const [{ data: log }, showList, pending] = await Promise.all([
+      supabase.from("conversation_logs").select("update_messages").eq("session_id", sessionId).maybeSingle(),
+      clientCanSeeList(sessionId).catch(() => false),
+      holdsFor(sessionId, "pending").catch(() => []),
+    ]);
     return (
       <UpdateMode
         sessionId={sessionId}
@@ -91,6 +92,8 @@ export default async function ShortRedirectPage({
         initialVersion={data.version}
         initialUpdatedAt={data.updated_at ?? data.submitted_at}
         initialMessages={Array.isArray(log?.update_messages) ? log.update_messages : []}
+        showList={showList}
+        listPending={pending.some((h) => h.kind === "change")}
       />
     );
   }

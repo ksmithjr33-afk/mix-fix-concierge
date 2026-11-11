@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import EventSummary from "./event-summary";
+import ShoppingList from "./shopping-list";
 import { UPDATE_OPENER, updateGreeting } from "@/lib/update-mode-shared";
 import MenuCards from "@/app/menu-card";
 import type { MenuKey } from "@/lib/menu-markers";
@@ -33,6 +34,8 @@ export default function UpdateMode({
   initialVersion,
   initialUpdatedAt,
   initialMessages,
+  showList = false,
+  listPending = false,
 }: {
   sessionId: string;
   clientName: string | null;
@@ -40,6 +43,8 @@ export default function UpdateMode({
   initialVersion: number;
   initialUpdatedAt: string | null;
   initialMessages: Message[];
+  showList?: boolean; // auto send is on and the first list is out
+  listPending?: boolean; // a change that would change the list is waiting for approval
 }) {
   const [messages, setMessages] = useState<Message[]>(
     initialMessages.length > 0
@@ -49,6 +54,7 @@ export default function UpdateMode({
   const [eventData, setEventData] = useState<EventData>(initialEventData);
   const [version, setVersion] = useState(initialVersion);
   const [updatedAt, setUpdatedAt] = useState(initialUpdatedAt);
+  const [pending, setPending] = useState(listPending);
   // The version this chat opened on: the final recap covers every change saved after it.
   const [chatStartVersion] = useState(initialVersion);
   const [input, setInput] = useState("");
@@ -111,6 +117,10 @@ export default function UpdateMode({
           if (parsed.eventData) setEventData(parsed.eventData);
           if (typeof parsed.version === "number") setVersion(parsed.version);
           if (parsed.updatedAt) setUpdatedAt(parsed.updatedAt);
+          return;
+        }
+        if (parsed.event === "held") {
+          setPending(true);
           return;
         }
         if (parsed.event === "menu" && parsed.menu) {
@@ -245,6 +255,8 @@ export default function UpdateMode({
           </div>
           <EventSummary data={eventData} />
         </div>
+
+        {showList && <ShoppingList data={eventData} pending={pending} />}
       </main>
     </div>
   );
