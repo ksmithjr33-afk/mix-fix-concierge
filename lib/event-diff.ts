@@ -4,6 +4,7 @@
 // lib/event-updates.ts for that.
 
 import { parseEventDate } from "@/lib/event-date";
+import { diveSetMenuDrinks, isDiveBarPackage } from "@/lib/dive-menu";
 
 export type EventData = Record<string, unknown>;
 type Drink = Record<string, unknown>;
@@ -128,6 +129,7 @@ const FIELD_LABELS: Record<string, string> = {
   menu_colors: "Menu colors",
   event_name: "Event name",
   dive_menu_requested: "Dive Bar menu requested",
+  dive_set_menu: "Dive Bar set menu",
   manager_request: "Manager request",
   event_date: "Event date",
   hours_booked: "Hours booked",
@@ -499,6 +501,9 @@ export interface UpdatePlan {
   // Drink menu changes asked for inside the six day cutoff. Not saved, not noted,
   // not sent anywhere: the client is told the drink menu is locked.
   refusedDrinks: boolean;
+  // Drink menu changes on Dive Bar, which has a set menu. Refused the same way,
+  // and the client is told the menu is set for the package.
+  diveMenuSet: boolean;
 }
 
 function diffDrinks(oldDrinks: Drink[], newDrinks: Drink[]): FieldChange[] {
@@ -576,11 +581,31 @@ export function planUpdate(
     refusedDrinks = kept.length < changes.length || keptRequests.length < requests.length;
   }
 
+  // Dive Bar has a set menu: drink changes are refused while the event stays on Dive Bar.
+  let diveMenuSet = false;
+  const nextPkg = "package" in updates ? updates.package : current.package;
+  if (isDiveBarPackage(current.package) && isDiveBarPackage(nextPkg)) {
+    const before = kept.length + keptRequests.length;
+    kept = kept.filter((c) => !isDrinkField(c.field));
+    keptRequests = keptRequests.filter((c) => !String(c.new).startsWith("Add drinks beyond"));
+    diveMenuSet = kept.length + keptRequests.length < before;
+  } else if (!isDiveBarPackage(current.package) && isDiveBarPackage(nextPkg) && kept.some((c) => c.field === "package")) {
+    // Switching to Dive Bar brings its set menu with it.
+    kept = kept.filter((c) => !isDrinkField(c.field));
+    kept.push({ field: "signature_drinks", old: current.signature_drinks ?? null, new: diveSetMenuDrinks() });
+    if (current.dive_set_menu !== true) kept.push({ field: "dive_set_menu", old: current.dive_set_menu ?? null, new: true });
+    keptRequests = keptRequests.filter((c) => !String(c.new).startsWith("Add drinks beyond"));
+  } else if (isDiveBarPackage(current.package) && !isDiveBarPackage(nextPkg) && current.dive_set_menu === true && kept.some((c) => c.field === "package")) {
+    // Leaving Dive Bar: the five classics stay as the drinks, no longer a set menu.
+    kept.push({ field: "dive_set_menu", old: true, new: false });
+  }
+
   return {
     next: applyChanges(current, kept),
     applied: row(kept, true, true),
     requests: row(keptRequests, false, null),
     refusedDrinks,
+    diveMenuSet,
   };
 }
 

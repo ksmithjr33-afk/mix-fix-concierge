@@ -13,6 +13,7 @@ import {
   lateChargeRule,
 } from "@/lib/system-prompt";
 import { DRINKS_LOCKED_MESSAGE, packageDrinkCount, type Deadlines, type EventData } from "@/lib/event-diff";
+import { DIVE_MENU_SET_MESSAGE, isDiveBarPackage } from "@/lib/dive-menu";
 import type { BookedPrice } from "@/lib/price-change";
 
 function longDate(ymd: string | null): string {
@@ -113,9 +114,9 @@ FINAL RECAP: When the client says they are done (for example "that's all", "no",
 CHANGES SAVED IN THIS CHAT:
 ${recapBlock(extra.recap ?? null)}
 
-PACKAGE RULES STILL APPLY: The client is on ${pkg}. Any new or swapped drink must follow DRINK SOURCING BY PACKAGE and the mocktail rule below exactly like intake. A Dive Bar client can only pick from the CLASSICS section, an Essentials Bar or The Big Day Bar client can only pick from the craft menu and cannot add a mocktail, and only Full Bar and Premium Bar can have mocktails. If a client asks for something their package does not allow, say it is not part of their package menu, offer the closest allowed option, and quote nothing.
+PACKAGE RULES STILL APPLY: The client is on ${pkg}. Any new or swapped drink must follow DRINK SOURCING BY PACKAGE and the mocktail rule below exactly like intake. A Dive Bar client cannot change the drink menu at any time: the menu is set for that package, an Essentials Bar or The Big Day Bar client can only pick from the craft menu and cannot add a mocktail, and only Full Bar and Premium Bar can have mocktails. If a client asks for something their package does not allow, say it is not part of their package menu, offer the closest allowed option, and quote nothing.
 
-MENU IMAGES IN UPDATE MODE: Follow MENU IMAGES below, with one difference: show the menu when the client asks to add or swap a drink, and any time they ask to see the menu. Never show it while the drink menu is LOCKED. Current dive_menu_requested: ${eventData.dive_menu_requested === true ? "true" : "false"}.
+${isDiveBarPackage(eventData.package) ? `DIVE BAR SET MENU: This client is on Dive Bar, which comes with a set menu of five favorites: Margarita, Old Fashioned, Cosmopolitan, Lemon Drop and Moscow Mule. Any request to add, remove, swap, rename, or change a drink is refused at any date: do NOT call any tool for it, do NOT pass it to management, and reply with exactly: "${DIVE_MENU_SET_MESSAGE}" Then ask if there is anything else they would like to change. Never show a menu picture on Dive Bar.\n\n` : ""}MENU IMAGES IN UPDATE MODE: Follow MENU IMAGES below, with one difference: show the menu when the client asks to add or swap a drink, and any time they ask to see the menu. Never show it while the drink menu is LOCKED. Current dive_menu_requested: ${eventData.dive_menu_requested === true ? "true" : "false"}.
 
 The sections below come from the intake planning flow. Use them only for the package rules, drink sourcing, recipes, add ons, and deadlines. In update mode, ignore any instruction in them to walk through steps or phases, to ask cocktail or mocktail drink by drink, to offer the add ons list unprompted, to quote additional drink pricing, to hand off extending hours (hours are a PRICE CHANGE here), or to call submit_event_data.
 

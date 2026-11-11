@@ -152,6 +152,7 @@ export interface ApplyResult {
   // total. Nothing was saved: the bot states the price and asks for a yes first.
   needsQuote: PriceChange | null;
   refusedDrinks: boolean; // drink changes inside the six day cutoff, dropped
+  diveMenuSet: boolean; // drink changes on Dive Bar, which has a set menu, dropped
   withinSixDays: boolean;
   paymentPreference: string | null;
 }
@@ -210,6 +211,7 @@ interface PreparedUpdate {
   booked: BookedPrice | null;
   bookedComputed: boolean;
   refusedDrinks: boolean;
+  diveMenuSet: boolean;
 }
 
 /** Plan and price an update without saving anything. */
@@ -259,12 +261,13 @@ function prepareUpdate(
     }
   }
 
-  return { current, deadlines, applied, requests: plan.requests, next, price, booked, bookedComputed, refusedDrinks: plan.refusedDrinks };
+  return { current, deadlines, applied, requests: plan.requests, next, price, booked, bookedComputed, refusedDrinks: plan.refusedDrinks, diveMenuSet: plan.diveMenuSet };
 }
 
 export interface QuoteResult {
   price: PriceChange | null; // null when nothing priced changes
   refusedDrinks: boolean;
+  diveMenuSet: boolean;
   withinSixDays: boolean;
   changes: FieldChange[]; // what would apply, implied changes included
 }
@@ -282,6 +285,7 @@ export async function quoteEventUpdate(
   return {
     price: prep.price,
     refusedDrinks: prep.refusedDrinks,
+    diveMenuSet: prep.diveMenuSet,
     withinSixDays: prep.deadlines.withinSixDays,
     changes: prep.applied?.changes ?? [],
   };
@@ -340,6 +344,7 @@ export async function applyEventUpdate(
       priceChange: null,
       needsQuote: null,
       refusedDrinks: prep.refusedDrinks,
+      diveMenuSet: prep.diveMenuSet,
       withinSixDays: prep.deadlines.withinSixDays,
       paymentPreference: (current.payment_preference as string | undefined) || null,
     };

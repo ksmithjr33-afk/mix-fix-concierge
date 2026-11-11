@@ -118,7 +118,7 @@ function Details({ v }: { v: StaffEventView }) {
 
       {v.drinks.length > 0 && (
         <section className={card}>
-          <h3 className="font-heading text-base font-bold text-[#2C2420] mb-2">Signature drinks</h3>
+          <h3 className="font-heading text-base font-bold text-[#2C2420] mb-2">{v.setMenu ? "Dive Bar set menu" : "Signature drinks"}</h3>
           <ul className="space-y-3">
             {v.drinks.map((d, i) => (
               <li key={i} className="border-b border-[#DDD5CC] last:border-0 pb-3 last:pb-0">
@@ -141,8 +141,8 @@ function Details({ v }: { v: StaffEventView }) {
 
       {v.classics && (
         <section className={card}>
-          <h3 className="font-heading text-base font-bold text-[#2C2420]">Classics menu</h3>
-          <p className="text-sm text-[#6B5D52] mb-2">No signature menu. Guests order these classics at the bar.</p>
+          <h3 className="font-heading text-base font-bold text-[#2C2420]">Also available</h3>
+          <p className="text-sm text-[#6B5D52] mb-2">Guests can also order these classics at the bar.</p>
           <div className="space-y-3">
             {v.classics.map((g) => (
               <div key={g.title}>

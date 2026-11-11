@@ -25,6 +25,7 @@ import {
 import { UPDATE_OPENER } from "@/lib/update-mode-shared";
 import { deliverEventUpdates } from "@/lib/update-delivery";
 import { allowedMenus, createMenuFilter, type MenuKey } from "@/lib/menu-markers";
+import { applyDiveSetMenu, DIVE_MENU_SET_MESSAGE } from "@/lib/dive-menu";
 import { DEFAULT_DEPOSIT, impliedLine, money, paymentPhrase, type PriceChange } from "@/lib/price-change";
 
 const anthropic = new Anthropic();
@@ -294,7 +295,8 @@ function priceLines(p: PriceChange): string[] {
 function quoteToolResult(quote: QuoteResult | null): string {
   if (!quote) return "TOOL RESULT: This event could not be priced right now. Tell the client our team will confirm the price, and do not quote anything.";
   const parts: string[] = [];
-  if (quote.refusedDrinks) parts.push(`DRINK MENU LOCKED, within 6 days of the event. Say exactly: "${DRINKS_LOCKED_MESSAGE}"`);
+  if (quote.diveMenuSet) parts.push(`DRINK MENU SET, Dive Bar has a set menu and drinks cannot be changed. Say exactly: "${DIVE_MENU_SET_MESSAGE}"`);
+  else if (quote.refusedDrinks) parts.push(`DRINK MENU LOCKED, within 6 days of the event. Say exactly: "${DRINKS_LOCKED_MESSAGE}"`);
   if (!quote.price) {
     parts.push("NOTHING TO PRICE: these values are already on file or do not change the price. Do not quote a price.");
   } else {
@@ -326,10 +328,12 @@ function updateToolResult(result: ApplyResult | null): string {
     );
     return `TOOL RESULT:\n\n${parts.join("\n\n")}`;
   }
-  if (result.refusedDrinks) {
+  if (result.diveMenuSet) {
+    parts.push(`DRINK CHANGE NOT SAVED, Dive Bar has a set menu. Say exactly: "${DIVE_MENU_SET_MESSAGE}"`);
+  } else if (result.refusedDrinks) {
     parts.push(`DRINK CHANGE NOT SAVED, the drink menu is locked within 6 days of the event. Say exactly: "${DRINKS_LOCKED_MESSAGE}"`);
   }
-  if (result.rows.length === 0 && !result.refusedDrinks) {
+  if (result.rows.length === 0 && !result.refusedDrinks && !result.diveMenuSet) {
     return "TOOL RESULT: NOTHING was recorded because every value sent already matches what is on file. Tell the client it is already on file. Do not say you updated or saved anything.";
   }
   for (const r of result.rows) {
@@ -481,7 +485,9 @@ async function updateModeResponse(session: SessionRow, messages: ChatMessage[], 
             if (lastApply === undefined) {
               text = lastQuote?.price
                 ? `${lastQuote.price.price_text} Should I make that change?`
-                : lastQuote?.refusedDrinks
+                : lastQuote?.diveMenuSet
+                  ? DIVE_MENU_SET_MESSAGE
+                  : lastQuote?.refusedDrinks
                   ? DRINKS_LOCKED_MESSAGE
                   : "Anything else you would like to change?";
             } else if (!lastApply) {
@@ -489,12 +495,12 @@ async function updateModeResponse(session: SessionRow, messages: ChatMessage[], 
             } else if (lastApply.needsQuote) {
               text = `${lastApply.needsQuote.price_text} Should I make that change?`;
             } else if (lastApply.rows.length === 0) {
-              text = lastApply.refusedDrinks ? DRINKS_LOCKED_MESSAGE : "That is already on file. Anything else you would like to change?";
+              text = lastApply.diveMenuSet ? DIVE_MENU_SET_MESSAGE : lastApply.refusedDrinks ? DRINKS_LOCKED_MESSAGE : "That is already on file. Anything else you would like to change?";
             } else {
               const saved = lastApply.rows.some((r) => r.applied)
                 ? "That change is saved."
                 : "I have sent that to a manager who will reach out to you shortly.";
-              text = [lastApply.refusedDrinks ? DRINKS_LOCKED_MESSAGE : "", saved, "Anything else you would like to change?"]
+              text = [lastApply.diveMenuSet ? DIVE_MENU_SET_MESSAGE : lastApply.refusedDrinks ? DRINKS_LOCKED_MESSAGE : "", saved, "Anything else you would like to change?"]
                 .filter(Boolean)
                 .join(" ");
             }
@@ -604,7 +610,8 @@ export async function POST(request: Request) {
           );
 
           if (toolUse) {
-            const eventData = toolUse.input;
+            // Dive Bar: record the five set menu drinks as the event's menu.
+            const eventData = applyDiveSetMenu(toolUse.input as Record<string, unknown>);
             const transcript = buildTranscript(updatedMessages);
             const origin = new URL(request.url).origin;
 

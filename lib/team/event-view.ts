@@ -5,6 +5,7 @@
 // included from 48 hours before service starts. Pure, no database.
 
 import { DRINK_MENU_RULES } from "@/lib/system-prompt";
+import { DIVE_NOT_AVAILABLE, DIVE_SET_MENU, diveSetMenuDrinks, usesDiveSetMenu } from "@/lib/dive-menu";
 import { staffingFor } from "@/lib/pricing";
 import { isBottleRequest } from "@/lib/shopping-list";
 import { recapLines, type FieldChange } from "@/lib/event-diff";
@@ -77,7 +78,8 @@ export interface StaffEventView {
   specialRequests: string;
   bottleNote: string; // extra_bottles when it is a note, not a bottle to buy
   drinks: StaffDrink[];
-  classics: ClassicGroup[] | null; // Dive Bar with no menu
+  classics: ClassicGroup[] | null; // Dive Bar: the other classics guests can order ("Also available")
+  setMenu: boolean; // Dive Bar: the drinks are the package's set menu
   lastUpdated: string;
   timeZone: string; // the event's market time zone, for times shown on the page
   market: string; // "Austin", or "No market"
@@ -136,8 +138,8 @@ function toCount(v: unknown): number | null {
   return Number.isFinite(n) && n > 0 ? Math.round(n) : null;
 }
 
-/** Classics the Dive Bar well does not stock unless picked as a signature drink. */
-const DIVE_SIGNATURE_ONLY = new Set(["Sidecar", "Bellini", "Amaretto Sour", "Hurricane"]);
+/** Classics a Dive Bar guest can order besides the set menu: not the five, and not the drinks Dive Bar leaves out. */
+const DIVE_SKIP = new Set<string>([...DIVE_SET_MENU, ...DIVE_NOT_AVAILABLE]);
 
 /** The CLASSICS section of the bot's menu, grouped by spirit: the same recipes the bot offers. */
 export function classicsMenu(opts: { dive?: boolean } = {}): ClassicGroup[] {
@@ -154,7 +156,7 @@ export function classicsMenu(opts: { dive?: boolean } = {}): ClassicGroup[] {
       }
       continue;
     }
-    if (opts.dive && DIVE_SIGNATURE_ONLY.has(m[1].trim())) continue;
+    if (opts.dive && DIVE_SKIP.has(m[1].trim())) continue;
     groups.at(-1)?.drinks.push({ name: m[1].trim(), recipe: m[2].trim() });
   }
   return groups.filter((g) => g.drinks.length > 0);
@@ -176,7 +178,7 @@ const STAFF_CHANGE_FIELDS = new Set([
   "event_name", "event_type", "event_date", "bar_service_start", "bar_service_end", "hours_booked", "event_address",
   "venue_type", "indoor_outdoor", "bar_on_site", "bar_details", "bar_floor_access", "parking_info", "guest_count",
   "package", "bartenders", "theme", "event_colors", "allergies", "special_requests", "day_of_contact_name", "beer",
-  "wine", "client_providing_beer_wine", "beer_and_wine_details", "dual_bar_setup", "extra_bottles", "dive_menu_requested",
+  "wine", "client_providing_beer_wine", "beer_and_wine_details", "dual_bar_setup", "extra_bottles", "dive_menu_requested", "dive_set_menu",
   "drinking_pace",
 ]);
 
@@ -214,8 +216,9 @@ export function buildStaffEventView(
   const s = eventSchedule(ed);
   const pkg = text(ed.package) || text(session.package_type);
   const guests = text(ed.guest_count) || text(session.guest_count);
-  const drinks = drinksOf(ed);
-  const dive = pkg.toLowerCase().includes("dive");
+  // Dive Bar with the set menu, or booked before it with no drinks: the five are the menu.
+  const setMenu = usesDiveSetMenu({ ...ed, package: pkg });
+  const drinks = setMenu && drinksOf(ed).filter((d) => d.kind !== "Mocktail").length === 0 ? drinksOf({ signature_drinks: diveSetMenuDrinks() }) : drinksOf(ed);
   const address = scrub(ed.event_address);
   const showPhone = showDayOfPhone(ed, now);
   const dayPhone = text(ed.day_of_contact_phone);
@@ -253,7 +256,8 @@ export function buildStaffEventView(
     specialRequests: scrub(ed.special_requests),
     bottleNote: ed.extra_bottles && !isBottleRequest(ed.extra_bottles) && !/^(no|none|n\/a)\.?$/i.test(text(ed.extra_bottles)) ? scrub(ed.extra_bottles) : "",
     drinks,
-    classics: dive && drinks.length === 0 ? classicsMenu({ dive: true }) : null,
+    classics: setMenu ? classicsMenu({ dive: true }) : null,
+    setMenu,
     lastUpdated: chicagoStamp(session.updated_at ?? session.submitted_at, s.tz),
     timeZone: s.tz,
     market: marketLabel(sessionMarket(session)),

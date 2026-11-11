@@ -24,9 +24,9 @@ export function buildEventFields(eventData: LooseEventData) {
   let graphicDesignerBrief = "";
   let orderTeamEmail = "";
   const pkgLower = ((eventData.package as string) ?? "").toLowerCase();
-  // Dive Bar only gets a menu when the client asked for one.
+  // Dive Bar's printed menu is its set menu (or the drinks an older booking picked).
   const diveMenuRequested = eventData.dive_menu_requested === true;
-  const includeMenuDesign = !pkgLower.includes("dive") || diveMenuRequested;
+  const includeMenuDesign = !pkgLower.includes("dive") || diveMenuRequested || eventData.dive_set_menu === true;
   try {
     const shoppingListItems = generateShoppingList(eventData as Parameters<typeof generateShoppingList>[0]);
     shoppingListNote = formatShoppingListForNote(shoppingListItems, eventData as Parameters<typeof formatShoppingListForNote>[1]);
@@ -89,6 +89,7 @@ export function buildEventFields(eventData: LooseEventData) {
       menu_colors: includeMenuDesign ? eventData.menu_colors || null : null,
       menu_reference_photos: includeMenuDesign ? eventData.menu_reference_photos || null : null,
       dive_menu_requested: diveMenuRequested,
+      dive_set_menu: pkgLower.includes("dive") && eventData.dive_set_menu === true,
       ice_amount: iceAmount,
       actual_event_date: toIsoEventDate(eventData.event_date),
       event_start_time: eventData.bar_service_start || null,

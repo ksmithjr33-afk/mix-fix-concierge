@@ -31,6 +31,7 @@ interface EventData {
   event_location?: string;
   venue_type?: string;
   client_providing_beer_wine?: boolean;
+  dive_set_menu?: boolean; // Dive Bar: the five set menu drinks were recorded as signature_drinks
 }
 
 /**
@@ -197,19 +198,22 @@ function countDrinksUsingSpirit(drinks: SignatureDrink[], spiritKey: string): nu
 }
 
 /**
- * Dive Bar with no signature drinks: guests walk up and order classics, so the
+ * Dive Bar well: the set menu (Margarita, Old Fashioned, Cosmopolitan, Lemon
+ * Drop, Moscow Mule) plus the other classics guests order at the bar, so the
  * client buys a default well. Each share is the fraction of guests drinking that
- * spirit, since guests spread across the well. Triple sec is sized separately.
+ * spirit, since guests spread across the well. The set menu is vodka (three
+ * drinks), tequila, and whiskey, so those carry the most. Triple sec (in the
+ * Margarita, Cosmopolitan, and Lemon Drop) is sized separately.
  */
 const DIVE_WELL_SHARES: [string, number][] = [
-  ["vodka", 0.4],
-  ["whiskey", 0.4],
-  ["tequila", 0.4],
-  ["rum", 0.25],
-  ["gin", 0.25],
+  ["vodka", 0.55],
+  ["tequila", 0.5],
+  ["whiskey", 0.5],
+  ["rum", 0.2],
+  ["gin", 0.2],
 ];
 const DIVE_WELL_POUR_OZ = 2;
-const DIVE_WELL_GUESTS_PER_TRIPLE_SEC = 50;
+const DIVE_WELL_GUESTS_PER_TRIPLE_SEC = 35;
 // The classics also need these, at a set bottle count however many guests come.
 const DIVE_WELL_FIXED_BOTTLES: [string, number][] = [
   ["dry vermouth", 1],
@@ -257,9 +261,37 @@ function isDiveBaselineMixer(key: string): boolean {
   return DIVE_BASELINE_MIXERS.some((b) => key.includes(b));
 }
 
-/** True when a Dive Bar booking has no alcoholic signature drinks (no menu was built). */
+/**
+ * True when a Dive Bar booking is stocked from the well: it has the set menu,
+ * or no alcoholic signature drinks (booked before the set menu). Dive Bar
+ * events that picked their own drinks keep the recipe based list.
+ */
 function usesDiveWell(eventData: EventData, drinks: SignatureDrink[]): boolean {
-  return isDiveBar(eventData.package) && drinks.filter(d => !d.is_mocktail).length === 0;
+  return isDiveBar(eventData.package) && (eventData.dive_set_menu === true || drinks.filter(d => !d.is_mocktail).length === 0);
+}
+
+/** Rims for the Margarita (salt) and the Lemon Drop (sugar). */
+const DIVE_WELL_RIMS = [
+  { item: "Salt", quantity: "1 large container (for rims)" },
+  { item: "Sugar", quantity: "1 small container (for rims)" },
+];
+
+/** Cranberry juice for Cosmopolitans and vodka cranberries: one 32 oz bottle per 35 guests. */
+function diveWellCranberry(guestCount: number): string {
+  const n = Math.max(1, Math.ceil(guestCount / 35));
+  return `${n} x 32 oz bottle${n === 1 ? "" : "s"}`;
+}
+
+/** The well's recipe mixers: the classics mixers at drink count 1, and the set mixers. */
+function diveWellMixerItems(guestCount: number, hours: number, eventType: string | undefined): ShoppingListItem[] {
+  return [
+    ...DIVE_WELL_MIXERS.map((m) => ({
+      category: "Mixers & Ingredients",
+      item: m,
+      quantity: getNatalieMixerQuantity(m, guestCount, 0, 1, false, hours, eventType),
+    })),
+    ...diveWellSetMixers(guestCount).map((m) => ({ category: "Mixers & Ingredients", ...m })),
+  ];
 }
 
 /** Recipe-based spirit bottle calculation. New formula calibrated against Isabel's lists. */
@@ -331,8 +363,8 @@ function getSpiritBottles(
     "sambuca": { top: "Romana Sambuca", moderate: "Romana Sambuca" },
   };
 
-  // Accumulate oz per spirit
-  for (const drink of alcoholicDrinks) {
+  // Accumulate oz per spirit. The Dive Bar well sets its own spirits below.
+  for (const drink of diveWell ? [] : alcoholicDrinks) {
     const baseSpirit = drink.base_spirit?.toLowerCase()?.trim() || "";
     if (!baseSpirit || baseSpirit === "none" || baseSpirit === "n/a") continue;
 
@@ -1675,7 +1707,7 @@ function generateDiveBarSupplyList(eventData: EventData): string {
   const spriteCases = Math.max(1, Math.ceil(guestCount / 50));
   const waterCases = Math.max(1, Math.ceil(guestCount / 25));
   parts.push("<b>BASELINE MIXERS</b>");
-  parts.push("Cranberry juice — 1 x 32 oz bottle");
+  parts.push(`Cranberry juice — ${usesDiveWell(eventData, drinks) ? diveWellCranberry(guestCount) : "1 x 32 oz bottle"}`);
   parts.push("Pineapple juice — 1 x 32 oz bottle");
   parts.push("Orange juice — 1 x 32 oz bottle");
   parts.push("Tonic — 2 x 1 liter bottles");
@@ -1705,14 +1737,7 @@ function generateDiveBarSupplyList(eventData: EventData): string {
   const seenRecipeMixers = new Set<string>();
   const recipeMixers: ShoppingListItem[] = [];
   const recipeMixerSource: ShoppingListItem[] = usesDiveWell(eventData, drinks)
-    ? [
-        ...DIVE_WELL_MIXERS.map((m) => ({
-          category: "Mixers & Ingredients",
-          item: m,
-          quantity: getNatalieMixerQuantity(m, guestCount, 0, 1, false, hours, eventData.event_type),
-        })),
-        ...diveWellSetMixers(guestCount).map((m) => ({ category: "Mixers & Ingredients", ...m })),
-      ]
+    ? diveWellMixerItems(guestCount, hours, eventData.event_type)
     : getMixersAndIngredients(drinks, guestCount, hours, eventData.event_type);
   for (const m of recipeMixerSource) {
     const label = cleanMixerLabel(m.item);
@@ -1742,6 +1767,7 @@ function generateDiveBarSupplyList(eventData: EventData): string {
   parts.push(`Oranges — ${oranges} count`);
   const picksPinaColada = drinks.some((d) => /pi[nñ]a colada/i.test(d?.name ?? ""));
   if (usesDiveWell(eventData, drinks) || picksPinaColada) parts.push(`Pineapple — ${diveWellPineapple(guestCount)}`);
+  if (usesDiveWell(eventData, drinks)) for (const r of DIVE_WELL_RIMS) parts.push(`${r.item} — ${r.quantity}`);
   parts.push("");
 
   // Classic cocktail recipes for the bartender (auto filled standard recipes)
@@ -1984,8 +2010,21 @@ export function formatShoppingListForNote(
   const fallbackItems: { item: string; quantity: string }[] = [];
   const seenMixers = new Set<string>();
   const gbDrinkCount = countGingerBeerDrinks(drinks);
+  const diveWell = usesDiveWell(eventData, drinks);
+  if (diveWell) {
+    // Dive Bar well: the set menu and the classics draw from the same mixers.
+    for (const m of diveWellMixerItems(guestCount, hours, eventData.event_type)) {
+      const key = m.item.toLowerCase();
+      if (seenMixers.has(key)) continue;
+      seenMixers.add(key);
+      if (isSodaOrGingerBeer(key)) sodaItems.push({ item: m.item, quantity: m.quantity });
+      else if (isPureeJuiceOrSyrup(key)) pureeJuiceSyrupItems.push({ item: m.item, quantity: m.quantity });
+      else fallbackItems.push({ item: m.item, quantity: m.quantity });
+    }
+    pureeJuiceSyrupItems.push({ item: "cranberry juice", quantity: diveWellCranberry(guestCount) });
+  }
 
-  for (const drink of drinks) {
+  for (const drink of diveWell ? [] : drinks) {
     const ingredients = normalizeIngredients(drink.ingredients);
     for (const ing of ingredients) {
       // Detect splash/dash usage BEFORE stripping modifiers
@@ -2051,7 +2090,7 @@ export function formatShoppingListForNote(
 
   // PRODUCE
   const produceItems = calculateProduceFromGarnishes(drinks, guestCount);
-  const rimItems = getRimIngredients(drinks);
+  const rimItems = diveWell ? DIVE_WELL_RIMS : getRimIngredients(drinks);
   if (produceItems.length > 0 || rimItems.length > 0) {
     lines.push("");
     lines.push("PRODUCE AND GARNISHES");
@@ -2470,8 +2509,10 @@ export function generateOrderTeamEmail(
 
   const seenMixers = new Set<string>();
   const gbDrinkCount = countGingerBeerDrinks(drinks);
+  // The Dive Bar well stocks its own mixers below, the same for every Dive Bar menu.
+  const diveWell = usesDiveWell(eventData, drinks);
 
-  for (const drink of drinks) {
+  for (const drink of diveWell ? [] : drinks) {
     const ingredients = normalizeIngredients(drink.ingredients);
     for (const ing of ingredients) {
       const isSplash = /^(splash of|pinch of|dash of|drop of|squeeze of)\s+/i.test(ing.replace(/^[\d.]+\s*oz\s*/i, ""));
@@ -2511,7 +2552,7 @@ export function generateOrderTeamEmail(
   }
 
   // Dive Bar with no menu: guests order classics, so stock the classics mixers.
-  if (usesDiveWell(eventData, drinks)) {
+  if (diveWell) {
     for (const m of DIVE_WELL_MIXERS) {
       if (seenMixers.has(m)) continue;
       seenMixers.add(m);
@@ -2528,14 +2569,14 @@ export function generateOrderTeamEmail(
     buckets[routeMixerToStore("Pineapple")].push(`- Pineapple — ${diveWellPineapple(guestCount)}`);
   }
 
-  const produceItems = calculateProduceFromGarnishes(drinks, guestCount);
+  const produceItems = diveWell ? [] : calculateProduceFromGarnishes(drinks, guestCount);
   for (const p of produceItems) {
     const store = routeMixerToStore(p.item);
     buckets[store].push(`- ${p.item} — ${p.quantity}`);
   }
 
   // Rim ingredients
-  const rimItems = getRimIngredients(drinks);
+  const rimItems = diveWell ? DIVE_WELL_RIMS : getRimIngredients(drinks);
   for (const r of rimItems) {
     buckets["Walmart"].push(`- ${r.item} — ${r.quantity}`);
   }
@@ -2547,7 +2588,7 @@ export function generateOrderTeamEmail(
   buckets["Amazon"].push(`- Cocktail napkins — ${napkins} count`);
   buckets["Crew"].push(`- Agave cocktail straws — ${straws} count`);
 
-  buckets["Sam's Club"].push("- Cranberry juice — 1 x 32 oz bottle (Kirkland or GV)");
+  buckets["Sam's Club"].push(`- Cranberry juice — ${diveWell ? diveWellCranberry(guestCount) : "1 x 32 oz bottle"} (Kirkland or GV)`);
   buckets["Sam's Club"].push("- Pineapple juice — 1 x 32 oz bottle (Kirkland or GV)");
   buckets["Sam's Club"].push("- Orange juice — 1 x 32 oz bottle (Kirkland or GV)");
   buckets["Sam's Club"].push("- Tonic — 2 x 1 liter bottles (Kirkland or GV)");

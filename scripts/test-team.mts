@@ -160,7 +160,8 @@ check("Recipes keep oz amounts for bartenders", vEarly.drinks[0].ingredients[0] 
 
 const dive = view.buildStaffEventView({ ...session, event_data: { ...ed, package: "Dive Bar", signature_drinks: [] } }, { now: early });
 const classicNames = (dive.classics ?? []).flatMap((g) => g.drinks.map((d) => d.name));
-check("Dive Bar with no menu shows the classics", classicNames.includes("Old Fashioned") && classicNames.includes("Margarita") && classicNames.includes("Pina Colada"));
+check("Dive Bar with no drinks shows the five set menu drinks", dive.setMenu && dive.drinks.map((d) => d.name).join() === "Margarita,Old Fashioned,Cosmopolitan,Lemon Drop,Moscow Mule");
+check("Dive Bar Also available is the other classics, not the five", classicNames.includes("Pina Colada") && classicNames.includes("Paloma") && !classicNames.includes("Margarita") && !classicNames.includes("Old Fashioned"));
 check("Dive Bar classics have recipes", (dive.classics ?? [])[0].drinks[0].recipe.includes("oz"));
 check("Dive Bar classics leave out signature only drinks", !classicNames.some((n) => ["Sidecar", "Bellini", "Amaretto Sour", "Hurricane"].includes(n)));
 check("Packages with a menu show no classics list", vEarly.classics === null);

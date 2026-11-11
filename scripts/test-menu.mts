@@ -90,8 +90,8 @@ const neitherLine = lines.find((l: string) => l.startsWith("Only a drink on neit
 check("Exclusion line gives Dive Bar the flat answer", neitherLine.includes(NOT_ON_DIVE) && neitherLine.includes("Do not ask for a recipe."), neitherLine);
 check("Exclusion line no longer sends these drinks off list on Dive Bar", !neitherLine.includes("handled as an off list drink"));
 check(
-  "Dive Bar package flow bars the four from signature picks",
-  DRINK_SOURCING_AND_PACKAGE_TEXT.includes("never Espresso Martini, French Connection, Aperol Spritz, Mojito, Mint Julep, Bloody Mary, or Mai Tai")
+  "Dive Bar package flow never offers the eleven excluded drinks",
+  DRINK_SOURCING_AND_PACKAGE_TEXT.includes("Never offer Espresso Martini, French Connection, Aperol Spritz, Mojito, Mint Julep, Bloody Mary, Mai Tai, Sidecar, Bellini, Amaretto Sour, and Hurricane")
 );
 
 const frozen = lines.find((l: string) => l.startsWith("ON THE ROCKS, NEVER FROZEN:")) ?? "";
