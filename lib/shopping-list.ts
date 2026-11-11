@@ -201,19 +201,21 @@ function countDrinksUsingSpirit(drinks: SignatureDrink[], spiritKey: string): nu
  * Dive Bar well: the set menu (Margarita, Old Fashioned, Cosmopolitan, Lemon
  * Drop, Moscow Mule) plus the other classics guests order at the bar, so the
  * client buys a default well. Each share is the fraction of guests drinking that
- * spirit, since guests spread across the well. The set menu is vodka (three
- * drinks), tequila, and whiskey, so those carry the most. Triple sec (in the
- * Margarita, Cosmopolitan, and Lemon Drop) is sized separately.
+ * spirit, since guests spread across the well. Triple sec (in the Margarita,
+ * Cosmopolitan, and Lemon Drop) is sized separately. The set menu does not add
+ * alcohol: these are the same spirit and triple sec amounts the well had before
+ * the set menu. The set menu only adds non alcohol items (more cranberry juice,
+ * salt and sugar for rims).
  */
 const DIVE_WELL_SHARES: [string, number][] = [
-  ["vodka", 0.55],
-  ["tequila", 0.5],
-  ["whiskey", 0.5],
-  ["rum", 0.2],
-  ["gin", 0.2],
+  ["vodka", 0.4],
+  ["whiskey", 0.4],
+  ["tequila", 0.4],
+  ["rum", 0.25],
+  ["gin", 0.25],
 ];
 const DIVE_WELL_POUR_OZ = 2;
-const DIVE_WELL_GUESTS_PER_TRIPLE_SEC = 35;
+const DIVE_WELL_GUESTS_PER_TRIPLE_SEC = 50;
 // The classics also need these, at a set bottle count however many guests come.
 const DIVE_WELL_FIXED_BOTTLES: [string, number][] = [
   ["dry vermouth", 1],

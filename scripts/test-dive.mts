@@ -88,8 +88,34 @@ for (const word of ["lime juice", "lemon juice", "simple syrup", "bitters", "cra
   check(`The shopping note has ${word}`, has(note, word));
 }
 check("The well still stocks the other classics (rum, gin, vermouth, prosecco)", ["rum", "gin", "dry vermouth", "sweet vermouth", "prosecco"].every((k) => spirits.has(k)));
-check("Spirits weight toward tequila, whiskey, and vodka", Math.min(spirits.get("tequila")!, spirits.get("whiskey")!, spirits.get("vodka")!) > Math.max(spirits.get("rum")!, spirits.get("gin")!));
-check("100 guests: 6 vodka, 5 tequila, 5 whiskey, 2 rum, 2 gin, 3 triple sec", [["vodka", 6], ["tequila", 5], ["whiskey", 5], ["rum", 2], ["gin", 2], ["triple sec", 3]].every(([k, n]) => spirits.get(k as string) === n), JSON.stringify([...spirits]));
+check("100 guests: 4 vodka, 4 tequila, 4 whiskey, 3 rum, 3 gin, 2 triple sec (same as before the set menu)", [["vodka", 4], ["tequila", 4], ["whiskey", 4], ["rum", 3], ["gin", 3], ["triple sec", 2]].every(([k, n]) => spirits.get(k as string) === n), JSON.stringify([...spirits]));
+
+// The set menu must not add alcohol. The fixture holds the well's alcohol from
+// before the set menu (commit c7004d7^), across guest counts, hours, event
+// types and venues. Every bottle count, and the total, must match.
+const before = JSON.parse(src("scripts/fixtures/dive-well-alcohol-before-set-menu.json")) as {
+  guests: number; start: string; end: string; event_type: string; venue_type: string; bottles: Record<string, number>;
+}[];
+const alcoholBottles = (e: unknown) => {
+  const out: Record<string, number> = {};
+  for (const i of list.generateShoppingList(e as never)) {
+    if (i.category === "Spirits" || i.category === "Beer & Wine") out[i.item.toLowerCase()] = Number(i.quantity.match(/^(\d+)/)?.[1]);
+  }
+  return out;
+};
+const total = (b: Record<string, number>) => Object.values(b).reduce((a, n) => a + n, 0);
+const sorted = (b: Record<string, number>) => JSON.stringify(Object.entries(b).sort(([x], [y]) => x.localeCompare(y)));
+const wellMismatches: string[] = [];
+console.log = () => {};
+for (const c of before) {
+  const now = alcoholBottles(dive.applyDiveSetMenu(ed({ bar_service_start: c.start, bar_service_end: c.end, event_type: c.event_type, venue_type: c.venue_type }, c.guests)));
+  if (total(now) !== total(c.bottles) || sorted(now) !== sorted(c.bottles)) wellMismatches.push(`${c.guests} guests ${c.start}-${c.end} ${c.event_type} ${c.venue_type}: was ${sorted(c.bottles)} now ${sorted(now)}`);
+}
+console.log = mute;
+check(`The Dive Bar well's total alcohol matches the amounts from before the set menu (${before.length} cases)`, before.length > 300 && wellMismatches.length === 0, wellMismatches.slice(0, 3).join("\n"));
+const sixSpirits = (b: Record<string, number>) => ["vodka", "tequila", "whiskey", "rum", "gin", "triple sec"].reduce((a, k) => a + (b[k] ?? 0), 0);
+const hundred = before.find((c) => c.guests === 100 && c.end === "10:00 PM" && c.event_type === "birthday" && c.venue_type === "venue")!;
+check("100 guests: the fixture is 4 vodka, 4 tequila, 4 whiskey, 3 rum, 3 gin, 2 triple sec, 20 bottles of those", sixSpirits(hundred.bottles) === 20 && hundred.bottles.vodka === 4 && hundred.bottles["triple sec"] === 2 && sixSpirits(Object.fromEntries(spirits)) === 20);
 check("Cranberry is sized for Cosmopolitans: 3 bottles for 100 guests", /Cranberry juice — 3 x 32 oz bottles/.test(supply) && /Cranberry juice — 3 x 32 oz bottles/.test(order));
 check("Ginger beer is listed once in the order email", (order.match(/Ginger beer —/g) ?? []).length === 1);
 check("The supply list has the five recipes for the bartender", FIVE.split(",").every((n) => supply.includes(`<b>${n}</b>`)));
