@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { getCurrentStaff } from "@/lib/team/auth";
 import { alertAdmins, openEvent, recordMissing } from "@/lib/team/events";
-import { allShopItems, buildStaffShopping } from "@/lib/team/shopping";
+import { allSupplies } from "@/lib/team/supplies";
+import { staffSupplies } from "@/lib/team/supplies-db";
 import { firstName, scrub } from "@/lib/team/event-view";
 import { eventDay, shortDate } from "@/lib/team/time";
 import { sendStaffText } from "@/lib/team/sms";
@@ -20,7 +21,7 @@ export async function POST(request: Request) {
     if (!access.ok) return NextResponse.json({ error: "You are not assigned to this event." }, { status: 403 });
 
     const ed = access.session.event_data ?? {};
-    const items = allShopItems(buildStaffShopping(ed)).filter((i) => keys.includes(i.key));
+    const items = allSupplies((await staffSupplies(access.session)).list).filter((i) => keys.includes(i.key));
     const date = shortDate(eventDay(ed.event_date ?? access.session.event_date));
     const name = scrub(ed.event_name) || scrub(ed.event_type) || "event";
     const lines = [

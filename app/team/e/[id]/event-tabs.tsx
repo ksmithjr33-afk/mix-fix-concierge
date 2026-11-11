@@ -4,6 +4,8 @@ import { useState } from "react";
 import type { StaffEventView } from "@/lib/team/event-view";
 import { CHECKLIST_INTRO, CHECKLIST_TITLE, CONFIRM_LABEL, type ResolvedGroup } from "@/lib/team/checklist-config";
 import type { ShopItem, ShoppingGroup } from "@/lib/team/shopping";
+import { SUPPLIES_INTRO, SUPPLIES_TAB, SUPPLIES_TITLE, UPDATED_TITLE } from "@/lib/team/supplies";
+import { WRAP_UP_TAB } from "@/lib/team/wrapup";
 import { canConfirm, type CheckState, type ListName } from "@/lib/team/checks";
 import { timeLabel } from "@/lib/team/clock-label";
 import BarReadyCard, { type BarReadyProps } from "./bar-ready";
@@ -15,7 +17,7 @@ import type { ClockView } from "@/lib/team/clock-db";
 import ChatThread, { type ChatProps } from "./chat-thread";
 
 
-type Tab = "details" | "checklist" | "shopping" | "chat";
+export type Tab = "details" | "checklist" | "shopping" | "wrapup" | "chat";
 
 const card = "bg-[#F5F0EB] rounded-2xl border border-[#DDD5CC] px-4 py-3 sm:px-5 sm:py-4";
 
@@ -132,6 +134,7 @@ export function Details({ v }: { v: StaffEventView }) {
                     <li key={j}>{ing}</li>
                   ))}
                 </ul>
+                {d.cup && <p className="text-sm text-[#6B5D52] mt-1">Cup: {d.cup}</p>}
                 {d.method && <p className="text-sm text-[#6B5D52] mt-1">Method: {d.method}</p>}
                 {d.garnish && <p className="text-sm text-[#6B5D52]">Garnish: {d.garnish}</p>}
               </li>
@@ -442,13 +445,45 @@ export interface ShoppingLayout {
   groups: ShoppingGroup[];
 }
 
-function Shopping({ sessionId, shopping, initial }: { sessionId: string; shopping: ShoppingLayout; initial: Record<string, CheckState> }) {
+/** "Updated": what changed on the list since this person last looked, until they tap Got it. */
+function UpdatedNote({ sessionId, changes }: { sessionId: string; changes: string[] }) {
+  const [open, setOpen] = useState(changes.length > 0);
+  if (!open) return null;
+  const gotIt = async () => {
+    setOpen(false);
+    await fetch("/api/team/supplies-seen", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId }) }).catch(() => {});
+  };
+  return (
+    <section className="bg-[#FFF8EC] rounded-2xl border border-[#E3C9A0] px-4 py-3">
+      <div className="flex items-baseline justify-between gap-2">
+        <h3 className="font-heading text-sm font-bold uppercase tracking-wide text-[#8A4B12]">{UPDATED_TITLE}</h3>
+        <button type="button" onClick={gotIt} className="text-sm text-[#9A7049] underline py-1">
+          Got it
+        </button>
+      </div>
+      <ul className="mt-1 space-y-0.5">
+        {changes.map((c, i) => (
+          <li key={i} className="text-[15px] text-[#2C2420] break-words">
+            {c}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function Supplies({ sessionId, shopping, initial, updates }: { sessionId: string; shopping: ShoppingLayout; initial: Record<string, CheckState>; updates: string[] }) {
   const { state, toggle, error } = useChecks(sessionId, "shopping", initial);
   const [missingOpen, setMissingOpen] = useState(false);
   const all = shopping.groups.flatMap((g) => g.items);
 
   return (
     <div className="space-y-3">
+      <UpdatedNote sessionId={sessionId} changes={updates} />
+      <div className="px-1">
+        <h2 className="font-heading text-xl font-bold text-[#2C2420]">{SUPPLIES_TITLE}</h2>
+        <p className="text-[15px] text-[#6B5D52]">{SUPPLIES_INTRO}</p>
+      </div>
       {shopping.banner && (
         <p className="bg-[#FFF8EC] rounded-2xl border border-[#E3C9A0] px-4 py-3 text-[15px] font-medium text-[#2C2420]">{shopping.banner}</p>
       )}
@@ -489,8 +524,11 @@ export default function EventTabs({
   confirmedAt,
   shopping,
   shoppingState,
+  supplyUpdates = [],
   barReady,
+  photoReminder = null,
   closeout = null,
+  wrapUpDone = false,
   pay = null,
   offered,
   managerHref,
@@ -514,16 +552,21 @@ export default function EventTabs({
   confirmedAt: string | null;
   shopping: ShoppingLayout;
   shoppingState: Record<string, CheckState>;
+  supplyUpdates?: string[]; // the Updated note on the Supplies tab
   barReady: Omit<BarReadyProps, "sessionId"> & { show: boolean };
-  closeout?: Omit<CloseoutProps, "sessionId"> | null;
+  photoReminder?: string | null; // no bar setup photo yet after service started
+  closeout?: Omit<CloseoutProps, "sessionId"> | null; // the Wrap up tab, once bar service has started
+  wrapUpDone?: boolean;
   pay?: string | null; // the viewer's own estimated pay
 }) {
   const [tab, setTab] = useState<Tab>(initialTab);
   const [chatUnread, setChatUnread] = useState(initialTab === "chat" ? 0 : chat.unread);
+  const [wrapped, setWrapped] = useState(wrapUpDone);
   const tabs: [Tab, string][] = [
     ["details", "Details"],
     ["checklist", "Checklist"],
-    ["shopping", "Shopping"],
+    ["shopping", SUPPLIES_TAB],
+    ...(closeout ? ([["wrapup", WRAP_UP_TAB]] as [Tab, string][]) : []),
     ["chat", `Chat${chatUnread ? ` (${chatUnread})` : ""}`],
   ];
 
@@ -550,13 +593,20 @@ export default function EventTabs({
 
       {giveUp?.handoff && <GiveUp {...giveUp} />}
 
-      {clock.canPunch && <ClockCard sessionId={view.sessionId} initial={clock} renderedAt={renderedAt} />}
+      {clock.canPunch && (
+        <ClockCard sessionId={view.sessionId} initial={clock} renderedAt={renderedAt} wrapUp={closeout && !wrapped ? () => setTab("wrapup") : undefined} />
+      )}
 
-      {barReady.show && <BarReadyCard sessionId={view.sessionId} {...barReady} />}
+      {photoReminder && tab !== "checklist" && (
+        <section className="bg-[#FFF8EC] rounded-2xl border border-[#E3C9A0] px-4 py-3 flex flex-wrap items-center justify-between gap-2">
+          <p className="text-[15px] text-[#2C2420]">{photoReminder}</p>
+          <button type="button" onClick={() => setTab("checklist")} className="text-sm font-medium text-[#9A7049] underline">
+            Add the photo
+          </button>
+        </section>
+      )}
 
-      {closeout && <CloseoutCard sessionId={view.sessionId} {...closeout} />}
-
-      <nav className="grid grid-cols-4 gap-1 bg-[#DDD5CC] p-1 rounded-xl" role="tablist">
+      <nav className={`grid ${tabs.length === 5 ? "grid-cols-5" : "grid-cols-4"} gap-1 bg-[#DDD5CC] p-1 rounded-xl`} role="tablist">
         {tabs.map(([key, label]) => (
           <button
             key={key}
@@ -567,7 +617,7 @@ export default function EventTabs({
               setTab(key);
               if (key === "chat") setChatUnread(0);
             }}
-            className={`py-2 rounded-lg text-sm font-medium transition-colors ${
+            className={`py-2 px-0.5 rounded-lg text-[13px] sm:text-sm font-medium leading-tight transition-colors ${
               tab === key ? "bg-[#F5F0EB] text-[#2C2420] shadow-sm" : "text-[#6B5D52]"
             }`}
           >
@@ -584,7 +634,8 @@ export default function EventTabs({
           </div>
         )}
       </div>
-      <div hidden={tab !== "checklist"}>
+      <div hidden={tab !== "checklist"} className="space-y-4">
+        {barReady.show && <BarReadyCard sessionId={view.sessionId} {...barReady} reminder={photoReminder ?? undefined} />}
         <Checklist
           sessionId={view.sessionId}
           groups={checklist}
@@ -595,8 +646,13 @@ export default function EventTabs({
         />
       </div>
       <div hidden={tab !== "shopping"}>
-        <Shopping sessionId={view.sessionId} shopping={shopping} initial={shoppingState} />
+        <Supplies sessionId={view.sessionId} shopping={shopping} initial={shoppingState} updates={supplyUpdates} />
       </div>
+      {closeout && (
+        <div hidden={tab !== "wrapup"}>
+          <CloseoutCard sessionId={view.sessionId} {...closeout} onSent={() => setWrapped(true)} />
+        </div>
+      )}
       <div hidden={tab !== "chat"}>
         <ChatThread {...chat} active={tab === "chat"} />
       </div>

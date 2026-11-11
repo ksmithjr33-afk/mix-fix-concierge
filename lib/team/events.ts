@@ -13,8 +13,11 @@ import {
 } from "@/lib/team/event-view";
 import { alertRecipients } from "@/lib/team/assignments";
 import { checklistFor, checklistKeys, type ResolvedGroup } from "@/lib/team/checklist-config";
-import { allShopItems, buildStaffShopping, type StaffShopping } from "@/lib/team/shopping";
 import { activeConfirmation, canConfirm, clearsConfirmation, mergeChecks, progress, type CheckRow, type CheckState, type ListName } from "@/lib/team/checks";
+import { allSupplies, bartenderLists, supplyState, type ListDetail, type Supplies } from "@/lib/team/supplies";
+import { staffSupplies, supplyUpdates } from "@/lib/team/supplies-db";
+import type { SheetRecipe } from "@/lib/order-sheet";
+import { withDrinkEdits } from "@/lib/team/event-view";
 
 /** The staff member's assignment to an event. Null when there is none, or before the assignments table exists. */
 export async function getAssignment(sessionId: string, staffId: string): Promise<AssignmentLike | null> {
@@ -74,10 +77,10 @@ export async function openEvent(sessionId: string, staff: StaffMember): Promise<
   return canOpenEvent(staff, assignment) ? { ok: true, session } : { ok: false, reason: "not_assigned" };
 }
 
-async function checkRows(staffId: string, sessionId: string, list: ListName): Promise<CheckRow[]> {
+async function checkRows(staffId: string, sessionId: string, list: ListName): Promise<(CheckRow & { updated_at?: string | null })[]> {
   const { data, error } = await supabase
     .from("staff_checks")
-    .select("item_key, checked, quantity")
+    .select("item_key, checked, quantity, updated_at")
     .eq("staff_id", staffId)
     .eq("session_id", sessionId)
     .eq("list", list);
@@ -90,8 +93,10 @@ export interface EventPageData {
   checklist: ResolvedGroup[];
   checklistState: Record<string, CheckState>;
   confirmedAt: string | null;
-  shopping: StaffShopping;
+  shopping: Supplies; // read from the admin Shopping list
   shoppingState: Record<string, CheckState>;
+  supplyUpdates: string[]; // what changed on the list since this person last looked
+  recipes: SheetRecipe[];
 }
 
 function checklistState(pkg: unknown, rows: CheckRow[]): Record<string, CheckState> {
@@ -110,33 +115,22 @@ export async function getConfirmation(staffId: string, sessionId: string): Promi
 }
 
 /**
- * Everything the event page renders. The first time a staff member opens the
- * shopping list, every item is saved unchecked with its quantity, so later
- * changes from client updates can be spotted.
+ * Everything the event page renders. The supplies list is the admin Shopping
+ * list for the event, so renamed, resized, added and removed lines all show,
+ * and the drinks carry this event's recipe edits.
  */
 export async function eventPageData(session: SessionRow, staff: StaffMember): Promise<EventPageData> {
-  const ed = session.event_data ?? {};
-  const [mates, update] = await Promise.all([teammates(session.id, staff.id), latestUpdate(session.id)]);
-  const view = buildStaffEventView(session, { teammates: mates, latestUpdate: update });
+  const [mates, update, supplies] = await Promise.all([teammates(session.id, staff.id), latestUpdate(session.id), staffSupplies(session)]);
+  const base = buildStaffEventView(session, { teammates: mates, latestUpdate: update });
+  const view = { ...base, drinks: withDrinkEdits(base.drinks, supplies.recipes) };
 
   const checklist = checklistFor(view.package);
-  const shopping = buildStaffShopping(ed);
-  const shopItems = allShopItems(shopping);
-
-  const [checklistRows, initialShopRows, confirmedAt] = await Promise.all([
+  const [checklistRows, shopRows, confirmedAt, updates] = await Promise.all([
     checkRows(staff.id, session.id, "checklist"),
     checkRows(staff.id, session.id, "shopping"),
     getConfirmation(staff.id, session.id),
+    supplyUpdates(staff.id, session.id, supplies.list),
   ]);
-  let shopRows = initialShopRows;
-  if (shopRows.length === 0 && shopItems.length > 0) {
-    shopRows = shopItems.map((i) => ({ item_key: i.key, checked: false, quantity: i.quantity }));
-    const { error } = await supabase.from("staff_checks").upsert(
-      shopRows.map((r) => ({ ...r, staff_id: staff.id, session_id: session.id, list: "shopping" })),
-      { onConflict: "staff_id,session_id,list,item_key", ignoreDuplicates: true }
-    );
-    if (error) console.error("staff_checks seed failed:", error.message);
-  }
 
   const clState = checklistState(view.package, checklistRows);
   return {
@@ -144,21 +138,49 @@ export async function eventPageData(session: SessionRow, staff: StaffMember): Pr
     checklist,
     checklistState: clState,
     confirmedAt: activeConfirmation(confirmedAt, clState),
-    shopping,
-    shoppingState: mergeChecks(shopItems, shopRows, { trackChanges: true }),
+    shopping: supplies.list,
+    shoppingState: supplyState(supplies.list, shopRows),
+    supplyUpdates: updates,
+    recipes: supplies.recipes,
   };
 }
 
-/** How many checklist and shopping items this staff member has checked right now. */
-export async function checkSnapshot(session: SessionRow, staff: StaffMember) {
+/** How many checklist and supplies items this staff member has checked right now. */
+export async function checkSnapshot(session: SessionRow, staff: StaffMember, list?: Supplies) {
   const ed = session.event_data ?? {};
-  const [clRows, shopRows] = await Promise.all([
+  const [clRows, shopRows, supplies] = await Promise.all([
     checkRows(staff.id, session.id, "checklist"),
     checkRows(staff.id, session.id, "shopping"),
+    list ? Promise.resolve(list) : staffSupplies(session).then((s) => s.list),
   ]);
   const cl = progress(checklistState(ed.package ?? session.package_type, clRows));
-  const sh = progress(mergeChecks(allShopItems(buildStaffShopping(ed)), shopRows, { trackChanges: true }));
+  const sh = progress(supplyState(supplies, shopRows));
   return { checklistChecked: cl.checked, checklistTotal: cl.total, shoppingChecked: sh.checked, shoppingTotal: sh.total };
+}
+
+/** Each person's two lists for the manager: unchecked items by name, checked ones, and when each list was last touched. */
+export async function teamLists(session: SessionRow, staffIds: string[], list?: Supplies): Promise<Map<string, { checklist: ListDetail; supplies: ListDetail }>> {
+  const ed = session.event_data ?? {};
+  const pkg = ed.package ?? session.package_type;
+  const supplies = list ?? (await staffSupplies(session)).list;
+  const out = new Map<string, { checklist: ListDetail; supplies: ListDetail }>();
+  await Promise.all(
+    staffIds.map(async (id) => {
+      const [clRows, shopRows] = await Promise.all([checkRows(id, session.id, "checklist"), checkRows(id, session.id, "shopping")]);
+      out.set(
+        id,
+        bartenderLists({
+          checklist: checklistFor(pkg),
+          checklistState: checklistState(pkg, clRows),
+          checklistRows: clRows,
+          supplies,
+          supplyState: supplyState(supplies, shopRows),
+          supplyRows: shopRows,
+        })
+      );
+    })
+  );
+  return out;
 }
 
 /** "I have everything": saved only when every checklist box is checked. Returns the confirmed time, or null. */
@@ -195,7 +217,7 @@ export async function saveCheck(
   if (list === "checklist") {
     if (!checklistKeys(ed.package ?? session.package_type).includes(key)) return false;
   } else {
-    const item = allShopItems(buildStaffShopping(ed)).find((i) => i.key === key);
+    const item = allSupplies((await staffSupplies(session)).list).find((i) => i.key === key);
     if (!item) return false;
     quantity = item.quantity;
   }
@@ -244,6 +266,7 @@ export async function managerEventView(session: SessionRow) {
 
 export interface MissingReport {
   id: string;
+  staffId: string;
   staffFirstName: string;
   items: string[];
   note: string;
@@ -260,6 +283,7 @@ export async function missingReports(sessionId: string): Promise<MissingReport[]
   const names = new Map(((staff as { id: string; name: string }[]) ?? []).map((s) => [s.id, firstName(s.name)]));
   return rows.map((r) => ({
     id: r.id,
+    staffId: r.staff_id,
     staffFirstName: names.get(r.staff_id) || "A bartender",
     items: Array.isArray(r.items) ? r.items.map(String) : [],
     note: r.note ?? "",

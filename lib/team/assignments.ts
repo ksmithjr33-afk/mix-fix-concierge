@@ -64,8 +64,9 @@ export function declineText(o: { firstName: string; title: string; date: string;
   return `${o.firstName || "A bartender"} declined ${o.title} on ${o.date}. Assign someone else here: ${o.link}`;
 }
 
-export function updateText(o: { date: string; link: string }): string {
-  return `Your event on ${o.date} was updated. Check your event page: ${o.link}`;
+/** "Your event on 11/14 was updated." with what changed on the supplies list when there is a line for it. */
+export function updateText(o: { date: string; link: string; supplies?: string }): string {
+  return `Your event on ${o.date} was updated.${o.supplies ? ` ${o.supplies}` : ""} Check your event page: ${o.link}`;
 }
 
 export const ROLES = ["bartender", "admin"] as const;

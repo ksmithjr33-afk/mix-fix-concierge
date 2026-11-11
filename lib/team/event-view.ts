@@ -4,6 +4,7 @@
 // amounts, emails, and phone numbers removed. The day of contact phone is only
 // included from 48 hours before service starts. Pure, no database.
 
+import { recipeKeys } from "@/lib/order-sheet-shared";
 import { DRINK_MENU_RULES } from "@/lib/system-prompt";
 import { DIVE_NOT_AVAILABLE, DIVE_SET_MENU, diveSetMenuDrinks, usesDiveSetMenu } from "@/lib/dive-menu";
 import { staffingFor } from "@/lib/pricing";
@@ -43,6 +44,22 @@ export interface StaffDrink {
   ingredients: string[]; // with oz amounts, bartenders pour from these
   method: string;
   garnish: string;
+  cup?: string; // "12 oz", from the Shopping list recipe
+}
+
+/**
+ * The drinks with this event's recipe edits from the admin Shopping list on
+ * top: name, cup, ingredient lines, and garnish. Display only, matched by the
+ * calculated drink name. A drink with no edit keeps what it had, plus its cup.
+ */
+export function withDrinkEdits(drinks: StaffDrink[], recipes: { key: string; name: string; cup: string; ingredients: string[]; garnish: string; edited: boolean }[]): StaffDrink[] {
+  const byKey = new Map(recipes.map((r) => [r.key, r]));
+  const keys = recipeKeys(drinks.map((d) => d.name));
+  return drinks.map((d, i) => {
+    const r = byKey.get(keys[i]);
+    if (!r) return d;
+    return r.edited ? { ...d, name: r.name, cup: r.cup, ingredients: r.ingredients, garnish: r.garnish } : { ...d, cup: r.cup };
+  });
 }
 
 export interface ClassicGroup {

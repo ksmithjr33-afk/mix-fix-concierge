@@ -4,7 +4,8 @@ import { eventLanding } from "@/lib/team/manager-tabs";
 import { eventPageData, openEvent } from "@/lib/team/events";
 import { CHECKLIST_FOOTER } from "@/lib/team/checklist-config";
 import { barReadyEntries } from "@/lib/team/bar-ready-db";
-import { barReadyOpen } from "@/lib/team/bar-ready";
+import { barPhotoMissing, barPhotosOpen, barReadyOpensAt } from "@/lib/team/bar-ready";
+import { timeLabel } from "@/lib/team/clock-label";
 import { closeoutState } from "@/lib/team/closeout-db";
 import { companyGear } from "@/lib/team/closeout";
 import { myEstimate } from "@/lib/team/pay-db";
@@ -14,7 +15,7 @@ import { eventData } from "@/lib/team/markets";
 import { myHandoff, teammateChoices } from "@/lib/team/shifts-db";
 import { markThreadRead, threadMessages, unreadByEvent } from "@/lib/team/chat-db";
 import TeamHeader from "../../team-header";
-import EventTabs from "./event-tabs";
+import EventTabs, { type Tab } from "./event-tabs";
 
 export const dynamic = "force-dynamic";
 
@@ -35,8 +36,10 @@ export default async function TeamEventPage({
   const { id } = await params;
   const query = await searchParams;
   const chatTab = query.tab === "chat";
+  // Links from texts can open a tab: the chat, or the wrap up reminder.
+  const askedTab: Tab = (["chat", "wrapup", "shopping", "checklist"] as const).find((t) => t === query.tab) ?? "details";
   const asBartender = query.as === "bartender";
-  const staff = await requireStaff(`/team/e/${encodeURIComponent(id)}${chatTab ? "?tab=chat" : asBartender ? "?as=bartender" : ""}`);
+  const staff = await requireStaff(`/team/e/${encodeURIComponent(id)}${askedTab !== "details" ? `?tab=${askedTab}` : asBartender ? "?as=bartender" : ""}`);
   // Admins land on the manager view of the event from any link (texts, lists,
   // the calendar), unless they asked for the bartender view of it. An admin in
   // Bartender view comes back as a bartender here, so they stay on this page.
@@ -74,12 +77,15 @@ export default async function TeamEventPage({
   const pay = assignment && assignment.status !== "declined" ? await myEstimate(staff.id, access.session) : null;
   const [handoff, teammates] = accepted ? await Promise.all([myHandoff(id, staff.id), teammateChoices(access.session, staff.id)]) : [null, []];
   const renderedAt = serverNow();
-  const open = barReadyOpen(ed);
+  const open = barPhotosOpen(ed);
+  const photoCount = entries.reduce((n, e) => n + e.photos.length, 0);
+  const onEvent = staff.role === "admin" || (!!assignment && assignment.status !== "declined");
+  const opensAt = barReadyOpensAt(ed);
   return (
     <>
       <TeamHeader signedIn admin={staff.role === "admin"} back={back} />
       <EventTabs
-        initialTab={chatTab ? "chat" : "details"}
+        initialTab={askedTab === "wrapup" && !closeout.open ? "details" : askedTab}
         chat={{ sessionId: id, initial: messages, unread: unread.get(id) ?? 0, timeZone: data.view.timeZone }}
         offered={assignment?.status === "offered"}
         giveUp={accepted ? { sessionId: id, handoff, teammates, canStart: punches.length === 0 } : null}
@@ -93,19 +99,27 @@ export default async function TeamEventPage({
         confirmedAt={data.confirmedAt}
         shopping={shoppingGroups(data.view.package, data.shopping)}
         shoppingState={data.shoppingState}
+        supplyUpdates={data.supplyUpdates}
         barReady={{
-          show: open || entries.length > 0,
+          show: onEvent,
           canSubmit: open,
           isAdmin: staff.role === "admin",
           entries,
           timeZone: data.view.timeZone,
+          opensNote: opensAt && renderedAt < opensAt.getTime() ? `You can add photos from arrival time, ${timeLabel(opensAt.toISOString(), undefined, data.view.timeZone)}.` : "",
         }}
+        photoReminder={
+          accepted && open && barPhotoMissing(ed, new Date(renderedAt), photoCount)
+            ? "No bar setup photo yet. When you have a minute, take one so the office can see the setup."
+            : null
+        }
         pay={pay}
         closeout={
           closeout.open && staff.role !== "admin"
-            ? { canSubmit: closeout.canSubmit, mine: closeout.mine, gear: companyGear(), timeZone: data.view.timeZone }
+            ? { canSubmit: closeout.canSubmit, mine: closeout.mine, gear: companyGear(), items: closeout.items, clientAlcohol: closeout.clientAlcohol, timeZone: data.view.timeZone }
             : null
         }
+        wrapUpDone={!!closeout.mine}
       />
     </>
   );

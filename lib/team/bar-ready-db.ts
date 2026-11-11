@@ -12,6 +12,7 @@ import {
   BAR_PHOTO_BUCKET,
   barReadyText,
   groupReports,
+  photoLimitError,
   photoPath,
   SIGNED_URL_SECONDS,
   snapshotTotals,
@@ -29,6 +30,7 @@ interface ReportRow {
   shopping_total: number;
   missing_reported: boolean;
   created_at: string;
+  removed_at?: string | null;
 }
 
 export interface BarReadyPhoto {
@@ -40,7 +42,7 @@ export interface BarReadyPhoto {
   total: number;
 }
 
-/** One person's check in: their latest photo first, then earlier ones they replaced. */
+/** One person's bar setup photos (up to 4), newest first. Removed and retaken ones are kept in storage but not shown. */
 export interface BarReadyEntry {
   staffId: string;
   staffFirstName: string;
@@ -48,8 +50,7 @@ export interface BarReadyEntry {
   photos: BarReadyPhoto[];
 }
 
-const COLUMNS =
-  "id, session_id, staff_id, photo_path, note, checklist_checked, checklist_total, shopping_checked, shopping_total, missing_reported, created_at";
+const COLUMNS = "*"; // removed_at is read once the column exists
 
 async function signedUrls(paths: string[]): Promise<Map<string, string>> {
   if (paths.length === 0) return new Map();
@@ -75,7 +76,7 @@ export async function barReadyEntries(sessionId: string, viewer: StaffMember): P
     .eq("session_id", sessionId)
     .order("created_at", { ascending: false });
   if (error || !data) return []; // before the table exists
-  const rows = data as ReportRow[];
+  const rows = (data as ReportRow[]).filter((r) => !r.removed_at);
   const [urls, names] = await Promise.all([signedUrls(rows.map((r) => r.photo_path)), staffNames([...new Set(rows.map((r) => r.staff_id))])]);
   return groupReports(rows).map((group) => ({
     staffId: group[0].staff_id,
@@ -108,9 +109,15 @@ export async function submitBarReady(opts: {
   photoType: string;
   note: string;
   eventLink: string;
+  replaces?: string | null; // retake: the photo this one takes the place of
 }): Promise<void> {
   const { session, staff } = opts;
   const now = new Date();
+  const mine = await activePhotos(session.id, staff.id);
+  const replacing = opts.replaces ? mine.find((r) => r.id === opts.replaces) ?? null : null;
+  if (opts.replaces && !replacing) throw new BarPhotoError("That photo is no longer there. Reload the page.", 404);
+  const limit = photoLimitError(mine.length, !!replacing);
+  if (limit) throw new BarPhotoError(limit, 409);
   const path = photoPath(session.id, staff.id, now, opts.photoType);
 
   const { error: upErr } = await supabase.storage
@@ -141,7 +148,8 @@ export async function submitBarReady(opts: {
     throw new Error(`bar_ready_reports insert failed: ${error.message}`);
   }
 
-  if ((earlier.count ?? 0) > 0) return; // a replacement photo: admins already got the text
+  if (replacing) await supabase.from("bar_ready_reports").update({ removed_at: now.toISOString() }).eq("id", replacing.id);
+  if ((earlier.count ?? 0) > 0) return; // another or a retaken photo: admins already got the text
   const totals = snapshotTotals(snap);
   const message = barReadyText({
     firstName: firstName(staff.name),
@@ -153,4 +161,35 @@ export async function submitBarReady(opts: {
   });
   const admins = await alertAdmins();
   await Promise.all(admins.map((a) => sendStaffText(a.phone, a.name, message)));
+}
+
+export class BarPhotoError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.status = status;
+  }
+}
+
+/** This person's photos still shown for the event. */
+async function activePhotos(sessionId: string, staffId: string): Promise<ReportRow[]> {
+  const { data, error } = await supabase.from("bar_ready_reports").select(COLUMNS).eq("session_id", sessionId).eq("staff_id", staffId);
+  if (error || !data) return [];
+  return (data as ReportRow[]).filter((r) => !r.removed_at);
+}
+
+/** Remove one of your own photos. It stays in the private bucket and stops showing. Returns false when it is not yours. */
+export async function removeBarPhoto(sessionId: string, staff: StaffMember, photoId: string): Promise<boolean> {
+  const mine = await activePhotos(sessionId, staff.id);
+  if (!mine.some((r) => r.id === photoId)) return false;
+  const { error } = await supabase.from("bar_ready_reports").update({ removed_at: new Date().toISOString() }).eq("id", photoId).eq("staff_id", staff.id);
+  if (error) throw new Error(`bar photo remove failed: ${error.message}`);
+  return true;
+}
+
+/** How many bar setup photos are in for the event, from anyone. */
+export async function barPhotoCount(sessionId: string): Promise<number> {
+  const { data, error } = await supabase.from("bar_ready_reports").select(COLUMNS).eq("session_id", sessionId);
+  if (error || !data) return 0;
+  return (data as ReportRow[]).filter((r) => !r.removed_at).length;
 }

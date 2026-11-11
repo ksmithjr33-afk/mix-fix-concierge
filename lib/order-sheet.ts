@@ -11,7 +11,8 @@
 import { calculateHours, formatPackageLabel, generateNatalieSupplyList } from "@/lib/shopping-list";
 import { parseEventDate } from "@/lib/event-date";
 import { clientList, quietly } from "@/lib/client-list";
-import { DEFAULT_STORES, SECTIONS, isSection, lineText, textOn, type SectionId, type Store, type StoreInfo } from "@/lib/order-sheet-shared";
+import { DEFAULT_STORES, SECTIONS, isSection, lineText, recipeKeys, textOn, type SectionId, type Store, type StoreInfo } from "@/lib/order-sheet-shared";
+export { recipeKeys } from "@/lib/order-sheet-shared";
 export { DEFAULT_STORES, DELIVERY_STORE, PALETTE, SECTIONS, isSection, lineText, textOn, type SectionId, type Store, type StoreInfo } from "@/lib/order-sheet-shared";
 
 type EventData = Record<string, unknown>;
@@ -215,6 +216,86 @@ export function recipes(ed: EventData): Recipe[] {
         garnish: /^(none|no garnish)$/i.test(garnish) ? "" : garnish,
       };
     });
+}
+
+// ----- Recipe edits, this event only -----
+//
+// An admin can reword a recipe on the shopping list for this event: drink
+// name, cup size, the ingredient lines, and the garnish. It is display only.
+// Nothing reads it back into a quantity, so the lines above never change.
+
+export interface RecipeEdit {
+  name: string;
+  cup: string;
+  ingredients: string[];
+  garnish: string;
+  by?: string | null; // first name
+  at?: string | null;
+}
+
+export type SheetRecipe = Omit<Recipe, "cup"> & {
+  cup: string;
+  key: string; // the calculated drink name as a slug, "#2" for a second drink of the same name
+  edited: boolean;
+  editedBy: string | null;
+  editedAt: string | null;
+  calc: Recipe; // the calculated recipe, for "Reset to calculated"
+};
+
+export { RECIPE_EDIT_NOTE } from "@/lib/order-sheet-shared";
+
+function editOf(v: unknown): RecipeEdit | null {
+  if (!v || typeof v !== "object") return null;
+  const o = v as Record<string, unknown>;
+  return {
+    name: String(o.name ?? ""),
+    cup: String(o.cup ?? ""),
+    ingredients: Array.isArray(o.ingredients) ? o.ingredients.map(String) : [],
+    garnish: String(o.garnish ?? ""),
+    by: typeof o.by === "string" ? o.by : null,
+    at: typeof o.at === "string" ? o.at : null,
+  };
+}
+
+/** The recipes with this event's edits on top. A drink that left the menu takes its edit with it. */
+export function withRecipeEdits(list: Recipe[], edits: unknown): SheetRecipe[] {
+  const map = edits && typeof edits === "object" ? (edits as Record<string, unknown>) : {};
+  const keys = recipeKeys(list.map((r) => r.name));
+  return list.map((r, i) => {
+    const e = Object.prototype.hasOwnProperty.call(map, keys[i]) ? editOf(map[keys[i]]) : null;
+    if (!e) return { ...r, key: keys[i], edited: false, editedBy: null, editedAt: null, calc: r };
+    return {
+      ...r,
+      name: e.name || r.name,
+      cup: e.cup || r.cup,
+      martini: r.martini && (e.cup || r.cup) === r.cup,
+      ingredients: e.ingredients,
+      garnish: e.garnish,
+      key: keys[i],
+      edited: true,
+      editedBy: e.by ?? null,
+      editedAt: e.at ?? null,
+      calc: r,
+    };
+  });
+}
+
+const line = (v: unknown, max: number) => String(v ?? "").replace(/\s+/g, " ").trim().slice(0, max);
+
+/** A recipe edit from the form, cleaned: a name is required, empty ingredient lines are dropped. */
+export function cleanRecipeEdit(raw: Record<string, unknown>): { ok: true; value: RecipeEdit } | { ok: false; error: string } {
+  const name = line(raw.name, 80);
+  if (!name) return { ok: false, error: "A recipe needs a drink name." };
+  const ingredients = (Array.isArray(raw.ingredients) ? raw.ingredients : String(raw.ingredients ?? "").split("\n"))
+    .map((x) => line(x, 120))
+    .filter(Boolean)
+    .slice(0, 20);
+  return { ok: true, value: { name, cup: line(raw.cup, 30), ingredients, garnish: line(raw.garnish, 120) } };
+}
+
+/** True when the edit says exactly what the calculation says, so it is not an edit at all. */
+export function sameRecipe(e: RecipeEdit, r: Recipe): boolean {
+  return e.name === r.name && e.cup === r.cup && e.garnish === r.garnish && e.ingredients.join("\n") === r.ingredients.join("\n");
 }
 
 // ----- Saved edits merged on top -----

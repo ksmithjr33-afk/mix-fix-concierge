@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { PALETTE, SECTIONS, lineText, paletteName, textOn, type SectionId, type Store, type StoreInfo } from "@/lib/order-sheet-shared";
-import type { FieldName, Fields, SheetLine } from "@/lib/order-sheet";
+import { PALETTE, RECIPE_EDIT_NOTE, SECTIONS, lineText, paletteName, textOn, type SectionId, type Store, type StoreInfo } from "@/lib/order-sheet-shared";
+import type { FieldName, Fields, SheetLine, SheetRecipe } from "@/lib/order-sheet";
 import type { SheetView } from "@/lib/order-sheet-db";
 import { timeLabel } from "@/lib/team/clock-label";
 
@@ -199,7 +199,7 @@ export function AddStoreDialog({
             Cancel
           </button>
         </div>
-        <p className="text-xs text-[#666]">The new store is offered on every event's shopping list. Rename, recolor, or retire it under Manage stores.</p>
+        <p className="text-xs text-[#666]">The new store is offered on every event&apos;s shopping list. Rename, recolor, or retire it under Manage stores.</p>
       </form>
     </div>
   );
@@ -621,13 +621,70 @@ function LegendName({ store, value, onSave, onClose }: { store: StoreInfo; value
   );
 }
 
-function Recipes({ view }: { view: SheetView }) {
+/** Edit one recipe for this event only: name, cup, ingredient lines, garnish. Display only, never a quantity. */
+function RecipeEditor({ r, call, onClose }: { r: SheetRecipe; call: Call; onClose: (saved: boolean) => void }) {
+  const [name, setName] = useState(r.name);
+  const [cup, setCup] = useState(r.cup);
+  const [ingredients, setIngredients] = useState(r.ingredients.join("\n"));
+  const [garnish, setGarnish] = useState(r.garnish);
+  const [busy, setBusy] = useState(false);
+  const save = async (body: Record<string, unknown>) => {
+    setBusy(true);
+    const ok = await call({ action: "recipe", key: r.key, ...body });
+    setBusy(false);
+    if (ok) onClose(true);
+  };
+  const input = "mt-0.5 block w-full rounded-md border border-[#BBB] px-2 py-1.5 font-sans text-[15px]";
+  return (
+    <div className="my-2 rounded-lg border border-[#C9C9C9] bg-[#FAFAFA] p-3 font-sans text-[14px] space-y-2 print:hidden">
+      <p className="rounded-md bg-[#FFF8EC] border border-[#E3C9A0] px-2 py-1.5 text-[13px] text-[#8A4B12]">{RECIPE_EDIT_NOTE}</p>
+      <div className="grid gap-2 sm:grid-cols-[1fr_9rem]">
+        <label className="block">
+          Drink name
+          <input value={name} onChange={(e) => setName(e.target.value)} className={input} />
+        </label>
+        <label className="block">
+          Cup size
+          <input value={cup} onChange={(e) => setCup(e.target.value)} list="cup-sizes" className={input} />
+          <datalist id="cup-sizes">
+            <option value="9 oz" />
+            <option value="12 oz" />
+          </datalist>
+        </label>
+      </div>
+      <label className="block">
+        Ingredients, one per line
+        <textarea value={ingredients} onChange={(e) => setIngredients(e.target.value)} rows={Math.max(3, ingredients.split("\n").length + 1)} className={input} />
+      </label>
+      <label className="block">
+        Garnish
+        <input value={garnish} onChange={(e) => setGarnish(e.target.value)} className={input} />
+      </label>
+      <div className="flex flex-wrap items-center gap-3">
+        <button type="button" disabled={busy} onClick={() => save({ name, cup, ingredients: ingredients.split("\n"), garnish })} className="rounded-md bg-black px-3 py-1.5 text-white disabled:opacity-40">
+          Save for this event
+        </button>
+        <button type="button" disabled={busy} onClick={() => onClose(false)} className="underline">
+          Cancel
+        </button>
+        {r.edited && (
+          <button type="button" disabled={busy} onClick={() => save({ reset: true })} className="ml-auto underline">
+            Reset to calculated
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function Recipes({ view, call, onSaved }: { view: SheetView; call: Call; onSaved: () => void }) {
+  const [editing, setEditing] = useState<string | null>(null);
   if (view.recipes.length === 0) return null;
   return (
     <section className="mt-4">
       <h2 className="font-bold">COCKTAIL RECIPES</h2>
       {view.recipes.map((r, i) => (
-        <div key={`${r.name}-${i}`} className="mt-3">
+        <div key={`${r.key}-${i}`} className="mt-3">
           <p>
             <span className="doc-mark print-exact font-bold" style={{ background: RECIPE_GREEN, ...exact }}>
               {r.name}
@@ -642,16 +699,39 @@ function Recipes({ view }: { view: SheetView }) {
                 </b>
               </>
             )}
+            {r.edited && (
+              <span className="ml-2 align-middle font-sans text-[11px] font-bold uppercase tracking-wide text-[#8A4B12] print:hidden" title={r.editedBy ? `Edited by ${r.editedBy}` : undefined}>
+                edited
+              </span>
+            )}
+            {editing !== r.key && (
+              <button type="button" onClick={() => setEditing(r.key)} className="ml-2 font-sans text-[12px] text-[#777] hover:text-black hover:underline print:hidden">
+                Edit recipe
+              </button>
+            )}
           </p>
-          <ul className="list-disc pl-[1.75em]">
-            {r.ingredients.map((x, j) => (
-              <li key={j}>{x}</li>
-            ))}
-          </ul>
-          {r.garnish && (
-            <p className="pl-[1.75em]">
-              <b>Garnish:</b> {r.garnish}
-            </p>
+          {editing === r.key ? (
+            <RecipeEditor
+              r={r}
+              call={call}
+              onClose={(saved) => {
+                setEditing(null);
+                if (saved) onSaved();
+              }}
+            />
+          ) : (
+            <>
+              <ul className="list-disc pl-[1.75em]">
+                {r.ingredients.map((x, j) => (
+                  <li key={j}>{x}</li>
+                ))}
+              </ul>
+              {r.garnish && (
+                <p className="pl-[1.75em]">
+                  <b>Garnish:</b> {r.garnish}
+                </p>
+              )}
+            </>
           )}
         </div>
       ))}
@@ -697,11 +777,12 @@ export default function OrderSheet({ initial, timeZone }: { initial: SheetView; 
     return r.ok;
   };
 
-  const copied = (name: string) => {
-    setToast(`Copied “${name}”. Paste it into the store search.`);
+  const flash = (message: string, ms = 2500) => {
+    setToast(message);
     if (toastTimer.current) clearTimeout(toastTimer.current);
-    toastTimer.current = setTimeout(() => setToast(""), 2500);
+    toastTimer.current = setTimeout(() => setToast(""), ms);
   };
+  const copied = (name: string) => flash(`Copied “${name}”. Paste it into the store search.`);
 
   const { progress, counts } = view.sheet;
   const pct = progress.total ? Math.round((progress.ordered / progress.total) * 100) : 0;
@@ -839,7 +920,7 @@ export default function OrderSheet({ initial, timeZone }: { initial: SheetView; 
         })}
         <Legend view={view} call={call} open={open} setOpen={setOpen} />
         {view.meta.note && <p className="mt-3 whitespace-pre-wrap">Note: {view.meta.note}</p>}
-        <Recipes view={view} />
+        <Recipes view={view} call={call} onSaved={() => flash(`Recipe saved. ${RECIPE_EDIT_NOTE}`, 6000)} />
       </article>
 
       {mode === "store" && (

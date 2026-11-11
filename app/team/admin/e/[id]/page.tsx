@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { requireAdmin } from "@/lib/team/auth";
-import { getSubmittedSession, managerEventView, missingReports } from "@/lib/team/events";
+import { getSubmittedSession, managerEventView, missingReports, teamLists } from "@/lib/team/events";
 import { assigneeProgress, listStaff } from "@/lib/team/assignments-db";
 import { staffingCounts, staffingLabel } from "@/lib/team/assignments";
 import { bartendersNeeded } from "@/lib/team/event-view";
@@ -18,7 +18,12 @@ import { handoffPanel, postPanel } from "@/lib/team/shifts-db";
 import { marketLabel } from "@/lib/team/markets";
 import ShiftPanel from "./shift-panel";
 import { eventDayOf, unavailableOn } from "@/lib/team/availability-db";
-import { closeoutsFor } from "@/lib/team/closeout-db";
+import { closeoutsFor, unreviewedProblems } from "@/lib/team/closeout-db";
+import { staffSupplies } from "@/lib/team/supplies-db";
+import { withDrinkEdits } from "@/lib/team/event-view";
+import { barPhotoMissing } from "@/lib/team/bar-ready";
+import { dayOfCount, serviceStarted, wrapUpLate } from "@/lib/team/wrapup";
+import { firstName } from "@/lib/team/event-view";
 import Closeouts from "./closeouts";
 import { compactLines } from "@/lib/team/reliability-db";
 import { certIssues } from "@/lib/team/certs-db";
@@ -33,7 +38,7 @@ import BarReadyCard from "../../../e/[id]/bar-ready";
 import OrderSheet from "./order/order-sheet";
 import ManagerTabs from "./manager-tabs";
 import ManagerChat from "./manager-chat";
-import { ChecklistProgress, MissingReports, TimePunches } from "./day-of";
+import { BartenderLists, MissingReports, TimePunches } from "./day-of";
 
 export const dynamic = "force-dynamic";
 
@@ -49,7 +54,6 @@ function hhmm(v: unknown): string {
 }
 
 const str = (v: unknown) => (v === null || v === undefined ? "" : String(v));
-const card = "bg-[#F5F0EB] rounded-2xl border border-[#DDD5CC] px-4 py-3 sm:px-5 sm:py-4";
 
 export default async function AdminEventPage({
   params,
@@ -75,8 +79,9 @@ export default async function AdminEventPage({
 
   await ensureMarket(session); // works out the market from the address the first time, and after an address change
   await syncOrderSheet(session);
-  const [people, staff, hidden, panel, handoffs, unread, v, sheet, bar, missing, messages] = await Promise.all([
-    assigneeProgress(session),
+  const supplies = await staffSupplies(session); // the bartenders' list, read from the Shopping list
+  const [people, staff, hidden, panel, handoffs, unread, view, sheet, bar, missing, messages] = await Promise.all([
+    assigneeProgress(session, supplies.list),
     listStaff(),
     isHidden(id),
     postPanel(session),
@@ -89,6 +94,7 @@ export default async function AdminEventPage({
     threadMessages(id, me),
   ]);
   if (tab === "chat") await markThreadRead(id, me.id);
+  const v = { ...view, drinks: withDrinkEdits(view.drinks, supplies.recipes) };
   const lookIds = [
     ...staff.filter((s) => s.active).map((s) => s.id),
     ...handoffs.flatMap((h) => [h.fromStaffId, h.teammateStaffId ?? ""]).filter(Boolean),
@@ -104,6 +110,26 @@ export default async function AdminEventPage({
     listLog(id),
   ]);
   const away = await unavailableOn(eventDayOf(session));
+  const onEventIds = people.filter((p) => p.status !== "declined").map((p) => p.staffId);
+  const lists = await teamLists(session, onEventIds, supplies.list);
+
+  // The Day of count: missing reports, no bar photo after service starts, lists
+  // with unchecked items at service start, wrap ups with problems not yet
+  // reviewed, and wrap ups not in 2 hours after service ends.
+  const now = new Date();
+  const edNow = session.event_data ?? {};
+  const started = serviceStarted(edNow, now);
+  const accepted = people.filter((p) => p.status === "accepted");
+  const photoCount = bar.reduce((n, e) => n + e.photos.length, 0);
+  const waiting = accepted.filter((p) => !closeouts.some((c) => c.staffId === p.staffId)).map((p) => ({ name: firstName(p.name) || p.name, late: wrapUpLate(edNow, now) }));
+  const dayofCount = dayOfCount({
+    missingReports: missing.length,
+    photoMissing: accepted.length > 0 && barPhotoMissing(edNow, now, photoCount),
+    listsUnfinished: started ? accepted.filter((p) => { const l = lists.get(p.staffId); return !!l && (l.checklist.unchecked.length > 0 || l.supplies.unchecked.length > 0); }).length : 0,
+    wrapUpProblems: unreviewedProblems(closeouts),
+    wrapUpsLate: waiting.filter((w) => w.late).length,
+  });
+  const onList = new Set(onEventIds);
   const chatUnread = tab === "chat" ? 0 : (unread.get(id) ?? 0);
   const marketSource = (session as { team_market_source?: string | null }).team_market_source ?? null;
   const counts = staffingCounts(bartendersNeeded(session), people.map((p) => p.status));
@@ -198,21 +224,14 @@ export default async function AdminEventPage({
     ),
     dayof: (
       <>
-        <ChecklistProgress people={people} timeZone={v.timeZone} />
         <section className="space-y-2">
-          <h2 className="px-1 font-heading text-base font-bold text-[#2C2420]">Bar ready</h2>
-          <BarReadyCard sessionId={id} canSubmit={false} isAdmin entries={bar} timeZone={v.timeZone} />
+          <h2 className="px-1 font-heading text-base font-bold text-[#2C2420]">Bar setup photos</h2>
+          <BarReadyCard sessionId={id} canSubmit={false} isAdmin entries={bar} timeZone={v.timeZone} reminder={accepted.length > 0 && barPhotoMissing(edNow, now, photoCount) ? "Bar service has started and no bar setup photo is in yet." : undefined} />
         </section>
-        <MissingReports reports={missing} timeZone={v.timeZone} />
+        <BartenderLists people={people} lists={lists} reports={missing} timeZone={v.timeZone} />
+        <MissingReports reports={missing.filter((r) => !onList.has(r.staffId))} timeZone={v.timeZone} />
+        <Closeouts sessionId={id} closeouts={closeouts} waiting={started ? waiting : []} timeZone={v.timeZone} />
         <TimePunches people={people} timeZone={v.timeZone} />
-        {closeouts.length > 0 ? (
-          <Closeouts closeouts={closeouts} timeZone={v.timeZone} />
-        ) : (
-          <section className={card}>
-            <h2 className="font-heading text-base font-bold text-[#2C2420] mb-1">Closeout</h2>
-            <p className="text-[15px] text-[#6B5D52]">No closeouts yet.</p>
-          </section>
-        )}
       </>
     ),
     chat: <ManagerChat sessionId={id} initial={messages} unread={chatUnread} timeZone={v.timeZone} />,
@@ -229,7 +248,7 @@ export default async function AdminEventPage({
           team: hidden ? 0 : counts.stillNeeded + handoffs.length,
           order: sheetFlags,
           client: pendingHolds.length,
-          dayof: missing.length,
+          dayof: dayofCount,
           chat: chatUnread,
         }}
       />

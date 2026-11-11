@@ -1,6 +1,7 @@
 // Database side of post event closeouts. Server only.
 //
-// One closeout per bartender per event (unique), editable for 24 hours, with
+// The closeout is the wrap up: one per bartender per event (unique), with the
+// end of night inventory, editable until an admin marks it reviewed, and
 // every save kept in event_closeout_versions. Photos go to the same private
 // bucket as the bar ready photos and are only shown through signed URLs after
 // the event access check. Texts go through sendStaffText and the GHL webhook
@@ -14,8 +15,8 @@ import { alertAdmins, getSubmittedSession } from "@/lib/team/events";
 import { assignmentRef, claimNotice, punchesFor, siteOrigin } from "@/lib/team/clock-db";
 import { sendStaffText } from "@/lib/team/sms";
 import { eventData } from "@/lib/team/markets";
-import { eventDay } from "@/lib/team/time";
-import { BAR_PHOTO_BUCKET, photoExtension, SIGNED_URL_SECONDS } from "@/lib/team/bar-ready";
+import { eventDay, eventTz } from "@/lib/team/time";
+import { BAR_PHOTO_BUCKET, PHOTO_TYPES, MAX_PHOTO_BYTES, photoExtension, SIGNED_URL_SECONDS } from "@/lib/team/bar-ready";
 import {
   canEdit,
   closeoutAlertText,
@@ -23,14 +24,19 @@ import {
   closeoutPhotoPath,
   closeoutReminderText,
   closeoutWebhookPayload,
-  CLOSEOUT_REMINDER_HOURS,
+  companyGear,
+  CLOSEOUT_REMINDER_MIN,
   CLOSEOUT_REMINDER_WINDOW_HOURS,
-  editUntil,
   needsAlert,
   validateCloseout,
   type CloseoutInput,
   type Rating,
 } from "@/lib/team/closeout";
+import { gearFromEquipment, hasProblems, leftoverTotals, validateInventory, wrapUpSummary, type EquipmentCheck, type Inventory, type LeftoverRow, type SupplyCount, type WrapUpSummary } from "@/lib/team/wrapup";
+import { clientProvidesAll } from "@/lib/team/shopping";
+import { staffSupplies } from "@/lib/team/supplies-db";
+import type { SupplyItem } from "@/lib/team/supplies";
+import { inQuietHours } from "@/lib/team/shifts";
 
 export interface CloseoutRow {
   id: string;
@@ -46,6 +52,12 @@ export interface CloseoutRow {
   submitted_at: string;
   updated_at: string;
   edits: number;
+  supplies?: SupplyCount[] | null;
+  equipment?: EquipmentCheck[] | null;
+  alcohol_left?: boolean | null;
+  alcohol_note?: string | null;
+  reviewed_at?: string | null;
+  reviewed_by_name?: string | null;
 }
 
 interface VersionRow {
@@ -70,8 +82,12 @@ export interface CloseoutView {
   photoUrl: string | null;
   submittedAt: string;
   updatedAt: string;
-  editUntil: string;
   edits: number;
+  inventory: Inventory;
+  summary: WrapUpSummary; // problems, reusable, opened, used up: the manager's reading order
+  problemPhotos: Record<string, string>; // equipment item to a short lived photo link
+  reviewedAt: string | null;
+  reviewedBy: string | null;
   versions: { version: number; at: string; rating: string; photoUrl: string | null }[]; // earlier saves, newest first (admins)
 }
 
@@ -80,8 +96,10 @@ type Result<T> = ({ ok: true } & T) | { ok: false; error: string; status: number
 export interface CloseoutState {
   open: boolean; // the card shows and can be sent
   clockedOut: boolean;
-  canSubmit: boolean; // assigned and accepted, open, and inside the edit window
+  canSubmit: boolean; // assigned and accepted, open, and not yet reviewed
   mine: CloseoutView | null;
+  items: SupplyItem[]; // what The Mix Fix provided, in the order the bartender saw it
+  clientAlcohol: boolean; // the client provided alcohol, so the alcohol question is asked
 }
 
 async function signed(paths: string[]): Promise<Map<string, string>> {
@@ -98,7 +116,19 @@ async function closeoutRow(sessionId: string, staffId: string): Promise<Closeout
   return (data as CloseoutRow | null) ?? null;
 }
 
+function inventoryOf(r: CloseoutRow): Inventory {
+  return {
+    supplies: Array.isArray(r.supplies) ? r.supplies : [],
+    equipment: Array.isArray(r.equipment) ? r.equipment : [],
+    alcoholLeft: typeof r.alcohol_left === "boolean" ? r.alcohol_left : null,
+    alcoholNote: r.alcohol_note ?? "",
+  };
+}
+
+const equipmentPaths = (r: CloseoutRow) => inventoryOf(r).equipment.map((e) => e.photoPath).filter(Boolean);
+
 function toView(r: CloseoutRow, name: string, urls: Map<string, string>, versions: VersionRow[]): CloseoutView {
+  const inventory = inventoryOf(r);
   return {
     id: r.id,
     staffId: r.staff_id,
@@ -112,14 +142,25 @@ function toView(r: CloseoutRow, name: string, urls: Map<string, string>, version
     photoUrl: urls.get(r.photo_path) ?? null,
     submittedAt: r.submitted_at,
     updatedAt: r.updated_at,
-    editUntil: editUntil(r.submitted_at).toISOString(),
     edits: r.edits ?? 0,
+    inventory,
+    summary: wrapUpSummary(inventory),
+    problemPhotos: Object.fromEntries(inventory.equipment.filter((e) => e.photoPath && urls.get(e.photoPath)).map((e) => [e.item, urls.get(e.photoPath)!])),
+    reviewedAt: r.reviewed_at ?? null,
+    reviewedBy: r.reviewed_by_name ?? null,
     versions: versions
       .filter((v) => v.closeout_id === r.id)
       .sort((a, b) => b.version - a.version)
       .slice(1)
       .map((v) => ({ version: v.version, at: v.created_at, rating: String(v.data.rating ?? ""), photoUrl: urls.get(v.photo_path) ?? null })),
   };
+}
+
+/** The wrap up's supplies: what The Mix Fix provided, from the bartender's list, in its order. None when the client provides everything. */
+async function wrapUpItems(session: SessionRow): Promise<{ items: SupplyItem[]; clientAlcohol: boolean }> {
+  const { list } = await staffSupplies(session);
+  const pkg = eventData(session).package ?? session.package_type;
+  return { items: clientProvidesAll(pkg) ? [] : list.supplies.filter((i) => i.mixFix), clientAlcohol: list.alcohol.length > 0 };
 }
 
 /** Whether a clock out was recorded for this person on the event. */
@@ -129,19 +170,22 @@ async function clockedOutOn(sessionId: string, staffId: string): Promise<boolean
   return (await punchesFor(a.id)).some((p) => p.type === "out");
 }
 
-/** The closeout card for one bartender. Call after the event access check. */
+/** The wrap up for one bartender. Call after the event access check. */
 export async function closeoutState(session: SessionRow, staff: StaffMember, now: Date = new Date()): Promise<CloseoutState> {
   const a = staff.role === "admin" ? null : await assignmentRef(session.id, staff.id);
   const accepted = a?.status === "accepted";
   const clockedOut = accepted ? await clockedOutOn(session.id, staff.id) : false;
   const open = accepted && closeoutOpen(eventData(session), { clockedOut, now });
   const row = accepted ? await closeoutRow(session.id, staff.id) : null;
-  const urls = row ? await signed([row.photo_path]) : new Map<string, string>();
+  const urls = row ? await signed([row.photo_path, ...equipmentPaths(row)]) : new Map<string, string>();
+  const { items, clientAlcohol } = open || row ? await wrapUpItems(session) : { items: [], clientAlcohol: false };
   return {
     open: open || !!row,
     clockedOut,
-    canSubmit: open && canEdit(row?.submitted_at ?? null, now),
+    canSubmit: open && canEdit(row?.reviewed_at),
     mine: row ? toView(row, firstName(staff.name), urls, []) : null,
+    items,
+    clientAlcohol,
   };
 }
 
@@ -157,7 +201,7 @@ export async function closeoutsFor(sessionId: string): Promise<CloseoutView[]> {
   ]);
   const versions = (vs as VersionRow[]) ?? [];
   const names = new Map(((people as { id: string; name: string }[]) ?? []).map((p) => [p.id, firstName(p.name)]));
-  const urls = await signed([...rows.map((r) => r.photo_path), ...versions.map((v) => v.photo_path)]);
+  const urls = await signed([...rows.map((r) => r.photo_path), ...rows.flatMap(equipmentPaths), ...versions.map((v) => v.photo_path)]);
   return rows.map((r) => toView(r, names.get(r.staff_id) || "Bartender", urls, versions));
 }
 
@@ -202,6 +246,7 @@ export async function submitCloseout(opts: {
   raw: Record<string, unknown>;
   photo: Blob | null;
   photoType: string;
+  equipmentPhotos?: Record<string, Blob>; // equipment item to a photo of what happened to it
   now?: Date;
 }): Promise<Result<{ closeout: CloseoutView; first: boolean }>> {
   const now = opts.now ?? new Date();
@@ -212,14 +257,33 @@ export async function submitCloseout(opts: {
   if (!a || a.status !== "accepted") return { ok: false, error: "Only a bartender on this event can send its closeout.", status: 403 };
   const clockedOut = await clockedOutOn(session.id, staff.id);
   if (!closeoutOpen(eventData(session), { clockedOut, now })) {
-    return { ok: false, error: "The closeout opens after you clock out, or 30 minutes before service ends.", status: 403 };
+    return { ok: false, error: "The wrap up opens once bar service starts.", status: 403 };
   }
   const existing = await closeoutRow(session.id, staff.id);
-  if (existing && !canEdit(existing.submitted_at, now)) return { ok: false, error: "Closeouts can be edited for 24 hours. This one is locked now.", status: 409 };
+  if (existing && !canEdit(existing.reviewed_at)) return { ok: false, error: "An admin has reviewed your wrap up, so it is locked now.", status: 409 };
 
   const photo = opts.photo && opts.photo.size > 0 ? opts.photo : null;
   const v = validateCloseout(opts.raw, photo ? { type: opts.photoType, size: photo.size } : null, { hasPhoto: !!existing?.photo_path });
   if (!v.ok) return { ok: false, error: v.error, status: 400 };
+
+  // The inventory, checked against the list rebuilt here, never the phone's copy.
+  const gear = companyGear();
+  const { items, clientAlcohol } = await wrapUpItems(session);
+  const equipPhotos = Object.entries(opts.equipmentPhotos ?? {}).filter(([g, b]) => gear.includes(g) && b.size > 0);
+  for (const [, b] of equipPhotos) {
+    if (!PHOTO_TYPES.includes(b.type.toLowerCase())) return { ok: false, error: "That file is not a photo. Take or choose a photo.", status: 400 };
+    if (b.size > MAX_PHOTO_BYTES) return { ok: false, error: "That photo is too large. Try again.", status: 400 };
+  }
+  const kept = Object.fromEntries((existing ? inventoryOf(existing).equipment : []).filter((e) => e.photoPath).map((e) => [e.item, e.photoPath]));
+  const paths: Record<string, string> = { ...kept };
+  for (const [i, [g, b]] of equipPhotos.entries()) paths[g] = closeoutPhotoPath(session.id, staff.id, new Date(now.getTime() + i + 1), `equip.${photoExtension(b.type)}`);
+  const inv = validateInventory(opts.raw, { items, gear, clientAlcohol, photos: paths });
+  if (!inv.ok) return { ok: false, error: inv.error, status: 400 };
+  for (const [g, b] of equipPhotos) {
+    const { error: upErr } = await supabase.storage.from(BAR_PHOTO_BUCKET).upload(paths[g], b, { contentType: b.type.toLowerCase(), upsert: false });
+    if (upErr) return { ok: false, error: "A photo did not upload. Tap Retry.", status: 500 };
+  }
+  const gearFromInv = gearFromEquipment(inv.value.equipment);
 
   let photoPath = existing?.photo_path ?? "";
   if (photo) {
@@ -231,14 +295,19 @@ export async function submitCloseout(opts: {
     }
   }
 
+  const c: CloseoutInput = { ...v.value, ...gearFromInv, leftoverNote: inv.value.alcoholNote || v.value.leftoverNote };
   const fields = {
-    rating: v.value.rating,
-    guest_estimate: v.value.guestEstimate,
-    issues: v.value.issues,
-    gear_items: v.value.gearItems,
-    gear_note: v.value.gearNote,
-    leftover_note: v.value.leftoverNote,
+    rating: c.rating,
+    guest_estimate: c.guestEstimate,
+    issues: c.issues,
+    gear_items: c.gearItems,
+    gear_note: c.gearNote,
+    leftover_note: c.leftoverNote,
     photo_path: photoPath,
+    supplies: inv.value.supplies,
+    equipment: inv.value.equipment,
+    alcohol_left: inv.value.alcoholLeft,
+    alcohol_note: inv.value.alcoholNote,
     updated_at: now.toISOString(),
   };
   let row: CloseoutRow;
@@ -250,7 +319,7 @@ export async function submitCloseout(opts: {
       .eq("updated_at", existing.updated_at) // two phones saving at once: the second one retries
       .select("*");
     const rows = (data as CloseoutRow[]) ?? [];
-    if (error || rows.length === 0) return { ok: false, error: "Someone saved this closeout at the same time. Reload and try again.", status: 409 };
+    if (error || rows.length === 0) return { ok: false, error: "Someone saved this wrap up at the same time. Reload and try again.", status: 409 };
     row = rows[0];
   } else {
     const { data, error } = await supabase
@@ -260,7 +329,7 @@ export async function submitCloseout(opts: {
       .single();
     if (error || !data) {
       if (photo) await supabase.storage.from(BAR_PHOTO_BUCKET).remove([photoPath]);
-      return { ok: false, error: /duplicate|unique/i.test(error?.message ?? "") ? "Your closeout is already in. Reload to edit it." : "Could not save. Try again.", status: 409 };
+      return { ok: false, error: /duplicate|unique/i.test(error?.message ?? "") ? "Your wrap up is already in. Reload to edit it." : "Could not save. Try again.", status: 409 };
     }
     row = data as CloseoutRow;
   }
@@ -276,8 +345,8 @@ export async function submitCloseout(opts: {
   });
   if (vErr) console.error("[team] closeout version save failed:", vErr.message);
 
-  await afterSave(session, staff, row, v.value, !existing);
-  const urls = await signed([row.photo_path]);
+  await afterSave(session, staff, row, c, !existing);
+  const urls = await signed([row.photo_path, ...equipmentPaths(row)]);
   return { ok: true, first: !existing, closeout: toView(row, firstName(staff.name), urls, []) };
 }
 
@@ -299,8 +368,10 @@ async function afterSave(session: SessionRow, staff: StaffMember, row: CloseoutR
 }
 
 /**
- * One text to each bartender who clocked out 2 or more hours ago and has not
- * sent a closeout. Clock outs older than a day are left alone. Returns texts sent.
+ * One text to each bartender who clocked out 30 or more minutes ago and has not
+ * done their wrap up. Not in quiet hours (9 PM to 8 AM in the event's time
+ * zone): a late clock out hears at 8 AM. Clock outs older than a day are left
+ * alone. Returns texts sent.
  */
 export async function sendCloseoutReminders(now: Date = new Date()): Promise<number> {
   const since = new Date(now.getTime() - CLOSEOUT_REMINDER_WINDOW_HOURS * 3_600_000).toISOString();
@@ -308,18 +379,59 @@ export async function sendCloseoutReminders(now: Date = new Date()): Promise<num
   if (error || !data) return 0;
   let sent = 0;
   for (const p of data as { assignment_id: string; staff_id: string; session_id: string; punched_at: string }[]) {
-    if (now.getTime() - new Date(p.punched_at).getTime() < CLOSEOUT_REMINDER_HOURS * 3_600_000) continue;
+    if (now.getTime() - new Date(p.punched_at).getTime() < CLOSEOUT_REMINDER_MIN * 60_000) continue;
     if (await closeoutRow(p.session_id, p.staff_id)) continue;
     const session = await getSubmittedSession(p.session_id);
     if (!session) continue;
+    if (inQuietHours(now, eventTz(eventData(session)))) continue;
     const a = await assignmentRef(p.session_id, p.staff_id);
     if (!a || a.status !== "accepted") continue;
     const { data: s } = await supabase.from("staff").select("id, name, phone, active").eq("id", p.staff_id).maybeSingle();
     const person = s as { name: string; phone: string; active: boolean } | null;
     if (!person || !person.active) continue;
-    if (!(await claimNotice(`closeout_reminder:${p.assignment_id}`, "closeout_reminder"))) continue;
-    const ok = await sendStaffText(person.phone, person.name, closeoutReminderText({ firstName: firstName(person.name), title: eventTitle(eventData(session)), link: `${siteOrigin()}/team/e/${p.session_id}` }));
+    if (!(await claimNotice(`wrapup_reminder:${p.assignment_id}`, "wrapup_reminder"))) continue;
+    const ok = await sendStaffText(person.phone, person.name, closeoutReminderText({ firstName: firstName(person.name), title: eventTitle(eventData(session)), link: `${siteOrigin()}/team/e/${p.session_id}?tab=wrapup` }));
     if (ok) sent++;
   }
   return sent;
+}
+
+/** An admin marks a wrap up reviewed, which locks it. Admins only: the caller checks. */
+export async function markReviewed(sessionId: string, closeoutId: string, admin: StaffMember, now: Date = new Date()): Promise<Result<{ closeout: CloseoutView }>> {
+  const { data } = await supabase.from("event_closeouts").select("*").eq("id", closeoutId).eq("session_id", sessionId).maybeSingle();
+  const row = data as CloseoutRow | null;
+  if (!row) return { ok: false, error: "That wrap up is not on this event.", status: 404 };
+  const { data: updated, error } = await supabase
+    .from("event_closeouts")
+    .update({ reviewed_at: now.toISOString(), reviewed_by: admin.id, reviewed_by_name: firstName(admin.name) || "Admin" })
+    .eq("id", closeoutId)
+    .select("*");
+  const r = ((updated as CloseoutRow[]) ?? [])[0];
+  if (error || !r) return { ok: false, error: "Could not save. Try again.", status: 500 };
+  const { data: person } = await supabase.from("staff").select("id, name").eq("id", r.staff_id).maybeSingle();
+  const urls = await signed([r.photo_path, ...equipmentPaths(r)]);
+  return { ok: true, closeout: toView(r, firstName((person as { name?: string } | null)?.name ?? "") || "Bartender", urls, []) };
+}
+
+/** Wrap ups with Missing or Damaged items that nobody has reviewed yet. */
+export function unreviewedProblems(closeouts: CloseoutView[]): number {
+  return closeouts.filter((c) => !c.reviewedAt && hasProblems(c.inventory)).length;
+}
+
+/**
+ * Unopened items from wrap ups on events from `from` to `to` (YYYY-MM-DD,
+ * inclusive), totalled by item and size, for the person ordering the next event.
+ */
+export async function leftoverStock(from: string, to: string): Promise<{ rows: LeftoverRow[]; wrapUps: number }> {
+  const { data, error } = await supabase.from("event_closeouts").select("*");
+  if (error || !data) return { rows: [], wrapUps: 0 };
+  const closeouts = (data as CloseoutRow[]).filter((c) => Array.isArray(c.supplies) && c.supplies.length > 0);
+  const ids = [...new Set(closeouts.map((c) => c.session_id))];
+  const { data: sessions } = ids.length ? await supabase.from("sessions").select("id, event_date, event_data").in("id", ids) : { data: [] };
+  const day = new Map(((sessions as { id: string; event_date: string | null; event_data: Record<string, unknown> | null }[]) ?? []).map((s) => [s.id, eventDay(s.event_data?.event_date ?? s.event_date)]));
+  const inRange = closeouts.filter((c) => {
+    const d = day.get(c.session_id);
+    return !!d && d >= from && d <= to;
+  });
+  return { rows: leftoverTotals(inRange.map((c) => ({ sessionId: c.session_id, supplies: c.supplies ?? [] }))), wrapUps: inRange.length };
 }

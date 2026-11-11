@@ -8,7 +8,9 @@ export const BAR_PHOTO_BUCKET = "bar-photos";
 export const MAX_PHOTO_BYTES = 8 * 1024 * 1024; // phones resize first, this only stops runaway uploads
 export const PHOTO_TYPES = ["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"];
 export const MAX_NOTE_LENGTH = 500;
-export const SIGNED_URL_SECONDS = 60 * 60;
+export const SIGNED_URL_SECONDS = 30 * 60; // short lived links, made fresh on each page load
+import { MAX_BAR_PHOTOS } from "@/lib/team/bar-photo-labels";
+export { BAR_PHOTO_BUTTON, BAR_PHOTO_TITLE, MAX_BAR_PHOTOS } from "@/lib/team/bar-photo-labels";
 
 /** The card opens at arrival time on the event day, or at the start of the day when there is no start time. */
 export function barReadyOpensAt(ed: Record<string, unknown>): Date | null {
@@ -20,6 +22,30 @@ export function barReadyOpensAt(ed: Record<string, unknown>): Date | null {
 export function barReadyOpen(ed: Record<string, unknown>, now: Date = new Date()): boolean {
   const at = barReadyOpensAt(ed);
   return !!at && now.getTime() >= at.getTime();
+}
+
+/** Photos can be added, retaken, and removed until the event ends: service end, or the end of the event day with no end time. */
+export function barPhotosCloseAt(ed: Record<string, unknown>): Date | null {
+  const s = eventSchedule(ed);
+  if (s.end) return s.end;
+  const day = eventDayStart(ed);
+  return day ? new Date(day.getTime() + 24 * 3_600_000) : null;
+}
+
+export function barPhotosOpen(ed: Record<string, unknown>, now: Date = new Date()): boolean {
+  const close = barPhotosCloseAt(ed);
+  return barReadyOpen(ed, now) && (!close || now.getTime() < close.getTime());
+}
+
+/** No bar setup photo from anyone once bar service has started: a gentle reminder for the bartender, a flag for managers. */
+export function barPhotoMissing(ed: Record<string, unknown>, now: Date, photos: number): boolean {
+  const start = eventSchedule(ed).start;
+  return photos === 0 && !!start && now.getTime() >= start.getTime();
+}
+
+/** Room for one more photo, or a retake of one already there. */
+export function photoLimitError(active: number, replacing: boolean): string | null {
+  return !replacing && active >= MAX_BAR_PHOTOS ? `Up to ${MAX_BAR_PHOTOS} photos. Remove or retake one first.` : null;
 }
 
 /** Assigned staff and admins can see bar photos for an event. Nobody else. */
@@ -34,7 +60,7 @@ export function canSubmitBarReady(
   ed: Record<string, unknown>,
   now: Date = new Date()
 ): boolean {
-  return canOpenEvent(staff, assignment) && barReadyOpen(ed, now);
+  return canOpenEvent(staff, assignment) && barPhotosOpen(ed, now);
 }
 
 export interface PhotoLike {

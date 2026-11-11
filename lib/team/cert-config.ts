@@ -58,9 +58,9 @@ export const ONBOARDING: OnboardingItem[] = [
     id: "who_brings_what",
     title: 'Read "Who brings what"',
     body: [
-      "The Mix Fix brings the bar station: tables, tablecloths, coolers, signage, and prep supplies. Those items are on the event checklist under From The Mix Fix. Return them after the event, and report anything broken or missing on the closeout.",
+      "The Mix Fix brings the bar station: tables, tablecloths, coolers, signage, and prep supplies. Those items are on the event checklist under From The Mix Fix. Return them after the event, and report anything broken or missing on the wrap up.",
       "You bring your own tools to every event: shaker tins, jiggers, strainers, a stirring spoon, a muddler, an ice scoop, a wine key, a bar knife, and two bar towels.",
-      "The client buys the alcohol, mixers, and ice from the shopping list on the event page unless the package says otherwise. Check off the checklist and shopping list before you leave for the event.",
+      "The client buys the alcohol, mixers, and ice on the supplies list on the event page unless the package says otherwise. Check off the checklist before you leave, and the supplies list when you get to the event.",
     ],
     ack: "I have read it",
   },
@@ -70,7 +70,7 @@ export const ONBOARDING: OnboardingItem[] = [
     body: [
       "Clock in from the event page when you arrive. Clock in opens 30 minutes before arrival time. On time means clocked in at or before arrival. Your phone's location is saved with each punch, and a punch far from the event is flagged.",
       "When the bar is set, send the Bar is ready photo from the event page before service starts. Admins hear if it has not come in 30 minutes before service.",
-      "Clock out after breakdown, then send the closeout: how it went, the guest count, any issues, and a photo of the bar broken down and the area cleaned.",
+      "Clock out after breakdown, then do the wrap up on the Wrap up tab: how it went, what is left, the equipment, and a photo of the bar broken down and the area cleaned.",
     ],
     ack: "I have read it",
   },

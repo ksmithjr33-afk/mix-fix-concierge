@@ -154,7 +154,12 @@ export default async function AdminEventsPage({
       <TeamHeader signedIn admin />
       <main className="max-w-2xl mx-auto px-4 py-6 space-y-4">
         <div className="px-1">
-          <h1 className="font-heading text-2xl font-bold text-[#2C2420]">Staffing</h1>
+          <div className="flex items-baseline justify-between gap-3">
+            <h1 className="font-heading text-2xl font-bold text-[#2C2420]">Staffing</h1>
+            <Link href="/team/admin/leftovers" className="text-sm text-[#B5845A] underline shrink-0">
+              Leftover stock
+            </Link>
+          </div>
           <p className="text-[15px] text-[#6B5D52]">
             {view === "past"
               ? "Past events"

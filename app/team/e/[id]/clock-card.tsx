@@ -85,7 +85,7 @@ function Flags({ flags }: { flags: PunchFlag[] }) {
   );
 }
 
-export default function ClockCard({ sessionId, initial, renderedAt }: { sessionId: string; initial: ClockView; renderedAt: number }) {
+export default function ClockCard({ sessionId, initial, renderedAt, wrapUp }: { sessionId: string; initial: ClockView; renderedAt: number; wrapUp?: () => void }) {
   const [clock, setClock] = useState(initial);
   const [queued, setQueued] = useState<QueuedPunch[]>([]);
   const [busy, setBusy] = useState(false);
@@ -198,6 +198,15 @@ export default function ClockCard({ sessionId, initial, renderedAt }: { sessionI
             Clock out
           </button>
         ))}
+
+      {clockedOut && wrapUp && (
+        <div className="rounded-xl bg-[#FFF8EC] border border-[#E3C9A0] px-3 py-2.5 space-y-2">
+          <p className="text-[15px] text-[#2C2420]">You clocked out. Please do your wrap up before you go.</p>
+          <button type="button" onClick={wrapUp} className="w-full rounded-xl bg-[#B5845A] text-white py-3 font-medium">
+            Do the wrap up
+          </button>
+        </div>
+      )}
 
       {!clockedOut && <p className="text-xs text-[#A39585]">Your location is saved with each punch. No signal? Tap anyway, it sends later.</p>}
       {error && <p className="text-sm text-[#A0412D]">{error}</p>}

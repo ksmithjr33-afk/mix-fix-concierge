@@ -103,6 +103,16 @@ export function contrastOn(hex: string): number {
 const PLAIN_SIZE = /^\d+(?:\.\d+)?\s?(?:fl oz|oz|ml|l|liters?|lb|lbs|gallons?)$/i;
 const COUNTED = /^(\d+(?:\.\d+)?) ((?:bottle|can|bag|carton|jar|container|jug|box)e?s?)$/i;
 
+/** The amount part of a line: "4 x 32 oz bottles", "5 bottles (750 ml)", or "" when there is none. */
+export function amountText(f: { quantity: string; size: string }, section?: SectionId): string {
+  const quantity = f.quantity.trim();
+  const size = f.size.trim();
+  const counted = quantity.match(COUNTED);
+  if (size && counted && section !== "liquor" && PLAIN_SIZE.test(size)) return `${counted[1]} x ${size} ${counted[2]}`;
+  if (size) return quantity ? `${quantity} (${size})` : size;
+  return quantity;
+}
+
 /**
  * One line, worded the way Isabel's samples word it. Only the wording: every
  * number is the one in the fields.
@@ -114,14 +124,23 @@ const COUNTED = /^(\d+(?:\.\d+)?) ((?:bottle|can|bag|carton|jar|container|jug|bo
  */
 export function lineText(f: { name: string; quantity: string; size: string; detail: string }, section?: SectionId): string {
   const name = f.name.trim();
-  const quantity = f.quantity.trim();
-  const size = f.size.trim();
   const detail = f.detail.trim();
-  let amount = quantity;
-  const counted = quantity.match(COUNTED);
-  if (size && counted && section !== "liquor" && PLAIN_SIZE.test(size)) amount = `${counted[1]} x ${size} ${counted[2]}`;
-  else if (size) amount = quantity ? `${quantity} (${size})` : size;
+  const amount = amountText(f, section);
   let text = amount ? `${name} — ${amount}` : name;
   if (detail) text += /^[a-z(]/.test(detail) ? ` ${detail.startsWith("(") ? detail : `(${detail})`}` : ` — ${detail}`;
   return text;
 }
+
+/** One key per drink name ("paloma", "paloma#2"), stable while the drink stays on the menu. For recipe edits. */
+export function recipeKeys(names: string[]): string[] {
+  const seen = new Map<string, number>();
+  return names.map((n) => {
+    const base = n.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "drink";
+    const k = (seen.get(base) ?? 0) + 1;
+    seen.set(base, k);
+    return k === 1 ? base : `${base}#${k}`;
+  });
+}
+
+/** Shown whenever an admin edits a recipe on the Shopping list. */
+export const RECIPE_EDIT_NOTE = "This does not change quantities. Update the list lines too if needed.";

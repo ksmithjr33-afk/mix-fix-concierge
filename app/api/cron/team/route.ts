@@ -3,6 +3,7 @@ import { sendClockOutReminders, sendLateSetupAlerts } from "@/lib/team/clock-db"
 import { deliverShiftNotices, sendShortShiftAlerts } from "@/lib/team/shifts-db";
 import { ensureMarkets } from "@/lib/team/markets-db";
 import { sendCloseoutReminders } from "@/lib/team/closeout-db";
+import { sendSupplyNotices } from "@/lib/team/supplies-db";
 import { sendCertReminders } from "@/lib/team/certs-db";
 import { deliverAnnouncements } from "@/lib/team/announcements-db";
 import { deliverChatNotices } from "@/lib/team/chat-db";
@@ -28,15 +29,16 @@ export async function GET(request: Request) {
   // Each job runs on its own, so one failing never stops the others.
   // Markets first, so the time math below uses each event's time zone.
   const markets = await Promise.allSettled([fillMarkets()]);
-  const [reminders, alerts, short, shiftTexts, announcementTexts, chatTexts, closeoutTexts, certTexts] = await Promise.allSettled([
+  const [reminders, alerts, short, shiftTexts, announcementTexts, chatTexts, closeoutTexts, certTexts, supplyTexts] = await Promise.allSettled([
     sendClockOutReminders(now),
     sendLateSetupAlerts(now),
     sendShortShiftAlerts(now),
     deliverShiftNotices(now), // held new shift texts: batched, and sent at 8:00 AM after quiet hours
     deliverAnnouncements(now), // announcement texts held for quiet hours
     deliverChatNotices(now), // team chat texts held by the 5 minute batch
-    sendCloseoutReminders(now), // one text 2 hours after clock out with no closeout
+    sendCloseoutReminders(now), // one wrap up text 30 minutes after clock out, never in quiet hours
     sendCertReminders(now), // certification expiry: 30 days, 7 days, and the day
+    sendSupplyNotices(now), // admin edits to the supplies list inside 48 hours, once the edits settle
   ]);
   const result = (r: PromiseSettledResult<number>) => (r.status === "fulfilled" ? r.value : `failed: ${String(r.reason)}`);
   const out = {
@@ -49,6 +51,7 @@ export async function GET(request: Request) {
     chatTexts: result(chatTexts),
     closeoutReminders: result(closeoutTexts),
     certReminders: result(certTexts),
+    supplyTexts: result(supplyTexts),
   };
   console.log("[team-cron]", JSON.stringify(out));
   return NextResponse.json({ ok: true, ...out });

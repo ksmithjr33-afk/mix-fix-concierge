@@ -3,8 +3,10 @@ import { getCurrentStaff } from "@/lib/team/auth";
 import { openEvent } from "@/lib/team/events";
 import { submitCloseout } from "@/lib/team/closeout-db";
 
-// Post event closeout from a bartender on the event: how it went, guests,
-// issues, broken or missing gear, leftovers, and a required photo.
+// The wrap up from a bartender on the event: how it went, guests, the supplies
+// and equipment inventory, the leftover alcohol, anything we should know, and
+// a required photo. Equipment photos come as equipPhoto:<item>. Every check,
+// including that the sender is on the event, runs on the server.
 export async function POST(request: Request) {
   const staff = await getCurrentStaff();
   if (!staff) return NextResponse.json({ error: "Sign in again." }, { status: 401 });
@@ -27,9 +29,16 @@ export async function POST(request: Request) {
         gear: form.getAll("gear").map(String),
         gearNote: form.get("gearNote"),
         leftover: form.get("leftover"),
+        supplies: form.get("supplies"),
+        equipment: form.get("equipment"),
+        alcoholLeft: form.get("alcoholLeft"),
+        alcoholNote: form.get("alcoholNote"),
       },
       photo: file,
       photoType: file ? file.type.toLowerCase() : "",
+      equipmentPhotos: Object.fromEntries(
+        [...form.entries()].filter(([k, v]) => k.startsWith("equipPhoto:") && v instanceof Blob && v.size > 0).map(([k, v]) => [k.slice("equipPhoto:".length), v as Blob])
+      ),
     });
     if (!r.ok) return NextResponse.json({ error: r.error }, { status: r.status });
     return NextResponse.json({ ok: true, closeout: r.closeout });

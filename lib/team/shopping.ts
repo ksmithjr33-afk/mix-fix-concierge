@@ -1,4 +1,5 @@
-// What should be at the event, for the bartender's shopping list tab. Built
+// What should be at the event, built from the generated lists (the bartender's
+// Supplies tab now reads the admin Shopping list instead, lib/team/supplies.ts). Built
 // from the same generated lists the team already gets: "Alcohol" from the
 // client's shopping list, "Mixers, garnishes and supplies" from the supply list.
 // Item, brand where the list has one, and quantity. No prices, no store names.

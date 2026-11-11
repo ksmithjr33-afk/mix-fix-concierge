@@ -11,6 +11,7 @@ import { bartendersNeeded, firstName, type StaffMember } from "@/lib/team/event-
 import { eventTitle } from "@/lib/team/event-list";
 import { alertAdmins, checkSnapshot, getConfirmation, getSubmittedSession } from "@/lib/team/events";
 import { sendStaffText } from "@/lib/team/sms";
+import type { Supplies } from "@/lib/team/supplies";
 import { isHidden } from "@/lib/team/hidden";
 import { hasPunches } from "@/lib/team/clock-db";
 import { workedMinutes } from "@/lib/team/clock";
@@ -302,7 +303,7 @@ export interface AssigneeProgress {
 }
 
 /** Everyone on the event with their checklist, shopping, and check in progress. */
-export async function assigneeProgress(session: SessionRow): Promise<AssigneeProgress[]> {
+export async function assigneeProgress(session: SessionRow, supplies?: Supplies): Promise<AssigneeProgress[]> {
   const rows = await assignmentsFor(session.id);
   if (rows.length === 0) return [];
   const { data: staffRows } = await supabase.from("staff").select(STAFF_COLUMNS).in("id", rows.map((r) => r.staff_id));
@@ -323,7 +324,7 @@ export async function assigneeProgress(session: SessionRow): Promise<AssigneePro
     rows.map(async (r) => {
       const s = staff.get(r.staff_id);
       const member = s ?? { id: r.staff_id, name: "", phone: "", role: "bartender" as const, active: false, alerts: false };
-      const [snap, confirmedAt] = await Promise.all([checkSnapshot(session, member), getConfirmation(r.staff_id, session.id)]);
+      const [snap, confirmedAt] = await Promise.all([checkSnapshot(session, member, supplies), getConfirmation(r.staff_id, session.id)]);
       return {
         staffId: r.staff_id,
         name: s?.name || "Removed staff member",

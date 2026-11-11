@@ -324,7 +324,7 @@ check("A failed text never blocks a message", quiet.ok && db.event_messages.leng
 // Wiring.
 const tabs = src("app/team/e/[id]/event-tabs.tsx");
 check("The event page has a Chat tab with an unread count", tabs.includes('["chat", `Chat${chatUnread ? ` (${chatUnread})` : ""}`]') && tabs.includes("<ChatThread"));
-check("Message team links open the chat tab", src("app/team/e/[id]/page.tsx").includes('initialTab={chatTab ? "chat" : "details"}'));
+check("Message team links open the chat tab", src("app/team/e/[id]/page.tsx").includes('(["chat", "wrapup", "shopping", "checklist"] as const).find((t) => t === query.tab) ?? "details"') && src("app/team/e/[id]/page.tsx").includes("initialTab={"));
 const adminEvent = src("app/team/admin/e/[id]/page.tsx");
 const managerChat = src("app/team/admin/e/[id]/manager-chat.tsx");
 check(

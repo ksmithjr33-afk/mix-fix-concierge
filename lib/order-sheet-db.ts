@@ -17,12 +17,16 @@ import {
   recipes,
   sheetHeader,
   staleRows,
+  withRecipeEdits,
+  cleanRecipeEdit,
+  sameRecipe,
+  recipeKeys,
   type CalcLine,
   type FieldName,
   type Fields,
   type OrderStatus,
-  type Recipe,
   type SavedLine,
+  type SheetRecipe,
   type Sheet,
   type SheetHeader,
   type SheetLine,
@@ -30,6 +34,8 @@ import {
   type StoreInfo,
 } from "@/lib/order-sheet";
 import { addStore, listStores, rememberLegendName } from "@/lib/order-sheet-stores";
+import { seenItems, suppliesFromSheet, supplyChanges, inNoticeWindow, type SeenItem } from "@/lib/team/supplies";
+import { eventSchedule } from "@/lib/team/time";
 
 type EventData = Record<string, unknown>;
 
@@ -57,7 +63,7 @@ export interface SheetMeta {
 export interface SheetView {
   sessionId: string;
   header: SheetHeader;
-  recipes: Recipe[];
+  recipes: SheetRecipe[]; // with this event's recipe edits on top
   sheet: Sheet;
   byStore: ReturnType<typeof byStore>;
   meta: SheetMeta;
@@ -83,6 +89,9 @@ interface MetaRow {
   note_at?: string | null;
   delivery_day_of?: boolean | null;
   legend_names?: Record<string, unknown> | null;
+  recipe_edits?: Record<string, unknown> | null;
+  staff_list_sent?: SeenItem[] | null; // the bartenders' list before a burst of edits, until the text goes
+  staff_list_pending_at?: string | null;
 }
 
 async function metaRow(sessionId: string): Promise<MetaRow> {
@@ -150,13 +159,61 @@ export async function getSheetView(session: SessionLike): Promise<SheetView> {
   return {
     sessionId: session.id,
     header: sheetHeader(ed),
-    recipes: recipes(ed),
+    recipes: withRecipeEdits(recipes(ed), m.recipe_edits),
     sheet,
     byStore: byStore(sheet, stores),
     meta: meta(m, stores),
     stores,
     suggestions,
   };
+}
+
+/**
+ * The Shopping list as the bartenders read it: the same lines, with no store
+ * suggestions or store list needed, plus this event's recipe edits. For the
+ * bartender Supplies tab, the Something is missing sheet, and the wrap up.
+ */
+export async function staffSheet(session: SessionLike): Promise<{ sheet: Sheet; recipes: SheetRecipe[] }> {
+  const ed = eventDataOf(session);
+  const [saved, m] = await Promise.all([savedRows(session.id), metaRow(session.id)]);
+  return { sheet: buildSheet(calculatedLines(ed), saved), recipes: withRecipeEdits(recipes(ed), m.recipe_edits) };
+}
+
+/**
+ * After an edit that changed what bartenders see, inside 48 hours of the
+ * event: remember the list as it was before the first edit of the burst, and
+ * mark it for the cron, which texts assigned staff once the edits settle.
+ */
+async function noteStaffListChange(session: SessionLike, before: SeenItem[], m: MetaRow, now: Date): Promise<void> {
+  const s = eventSchedule(eventDataOf(session));
+  if (!inNoticeWindow(s.start, s.end, now)) return;
+  const { error } = await supabase
+    .from("order_sheet_meta")
+    .upsert(
+      { session_id: session.id, staff_list_sent: m.staff_list_sent ?? before, staff_list_pending_at: now.toISOString(), updated_at: now.toISOString() },
+      { onConflict: "session_id" }
+    );
+  if (error) console.error("[order-sheet] marking the staff list change failed:", error.message);
+}
+
+/** Events whose bartender list changed and settled: the list before, and the list now. For the cron. */
+export async function settledStaffListChanges(now: Date, settleMs: number): Promise<{ sessionId: string; changes: string[] }[]> {
+  const { data, error } = await supabase.from("order_sheet_meta").select("*");
+  if (error || !data) return [];
+  const out: { sessionId: string; changes: string[] }[] = [];
+  for (const m of data as (MetaRow & { session_id: string })[]) {
+    if (!m.staff_list_pending_at || now.getTime() - new Date(m.staff_list_pending_at).getTime() < settleMs) continue;
+    const { data: row } = await supabase.from("sessions").select("*").eq("id", m.session_id).maybeSingle();
+    const session = row as (SessionLike & { status?: string }) | null;
+    let changes: string[] = [];
+    if (session && session.status === "submitted" && session.event_data) {
+      const s = eventSchedule(eventDataOf(session));
+      if (inNoticeWindow(s.start, s.end, now)) changes = supplyChanges(m.staff_list_sent ?? [], seenItems(suppliesFromSheet((await staffSheet(session)).sheet)));
+    }
+    await supabase.from("order_sheet_meta").update({ staff_list_sent: null, staff_list_pending_at: null }).eq("session_id", m.session_id);
+    if (changes.length > 0) out.push({ sessionId: m.session_id, changes });
+  }
+  return out;
 }
 
 /**
@@ -249,7 +306,9 @@ const calcFields = (c: CalcLine): Fields => ({ name: c.name, quantity: c.quantit
 
 export async function applySheetAction(session: SessionLike, editor: Editor, body: Record<string, unknown>): Promise<ActionResult> {
   const { calc, saved, sheet, stores, meta: m } = await build(session);
-  const now = new Date().toISOString();
+  const before = seenItems(suppliesFromSheet(sheet));
+  const when = new Date();
+  const now = when.toISOString();
   const who = { by: editor.id, name: editor.name || "Admin" };
   const bad = (error: string, status = 400): ActionResult => ({ ok: false, error, status });
 
@@ -421,10 +480,31 @@ export async function applySheetAction(session: SessionLike, editor: Editor, bod
       }
       break;
     }
+    case "recipe": {
+      // This event only, display only: nothing reads a recipe edit back into a quantity.
+      const list = recipes(eventDataOf(session));
+      const keys = recipeKeys(list.map((r) => r.name));
+      const i = keys.indexOf(String(body.key ?? ""));
+      if (i < 0) return bad("That drink is no longer on the menu. Reload the page.", 404);
+      const edits = { ...(m.recipe_edits && typeof m.recipe_edits === "object" ? m.recipe_edits : {}) };
+      if (body.reset === true) {
+        delete edits[keys[i]];
+      } else {
+        const r = cleanRecipeEdit(body);
+        if (!r.ok) return bad(r.error);
+        if (sameRecipe(r.value, list[i])) delete edits[keys[i]];
+        else edits[keys[i]] = { ...r.value, by: who.name, at: now };
+      }
+      const { error } = await supabase.from("order_sheet_meta").upsert({ session_id: session.id, recipe_edits: edits, updated_at: now }, { onConflict: "session_id" });
+      if (error) return bad("Could not save. Try again.", 500);
+      break;
+    }
     default:
       return bad("Unknown action.");
   }
-  return { ok: true, view: await getSheetView(session) };
+  const view = await getSheetView(session);
+  if (supplyChanges(before, seenItems(suppliesFromSheet(view.sheet))).length > 0) await noteStaffListChange(session, before, m, when);
+  return { ok: true, view };
 }
 
 /** A store that can be picked for a line: on the list and not retired. */

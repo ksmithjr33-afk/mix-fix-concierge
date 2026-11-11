@@ -1,18 +1,16 @@
 // Post event closeout: rules, limits, texts, and the GHL payload. Pure, no database.
 //
-// Each bartender on an event sends one closeout after clocking out, or from
-// 30 minutes before scheduled service end: how it went, a guest estimate,
-// issues, company gear broken or missing, leftover product, and a required
-// photo of the bar broken down and the area cleaned. It can be edited for 24
-// hours after the first submit, and every save is kept.
+// Each bartender on an event sends one closeout, as part of the wrap up
+// (lib/team/wrapup.ts), once bar service has started or they clocked out: how
+// it went, a guest estimate, the inventory, anything we should know, and a
+// required photo of the bar broken down and the area cleaned. It can be edited
+// until an admin marks it reviewed, and every save is kept.
 
 import { CHECKLIST } from "@/lib/team/checklist-config";
 import { eventSchedule } from "@/lib/team/time";
 import { PHOTO_TYPES, MAX_PHOTO_BYTES, type PhotoLike } from "@/lib/team/bar-ready";
 
-export const CLOSEOUT_LEAD_MIN = 30; // opens 30 minutes before scheduled service end
-export const CLOSEOUT_EDIT_HOURS = 24;
-export const CLOSEOUT_REMINDER_HOURS = 2; // after clocking out with no closeout
+export const CLOSEOUT_REMINDER_MIN = 30; // one text 30 minutes after clocking out with no wrap up
 export const CLOSEOUT_REMINDER_WINDOW_HOURS = 26; // stop looking a day later, so old clock outs never text
 export const ISSUES_MAX = 1000;
 export const NOTE_MAX = 500;
@@ -27,26 +25,16 @@ export function companyGear(): string[] {
   return CHECKLIST.filter((g) => g.id === "company").flatMap((g) => g.sections.flatMap((s) => s.items));
 }
 
-/** 30 minutes before scheduled service end. Null when there is no end time. */
-export function closeoutOpensAt(ed: Record<string, unknown>): Date | null {
-  const end = eventSchedule(ed).end;
-  return end ? new Date(end.getTime() - CLOSEOUT_LEAD_MIN * 60_000) : null;
-}
-
-/** Open once they clocked out, or from 30 minutes before scheduled service end. */
+/** Open once bar service has started (the Wrap up tab shows), or once they clocked out. */
 export function closeoutOpen(ed: Record<string, unknown>, o: { clockedOut: boolean; now: Date }): boolean {
   if (o.clockedOut) return true;
-  const at = closeoutOpensAt(ed);
-  return !!at && o.now.getTime() >= at.getTime();
+  const start = eventSchedule(ed).start;
+  return !!start && o.now.getTime() >= start.getTime();
 }
 
-/** Editable until 24 hours after the first submit. */
-export function editUntil(firstSubmittedAt: string | Date): Date {
-  return new Date(new Date(firstSubmittedAt).getTime() + CLOSEOUT_EDIT_HOURS * 3_600_000);
-}
-
-export function canEdit(firstSubmittedAt: string | Date | null, now: Date): boolean {
-  return !firstSubmittedAt || now.getTime() < editUntil(firstSubmittedAt).getTime();
+/** Editable until an admin marks it reviewed. */
+export function canEdit(reviewedAt: string | null | undefined): boolean {
+  return !reviewedAt;
 }
 
 export interface CloseoutInput {
@@ -123,7 +111,7 @@ export function closeoutAlertText(o: { firstName: string; title: string; c: Clos
 }
 
 export function closeoutReminderText(o: { firstName: string; title: string; link: string }): string {
-  return `Hi ${o.firstName || "there"}, please send your closeout for ${o.title}: how it went and a photo of the bar broken down. ${o.link}`;
+  return `Hi ${o.firstName || "there"}, please do your wrap up for ${o.title}: how it went, what is left, the equipment, and a photo of the bar broken down. ${o.link}`;
 }
 
 /** Storage path in the private bar photo bucket. */

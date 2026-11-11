@@ -76,7 +76,7 @@ const bar = src("app/team/admin/e/[id]/manager-tabs.tsx");
 check("The page opens the tab in the address", page.includes("isManagerTab(asked) ? asked : \"details\"") && page.includes("initialTab={tab}"));
 check("Switching tabs puts the tab in the address", bar.includes('url.searchParams.set("tab", t)') && bar.includes("window.history.replaceState"));
 check("The tab bar has the bartender view's look and scrolls sideways on a phone", bar.includes("bg-[#DDD5CC] p-1 rounded-xl") && bar.includes("overflow-x-auto") && bar.includes("whitespace-nowrap") && bar.includes('bg-[#F5F0EB] text-[#2C2420] shadow-sm'));
-check("Tabs show a count when something needs attention", bar.includes("counts[key]") && page.includes("client: pendingHolds.length") && page.includes("counts.stillNeeded + handoffs.length") && page.includes("dayof: missing.length"));
+check("Tabs show a count when something needs attention", bar.includes("counts[key]") && page.includes("client: pendingHolds.length") && page.includes("counts.stillNeeded + handoffs.length") && page.includes("dayof: dayofCount") && page.includes("missingReports: missing.length"));
 const has = (tab: string, ...parts: string[]) => {
   const at = page.indexOf(`    ${tab}: `);
   const next = page.slice(at + 1).search(/\n    (details|team|order|client|dayof|chat): /);
@@ -87,11 +87,11 @@ check("Details: the event details and the admin edit form", has("details", "<Det
 check("Team: bartenders, assign someone, open shifts, requests, handoffs, market", has("team", "<AssignPanel", "<ShiftPanel"));
 check("Shopping list: the full order sheet inside the tab", has("order", "<OrderSheet initial={sheet}"));
 check("Client list: list, auto send, held changes, Review and send, the log", has("client", "<ClientListPanel", "holds=", "log=", "autoSend=", "listText="));
-check("Day of: checklist progress, bar ready photo, missing reports, time punches, closeout", has("dayof", "<ChecklistProgress", "<BarReadyCard", "<MissingReports", "<TimePunches", "<Closeouts"));
+check("Day of: bar setup photos, each bartender's lists, missing reports, wrap ups, time punches", has("dayof", "<BarReadyCard", "<BartenderLists", "<MissingReports", "<Closeouts", "<TimePunches"));
 check("Chat: the event team chat with Message team", has("chat", "<ManagerChat") && src("app/team/admin/e/[id]/manager-chat.tsx").includes("Message team"));
 check("The header: name, date and times, market, guests, package, and Bartender view of this event", page.includes("eventTitle(ed)") && page.includes("v.serviceStart") && page.includes("v.market") && page.includes("v.guestCount") && page.includes("v.package") && page.includes("?as=bartender`} ") && page.includes("Bartender view of this event"));
 check("No staffing page wording on the event page", !/Staffing/.test(page) && !/staffing page/i.test(page));
-check("Assign panel features stay: progress moves to Day of, not removed", src("app/team/admin/e/[id]/assign-panel.tsx").includes("showProgress") && src("app/team/admin/e/[id]/day-of.tsx").includes("Checklist progress"));
+check("Assign panel features stay: progress moves to Day of, not removed", src("app/team/admin/e/[id]/assign-panel.tsx").includes("showProgress") && src("app/team/admin/e/[id]/day-of.tsx").includes("<Bar label={title}"));
 
 // ----- The order sheet link and order_sheet_url -----
 const orderPage = src("app/team/admin/e/[id]/order/page.tsx");

@@ -1,4 +1,4 @@
-// Checkbox state for the checklist and shopping list tabs. Pure, no database.
+// Checkbox state for the Checklist and Supplies tabs. Pure, no database.
 //
 // One saved row per staff member, event, list, and item name, with the quantity
 // the item had when the row was written. When a client update changes the
