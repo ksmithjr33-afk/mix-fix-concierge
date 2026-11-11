@@ -130,3 +130,21 @@ export function calendarGrid(mode: CalMode, anchor: string, today: string, items
   }
   return { mode, anchor, label, prev, next, days };
 }
+
+export interface CalLinks {
+  prev: string;
+  next: string;
+  week: string;
+  month: string;
+  today: string;
+}
+
+/** The calendar's navigation links, built on the server so the view needs no function props. */
+export function calLinksOf(grid: Pick<CalGrid, "prev" | "next">, link: (o: { mode?: CalMode; d?: string }) => string): CalLinks {
+  return { prev: link({ d: grid.prev }), next: link({ d: grid.next }), week: link({ mode: "week" }), month: link({ mode: "month" }), today: link({ d: "today" }) };
+}
+
+/** The events a calendar shows: the whole week, or the days inside the month. */
+export function shownEvents(grid: CalGrid): EventListItem[] {
+  return grid.days.filter((d) => d.inMonth).flatMap((d) => d.events);
+}

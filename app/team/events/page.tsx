@@ -10,7 +10,7 @@ import TeamHeader from "../team-header";
 import EventList from "./event-list";
 import { openShiftsFor } from "@/lib/team/shifts-db";
 import { assignedEventItems } from "@/lib/team/my-events";
-import { calendarGrid, calMode, isYmd } from "@/lib/team/calendar";
+import { calendarGrid, calLinksOf, calMode, isYmd } from "@/lib/team/calendar";
 import CalendarView, { ListCalendarToggle } from "../calendar-view";
 
 export const dynamic = "force-dynamic";
@@ -114,7 +114,7 @@ export default async function TeamEventsPage({
               </div>
             )}
             {calendar ? (
-              <CalendarView grid={calendarGrid(mode, anchor, today, events)} link={calLink} empty={admin ? "No events in this range." : "None of your events fall in this range."} />
+              <CalendarView grid={calendarGrid(mode, anchor, today, events)} links={calLinksOf(calendarGrid(mode, anchor, today, events), calLink)} empty={admin ? "No events in this range." : "None of your events fall in this range."} />
             ) : (
               <EventList sections={sections} empty={past ? "No past events." : "No upcoming events yet."} respond={!past} />
             )}

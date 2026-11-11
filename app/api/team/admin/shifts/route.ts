@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
 import { getCurrentStaff } from "@/lib/team/auth";
 import { getSubmittedSession } from "@/lib/team/events";
-import { approveRequest, postAllUnstaffed, postShift, unpostShift } from "@/lib/team/shifts-db";
+import { approveRequest, postAllUnstaffed, postSelected, postShift, unpostShift } from "@/lib/team/shifts-db";
 import { isMarket } from "@/lib/team/markets";
 
 // Admin open shift actions.
 //   { action: "post", sessionId }      post the event's unfilled spots to its market
 //   { action: "post_all", market? }    post every unstaffed upcoming event (in one market)
+//   { action: "post_selected", sessionIds }  post the events ticked in Select mode
 //   { action: "unpost", postId }
 //   { action: "approve", postId, staffId }
 export async function POST(request: Request) {
@@ -25,6 +26,11 @@ export async function POST(request: Request) {
     }
     if (body.action === "post_all") {
       return NextResponse.json({ ok: true, ...(await postAllUnstaffed(staff, isMarket(body.market) ? body.market : null)) });
+    }
+    if (body.action === "post_selected") {
+      const r = await postSelected(staff, body.sessionIds);
+      if (!r.ok) return NextResponse.json({ error: r.error }, { status: r.status });
+      return NextResponse.json(r);
     }
     if (body.action === "unpost" || body.action === "approve") {
       if (typeof body.postId !== "string" || (body.action === "approve" && typeof body.staffId !== "string")) {

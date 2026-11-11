@@ -35,6 +35,8 @@ import {
   postError,
   postText,
   releasedText,
+  SELECT_MAX,
+  selectBlock,
   shiftSummary,
   shortAlertDue,
   shortShiftText,
@@ -343,6 +345,15 @@ export async function postShift(
  * posted yet (in one market, when given). Each bartender gets one text per
  * market right away, or at 8:00 AM in quiet hours.
  */
+/** Send the texts due now for the markets just posted to, and count the bartenders whose text is held for quiet hours. */
+async function deliverPosted(markets: Set<Market>, now: Date): Promise<{ texted: number; held: number }> {
+  if (markets.size === 0) return { texted: 0, held: 0 };
+  const texted = await deliverShiftNotices(now, { markets: [...markets] });
+  const { data: waiting } = await supabase.from("shift_notices").select("staff_id, market").eq("status", "pending").in("market", [...markets]);
+  const held = new Set(((waiting as { staff_id: string; market: string }[]) ?? []).map((w) => `${w.staff_id}|${w.market}`)).size;
+  return { texted, held };
+}
+
 export async function postAllUnstaffed(
   admin: StaffMember,
   market: Market | null = null,
@@ -363,15 +374,69 @@ export async function postAllUnstaffed(
       if (m) markets.add(m);
     } else if (/market/i.test(r.error)) out.noMarket++;
   }
-  if (markets.size > 0) {
-    out.texted = await deliverShiftNotices(now, { markets: [...markets] });
-    const { data: waiting } = await supabase.from("shift_notices").select("staff_id, market").eq("status", "pending").in("market", [...markets]);
-    out.held = new Set(((waiting as { staff_id: string; market: string }[]) ?? []).map((w) => `${w.staff_id}|${w.market}`)).size;
-  }
+  Object.assign(out, await deliverPosted(markets, now));
   return out;
 }
 
-/** Take an open shift down. Requests close without a text. */
+export interface SelectedResult {
+  posted: number;
+  texted: number;
+  held: number;
+  skipped: { id: string; title: string; reason: string }[];
+}
+
+/**
+ * Post the events an admin ticked in "Select" mode. Each one is checked again
+ * here, so an event that was posted, filled, or hidden since the page loaded
+ * is skipped with the reason. Texts work like "Post all unstaffed": due now,
+ * one text per bartender per market, held in quiet hours.
+ */
+export async function postSelected(admin: StaffMember, raw: unknown, now: Date = new Date()): Promise<Result<SelectedResult>> {
+  if (admin.role !== "admin") return fail("Admins only.", 403);
+  const ids = Array.isArray(raw) ? [...new Set(raw.filter((x): x is string => typeof x === "string" && x.length > 0 && x.length < 200))] : [];
+  if (ids.length === 0) return fail("Pick at least one event.", 400);
+  if (ids.length > SELECT_MAX) return fail(`Pick at most ${SELECT_MAX} events at a time.`, 400);
+  const { data } = await supabase.from("sessions").select("*").in("id", ids).eq("status", "submitted");
+  const byId = new Map(((data as SessionRow[]) ?? []).map((s) => [s.id, s]));
+  const hidden = await hiddenEventIds();
+  const out: SelectedResult = { posted: 0, texted: 0, held: 0, skipped: [] };
+  const markets = new Set<Market>();
+  for (const id of ids) {
+    const s = byId.get(id);
+    if (!s) {
+      out.skipped.push({ id, title: "Event", reason: "not found" });
+      continue;
+    }
+    const title = eventTitle(eventData(s));
+    const isHiddenNow = hidden.has(id);
+    const market = isHiddenNow ? sessionMarket(s) : await ensureMarket(s);
+    const rows = await assignmentsOf(id);
+    const needed = bartendersNeeded(s);
+    const reason = selectBlock({
+      hidden: isHiddenNow,
+      past: isPast(s, now),
+      day: eventSchedule(eventData(s)).day,
+      market,
+      needed,
+      spotsOpen: staffingCounts(needed, rows.map((r) => r.status)).stillNeeded,
+      alreadyPosted: !!(await activeOpenPost(id)),
+    });
+    if (reason) {
+      out.skipped.push({ id, title, reason });
+      continue;
+    }
+    const r = await postShift(s, admin, now, "now");
+    if (!r.ok) {
+      out.skipped.push({ id, title, reason: r.error.replace(/\.$/, "").toLowerCase() });
+      continue;
+    }
+    out.posted++;
+    if (market) markets.add(market);
+  }
+  Object.assign(out, await deliverPosted(markets, now));
+  return { ok: true, ...out };
+}
+
 export async function unpostShift(postId: string, admin: StaffMember): Promise<Result> {
   const post = await postById(postId);
   if (!post || post.status !== "posted") return fail("This shift is not posted.", 404);

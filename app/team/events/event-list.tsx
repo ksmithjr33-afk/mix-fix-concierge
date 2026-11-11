@@ -61,7 +61,15 @@ function Respond({ e, onDone }: { e: EventListItem; onDone: (status: "accepted" 
   );
 }
 
-export default function EventList({ sections, empty, respond = false }: { sections: ListSection[]; empty: string; respond?: boolean }) {
+/** Select mode on the staffing page: checkboxes on events that can be posted, a short reason on the rest. */
+export interface ListSelect {
+  selected: Set<string>;
+  reasons: Record<string, string>;
+  toggle: (id: string) => void;
+  selectAll: (ids: string[]) => void;
+}
+
+export default function EventList({ sections, empty, respond = false, select }: { sections: ListSection[]; empty: string; respond?: boolean; select?: ListSelect }) {
   const [query, setQuery] = useState("");
   const [statuses, setStatuses] = useState<Record<string, string>>({});
   const statusOf = (e: EventListItem) => statuses[e.id] ?? e.status;
@@ -87,6 +95,14 @@ export default function EventList({ sections, empty, respond = false }: { sectio
           className="w-full rounded-xl border border-[#DDD5CC] bg-[#F5F0EB] px-4 py-2.5 text-[16px] text-[#2C2420] placeholder:text-[#A39585] focus:outline-none focus:ring-2 focus:ring-[#B5845A]/30 focus:border-[#B5845A]"
         />
       )}
+      {select && (() => {
+        const ids = shown.flatMap((s) => s.days.flatMap((d) => d.events)).filter((e) => !select.reasons[e.id]).map((e) => e.id);
+        return (
+          <button type="button" onClick={() => select.selectAll(ids)} disabled={ids.length === 0} className="text-sm text-[#9A7049] underline disabled:opacity-40 px-1">
+            Select all shown ({ids.length})
+          </button>
+        );
+      })()}
       {(!anyEvents || (shown.length === 0 && !query)) && (
         <p className="text-[15px] text-[#6B5D52] bg-[#F5F0EB] rounded-2xl border border-[#DDD5CC] px-4 py-4">{empty}</p>
       )}
@@ -102,7 +118,22 @@ export default function EventList({ sections, empty, respond = false }: { sectio
                   const status = statusOf(e);
                   const offered = respond && status === "offered";
                   return (
-                    <li key={e.id} className="relative">
+                    <li key={e.id} className={`relative ${select ? "flex items-stretch" : ""}`}>
+                      {select && (
+                        <div className="w-24 shrink-0 flex items-center justify-center border-r border-[#DDD5CC] px-1 text-center">
+                          {select.reasons[e.id] ? (
+                            <span className="text-[11px] italic text-[#A39585]">{select.reasons[e.id]}</span>
+                          ) : (
+                            <input
+                              type="checkbox"
+                              checked={select.selected.has(e.id)}
+                              onChange={() => select.toggle(e.id)}
+                              className="h-5 w-5 accent-[#B5845A]"
+                              aria-label={`Select ${e.title}`}
+                            />
+                          )}
+                        </div>
+                      )}
                       {e.chat && (
                         <Link
                           href={e.chat.href}
@@ -112,7 +143,7 @@ export default function EventList({ sections, empty, respond = false }: { sectio
                           Chat{e.chat.unread ? ` (${e.chat.unread})` : ""}
                         </Link>
                       )}
-                      <Link href={e.href ?? `/team/e/${e.id}`} className={`flex items-start gap-3 px-3 py-2.5 hover:bg-[#EFE7DF] transition-colors ${e.chat ? "pb-6" : ""}`}>
+                      <Link href={e.href ?? `/team/e/${e.id}`} className={`${select ? "flex-1 min-w-0 " : ""}flex items-start gap-3 px-3 py-2.5 hover:bg-[#EFE7DF] transition-colors ${e.chat ? "pb-6" : ""}`}>
                         <span className="w-[4.5rem] shrink-0 pt-0.5 text-sm font-medium text-[#2C2420] tabular-nums">
                           {e.arrival || "TBD"}
                           <span className="block text-[10px] font-normal uppercase tracking-wide text-[#A39585]">arrive</span>

@@ -6,16 +6,19 @@ import { staffingByEvent } from "@/lib/team/assignments-db";
 import { staffingLabel, withoutHidden } from "@/lib/team/assignments";
 import { hiddenEventIds } from "@/lib/team/hidden";
 import { dayHeader, eventListItem, pastSection, upcomingSections } from "@/lib/team/event-list";
-import { chicagoToday } from "@/lib/team/time";
+import { chicagoToday, eventSchedule, todayIn } from "@/lib/team/time";
+import { selectBlock } from "@/lib/team/shifts";
+import { bartendersNeeded } from "@/lib/team/event-view";
+import StaffingBoard from "./staffing-board";
 import TeamHeader from "../../team-header";
 import EventList from "../../events/event-list";
 import HiddenList from "./hidden-list";
 import PostAll from "./post-all";
 import { ensureMarkets } from "@/lib/team/markets-db";
-import { isMarket, MARKETS, MARKET_INFO, sessionMarket } from "@/lib/team/markets";
-import { calendarGrid, calMode, isYmd } from "@/lib/team/calendar";
+import { eventData, isMarket, MARKETS, MARKET_INFO, sessionMarket } from "@/lib/team/markets";
+import { calendarGrid, calLinksOf, calMode, isYmd } from "@/lib/team/calendar";
 import { unreadByEvent } from "@/lib/team/chat-db";
-import CalendarView, { ListCalendarToggle } from "../../calendar-view";
+import { ListCalendarToggle } from "../../calendar-view";
 
 export const dynamic = "force-dynamic";
 
@@ -103,6 +106,22 @@ export default async function AdminEventsPage({
     href({ past: view === "past", market: m, layout: calendar ? "calendar" : null, cal: mode, d: anchor });
   const calLink = (o: { mode?: "week" | "month"; d?: string }) =>
     href({ market: marketFilter, layout: "calendar", cal: o.mode ?? mode, d: o.d === "today" ? today : (o.d ?? anchor) });
+  // Select mode: why an event has no checkbox (hidden events are not listed here).
+  const reasons: Record<string, string> = {};
+  for (const s of sessions) {
+    const sch = eventSchedule(eventData(s));
+    const why = selectBlock({
+      hidden: false,
+      past: !!sch.day && sch.day < todayIn(sch.tz),
+      day: sch.day,
+      market: sessionMarket(s),
+      needed: bartendersNeeded(s),
+      spotsOpen: counts.get(s.id)?.stillNeeded ?? 0,
+      alreadyPosted: posted.has(s.id),
+    });
+    if (why) reasons[s.id] = why;
+  }
+  const grid = calendar ? calendarGrid(mode, anchor, today, items) : null;
   const sections = view === "past" ? pastSection(items, today) : upcomingSections(items, today);
   const open = items.filter((i) => (!i.day || i.day >= today) && i.badge.tone === "warn").length;
 
@@ -137,10 +156,17 @@ export default async function AdminEventsPage({
           </div>
         )}
         {view === "upcoming" && <PostAll count={unstaffed} market={marketFilter} />}
-        {calendar ? (
-          <CalendarView grid={calendarGrid(mode, anchor, today, items)} link={calLink} empty={marketFilter ? "No events in this market in this range." : "No events in this range."} />
+        {view === "upcoming" ? (
+          <StaffingBoard
+            calendar={calendar}
+            sections={sections}
+            grid={grid}
+            links={grid ? calLinksOf(grid, calLink) : null}
+            empty={calendar ? (marketFilter ? "No events in this market in this range." : "No events in this range.") : marketFilter ? "No upcoming events in this market." : "No upcoming events."}
+            reasons={reasons}
+          />
         ) : (
-          <EventList sections={sections} empty={view === "past" ? "No past events." : marketFilter ? "No upcoming events in this market." : "No upcoming events."} />
+          <EventList sections={sections} empty={marketFilter ? "No past events in this market." : "No past events."} />
         )}
         <div className="px-1 pt-2 flex flex-wrap gap-x-5 gap-y-2">
           <Link href={view === "past" ? "/team/admin/events" : "/team/admin/events?past=1"} className="text-sm text-[#B5845A] underline">

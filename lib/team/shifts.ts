@@ -136,6 +136,23 @@ export function postError(o: { hidden: boolean; market: Market | null; spotsOpen
   return null;
 }
 
+/**
+ * The short reason an event has no checkbox in "Select" mode on the staffing
+ * page, or null when it can be posted. Same rules as postError, in a few words.
+ */
+export function selectBlock(o: { hidden: boolean; past: boolean; day: string | null; market: Market | null; needed: number | null; spotsOpen: number; alreadyPosted: boolean }): string | null {
+  if (o.hidden) return "hidden";
+  if (o.past) return "past";
+  if (!o.day) return "no date";
+  if (o.alreadyPosted) return "already posted";
+  if (o.needed === null) return "staff count unknown";
+  if (o.spotsOpen <= 0) return "fully staffed";
+  if (!o.market) return "no market";
+  return null;
+}
+
+export const SELECT_MAX = 200;
+
 /** The shift is still short 5 days before the event, so admins get one text. */
 export function shortAlertDue(ed: Record<string, unknown>, now: Date, spotsOpen: number): boolean {
   if (spotsOpen <= 0) return false;
@@ -280,3 +297,6 @@ export function stillOnShiftText(o: { from: string; date: string }): string {
 export function handoffCancelledText(o: { teammate: string; from: string; date: string }): string {
   return `Hi ${firstName(o.teammate) || "there"}, ${firstName(o.from) || "your teammate"} no longer needs you to take the Mix Fix shift on ${o.date}. No action needed.`;
 }
+
+
+export { selectedMessage } from "@/lib/team/select-message";

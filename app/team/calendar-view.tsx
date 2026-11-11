@@ -1,6 +1,16 @@
 import Link from "next/link";
-import type { CalDay, CalGrid } from "@/lib/team/calendar";
+import type { CalDay, CalGrid, CalLinks } from "@/lib/team/calendar";
 import type { EventListItem } from "@/lib/team/event-list";
+
+// No "use client": the server renders it, and the staffing page's Select mode
+// renders it in the browser with checkboxes.
+
+/** Select mode: a checkbox on each event that can be posted, a short reason on the rest. */
+export interface CalSelect {
+  selected: Set<string>;
+  reasons: Record<string, string>;
+  toggle: (id: string) => void;
+}
 
 // Same colors as the list badges.
 const TONE = {
@@ -8,8 +18,6 @@ const TONE = {
   warn: { badge: "bg-[#F6E3DC] text-[#A0412D]", block: "border-l-[#A0412D]" },
   muted: { badge: "bg-[#E8DDD5] text-[#6B5D52]", block: "border-l-[#A39585]" },
 };
-
-export type CalLink = (o: { mode?: "week" | "month"; d?: string }) => string;
 
 /** "List | Calendar" switch above an events list. */
 export function ListCalendarToggle({ calendar, listHref, calendarHref }: { calendar: boolean; listHref: string; calendarHref: string }) {
@@ -35,10 +43,23 @@ function ChatLink({ e }: { e: EventListItem }) {
   );
 }
 
-function Block({ e, compact }: { e: EventListItem; compact: boolean }) {
-  const tone = TONE[e.badge?.tone ?? "muted"];
+function Pick({ e, select }: { e: EventListItem; select: CalSelect }) {
+  const reason = select.reasons[e.id];
+  if (reason) return <span className="block px-2 pt-1.5 text-[11px] italic text-[#A39585]">{reason}</span>;
   return (
-    <div className={`rounded-lg bg-[#F5F0EB] border border-[#DDD5CC] border-l-4 ${tone.block} hover:bg-[#EFE7DF] transition-colors`}>
+    <label className="flex items-center gap-1.5 px-2 pt-1.5 text-[11px] font-medium text-[#2C2420]">
+      <input type="checkbox" checked={select.selected.has(e.id)} onChange={() => select.toggle(e.id)} className="h-4 w-4 accent-[#B5845A]" aria-label={`Select ${e.title}`} />
+      Select
+    </label>
+  );
+}
+
+function Block({ e, compact, select }: { e: EventListItem; compact: boolean; select?: CalSelect }) {
+  const tone = TONE[e.badge?.tone ?? "muted"];
+  const on = !!select?.selected.has(e.id);
+  return (
+    <div className={`rounded-lg bg-[#F5F0EB] border ${on ? "border-[#B5845A] ring-1 ring-[#B5845A]" : "border-[#DDD5CC]"} border-l-4 ${tone.block} hover:bg-[#EFE7DF] transition-colors`}>
+      {select && <Pick e={e} select={select} />}
       <Link href={e.href ?? `/team/e/${e.id}`} className="block px-2 py-1.5" title={[e.arrival, e.title, e.badge?.text].filter(Boolean).join(" · ")}>
         <span className="block text-[11px] font-medium tabular-nums text-[#6B5D52]">{e.arrival || "Time TBD"}</span>
         <span className={`block font-heading font-bold text-[#2C2420] ${compact ? "text-xs truncate" : "text-sm break-words"}`}>{e.title}</span>
@@ -64,29 +85,29 @@ function DayHead({ d }: { d: CalDay }) {
 }
 
 /** A week (stacked days on a phone, seven columns from small screens up) or a month grid. */
-export default function CalendarView({ grid, link, empty }: { grid: CalGrid; link: CalLink; empty: string }) {
+export default function CalendarView({ grid, links, empty, select }: { grid: CalGrid; links: CalLinks; empty: string; select?: CalSelect }) {
   const anyEvents = grid.days.some((d) => d.events.length > 0);
   const modeCls = (on: boolean) => `px-2.5 py-1 rounded-md text-sm ${on ? "bg-[#2C2420] text-white" : "text-[#6B5D52] border border-[#DDD5CC]"}`;
   return (
     <section className="space-y-3" aria-label="Calendar">
       <div className="flex flex-wrap items-center justify-between gap-2 px-1">
         <div className="flex items-center gap-2">
-          <Link href={link({ d: grid.prev })} className="rounded-md border border-[#DDD5CC] bg-[#F5F0EB] px-2.5 py-1 text-sm text-[#2C2420]" aria-label="Previous">
+          <Link href={links.prev} className="rounded-md border border-[#DDD5CC] bg-[#F5F0EB] px-2.5 py-1 text-sm text-[#2C2420]" aria-label="Previous">
             ‹
           </Link>
           <h2 className="font-heading text-[15px] font-bold text-[#2C2420]">{grid.label}</h2>
-          <Link href={link({ d: grid.next })} className="rounded-md border border-[#DDD5CC] bg-[#F5F0EB] px-2.5 py-1 text-sm text-[#2C2420]" aria-label="Next">
+          <Link href={links.next} className="rounded-md border border-[#DDD5CC] bg-[#F5F0EB] px-2.5 py-1 text-sm text-[#2C2420]" aria-label="Next">
             ›
           </Link>
         </div>
         <div className="flex gap-1.5">
-          <Link href={link({ mode: "week" })} aria-current={grid.mode === "week" ? "page" : undefined} className={modeCls(grid.mode === "week")}>
+          <Link href={links.week} aria-current={grid.mode === "week" ? "page" : undefined} className={modeCls(grid.mode === "week")}>
             Week
           </Link>
-          <Link href={link({ mode: "month" })} aria-current={grid.mode === "month" ? "page" : undefined} className={modeCls(grid.mode === "month")}>
+          <Link href={links.month} aria-current={grid.mode === "month" ? "page" : undefined} className={modeCls(grid.mode === "month")}>
             Month
           </Link>
-          <Link href={link({ d: "today" })} className={modeCls(false)}>
+          <Link href={links.today} className={modeCls(false)}>
             Today
           </Link>
         </div>
@@ -101,7 +122,7 @@ export default function CalendarView({ grid, link, empty }: { grid: CalGrid; lin
                 <span className="sm:hidden text-xs text-[#A39585]">{d.events.length ? `${d.events.length} ${d.events.length === 1 ? "event" : "events"}` : "No events"}</span>
               </div>
               {d.events.map((e) => (
-                <Block key={e.id} e={e} compact={false} />
+                <Block key={e.id} e={e} compact={false} select={select} />
               ))}
             </li>
           ))}
@@ -118,7 +139,7 @@ export default function CalendarView({ grid, link, empty }: { grid: CalGrid; lin
               <li key={d.ymd} className={`min-h-[6rem] rounded-lg border p-1 space-y-1 ${d.today ? "border-[#B5845A]" : "border-[#DDD5CC]"} ${d.inMonth ? "bg-[#EFE7DF]/60" : "bg-transparent opacity-60"}`}>
                 <span className={`block text-right text-xs tabular-nums ${d.today ? "font-bold text-[#B5845A]" : "text-[#6B5D52]"}`}>{d.dayNum}</span>
                 {d.events.map((e) => (
-                  <Block key={e.id} e={e} compact />
+                  <Block key={e.id} e={e} compact select={select} />
                 ))}
               </li>
             ))}
@@ -131,7 +152,7 @@ export default function CalendarView({ grid, link, empty }: { grid: CalGrid; lin
                 <li key={d.ymd} className={`rounded-xl border ${d.today ? "border-[#B5845A]" : "border-[#DDD5CC]"} bg-[#EFE7DF]/60 p-2 space-y-1.5`}>
                   <span className="text-xs font-bold uppercase tracking-wider text-[#6B5D52]">{d.label}</span>
                   {d.events.map((e) => (
-                    <Block key={e.id} e={e} compact={false} />
+                    <Block key={e.id} e={e} compact={false} select={select} />
                   ))}
                 </li>
               ))}
