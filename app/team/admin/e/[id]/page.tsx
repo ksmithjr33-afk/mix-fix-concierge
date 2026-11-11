@@ -18,6 +18,8 @@ import { handoffPanel, postPanel } from "@/lib/team/shifts-db";
 import { marketLabel } from "@/lib/team/markets";
 import ShiftPanel from "./shift-panel";
 import { eventDayOf, unavailableOn } from "@/lib/team/availability-db";
+import { closeoutsFor } from "@/lib/team/closeout-db";
+import Closeouts from "./closeouts";
 
 export const dynamic = "force-dynamic";
 
@@ -54,6 +56,7 @@ export default async function AdminEventPage({ params }: { params: Promise<{ id:
     handoffPanel(session),
     unreadByEvent(me.id, [id]),
   ]);
+  const closeouts = await closeoutsFor(id);
   const away = await unavailableOn(eventDayOf(session));
   const chatUnread = unread.get(id) ?? 0;
   const v = buildStaffEventView(session);
@@ -102,6 +105,7 @@ export default async function AdminEventPage({ params }: { params: Promise<{ id:
             </Link>
           </div>
         </div>
+        {closeouts.length > 0 && <Closeouts closeouts={closeouts} timeZone={v.timeZone} />}
         {hidden ? (
           <>
             <p className="text-sm text-[#6B5D52] px-1">Market: {marketLabel(panel.market)}. Hidden events cannot be posted.</p>

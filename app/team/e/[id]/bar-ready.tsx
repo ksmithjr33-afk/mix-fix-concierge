@@ -16,7 +16,7 @@ const MAX_SIDE = 1600; // px on the long side: sharp enough to check the setup, 
 const JPEG_QUALITY = 0.75;
 
 /** Shrink the photo on the phone before upload. Falls back to the original file if the browser cannot decode it. */
-async function resizePhoto(file: File): Promise<Blob> {
+export async function resizePhoto(file: File): Promise<Blob> {
   try {
     const bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
     const scale = Math.min(1, MAX_SIDE / Math.max(bitmap.width, bitmap.height));

@@ -3,6 +3,8 @@ import { eventPageData, openEvent } from "@/lib/team/events";
 import { CHECKLIST_FOOTER } from "@/lib/team/checklist-config";
 import { barReadyEntries } from "@/lib/team/bar-ready-db";
 import { barReadyOpen } from "@/lib/team/bar-ready";
+import { closeoutState } from "@/lib/team/closeout-db";
+import { companyGear } from "@/lib/team/closeout";
 import { shoppingGroups } from "@/lib/team/shopping";
 import { assignmentRef, clockView, punchesFor } from "@/lib/team/clock-db";
 import { eventData } from "@/lib/team/markets";
@@ -47,12 +49,13 @@ export default async function TeamEventPage({
   }
 
   const ed = eventData(access.session);
-  const [data, entries, assignment, messages, unread] = await Promise.all([
+  const [data, entries, assignment, messages, unread, closeout] = await Promise.all([
     eventPageData(access.session, staff),
     barReadyEntries(id, staff),
     assignmentRef(id, staff.id),
     threadMessages(id, staff),
     unreadByEvent(staff.id, [id]),
+    closeoutState(access.session, staff),
   ]);
   if (chatTab) await markThreadRead(id, staff.id);
   const punches = assignment ? await punchesFor(assignment.id) : [];
@@ -85,6 +88,11 @@ export default async function TeamEventPage({
           entries,
           timeZone: data.view.timeZone,
         }}
+        closeout={
+          closeout.open && staff.role !== "admin"
+            ? { canSubmit: closeout.canSubmit, mine: closeout.mine, gear: companyGear(), timeZone: data.view.timeZone }
+            : null
+        }
       />
     </>
   );

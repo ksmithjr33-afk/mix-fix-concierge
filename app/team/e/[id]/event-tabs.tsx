@@ -7,6 +7,7 @@ import type { ShopItem, ShoppingGroup } from "@/lib/team/shopping";
 import { canConfirm, type CheckState, type ListName } from "@/lib/team/checks";
 import { timeLabel } from "@/lib/team/clock-label";
 import BarReadyCard, { type BarReadyProps } from "./bar-ready";
+import CloseoutCard, { type CloseoutProps } from "./closeout-card";
 import RespondBanner from "./respond-banner";
 import ClockCard from "./clock-card";
 import GiveUp, { type GiveUpProps } from "./give-up";
@@ -489,6 +490,7 @@ export default function EventTabs({
   shopping,
   shoppingState,
   barReady,
+  closeout = null,
   offered,
   manageHref,
   clock,
@@ -512,6 +514,7 @@ export default function EventTabs({
   shopping: ShoppingLayout;
   shoppingState: Record<string, CheckState>;
   barReady: Omit<BarReadyProps, "sessionId"> & { show: boolean };
+  closeout?: Omit<CloseoutProps, "sessionId"> | null;
 }) {
   const [tab, setTab] = useState<Tab>(initialTab);
   const [chatUnread, setChatUnread] = useState(initialTab === "chat" ? 0 : chat.unread);
@@ -543,6 +546,8 @@ export default function EventTabs({
       {clock.canPunch && <ClockCard sessionId={view.sessionId} initial={clock} renderedAt={renderedAt} />}
 
       {barReady.show && <BarReadyCard sessionId={view.sessionId} {...barReady} />}
+
+      {closeout && <CloseoutCard sessionId={view.sessionId} {...closeout} />}
 
       <nav className="grid grid-cols-4 gap-1 bg-[#DDD5CC] p-1 rounded-xl" role="tablist">
         {tabs.map(([key, label]) => (
