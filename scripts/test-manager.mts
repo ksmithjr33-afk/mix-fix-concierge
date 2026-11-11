@@ -69,7 +69,7 @@ check("Manage staff for this event is gone", !src("app/team/e/[id]/event-tabs.ts
 check("Admin event lists open the manager view", src("app/team/events/page.tsx").includes("href: `/team/admin/e/${r.id}`") && src("app/team/admin/events/page.tsx").includes("href: `/team/admin/e/${s.id}`"));
 
 // ----- Tabs and their links -----
-check("Six tabs in order", tabs.MANAGER_TABS.map(([, l]) => l).join(" | ") === "Details | Team | Order sheet | Client list | Day of | Chat");
+check("Six tabs in order", tabs.MANAGER_TABS.map(([, l]) => l).join(" | ") === "Details | Team | Shopping list | Client list | Day of | Chat");
 check("Tab links", tabs.managerHref("s1") === "/team/admin/e/s1" && tabs.managerHref("s1", "order") === "/team/admin/e/s1?tab=order" && tabs.managerHref("a b", "team") === "/team/admin/e/a%20b?tab=team");
 const page = src("app/team/admin/e/[id]/page.tsx");
 const bar = src("app/team/admin/e/[id]/manager-tabs.tsx");
@@ -85,7 +85,7 @@ const has = (tab: string, ...parts: string[]) => {
 };
 check("Details: the event details and the admin edit form", has("details", "<Details v={v} />", "<EditEvent", "<HideAction"));
 check("Team: bartenders, assign someone, open shifts, requests, handoffs, market", has("team", "<AssignPanel", "<ShiftPanel"));
-check("Order sheet: the full order sheet inside the tab", has("order", "<OrderSheet initial={sheet}"));
+check("Shopping list: the full order sheet inside the tab", has("order", "<OrderSheet initial={sheet}"));
 check("Client list: list, auto send, held changes, Review and send, the log", has("client", "<ClientListPanel", "holds=", "log=", "autoSend=", "listText="));
 check("Day of: checklist progress, bar ready photo, missing reports, time punches, closeout", has("dayof", "<ChecklistProgress", "<BarReadyCard", "<MissingReports", "<TimePunches", "<Closeouts"));
 check("Chat: the event team chat with Message team", has("chat", "<ManagerChat") && src("app/team/admin/e/[id]/manager-chat.tsx").includes("Message team"));
@@ -95,7 +95,7 @@ check("Assign panel features stay: progress moves to Day of, not removed", src("
 
 // ----- The order sheet link and order_sheet_url -----
 const orderPage = src("app/team/admin/e/[id]/order/page.tsx");
-check("The old order sheet link opens the Order sheet tab", orderPage.includes('redirect(managerHref(id, "order"))'));
+check("The old order sheet link opens the Shopping list tab", orderPage.includes('redirect(managerHref(id, "order"))'));
 check("order_sheet_url still points at that link", cldb && src("lib/client-list.ts").includes("/team/admin/e/${encodeURIComponent(sessionId)}/order"));
 
 // ----- Admin only, on the server -----
@@ -126,5 +126,35 @@ check("The routes behind the tabs are all admin routes", tabRoutes.every((r) => 
 check("Admin pages are all behind requireAdmin", ["app/team/admin/e/[id]/page.tsx", "app/team/admin/e/[id]/order/page.tsx", "app/team/admin/stores/page.tsx"].every((p) => src(p).includes("await requireAdmin(")));
 const importsAdmin = (p: string) => [...src(p).matchAll(/from "([^"]+)"/g)].some((m) => m[1].includes("/admin/"));
 check("Manager components never reach bartenders: the bartender view imports nothing from the admin pages", !importsAdmin("app/team/e/[id]/page.tsx") && !importsAdmin("app/team/e/[id]/event-tabs.tsx"));
+
+// ----- Admins see "Shopping list", never "order sheet" -----
+const os = await import("../lib/order-sheet.ts");
+check("The tab is named Shopping list, next to Client list", tabs.MANAGER_TABS.some(([k, l]) => k === "order" && l === "Shopping list") && tabs.MANAGER_TABS.some(([k, l]) => k === "client" && l === "Client list"));
+check("The events list status says shopping list", os.STATUS_LABEL.not_started === "shopping list not started" && os.STATUS_LABEL.in_progress === "shopping list in progress" && os.STATUS_LABEL.all_ordered === "shopping list all ordered");
+const visible = (p: string) =>
+  src(p)
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/(^|[^:])\/\/.*$/gm, "$1")
+    .replace(/\{\/\*[\s\S]*?\*\/\}/g, "")
+    .replace(/console\.(error|log|warn)\([^)]*\)/g, "");
+const uiFiles = [
+  "app/team/admin/e/[id]/order/order-sheet.tsx",
+  "app/team/admin/e/[id]/page.tsx",
+  "app/team/admin/e/[id]/manager-tabs.tsx",
+  "app/team/admin/e/[id]/client-list-panel.tsx",
+  "app/team/admin/e/[id]/day-of.tsx",
+  "app/team/admin/events/page.tsx",
+  "app/team/admin/stores/page.tsx",
+  "app/team/admin/stores/store-manager.tsx",
+  "app/team/admin/staff/page.tsx",
+  "app/api/team/admin/order-sheet/route.ts",
+  "app/api/team/admin/stores/route.ts",
+  "lib/order-sheet-db.ts",
+  "lib/order-sheet-stores.ts",
+  "lib/team/manager-tabs.ts",
+];
+check("No admin facing text says order sheet", uiFiles.every((p) => !/order sheets?\b/i.test(visible(p))), uiFiles.filter((p) => /order sheets?\b/i.test(visible(p))).join(", "));
+check("Near the team's list, the client's list is the Client's list", src("app/team/admin/e/[id]/order/order-sheet.tsx").includes("the Client&apos;s list") && src("app/team/admin/e/[id]/order/order-sheet.tsx").includes('"On the Client\'s list"'));
+check("Routes, tables and the payload field keep their names", src("lib/client-list.ts").includes("/order`") && existsSync(new URL("../app/api/team/admin/order-sheet/route.ts", import.meta.url)) && src("lib/order-sheet-db.ts").includes('from("order_sheet_lines")'));
 
 done("manager view");

@@ -38,7 +38,7 @@ import { ChecklistProgress, MissingReports, TimePunches } from "./day-of";
 export const dynamic = "force-dynamic";
 
 // The manager view of one event, admins only: every admin section of the
-// event under tabs (Details, Team, Order sheet, Client list, Day of, Chat).
+// event under tabs (Details, Team, Shopping list, Client list, Day of, Chat).
 // requireAdmin runs first, so bartenders (and admins in Bartender view) never
 // get past it, and every route behind each tab checks admin again on the server.
 function hhmm(v: unknown): string {

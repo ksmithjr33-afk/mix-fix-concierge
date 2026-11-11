@@ -287,9 +287,9 @@ export interface Sheet {
 export type OrderStatus = "not_started" | "in_progress" | "all_ordered" | "nothing_to_order";
 
 export const STATUS_LABEL: Record<OrderStatus, string> = {
-  not_started: "order not started",
-  in_progress: "order in progress",
-  all_ordered: "all ordered",
+  not_started: "shopping list not started",
+  in_progress: "shopping list in progress",
+  all_ordered: "shopping list all ordered",
   nothing_to_order: "client buys all",
 };
 

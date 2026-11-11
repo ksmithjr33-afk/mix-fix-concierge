@@ -60,7 +60,7 @@ export default async function AdminStaffPage() {
         <SettingToggle
           settingKey={SUGGEST_STORES_KEY}
           initial={suggestStores}
-          title="Suggest stores on order sheets"
+          title="Suggest stores on shopping lists"
           onText="On: a line with no store shows the store that item was last given on another event, marked as a suggestion. It is never set by itself."
           offText="Off: lines with no store show no suggestion."
         />

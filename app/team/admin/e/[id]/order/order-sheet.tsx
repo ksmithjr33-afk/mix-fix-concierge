@@ -199,7 +199,7 @@ export function AddStoreDialog({
             Cancel
           </button>
         </div>
-        <p className="text-xs text-[#666]">The new store is on the list for every event. Rename, recolor, or retire it under Manage stores.</p>
+        <p className="text-xs text-[#666]">The new store is offered on every event's shopping list. Rename, recolor, or retire it under Manage stores.</p>
       </form>
     </div>
   );
@@ -270,7 +270,7 @@ function LineEditor({
     line.kind !== "added" && line.edited.length > 0 && line.editedBy ? `Edited by ${line.editedBy} ${timeLabel(line.editedAt, undefined, tz)}` : "",
     store && line.storeBy ? `${store.name} set by ${line.storeBy} ${timeLabel(line.storeAt, undefined, tz)}` : "",
     line.ordered && line.orderedBy ? `Ordered by ${line.orderedBy} ${timeLabel(line.orderedAt, undefined, tz)}` : "",
-    line.clientBuys ? "On the client's own shopping list" : "",
+    line.clientBuys ? "On the Client's list" : "",
   ].filter(Boolean);
   const input = "mt-0.5 block w-full rounded-md border border-[#BBB] bg-white px-2 py-1.5 text-black";
 
@@ -616,7 +616,7 @@ function LegendName({ store, value, onSave, onClose }: { store: StoreInfo; value
           className="mt-1 block w-full rounded-md border border-[#BBB] px-2 py-1.5"
         />
       </label>
-      <p className="mt-1 text-xs text-[#666]">Shown as ({v.trim() || "Taylor"}) on this sheet. The next event starts with the same name.</p>
+      <p className="mt-1 text-xs text-[#666]">Shown as ({v.trim() || "Taylor"}) on this shopping list. The next event starts with the same name.</p>
     </div>
   );
 }
@@ -763,7 +763,7 @@ export default function OrderSheet({ initial, timeZone }: { initial: SheetView; 
         )}
         {view.meta.legacyDelivery && (
           <p className="mt-1 text-[13px] text-[#4A3F38]">
-            This sheet had “Delivery to event on day of” ticked before it became a store, so the legend still shows it.{" "}
+            This shopping list had “Delivery to event on day of” ticked before it became a store, so the legend still shows it.{" "}
             {deliveryInUse ? "It is now set on lines." : "Set it as the store on the lines that are delivered."}{" "}
             <button type="button" onClick={() => call({ action: "clear_legacy_delivery" })} className="underline">
               {deliveryInUse ? "Done, clear the old tick" : "Clear the old tick"}
@@ -875,7 +875,7 @@ export default function OrderSheet({ initial, timeZone }: { initial: SheetView; 
 
       <section className="max-w-[8.5in] mx-auto space-y-1.5 print:hidden">
         <label htmlFor="sheet-note" className="block text-sm font-medium text-[#2C2420]">
-          Note on the sheet
+          Note on the shopping list
         </label>
         <textarea
           id="sheet-note"
@@ -892,7 +892,7 @@ export default function OrderSheet({ initial, timeZone }: { initial: SheetView; 
           </p>
         )}
         <p className="text-xs text-[#A39585]">
-          Edits here only change this order sheet. They never change the client&apos;s shopping list, the calculation, or any other event.
+          Edits here only change this shopping list. They never change the Client&apos;s list, the calculation, or any other event.
           {view.suggestions ? " A dashed swatch is a suggestion: the store that item was last given on another event." : ""}
         </p>
       </section>

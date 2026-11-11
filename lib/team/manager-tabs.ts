@@ -4,7 +4,7 @@
 export const MANAGER_TABS = [
   ["details", "Details"],
   ["team", "Team"],
-  ["order", "Order sheet"],
+  ["order", "Shopping list"],
   ["client", "Client list"],
   ["dayof", "Day of"],
   ["chat", "Chat"],

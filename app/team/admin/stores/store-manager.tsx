@@ -152,7 +152,7 @@ export default function StoreManager({ initial }: { initial: StoreInfo[] }) {
       {retired.length > 0 && (
         <section className={card}>
           <h2 className="font-heading text-base font-bold text-[#2C2420]">Retired</h2>
-          <p className="text-sm text-[#6B5D52]">Still shown on the sheets that used them. Not offered on new lines. Their colors stay taken so old sheets never show two stores in one color.</p>
+          <p className="text-sm text-[#6B5D52]">Still shown on the shopping lists that used them. Not offered on new lines. Their colors stay taken so old shopping lists never show two stores in one color.</p>
           <ul>{retired.map((s, i) => row(s, i, retired))}</ul>
         </section>
       )}

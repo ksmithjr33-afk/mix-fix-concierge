@@ -5,7 +5,7 @@ import StoreManager from "./store-manager";
 
 export const dynamic = "force-dynamic";
 
-// Manage stores, admins only: the stores order sheets can use, their
+// Manage stores, admins only: the stores shopping lists can use, their
 // highlight colors and order, and retiring a store.
 export default async function AdminStoresPage() {
   await requireAdmin("/team/admin/stores");
@@ -17,7 +17,7 @@ export default async function AdminStoresPage() {
         <div className="px-1">
           <h1 className="font-heading text-2xl font-bold text-[#2C2420]">Manage stores</h1>
           <p className="text-[15px] text-[#6B5D52]">
-            The stores on every order sheet, in the order they are offered and shown on the legend. A retired store stays on old sheets that used it but is not
+            The stores on every shopping list, in the order they are offered and shown on the legend. A retired store stays on old shopping lists that used it but is not
             offered on new lines.
           </p>
         </div>
