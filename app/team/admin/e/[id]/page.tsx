@@ -17,6 +17,7 @@ import { ensureMarket } from "@/lib/team/markets-db";
 import { handoffPanel, postPanel } from "@/lib/team/shifts-db";
 import { marketLabel } from "@/lib/team/markets";
 import ShiftPanel from "./shift-panel";
+import { eventDayOf, unavailableOn } from "@/lib/team/availability-db";
 
 export const dynamic = "force-dynamic";
 
@@ -53,6 +54,7 @@ export default async function AdminEventPage({ params }: { params: Promise<{ id:
     handoffPanel(session),
     unreadByEvent(me.id, [id]),
   ]);
+  const away = await unavailableOn(eventDayOf(session));
   const chatUnread = unread.get(id) ?? 0;
   const v = buildStaffEventView(session);
   const marketSource = (session as { team_market_source?: string | null }).team_market_source ?? null;
@@ -75,7 +77,7 @@ export default async function AdminEventPage({ params }: { params: Promise<{ id:
   const onEvent = new Set(people.filter((p) => p.status !== "declined").map((p) => p.staffId));
   const available = staff
     .filter((s) => s.active && !onEvent.has(s.id))
-    .map((s) => ({ id: s.id, name: s.name || s.phone, role: s.role, declined: people.some((p) => p.staffId === s.id), markets: s.markets }));
+    .map((s) => ({ id: s.id, name: s.name || s.phone, role: s.role, declined: people.some((p) => p.staffId === s.id), markets: s.markets, unavailable: away.has(s.id) }));
 
   return (
     <>

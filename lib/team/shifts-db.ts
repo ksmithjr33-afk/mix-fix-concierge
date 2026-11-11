@@ -15,6 +15,8 @@ import { sendStaffText } from "@/lib/team/sms";
 import { ensureMarket, staffMarkets } from "@/lib/team/markets-db";
 import { eventData, marketLabel, marketTz, sessionMarket, staffMarketsOf, type Market } from "@/lib/team/markets";
 import { staffingCounts, type AssignmentStatus } from "@/lib/team/assignments";
+import { eventDayOf, isUnavailable, unavailableOn } from "@/lib/team/availability-db";
+import { NEEDS_CONFIRM, unavailableConfirm } from "@/lib/team/availability";
 import { eventDay, eventSchedule, formatClock, shortDate, todayIn } from "@/lib/team/time";
 import {
   ACTIVE_HANDOFF,
@@ -142,11 +144,24 @@ async function textAdmins(message: string): Promise<number> {
   return sent.filter(Boolean).length;
 }
 
-/** Active bartenders in the post's market, except anyone already on the event (and whoever is handing it off). */
+/**
+ * Active bartenders in the post's market, except anyone already on the event
+ * (and whoever is handing it off), and anyone who marked the event's day
+ * unavailable.
+ */
 async function marketBartenders(post: PostRow, session: SessionRow, exclude: Set<string>): Promise<StaffFull[]> {
   const { data } = await supabase.from("staff").select("*").eq("active", true).eq("role", "bartender");
   const onEvent = new Set((await assignmentsOf(session.id)).filter((a) => a.status !== "declined").map((a) => a.staff_id));
-  return ((data as StaffFull[]) ?? []).filter((s) => staffMarketsOf(s).includes(post.market) && !onEvent.has(s.id) && !exclude.has(s.id));
+  const away = await unavailableOn(eventDayOf(session));
+  return ((data as StaffFull[]) ?? []).filter((s) => staffMarketsOf(s).includes(post.market) && !onEvent.has(s.id) && !exclude.has(s.id) && !away.has(s.id));
+}
+
+/** The admin confirm step: an action on someone who marked the event's day unavailable needs confirmUnavailable. */
+async function unavailableGuard(person: { id: string; name: string }, session: SessionRow, verb: "Assign" | "Approve", confirmed: boolean) {
+  if (confirmed) return null;
+  const day = eventDayOf(session);
+  if (!day || !(await isUnavailable(person.id, day))) return null;
+  return fail(unavailableConfirm({ name: firstName(person.name), day, verb }), NEEDS_CONFIRM);
 }
 
 export interface NoticePlan {
@@ -263,6 +278,7 @@ export async function deliverShiftNotices(now: Date = new Date(), only: { market
         !isPast(info.session, now) &&
         info.spots > 0 &&
         !info.onEvent.has(n.staff_id) &&
+        !(await isUnavailable(n.staff_id, eventDayOf(info.session))) &&
         (info.post.kind === "open" || (info.handoff?.status === "open" && info.handoff.from_staff_id !== n.staff_id));
       if (ok) good.push({ n, info });
       else skip.push(n.id);
@@ -500,6 +516,8 @@ async function visiblePost(post: PostRow, staff: StaffFull): Promise<{ session: 
   if (!canSeePost({ ...staff, markets }, post)) return null;
   const session = await getSubmittedSession(post.session_id);
   if (!session || (await isHidden(session.id)) || isPast(session)) return null;
+  // Someone who marked the day unavailable does not see the shift.
+  if (await isUnavailable(staff.id, eventDayOf(session))) return null;
   const mine = (await assignmentsOf(session.id)).find((a) => a.staff_id === staff.id);
   if (mine && mine.status !== "declined") return null;
   let spots = 1;
@@ -588,6 +606,7 @@ export interface Requester {
   eventsWorked: number;
   sameDay: string[]; // "Maria · Wedding, arrive 3:00 PM"
   onEvent: boolean;
+  unavailable: boolean; // marked the event's day unavailable
 }
 
 export interface PostPanel {
@@ -606,6 +625,7 @@ export interface HandoffPanelRow {
   reason: string;
   fromName: string;
   teammateName: string;
+  teammateUnavailable: boolean;
   createdAt: string;
   postId: string | null;
   requesters: Requester[];
@@ -618,6 +638,7 @@ async function requestersFor(post: PostRow, session: SessionRow): Promise<Reques
   const people = await staffByIds(reqs.map((r) => r.staff_id));
   const onEvent = new Set((await assignmentsOf(session.id)).filter((a) => a.status !== "declined").map((a) => a.staff_id));
   const day = eventSchedule(eventData(session)).day;
+  const away = await unavailableOn(day);
   const out: Requester[] = [];
   for (const r of reqs) {
     const { data: theirs } = await supabase.from("event_assignments").select("session_id, status, session:session_id (*)").eq("staff_id", r.staff_id).eq("status", "accepted");
@@ -631,7 +652,7 @@ async function requestersFor(post: PostRow, session: SessionRow): Promise<Reques
       if (sch.day && sch.day < todayIn(sch.tz)) worked++;
       if (day && sch.day === day) sameDay.push([eventTitle(ed), sch.arrivalMin === null ? "" : `arrive ${formatClock(sch.arrivalMin)}`].filter(Boolean).join(", "));
     }
-    out.push({ staffId: r.staff_id, name: people.get(r.staff_id)?.name || "Unknown staff member", requestedAt: r.requested_at, eventsWorked: worked, sameDay, onEvent: onEvent.has(r.staff_id) });
+    out.push({ staffId: r.staff_id, name: people.get(r.staff_id)?.name || "Unknown staff member", requestedAt: r.requested_at, eventsWorked: worked, sameDay, onEvent: onEvent.has(r.staff_id), unavailable: away.has(r.staff_id) });
   }
   return out;
 }
@@ -653,6 +674,7 @@ export async function handoffPanel(session: SessionRow): Promise<HandoffPanelRow
   if (error) return [];
   const rows = (data as HandoffRow[]) ?? [];
   const people = await staffByIds([...new Set(rows.flatMap((h) => [h.from_staff_id, h.to_staff_id].filter((x): x is string => !!x)))]);
+  const away = await unavailableOn(eventDayOf(session));
   return Promise.all(
     rows.map(async (h) => {
       const post = h.mode === "market" ? await coverPostFor(h.id) : null;
@@ -664,6 +686,7 @@ export async function handoffPanel(session: SessionRow): Promise<HandoffPanelRow
         reason: h.reason,
         fromName: people.get(h.from_staff_id)?.name || "Unknown staff member",
         teammateName: h.to_staff_id ? people.get(h.to_staff_id)?.name || "" : "",
+        teammateUnavailable: !!h.to_staff_id && away.has(h.to_staff_id),
         createdAt: h.created_at,
         postId: post?.status === "posted" ? post.id : null,
         requesters: post?.status === "posted" ? await requestersFor(post, session) : [],
@@ -678,7 +701,7 @@ export async function handoffPanel(session: SessionRow): Promise<HandoffPanelRow
  * and everyone else who asked is texted. For a cover post this approves the
  * handoff to them.
  */
-export async function approveRequest(admin: StaffMember, postId: string, staffId: string): Promise<Result> {
+export async function approveRequest(admin: StaffMember, postId: string, staffId: string, opts: { confirmUnavailable?: boolean } = {}): Promise<Result> {
   const post = await postById(postId);
   if (!post || post.status !== "posted") return fail("This shift is not posted any more.", 404);
   const req = await myRequestStatus(postId, staffId);
@@ -688,11 +711,13 @@ export async function approveRequest(admin: StaffMember, postId: string, staffId
   if (post.kind === "cover") {
     const h = post.handoff_id ? await handoffById(post.handoff_id) : null;
     if (!h || h.status !== "open") return fail("This handoff is not open any more.");
-    return completeHandoff(h, staffId, admin);
+    return completeHandoff(h, staffId, admin, opts);
   }
   if ((await spotsOpen(session)) <= 0) return fail("No open spots left on this event.");
   const person = await staffById(staffId);
   if (!person || !person.active) return fail("That person is not on the active team.", 404);
+  const guard = await unavailableGuard(person, session, "Approve", opts.confirmUnavailable === true);
+  if (guard) return guard;
   const existing = (await assignmentsOf(session.id)).find((a) => a.staff_id === staffId);
   if (existing && existing.status !== "declined") return fail(`${firstName(person.name) || "They"} is already on this event.`);
 
@@ -887,13 +912,13 @@ export async function declineHandoff(handoffId: string, admin: StaffMember): Pro
 }
 
 /** An admin approves the teammate who accepted. */
-export async function approveHandoff(handoffId: string, admin: StaffMember): Promise<Result> {
+export async function approveHandoff(handoffId: string, admin: StaffMember, opts: { confirmUnavailable?: boolean } = {}): Promise<Result> {
   const h = await handoffById(handoffId);
   if (!h || h.mode !== "teammate") return fail("This handoff is not waiting for approval.", 404);
   if (h.status !== "teammate_accepted" || !h.to_staff_id) {
     return fail(h.status === "asked" ? "The teammate has not accepted yet." : "This handoff is not waiting for approval.");
   }
-  return completeHandoff(h, h.to_staff_id, admin);
+  return completeHandoff(h, h.to_staff_id, admin, opts);
 }
 
 /**
@@ -901,7 +926,7 @@ export async function approveHandoff(handoffId: string, admin: StaffMember): Pro
  * released and texted, the replacement becomes an accepted assignment with
  * no checklist progress, and gets the event page link.
  */
-async function completeHandoff(h: HandoffRow, replacementId: string, admin: StaffMember): Promise<Result> {
+async function completeHandoff(h: HandoffRow, replacementId: string, admin: StaffMember, opts: { confirmUnavailable?: boolean } = {}): Promise<Result> {
   const session = await getSubmittedSession(h.session_id);
   if (!session) return fail("We could not find that event.", 404);
   const rows = await assignmentsOf(session.id);
@@ -912,6 +937,8 @@ async function completeHandoff(h: HandoffRow, replacementId: string, admin: Staf
   if (!replacement || !replacement.active) return fail("That person is not on the active team.", 404);
   const theirs = rows.find((a) => a.staff_id === replacementId);
   if (theirs && theirs.status !== "declined") return fail(`${firstName(replacement.name) || "They"} is already on this event.`);
+  const guard = await unavailableGuard(replacement, session, "Approve", opts.confirmUnavailable === true);
+  if (guard) return guard;
 
   const now = new Date().toISOString();
   // The replacement first, so the event is never left with nobody if a step fails.

@@ -9,7 +9,7 @@
     "lint": "eslint",
     "test:pricing": "node --no-warnings scripts/test-pricing.mts",
     "test:menu": "node --no-warnings scripts/test-menu.mts",
-    "test:team": "node --no-warnings scripts/test-team.mts && node --no-warnings scripts/test-admin-edit.mts && node --no-warnings scripts/test-clock.mts && node --no-warnings scripts/test-timesheet.mts && node --no-warnings scripts/test-shifts.mts && node --no-warnings scripts/test-portal.mts && node --no-warnings scripts/test-select.mts && node --no-warnings scripts/test-dive.mts"
+    "test:team": "node --no-warnings scripts/test-team.mts && node --no-warnings scripts/test-admin-edit.mts && node --no-warnings scripts/test-clock.mts && node --no-warnings scripts/test-timesheet.mts && node --no-warnings scripts/test-shifts.mts && node --no-warnings scripts/test-portal.mts && node --no-warnings scripts/test-select.mts && node --no-warnings scripts/test-dive.mts && node --no-warnings scripts/test-availability.mts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.80.0",

@@ -7,11 +7,11 @@ async function setup(request: Request) {
   const staff = await getCurrentStaff();
   if (!staff) return { error: NextResponse.json({ error: "Sign in again." }, { status: 401 }) };
   if (staff.role !== "admin") return { error: NextResponse.json({ error: "Admins only." }, { status: 403 }) };
-  const { sessionId, staffId } = await request.json().catch(() => ({}));
+  const { sessionId, staffId, confirmUnavailable } = await request.json().catch(() => ({}));
   if (typeof sessionId !== "string" || typeof staffId !== "string") return { error: NextResponse.json({ error: "Bad request" }, { status: 400 }) };
   const session = await getSubmittedSession(sessionId);
   if (!session) return { error: NextResponse.json({ error: "We could not find that event." }, { status: 404 }) };
-  return { staff, session, staffId };
+  return { staff, session, staffId, confirmUnavailable: confirmUnavailable === true };
 }
 
 // Assign a staff member to an event. They get a text to accept or decline.
@@ -19,7 +19,7 @@ export async function POST(request: Request) {
   try {
     const s = await setup(request);
     if (s.error) return s.error;
-    const result = await assignStaff(s.session, s.staffId, s.staff, new URL(request.url).origin);
+    const result = await assignStaff(s.session, s.staffId, s.staff, new URL(request.url).origin, { confirmUnavailable: s.confirmUnavailable });
     if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.status });
     return NextResponse.json({ ok: true });
   } catch (err) {

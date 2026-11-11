@@ -45,25 +45,32 @@ export default function AssignPanel({
   summary: string;
   covered: boolean;
   people: AssigneeProgress[];
-  available: { id: string; name: string; role: string; declined: boolean; markets: string[] }[];
+  available: { id: string; name: string; role: string; declined: boolean; markets: string[]; unavailable: boolean; record?: string }[];
 }) {
   const router = useRouter();
   const [pick, setPick] = useState("");
   const [busy, setBusy] = useState("");
   const [removing, setRemoving] = useState("");
   const [error, setError] = useState("");
+  // The confirm step for someone who marked the event's day unavailable.
+  const [confirm, setConfirm] = useState<{ staffId: string; message: string } | null>(null);
 
-  const call = async (method: "POST" | "DELETE", staffId: string) => {
+  const call = async (method: "POST" | "DELETE", staffId: string, confirmUnavailable = false) => {
     setBusy(staffId);
     setError("");
     try {
       const res = await fetch("/api/team/admin/assign", {
         method,
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId, staffId }),
+        body: JSON.stringify({ sessionId, staffId, confirmUnavailable }),
       });
       const data = await res.json().catch(() => ({}));
+      if (res.status === 428) {
+        setConfirm({ staffId, message: data.error ?? "They marked this day unavailable. Assign anyway?" });
+        return;
+      }
       if (!res.ok) throw new Error(data.error ?? "Could not save.");
+      setConfirm(null);
       setPick("");
       setRemoving("");
       router.refresh();
@@ -157,6 +164,8 @@ export default function AssignPanel({
                   {s.role === "admin" ? " (admin)" : ""}
                   {s.declined ? " (declined before)" : ""}
                   {market && !s.markets.includes(market) ? " (other market)" : ""}
+                  {s.unavailable ? " (Unavailable)" : ""}
+                  {s.record ? ` · ${s.record}` : ""}
                 </option>
               ))}
             </select>
@@ -167,6 +176,22 @@ export default function AssignPanel({
               className="rounded-xl bg-[#B5845A] text-white px-4 py-2.5 font-medium disabled:opacity-40"
             >
               {busy && busy === pick ? "Assigning..." : "Assign"}
+            </button>
+          </div>
+        )}
+        {pick && available.find((s) => s.id === pick)?.unavailable && !confirm && (
+          <p className="text-xs text-[#9A7049] mt-2">
+            <span className="font-bold uppercase tracking-wide">Unavailable</span> {available.find((s) => s.id === pick)?.name.split(" ")[0]} marked this day unavailable.
+          </p>
+        )}
+        {confirm && (
+          <div className="mt-2 flex flex-wrap items-center gap-2 rounded-xl border border-[#E8C9A8] bg-[#FFF3DF] px-3 py-2">
+            <span className="text-sm text-[#2C2420]">{confirm.message}</span>
+            <button type="button" onClick={() => call("POST", confirm.staffId, true)} disabled={!!busy} className="rounded-lg bg-[#B5845A] text-white px-3 py-1.5 text-sm font-medium disabled:opacity-40">
+              {busy ? "Assigning..." : "Assign anyway"}
+            </button>
+            <button type="button" onClick={() => setConfirm(null)} className="text-sm text-[#6B5D52] underline">
+              Cancel
             </button>
           </div>
         )}

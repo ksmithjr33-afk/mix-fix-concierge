@@ -36,7 +36,7 @@ export async function POST(request: Request) {
       if (typeof body.postId !== "string" || (body.action === "approve" && typeof body.staffId !== "string")) {
         return NextResponse.json({ error: "Bad request" }, { status: 400 });
       }
-      const r = body.action === "unpost" ? await unpostShift(body.postId, staff) : await approveRequest(staff, body.postId, body.staffId);
+      const r = body.action === "unpost" ? await unpostShift(body.postId, staff) : await approveRequest(staff, body.postId, body.staffId, { confirmUnavailable: body.confirmUnavailable === true });
       if (!r.ok) return NextResponse.json({ error: r.error }, { status: r.status });
       return NextResponse.json({ ok: true });
     }

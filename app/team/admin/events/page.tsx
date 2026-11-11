@@ -10,6 +10,7 @@ import { chicagoToday, eventSchedule, todayIn } from "@/lib/team/time";
 import { selectBlock } from "@/lib/team/shifts";
 import { bartendersNeeded } from "@/lib/team/event-view";
 import StaffingBoard from "./staffing-board";
+import { availableCounts } from "@/lib/team/availability-db";
 import TeamHeader from "../../team-header";
 import EventList from "../../events/event-list";
 import HiddenList from "./hidden-list";
@@ -68,7 +69,11 @@ export default async function AdminEventsPage({
   // New events get a market from their address, a few per page load (the cron does the rest).
   await ensureMarkets(visible.filter((s) => (eventListItem(s).day ?? "9999") >= today), 3);
   const sessions = marketFilter ? visible.filter((s) => sessionMarket(s) === marketFilter) : visible;
-  const [counts, unread] = await Promise.all([staffingByEvent(sessions), unreadByEvent(admin.id, sessions.map((s) => s.id))]);
+  const [counts, unread, availability] = await Promise.all([
+    staffingByEvent(sessions),
+    unreadByEvent(admin.id, sessions.map((s) => s.id)),
+    view === "upcoming" ? availableCounts(sessions) : Promise.resolve(new Map<string, number | null>()),
+  ]);
   const { data: postRows, error: postErr } = await supabase.from("shift_posts").select("session_id, kind").eq("status", "posted");
   const posted = new Set(postErr ? [] : ((postRows as { session_id: string; kind: string }[]) ?? []).filter((p) => p.kind === "open").map((p) => p.session_id));
   const cover = new Set(postErr ? [] : ((postRows as { session_id: string; kind: string }[]) ?? []).filter((p) => p.kind === "cover").map((p) => p.session_id));
@@ -81,6 +86,8 @@ export default async function AdminEventsPage({
       posted.has(s.id) ? "posted" : "",
       cover.has(s.id) ? "cover needed" : "",
       sessionMarket(s) ? "" : "no market",
+      // Bartenders in the event's market who did not mark the day unavailable.
+      typeof availability.get(s.id) === "number" && (item.day ?? "") >= today ? `${availability.get(s.id)} available` : "",
     ]
       .filter(Boolean)
       .join(" · ");

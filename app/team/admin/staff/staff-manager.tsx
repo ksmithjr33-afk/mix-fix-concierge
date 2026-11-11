@@ -132,7 +132,7 @@ function Toggle({ on, label, disabled, onChange }: { on: boolean; label: string;
   );
 }
 
-function StaffRow({ s, meId, onSaved }: { s: StaffRecord; meId: string; onSaved: (s: StaffRecord) => void }) {
+function StaffRow({ s, meId, onSaved, notes }: { s: StaffRecord; meId: string; onSaved: (s: StaffRecord) => void; notes?: string[] }) {
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -183,11 +183,19 @@ function StaffRow({ s, meId, onSaved }: { s: StaffRecord; meId: string; onSaved:
             {!s.active && " · Inactive"}
           </p>
           <p className="text-sm text-[#6B5D52]">Markets: {marketNames(s.markets) || "None"}</p>
+          {(notes ?? []).map((n) => (
+            <p key={n} className="text-sm text-[#6B5D52] break-words">
+              {n}
+            </p>
+          ))}
         </div>
         <div className="shrink-0 flex flex-col items-end gap-1">
           <button type="button" onClick={() => setEditing(true)} className="text-sm text-[#B5845A] underline">
             Edit
           </button>
+          <a href={`/team/admin/staff/${s.id}`} className="text-sm text-[#B5845A] underline">
+            Details
+          </a>
           <a href={`/team/admin/preview/${s.id}`} className="text-sm text-[#B5845A] underline">
             Preview as
           </a>
@@ -206,7 +214,7 @@ function StaffRow({ s, meId, onSaved }: { s: StaffRecord; meId: string; onSaved:
   );
 }
 
-export default function StaffManager({ initial, meId }: { initial: StaffRecord[]; meId: string }) {
+export default function StaffManager({ initial, meId, notes = {} }: { initial: StaffRecord[]; meId: string; notes?: Record<string, string[]> }) {
   const [staff, setStaff] = useState(initial);
   const [adding, setAdding] = useState(false);
   const upsert = (s: StaffRecord) => setStaff((list) => (list.some((x) => x.id === s.id) ? list.map((x) => (x.id === s.id ? s : x)) : [s, ...list]));
@@ -240,7 +248,7 @@ export default function StaffManager({ initial, meId }: { initial: StaffRecord[]
         <h2 className="font-heading text-base font-bold text-[#2C2420]">Active ({active.length})</h2>
         <ul className="divide-y divide-[#DDD5CC]">
           {active.map((s) => (
-            <StaffRow key={s.id} s={s} meId={meId} onSaved={upsert} />
+            <StaffRow key={s.id} s={s} meId={meId} onSaved={upsert} notes={notes[s.id]} />
           ))}
         </ul>
       </section>
@@ -249,7 +257,7 @@ export default function StaffManager({ initial, meId }: { initial: StaffRecord[]
           <h2 className="font-heading text-base font-bold text-[#2C2420]">Inactive ({inactive.length})</h2>
           <ul className="divide-y divide-[#DDD5CC]">
             {inactive.map((s) => (
-              <StaffRow key={s.id} s={s} meId={meId} onSaved={upsert} />
+              <StaffRow key={s.id} s={s} meId={meId} onSaved={upsert} notes={notes[s.id]} />
             ))}
           </ul>
         </section>

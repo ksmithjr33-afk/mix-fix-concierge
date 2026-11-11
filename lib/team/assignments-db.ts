@@ -4,6 +4,8 @@
 // undoes or blocks the change that triggered it.
 
 import { supabase } from "@/lib/supabase";
+import { eventDayOf, isUnavailable } from "@/lib/team/availability-db";
+import { NEEDS_CONFIRM, unavailableConfirm } from "@/lib/team/availability";
 import type { SessionRow } from "@/lib/event-updates";
 import { normalizePhone } from "@/lib/team/codes";
 import { bartendersNeeded, firstName, type StaffMember } from "@/lib/team/event-view";
@@ -129,7 +131,13 @@ export async function assignmentsFor(sessionId: string): Promise<AssignmentRow[]
 export type ActionResult = { ok: true } | { ok: false; error: string; status: number };
 
 /** Offer an event to a staff member and text them. Someone who declined can be offered it again. */
-export async function assignStaff(session: SessionRow, staffId: string, admin: StaffMember, origin: string): Promise<ActionResult> {
+export async function assignStaff(
+  session: SessionRow,
+  staffId: string,
+  admin: StaffMember,
+  origin: string,
+  opts: { confirmUnavailable?: boolean } = {}
+): Promise<ActionResult> {
   if (await isHidden(session.id)) return { ok: false, error: "This event is hidden. Unhide it before assigning staff.", status: 409 };
   const staff = await staffById(staffId);
   if (!staff || !staff.active) return { ok: false, error: "That person is not on the active team.", status: 404 };
@@ -140,6 +148,11 @@ export async function assignStaff(session: SessionRow, staffId: string, admin: S
     .eq("staff_id", staffId)
     .maybeSingle();
   if (existing && existing.status !== "declined") return { ok: false, error: `${firstName(staff.name)} is already on this event.`, status: 409 };
+  // Someone who marked the day unavailable can still be assigned, after a confirm step.
+  const day = eventDayOf(session);
+  if (!opts.confirmUnavailable && day && (await isUnavailable(staffId, day))) {
+    return { ok: false, error: unavailableConfirm({ name: firstName(staff.name), day, verb: "Assign" }), status: NEEDS_CONFIRM };
+  }
 
   const { error } = await supabase.from("event_assignments").upsert(
     {

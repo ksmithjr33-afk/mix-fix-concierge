@@ -8,11 +8,11 @@ export async function POST(request: Request) {
   if (!staff) return NextResponse.json({ error: "Sign in again." }, { status: 401 });
   if (staff.role !== "admin") return NextResponse.json({ error: "Admins only." }, { status: 403 });
   try {
-    const { action, handoffId } = await request.json().catch(() => ({}));
+    const { action, handoffId, confirmUnavailable } = await request.json().catch(() => ({}));
     if (typeof handoffId !== "string" || (action !== "approve" && action !== "decline")) {
       return NextResponse.json({ error: "Bad request" }, { status: 400 });
     }
-    const r = action === "approve" ? await approveHandoff(handoffId, staff) : await declineHandoff(handoffId, staff);
+    const r = action === "approve" ? await approveHandoff(handoffId, staff, { confirmUnavailable: confirmUnavailable === true }) : await declineHandoff(handoffId, staff);
     if (!r.ok) return NextResponse.json({ error: r.error }, { status: r.status });
     return NextResponse.json({ ok: true });
   } catch (err) {

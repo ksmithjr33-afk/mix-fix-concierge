@@ -7,9 +7,13 @@ import { timeLabel } from "@/lib/team/clock-label";
 
 const card = "bg-[#F5F0EB] rounded-2xl border border-[#DDD5CC] px-4 py-3 sm:px-5 sm:py-4";
 
+class ConfirmNeeded extends Error {}
+
 async function post(url: string, body: Record<string, unknown>): Promise<Record<string, unknown>> {
   const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   const data = await res.json().catch(() => ({}));
+  // 428: the person marked the event's day unavailable, so the admin confirms first.
+  if (res.status === 428) throw new ConfirmNeeded(data.error ?? "They marked this day unavailable. Approve anyway?");
   if (!res.ok) throw new Error(data.error ?? "Could not save.");
   return data;
 }
@@ -19,21 +23,24 @@ function useAction() {
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [note, setNote] = useState("");
+  const [confirm, setConfirm] = useState<{ key: string; url: string; body: Record<string, unknown>; message: string } | null>(null);
   const run = async (key: string, url: string, body: Record<string, unknown>, done?: (d: Record<string, unknown>) => string) => {
     setBusy(key);
     setError("");
     setNote("");
     try {
       const d = await post(url, body);
+      setConfirm(null);
       if (done) setNote(done(d));
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not save.");
+      if (err instanceof ConfirmNeeded) setConfirm({ key, url, body: { ...body, confirmUnavailable: true }, message: err.message });
+      else setError(err instanceof Error ? err.message : "Could not save.");
     } finally {
       setBusy("");
     }
   };
-  return { busy, error, note, run };
+  return { busy, error, note, run, confirm, setConfirm };
 }
 
 function RequesterList({ people, postId, spots, tz, run, busy }: { people: Requester[]; postId: string; spots: number; tz: string; run: ReturnType<typeof useAction>["run"]; busy: string }) {
@@ -43,7 +50,10 @@ function RequesterList({ people, postId, spots, tz, run, busy }: { people: Reque
       {people.map((r) => (
         <li key={r.staffId} className="py-2.5 flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <p className="font-medium text-[#2C2420]">{r.name}</p>
+            <p className="font-medium text-[#2C2420]">
+              {r.name}
+              {r.unavailable && <span className="ml-2 align-middle text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-[#FFF3DF] text-[#9A7049]">Unavailable</span>}
+            </p>
             <p className="text-xs text-[#6B5D52]">
               Asked {timeLabel(r.requestedAt, undefined, tz)} · {r.eventsWorked} {r.eventsWorked === 1 ? "event" : "events"} worked
             </p>
@@ -86,7 +96,7 @@ export default function ShiftPanel({
   marketSource: string | null;
   timeZone: string;
 }) {
-  const { busy, error, note, run } = useAction();
+  const { busy, error, note, run, confirm, setConfirm } = useAction();
   const [market, setMarket] = useState(panel.market ?? "");
   const p = panel.post;
   const why = panel.hidden ? "Hidden events cannot be posted." : !panel.market ? "Set the market first." : panel.spotsOpen <= 0 ? "No open spots." : "";
@@ -168,7 +178,7 @@ export default function ShiftPanel({
             {h.mode === "teammate"
               ? h.status === "asked"
                 ? `Offered to ${h.teammateName}. Waiting for their answer.`
-                : `${h.teammateName} accepted. Approve to move the shift to them.`
+                : `${h.teammateName}${h.teammateUnavailable ? " (Unavailable that day)" : ""} accepted. Approve to move the shift to them.`
               : "Cover needed: open to the market. Approve one person who asked."}{" "}
             {h.fromName.split(" ")[0]} stays on the shift until you approve.
           </p>
@@ -185,6 +195,17 @@ export default function ShiftPanel({
           </div>
         </section>
       ))}
+      {confirm && (
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-[#E8C9A8] bg-[#FFF3DF] px-3 py-2">
+          <span className="text-sm text-[#2C2420]">{confirm.message}</span>
+          <button type="button" disabled={!!busy} onClick={() => run(confirm.key, confirm.url, confirm.body)} className="rounded-lg bg-[#8B9E7E] text-white px-3 py-1.5 text-sm font-medium disabled:opacity-40">
+            {busy ? "Approving..." : "Approve anyway"}
+          </button>
+          <button type="button" onClick={() => setConfirm(null)} className="text-sm text-[#6B5D52] underline">
+            Cancel
+          </button>
+        </div>
+      )}
       {note && <p className="text-sm text-[#55684A] px-1">{note}</p>}
       {error && <p className="text-sm text-[#A0412D] px-1">{error}</p>}
     </div>

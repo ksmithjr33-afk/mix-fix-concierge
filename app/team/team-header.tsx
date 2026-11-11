@@ -63,6 +63,9 @@ export default async function TeamHeader({
                 </Link>
               </>
             )}
+            <Link href="/team/me" className="text-xs sm:text-sm font-medium text-[#9A7049] hover:text-[#B5845A]">
+              Me
+            </Link>
             <Link href="/team/announcements" className="text-xs sm:text-sm font-medium text-[#9A7049] hover:text-[#B5845A]">
               <span className="hidden sm:inline">Announcements</span>
               <span className="sm:hidden">News</span>

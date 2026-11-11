@@ -1,6 +1,6 @@
 // In-memory stand-in for the Supabase client, for tests that run the real
 // update path without a database. Supports the query shapes the app uses:
-// select (with "alias:fk (cols)" joins), eq, neq, in, is, gte, order, limit,
+// select (with "alias:fk (cols)" joins), eq, neq, in, is, gte, lte, lt, order, limit,
 // maybeSingle, single, insert, update, upsert, delete, head counts, and rpc.
 
 import { randomUUID } from "node:crypto";
@@ -70,6 +70,14 @@ class Query implements PromiseLike<Result> {
   }
   gte(c: string, v: string) {
     this.filters.push((r) => String(r[c]) >= v);
+    return this;
+  }
+  lte(c: string, v: string) {
+    this.filters.push((r) => String(r[c]) <= v);
+    return this;
+  }
+  lt(c: string, v: string) {
+    this.filters.push((r) => String(r[c]) < v);
     return this;
   }
   not() {
