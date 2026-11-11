@@ -9,6 +9,7 @@ import { withoutHidden } from "@/lib/team/assignments";
 import TeamHeader from "../team-header";
 import EventList from "./event-list";
 import { openShiftsFor } from "@/lib/team/shifts-db";
+import { myCertNotices } from "@/lib/team/certs-db";
 import { assignedEventItems } from "@/lib/team/my-events";
 import { calendarGrid, calLinksOf, calMode, isYmd } from "@/lib/team/calendar";
 import CalendarView, { ListCalendarToggle } from "../calendar-view";
@@ -44,6 +45,7 @@ export default async function TeamEventsPage({
   const staff = await requireStaff(tab === "open" ? "/team/events?tab=open" : past ? "/team/events?past=1" : "/team/events");
   const admin = staff.role === "admin";
   const shifts = await openShiftsFor(staff);
+  const certNotes = tab === "open" && !admin ? await myCertNotices(staff.id) : { enforced: false, lines: [] };
   const [all, hidden] = await Promise.all([visibleEvents(staff.id, admin), hiddenEventIds()]);
   const events = withoutHidden(all, hidden);
   const today = chicagoToday();
@@ -78,6 +80,16 @@ export default async function TeamEventsPage({
             Open shifts{shifts.length ? ` (${shifts.length})` : ""}
           </Link>
         </nav>
+        {tab === "open" && certNotes.lines.length > 0 && (
+          <div className={`rounded-2xl px-4 py-3 text-[15px] space-y-1 ${certNotes.enforced ? "bg-[#F6E3DC] text-[#A0412D]" : "bg-[#FFF8EC] border border-[#E3C9A0] text-[#2C2420]"}`}>
+            {certNotes.lines.map((l) => (
+              <p key={l}>{l}</p>
+            ))}
+            <Link href="/team/certifications" className="underline">
+              My certifications
+            </Link>
+          </div>
+        )}
         {tab === "open" ? (
           shifts.length === 0 ? (
             <p className="text-[15px] text-[#6B5D52] bg-[#F5F0EB] rounded-2xl border border-[#DDD5CC] px-4 py-4">No open shifts in your markets right now. We text you when one is posted.</p>

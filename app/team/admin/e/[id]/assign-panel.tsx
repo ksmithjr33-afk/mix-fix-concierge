@@ -45,7 +45,7 @@ export default function AssignPanel({
   summary: string;
   covered: boolean;
   people: AssigneeProgress[];
-  available: { id: string; name: string; role: string; declined: boolean; markets: string[]; unavailable: boolean; record?: string }[];
+  available: { id: string; name: string; role: string; declined: boolean; markets: string[]; unavailable: boolean; record?: string; cert?: string }[];
 }) {
   const router = useRouter();
   const [pick, setPick] = useState("");
@@ -165,6 +165,7 @@ export default function AssignPanel({
                   {s.declined ? " (declined before)" : ""}
                   {market && !s.markets.includes(market) ? " (other market)" : ""}
                   {s.unavailable ? " (Unavailable)" : ""}
+                  {s.cert ? ` (${s.cert})` : ""}
                   {s.record ? ` · ${s.record}` : ""}
                 </option>
               ))}

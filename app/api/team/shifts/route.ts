@@ -13,7 +13,7 @@ export async function POST(request: Request) {
     }
     const r = action === "request" ? await requestShift(postId, staff) : await withdrawRequest(postId, staff);
     if (!r.ok) return NextResponse.json({ error: r.error }, { status: r.status });
-    return NextResponse.json({ ok: true, ...("overlap" in r ? { overlap: r.overlap } : {}) });
+    return NextResponse.json({ ok: true, ...("overlap" in r ? { overlap: r.overlap, certWarning: "certWarning" in r ? r.certWarning : null } : {}) });
   } catch (err) {
     console.error("[team] shift request error:", err);
     return NextResponse.json({ error: "Could not save. Try again." }, { status: 500 });

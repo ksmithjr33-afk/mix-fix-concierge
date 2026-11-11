@@ -17,6 +17,8 @@ import { eventData, marketLabel, marketTz, sessionMarket, staffMarketsOf, type M
 import { staffingCounts, type AssignmentStatus } from "@/lib/team/assignments";
 import { eventDayOf, isUnavailable, unavailableOn } from "@/lib/team/availability-db";
 import { NEEDS_CONFIRM, unavailableConfirm } from "@/lib/team/availability";
+import { certConfirmProblem, requestGate } from "@/lib/team/certs-db";
+import { blockText, warnText } from "@/lib/team/certs";
 import { eventDay, eventSchedule, formatClock, shortDate, todayIn } from "@/lib/team/time";
 import {
   ACTIVE_HANDOFF,
@@ -159,9 +161,22 @@ async function marketBartenders(post: PostRow, session: SessionRow, exclude: Set
 /** The admin confirm step: an action on someone who marked the event's day unavailable needs confirmUnavailable. */
 async function unavailableGuard(person: { id: string; name: string }, session: SessionRow, verb: "Assign" | "Approve", confirmed: boolean) {
   if (confirmed) return null;
+  const message = await confirmProblems(person, session, verb);
+  return message ? fail(message, NEEDS_CONFIRM) : null;
+}
+
+/**
+ * The admin confirm step names every problem at once: marked the day
+ * unavailable, and (while certifications are enforced) a missing, rejected, or
+ * expired certification for the event's market. Null when there is nothing.
+ */
+export async function confirmProblems(person: { id: string; name: string }, session: SessionRow, verb: "Assign" | "Approve"): Promise<string | null> {
   const day = eventDayOf(session);
-  if (!day || !(await isUnavailable(person.id, day))) return null;
-  return fail(unavailableConfirm({ name: firstName(person.name), day, verb }), NEEDS_CONFIRM);
+  const parts: string[] = [];
+  if (day && (await isUnavailable(person.id, day))) parts.push(unavailableConfirm({ name: firstName(person.name), day, verb }).replace(/ \w+ anyway\?$/, ""));
+  const cert = await certConfirmProblem(person, sessionMarket(session));
+  if (cert) parts.push(cert);
+  return parts.length ? `${parts.join(" ")} ${verb} anyway?` : null;
 }
 
 export interface NoticePlan {
@@ -566,10 +581,12 @@ export async function shiftForStaff(postId: string, staff: StaffMember): Promise
 }
 
 /** Ask for a shift. Allowed with a warning when it overlaps another event they are on. Admins hear about the first request. */
-export async function requestShift(postId: string, staff: StaffMember): Promise<Result<{ overlap: boolean }>> {
+export async function requestShift(postId: string, staff: StaffMember): Promise<Result<{ overlap: boolean; certWarning: string | null }>> {
   const post = await postById(postId);
   const v = post ? await visiblePost(post, staff) : null;
   if (!post || !v) return fail("This shift is no longer open.", 404);
+  const gate = await requestGate(staff.id, post.market);
+  if (gate.blocked && gate.standing) return fail(blockText(gate.standing, marketLabel(post.market)), 403);
   const now = new Date().toISOString();
   const { error } = await supabase
     .from("shift_requests")
@@ -581,7 +598,7 @@ export async function requestShift(postId: string, staff: StaffMember): Promise<
     const f = facts(v.session);
     await textAdmins(firstRequestText({ name: staff.name, title: f.title, date: f.date, link: adminLink(v.session.id) }));
   }
-  return { ok: true, overlap };
+  return { ok: true, overlap, certWarning: gate.standing ? warnText(gate.standing, marketLabel(post.market)) : null };
 }
 
 export async function withdrawRequest(postId: string, staff: StaffMember): Promise<Result> {

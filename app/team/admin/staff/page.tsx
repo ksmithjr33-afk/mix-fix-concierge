@@ -4,6 +4,9 @@ import TeamHeader from "../../team-header";
 import StaffManager from "./staff-manager";
 import { upcomingUnavailableByStaff } from "@/lib/team/availability-db";
 import { compactLines } from "@/lib/team/reliability-db";
+import { certLinesByStaff, certsEnforced, onboardingProgress } from "@/lib/team/certs-db";
+import { ONBOARDING } from "@/lib/team/cert-config";
+import EnforceToggle from "./enforce-toggle";
 import { rangeLabel } from "@/lib/team/availability";
 import { chicagoToday } from "@/lib/team/time";
 
@@ -12,11 +15,20 @@ export const dynamic = "force-dynamic";
 export default async function AdminStaffPage() {
   const me = await requireAdmin("/team/admin/staff");
   const [staff, away] = await Promise.all([listStaff(), upcomingUnavailableByStaff(chicagoToday())]);
-  const records = await compactLines(staff.map((s) => s.id));
+  const [records, certLines, onboard, enforced] = await Promise.all([
+    compactLines(staff.map((s) => s.id)),
+    certLinesByStaff(staff),
+    onboardingProgress(staff.map((s) => s.id)),
+    certsEnforced(),
+  ]);
   // One line per person per topic, shown under their name.
   const notes: Record<string, string[]> = {};
   const add = (id: string, line: string) => (notes[id] = [...(notes[id] ?? []), line]);
-  for (const s of staff) add(s.id, `Record: ${records[s.id]}`);
+  for (const s of staff) {
+    add(s.id, `Record: ${records[s.id]}`);
+    if (certLines[s.id]) add(s.id, `Certification: ${certLines[s.id]}`);
+    if (s.role !== "admin") add(s.id, `Onboarding: ${onboard.get(s.id) ?? 0} of ${ONBOARDING.length}`);
+  }
   for (const [id, rows] of away) {
     const shown = rows.slice(0, 3).map(rangeLabel).join("; ");
     add(id, `Unavailable: ${shown}${rows.length > 3 ? ` and ${rows.length - 3} more` : ""}`);
@@ -29,6 +41,7 @@ export default async function AdminStaffPage() {
           <h1 className="font-heading text-2xl font-bold text-[#2C2420]">Staff</h1>
           <p className="text-[15px] text-[#6B5D52]">Add, edit, or deactivate. Admins with alerts on get texts about declines, missing items, and bar check ins.</p>
         </div>
+        <EnforceToggle initial={enforced} />
         <StaffManager initial={staff} meId={me.id} notes={notes} />
       </main>
     </>

@@ -4,8 +4,7 @@
 // undoes or blocks the change that triggered it.
 
 import { supabase } from "@/lib/supabase";
-import { eventDayOf, isUnavailable } from "@/lib/team/availability-db";
-import { NEEDS_CONFIRM, unavailableConfirm } from "@/lib/team/availability";
+import { NEEDS_CONFIRM } from "@/lib/team/availability";
 import type { SessionRow } from "@/lib/event-updates";
 import { normalizePhone } from "@/lib/team/codes";
 import { bartendersNeeded, firstName, type StaffMember } from "@/lib/team/event-view";
@@ -17,7 +16,7 @@ import { hasPunches } from "@/lib/team/clock-db";
 import { workedMinutes } from "@/lib/team/clock";
 import { eventDay, eventSchedule, formatClock, shortDate } from "@/lib/team/time";
 import { cleanMarkets, eventData, staffMarketsOf } from "@/lib/team/markets";
-import { cancelHandoffsFor, closeIfFilled } from "@/lib/team/shifts-db";
+import { cancelHandoffsFor, closeIfFilled, confirmProblems } from "@/lib/team/shifts-db";
 import {
   assignText,
   canRespond,
@@ -148,10 +147,10 @@ export async function assignStaff(
     .eq("staff_id", staffId)
     .maybeSingle();
   if (existing && existing.status !== "declined") return { ok: false, error: `${firstName(staff.name)} is already on this event.`, status: 409 };
-  // Someone who marked the day unavailable can still be assigned, after a confirm step.
-  const day = eventDayOf(session);
-  if (!opts.confirmUnavailable && day && (await isUnavailable(staffId, day))) {
-    return { ok: false, error: unavailableConfirm({ name: firstName(staff.name), day, verb: "Assign" }), status: NEEDS_CONFIRM };
+  // Someone who marked the day unavailable, or (when enforced) has no current certification, can still be assigned after a confirm step.
+  if (!opts.confirmUnavailable) {
+    const problem = await confirmProblems(staff, session, "Assign");
+    if (problem) return { ok: false, error: problem, status: NEEDS_CONFIRM };
   }
 
   const { error } = await supabase.from("event_assignments").upsert(

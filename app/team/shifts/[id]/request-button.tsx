@@ -8,6 +8,7 @@ export default function RequestButton({ postId, initial, overlaps }: { postId: s
   const [confirmOverlap, setConfirmOverlap] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [warning, setWarning] = useState("");
 
   const send = async (action: "request" | "withdraw") => {
     setBusy(true);
@@ -16,6 +17,7 @@ export default function RequestButton({ postId, initial, overlaps }: { postId: s
       const res = await fetch("/api/team/shifts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, postId }) });
       const d = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(d.error ?? "Could not save.");
+      setWarning(typeof d.certWarning === "string" ? d.certWarning : "");
       setStatus(action === "request" ? "requested" : "none");
       setConfirmOverlap(false);
     } catch (err) {
@@ -56,6 +58,7 @@ export default function RequestButton({ postId, initial, overlaps }: { postId: s
           {busy ? "Requesting..." : "Request this shift"}
         </button>
       )}
+      {warning && <p className="text-sm text-[#9A7049]">{warning}</p>}
       {error && <p className="text-sm text-[#A0412D]">{error}</p>}
     </div>
   );

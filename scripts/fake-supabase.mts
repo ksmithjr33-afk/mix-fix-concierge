@@ -192,5 +192,5 @@ export const rpcs: Record<string, (args: Record<string, unknown>) => { data: unk
 export const supabase = {
   from: (table: string) => new Query(table),
   rpc: async (name: string, args: Record<string, unknown> = {}) => (rpcs[name] ? rpcs[name](args) : { data: null, error: { message: `function ${name} does not exist` } }),
-  storage: { from: () => ({ upload: async () => ({ error: null }), remove: async () => ({ error: null }), createSignedUrls: async () => ({ data: [], error: null }) }) },
+  storage: { from: () => ({ upload: async () => ({ error: null }), remove: async () => ({ error: null }), createSignedUrls: async () => ({ data: [], error: null }), createSignedUrl: async (p: string) => ({ data: { signedUrl: `https://signed.test/${p}` }, error: null }) }) },
 };
