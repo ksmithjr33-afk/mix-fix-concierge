@@ -1,39 +1,23 @@
 import Link from "next/link";
-import { supabase } from "@/lib/supabase";
 import { requireStaff } from "@/lib/team/auth";
 import { firstName } from "@/lib/team/event-view";
-import { eventListItem, pastSection, upcomingSections, type EventListItem, type EventRowSource } from "@/lib/team/event-list";
+import { pastSection, upcomingSections } from "@/lib/team/event-list";
 import { chicagoToday } from "@/lib/team/time";
-import { hiddenEventIds } from "@/lib/team/hidden";
-import { withoutHidden } from "@/lib/team/assignments";
 import TeamHeader from "../team-header";
 import EventList from "./event-list";
 import { openShiftsFor } from "@/lib/team/shifts-db";
 import { myCertNotices } from "@/lib/team/certs-db";
 import { myEstimates } from "@/lib/team/pay-db";
-import { assignedEventItems } from "@/lib/team/my-events";
-import { calendarGrid, calLinksOf, calMode, isYmd } from "@/lib/team/calendar";
+import { eventsForViewer, myUnavailableDays, shiftItems } from "@/lib/team/my-events";
+import { pickLayout } from "@/lib/team/calendar";
+import { getPrefs, savePrefs } from "@/lib/team/prefs-db";
+import { myPickups } from "@/lib/team/menu-pickup-db";
+import { staffMarkets } from "@/lib/team/markets-db";
+import { MARKETS, MARKET_INFO } from "@/lib/team/markets";
 import CalendarView, { ListCalendarToggle } from "../calendar-view";
+import MyPickupCard from "../menu-pickup-card";
 
 export const dynamic = "force-dynamic";
-
-// "*" so the event's market (and its time zone) comes along once the column exists.
-const COLUMNS = "*";
-
-/** Events this staff member can open: every submitted event for admins, assigned events for bartenders. */
-async function visibleEvents(staffId: string, admin: boolean): Promise<EventListItem[]> {
-  if (admin) {
-    // Every event, with the admin's own assignment status where they are on one.
-    const [{ data }, { data: mine }] = await Promise.all([
-      supabase.from("sessions").select(COLUMNS).eq("status", "submitted"),
-      supabase.from("event_assignments").select("session_id, status").eq("staff_id", staffId),
-    ]);
-    const own = new Map(((mine as { session_id: string; status: string }[]) ?? []).map((a) => [a.session_id, a.status]));
-    // Admins open the manager view of each event.
-    return ((data as EventRowSource[]) ?? []).map((r) => ({ ...eventListItem(r, own.get(r.id)), href: `/team/admin/e/${r.id}` }));
-  }
-  return assignedEventItems(staffId);
-}
 
 export default async function TeamEventsPage({
   searchParams,
@@ -42,35 +26,36 @@ export default async function TeamEventsPage({
 }) {
   const params = await searchParams;
   const tab = params.tab === "open" ? "open" : "mine";
-  const calendar = tab === "mine" && params.layout === "calendar";
-  const past = tab === "mine" && !calendar && params.past === "1";
-  const staff = await requireStaff(tab === "open" ? "/team/events?tab=open" : past ? "/team/events?past=1" : "/team/events");
+  const askedPast = tab === "mine" && params.past === "1";
+  const staff = await requireStaff(tab === "open" ? "/team/events?tab=open" : askedPast ? "/team/events?past=1" : "/team/events");
   const admin = staff.role === "admin";
+  // List or calendar: the address bar, else what this person used last.
+  const prefs = await getPrefs(staff.id);
+  if (tab === "mine" && (params.layout === "list" || params.layout === "calendar") && params.layout !== prefs.eventsLayout) {
+    Object.assign(prefs, await savePrefs(staff.id, { eventsLayout: params.layout }, prefs));
+  }
+  const calendar = tab === "mine" && !askedPast && pickLayout(params.layout, prefs.eventsLayout) === "calendar";
+  const past = askedPast;
   const shifts = await openShiftsFor(staff);
   const certNotes = tab === "open" && !admin ? await myCertNotices(staff.id) : { enforced: false, lines: [] };
-  const [all, hidden] = await Promise.all([visibleEvents(staff.id, admin), hiddenEventIds()]);
-  const visible = withoutHidden(all, hidden);
+  // Admins: every event. Bartenders: only their own events. Hidden events never.
+  const visible = await eventsForViewer(staff);
   // The viewer's own estimated pay, only on events they are on. Never anyone else's.
   const pay = await myEstimates(staff.id, visible.filter((e) => e.status === "accepted" || e.status === "offered").map((e) => e.id));
   const events = visible.map((e) => (pay[e.id] && (e.status === "accepted" || e.status === "offered") ? { ...e, pay: pay[e.id] } : e));
   const today = chicagoToday();
   const sections = past ? pastSection(events, today) : upcomingSections(events, today);
   const hasPast = events.some((e) => e.day && e.day < today);
-  const mode = calMode(params.cal);
-  const anchor = isYmd(params.d) ? params.d : today;
-  const calLink = (o: { mode?: "week" | "month"; d?: string }) => {
-    const q = new URLSearchParams({ layout: "calendar" });
-    const m = o.mode ?? mode;
-    const d = o.d === "today" ? today : (o.d ?? anchor);
-    if (m !== "week") q.set("cal", m);
-    if (d !== today) q.set("d", d);
-    return `/team/events?${q.toString()}`;
-  };
+  const pickups = tab === "mine" && !past ? await myPickups(staff) : [];
+  // The calendar: bartenders also see open shifts in their markets and their own unavailable days, as they do today elsewhere.
+  const calItems = calendar ? (admin ? events : [...events, ...shiftItems(shifts)]) : [];
+  const unavailable = calendar && !admin ? await myUnavailableDays(staff.id, today) : [];
+  const filterMarkets = calendar ? (admin ? [...MARKETS] : await staffMarkets(staff.id)) : [];
 
   return (
     <>
       <TeamHeader signedIn admin={admin} />
-      <main className="max-w-2xl mx-auto px-4 py-6 space-y-4">
+      <main className={`${calendar ? "max-w-[96rem] sm:px-6" : "max-w-2xl"} mx-auto px-4 py-6 space-y-4`}>
         <div className="px-1">
           <h1 className="font-heading text-2xl font-bold text-[#2C2420]">Hi {firstName(staff.name) || "there"}</h1>
           <p className="text-[15px] text-[#6B5D52]">
@@ -85,6 +70,9 @@ export default async function TeamEventsPage({
             Open shifts{shifts.length ? ` (${shifts.length})` : ""}
           </Link>
         </nav>
+        {pickups.map((p) => (
+          <MyPickupCard key={p.sessionId} pickup={p} />
+        ))}
         {tab === "open" && certNotes.lines.length > 0 && (
           <div className={`rounded-2xl px-4 py-3 text-[15px] space-y-1 ${certNotes.enforced ? "bg-[#F6E3DC] text-[#A0412D]" : "bg-[#FFF8EC] border border-[#E3C9A0] text-[#2C2420]"}`}>
             {certNotes.lines.map((l) => (
@@ -127,11 +115,19 @@ export default async function TeamEventsPage({
           <>
             {!past && (
               <div className="px-1">
-                <ListCalendarToggle calendar={calendar} listHref="/team/events" calendarHref={calLink({})} />
+                <ListCalendarToggle calendar={calendar} listHref="/team/events?layout=list" calendarHref="/team/events?layout=calendar" />
               </div>
             )}
             {calendar ? (
-              <CalendarView grid={calendarGrid(mode, anchor, today, events)} links={calLinksOf(calendarGrid(mode, anchor, today, events), calLink)} empty={admin ? "No events in this range." : "None of your events fall in this range."} />
+              <CalendarView
+                items={calItems}
+                today={today}
+                prefs={prefs}
+                markets={filterMarkets.map((m) => ({ key: m, label: MARKET_INFO[m].label }))}
+                unavailable={unavailable}
+                empty={admin ? "No events in this range." : "None of your events or open shifts fall in this range."}
+                audience={admin ? "admin" : "staff"}
+              />
             ) : (
               <EventList sections={sections} empty={past ? "No past events." : "No upcoming events yet."} respond={!past} />
             )}
@@ -139,7 +135,7 @@ export default async function TeamEventsPage({
         )}
         <div className="px-1 pt-2" hidden={tab === "open" || calendar}>
           {past ? (
-            <Link href="/team/events" className="text-sm text-[#B5845A] underline">
+            <Link href="/team/events?layout=list" className="text-sm text-[#B5845A] underline">
               Back to upcoming events
             </Link>
           ) : (

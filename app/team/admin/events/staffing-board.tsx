@@ -2,8 +2,8 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import type { ListSection } from "@/lib/team/event-list";
-import { shownEvents, type CalGrid, type CalLinks } from "@/lib/team/calendar";
+import type { EventListItem, ListSection } from "@/lib/team/event-list";
+import type { CalPrefs } from "@/lib/team/calendar";
 import { selectedMessage } from "@/lib/team/select-message";
 import EventList from "../../events/event-list";
 import CalendarView from "../../calendar-view";
@@ -17,15 +17,19 @@ import CalendarView from "../../calendar-view";
 export default function StaffingBoard({
   calendar,
   sections,
-  grid,
-  links,
+  items,
+  today,
+  prefs,
+  markets,
   empty,
   reasons,
 }: {
   calendar: boolean;
   sections: ListSection[];
-  grid: CalGrid | null;
-  links: CalLinks | null;
+  items: EventListItem[]; // the calendar's events, every market (it has its own filter)
+  today: string;
+  prefs: CalPrefs;
+  markets: { key: string; label: string }[];
   empty: string;
   reasons: Record<string, string>;
 }) {
@@ -72,20 +76,12 @@ export default function StaffingBoard({
   };
 
   const select = selecting ? { selected, reasons, toggle, selectAll } : undefined;
-  const calIds = grid ? shownEvents(grid).filter((e) => !reasons[e.id]).map((e) => e.id) : [];
 
   return (
     <div className={`space-y-3 ${selecting ? "pb-24" : ""}`}>
       <div className="flex flex-wrap items-center gap-3 px-1">
         {selecting ? (
-          <>
-            <span className="text-sm text-[#2C2420]">Tick the events to post to their markets.</span>
-            {calendar && (
-              <button type="button" onClick={() => selectAll(calIds)} disabled={calIds.length === 0} className="text-sm text-[#9A7049] underline disabled:opacity-40">
-                Select all shown ({calIds.length})
-              </button>
-            )}
-          </>
+          <span className="text-sm text-[#2C2420]">Tick the events to post to their markets.</span>
         ) : (
           <button
             type="button"
@@ -101,15 +97,15 @@ export default function StaffingBoard({
       </div>
       {message && <p className="px-1 text-sm text-[#55684A]">{message}</p>}
 
-      {calendar && grid && links ? (
-        <CalendarView grid={grid} links={links} empty={empty} select={select} />
+      {calendar ? (
+        <CalendarView items={items} today={today} prefs={prefs} markets={markets} empty={empty} select={select} audience="admin" />
       ) : (
         <EventList sections={sections} empty={empty} select={select} />
       )}
 
       {selecting && (
         <div className="fixed inset-x-0 bottom-0 z-30 border-t border-[#DDD5CC] bg-[#F5F0EB]/95 backdrop-blur px-4 py-3">
-          <div className="max-w-2xl mx-auto flex flex-wrap items-center gap-3">
+          <div className={`${calendar ? "max-w-[96rem]" : "max-w-2xl"} mx-auto flex flex-wrap items-center gap-3`}>
             <button
               type="button"
               onClick={post}

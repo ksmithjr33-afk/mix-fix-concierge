@@ -152,3 +152,9 @@ export function hideError(statuses: AssignmentStatus[]): string | null {
 export function withoutHidden<T extends { id: string }>(items: T[], hidden: Set<string>): T[] {
   return items.filter((i) => !hidden.has(i.id));
 }
+
+/** The calendar color: nobody assigned, spots still open, or fully staffed. */
+export function staffingTone(c: Pick<StaffingCounts, "assigned" | "stillNeeded">): "full" | "open" | "none" {
+  if (c.assigned === 0) return "none";
+  return c.stillNeeded > 0 ? "open" : "full";
+}

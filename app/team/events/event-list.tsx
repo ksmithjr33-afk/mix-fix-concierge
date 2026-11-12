@@ -151,6 +151,7 @@ export default function EventList({ sections, empty, respond = false, select }: 
                         <span className="min-w-0 flex-1">
                           <span className="flex items-center gap-2">
                             <span className="truncate font-heading font-bold text-[#2C2420]">{e.title}</span>
+                            {!!e.chat?.unread && <span className="shrink-0 h-2.5 w-2.5 rounded-full bg-[#A0412D]" title="Unread chat messages" aria-label="Unread chat messages" />}
                             {offered && <span className={`shrink-0 text-[11px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded ${BADGE.warn}`}>New</span>}
                             {e.badge && (
                               <span className={`shrink-0 text-[11px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded ${BADGE[e.badge.tone]}`}>{e.badge.text}</span>

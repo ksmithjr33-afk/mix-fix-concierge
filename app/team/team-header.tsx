@@ -1,12 +1,14 @@
 import Link from "next/link";
 import { getCurrentStaff, getSignedInStaff } from "@/lib/team/auth";
 import { unreadAnnouncements } from "@/lib/team/announcements-db";
+import ChatAlerts from "./chat-alerts";
 
 /**
  * Header shared by the team pages: logo, admin links for admins, the
  * Announcements link with an unread count, the Bartender view switch for
  * admins, and a sign out button when signed in. In Bartender view the admin
- * links are gone and a banner offers the way back.
+ * links are gone and a banner offers the way back. The chat icon shows
+ * unread team chat messages on every page, with a pop up for new ones.
  */
 export default async function TeamHeader({
   signedIn,
@@ -63,6 +65,7 @@ export default async function TeamHeader({
                 </Link>
               </>
             )}
+            {viewed && <ChatAlerts />}
             <Link href="/team/me" className="text-xs sm:text-sm font-medium text-[#9A7049] hover:text-[#B5845A]">
               Me
             </Link>

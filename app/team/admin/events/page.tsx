@@ -3,7 +3,7 @@ import { supabase } from "@/lib/supabase";
 import type { SessionRow } from "@/lib/event-updates";
 import { requireAdmin } from "@/lib/team/auth";
 import { staffingByEvent } from "@/lib/team/assignments-db";
-import { staffingLabel, withoutHidden } from "@/lib/team/assignments";
+import { staffingLabel, staffingTone, withoutHidden } from "@/lib/team/assignments";
 import { hiddenEventIds } from "@/lib/team/hidden";
 import { dayHeader, eventListItem, pastSection, upcomingSections } from "@/lib/team/event-list";
 import { chicagoToday, eventSchedule, todayIn } from "@/lib/team/time";
@@ -17,8 +17,10 @@ import HiddenList from "./hidden-list";
 import PostAll from "./post-all";
 import { ensureMarkets } from "@/lib/team/markets-db";
 import { eventData, isMarket, MARKETS, MARKET_INFO, sessionMarket } from "@/lib/team/markets";
-import { calendarGrid, calLinksOf, calMode, isYmd } from "@/lib/team/calendar";
+import { isYmd, pickLayout } from "@/lib/team/calendar";
 import { unreadByEvent } from "@/lib/team/chat-db";
+import { getPrefs, savePrefs } from "@/lib/team/prefs-db";
+import { pickupBadges } from "@/lib/team/menu-pickup-db";
 import { ListCalendarToggle } from "../../calendar-view";
 import { orderStatuses } from "@/lib/order-sheet-db";
 import { STATUS_LABEL } from "@/lib/order-sheet";
@@ -41,8 +43,14 @@ export default async function AdminEventsPage({
   // Date range filter on the event day, either end optional.
   const from = isYmd(params.from) ? params.from : null;
   const to = isYmd(params.to) ? params.to : null;
-  const calendar = view === "upcoming" && params.layout === "calendar";
   const admin = await requireAdmin(view === "upcoming" ? "/team/admin/events" : `/team/admin/events?${view}=1`);
+  // List or calendar: the address bar, else what this admin used last.
+  const prefs = await getPrefs(admin.id);
+  const layout = pickLayout(params.layout, prefs.staffingLayout);
+  if (view === "upcoming" && (params.layout === "list" || params.layout === "calendar") && params.layout !== prefs.staffingLayout) {
+    Object.assign(prefs, await savePrefs(admin.id, { staffingLayout: params.layout }, prefs));
+  }
+  const calendar = view === "upcoming" && layout === "calendar";
   const [{ data }, hidden] = await Promise.all([supabase.from("sessions").select("*").eq("status", "submitted"), hiddenEventIds()]);
   const allSessions = (data as SessionRow[]) ?? [];
   const today = chicagoToday();
@@ -79,13 +87,15 @@ export default async function AdminEventsPage({
     if (!from && !to) return true;
     return !!day && (!from || day >= from) && (!to || day <= to);
   };
-  const sessions = (marketFilter ? visible.filter((s) => sessionMarket(s) === marketFilter) : visible).filter(inRange);
-  const [counts, unread, availability, orders, heldLists] = await Promise.all([
+  // The calendar gets every market and date: it has its own market filter and navigation.
+  const sessions = calendar ? visible : (marketFilter ? visible.filter((s) => sessionMarket(s) === marketFilter) : visible).filter(inRange);
+  const [counts, unread, availability, orders, heldLists, menus] = await Promise.all([
     staffingByEvent(sessions),
     unreadByEvent(admin.id, sessions.map((s) => s.id)),
     view === "upcoming" ? availableCounts(sessions) : Promise.resolve(new Map<string, number | null>()),
     orderStatuses(sessions),
     sessionsWithPendingHolds(sessions.map((s) => s.id)),
+    pickupBadges(sessions.map((s) => s.id)),
   ]);
   const { data: postRows, error: postErr } = await supabase.from("shift_posts").select("session_id, kind").eq("status", "posted");
   const posted = new Set(postErr ? [] : ((postRows as { session_id: string; kind: string }[]) ?? []).filter((p) => p.kind === "open").map((p) => p.session_id));
@@ -103,33 +113,35 @@ export default async function AdminEventsPage({
       typeof availability.get(s.id) === "number" && (item.day ?? "") >= today ? `${availability.get(s.id)} available` : "",
       orders.has(s.id) ? STATUS_LABEL[orders.get(s.id)!] : "",
       heldLists.has(s.id) ? "list change waiting" : "",
+      menus.get(s.id)?.text ?? "",
     ]
       .filter(Boolean)
       .join(" · ");
-    return { ...item, href: `/team/admin/e/${s.id}`, badge: { text, tone }, chat: { href: `/team/admin/e/${s.id}?tab=chat`, unread: unread.get(s.id) ?? 0 } };
+    const menu = menus.get(s.id);
+    return {
+      ...item,
+      href: `/team/admin/e/${s.id}`,
+      badge: { text, tone },
+      chat: { href: `/team/admin/e/${s.id}?tab=chat`, unread: unread.get(s.id) ?? 0 },
+      staffing: staffingTone(c),
+      ...(menu ? { menu: { state: menu.state as "unassigned" | "assigned" | "picked_up", text: menu.text } } : {}),
+    };
   });
   const unstaffed = sessions.filter((s) => {
     const day = eventListItem(s).day;
     return !!day && day >= today && (counts.get(s.id)?.stillNeeded ?? 0) > 0 && !posted.has(s.id);
   }).length;
-  const mode = calMode(params.cal);
-  const anchor = isYmd(params.d) ? params.d : today;
-  const href = (o: { past?: boolean; market?: string | null; layout?: "calendar" | null; cal?: string; d?: string; dates?: boolean }) => {
+  const href = (o: { past?: boolean; market?: string | null; layout?: "calendar" | "list" | null; dates?: boolean }) => {
     const q = new URLSearchParams();
     if (o.past) q.set("past", "1");
     if (o.market) q.set("market", o.market);
     if (o.dates !== false && from) q.set("from", from);
     if (o.dates !== false && to) q.set("to", to);
     if (o.layout) q.set("layout", o.layout);
-    if (o.layout && o.cal && o.cal !== "week") q.set("cal", o.cal);
-    if (o.layout && o.d && o.d !== today) q.set("d", o.d);
     const qs = q.toString();
     return `/team/admin/events${qs ? `?${qs}` : ""}`;
   };
-  const filterHref = (m: string | null) =>
-    href({ past: view === "past", market: m, layout: calendar ? "calendar" : null, cal: mode, d: anchor });
-  const calLink = (o: { mode?: "week" | "month"; d?: string }) =>
-    href({ market: marketFilter, layout: "calendar", cal: o.mode ?? mode, d: o.d === "today" ? today : (o.d ?? anchor) });
+  const filterHref = (m: string | null) => href({ past: view === "past", market: m });
   // Select mode: why an event has no checkbox (hidden events are not listed here).
   const reasons: Record<string, string> = {};
   for (const s of sessions) {
@@ -145,14 +157,13 @@ export default async function AdminEventsPage({
     });
     if (why) reasons[s.id] = why;
   }
-  const grid = calendar ? calendarGrid(mode, anchor, today, items) : null;
   const sections = view === "past" ? pastSection(items, today) : upcomingSections(items, today);
   const open = items.filter((i) => (!i.day || i.day >= today) && i.badge.tone === "warn").length;
 
   return (
     <>
       <TeamHeader signedIn admin />
-      <main className="max-w-2xl mx-auto px-4 py-6 space-y-4">
+      <main className={`${calendar ? "max-w-[96rem] sm:px-6" : "max-w-2xl"} mx-auto px-4 py-6 space-y-4`}>
         <div className="px-1">
           <div className="flex items-baseline justify-between gap-3">
             <h1 className="font-heading text-2xl font-bold text-[#2C2420]">Staffing</h1>
@@ -168,6 +179,7 @@ export default async function AdminEventsPage({
                 : "Every upcoming event is covered"}
           </p>
         </div>
+        {!calendar && (
         <nav className="flex flex-wrap gap-1.5 px-1" aria-label="Market">
           {[null, ...MARKETS].map((m) => (
             <Link
@@ -179,10 +191,11 @@ export default async function AdminEventsPage({
             </Link>
           ))}
         </nav>
+        )}
+        {!calendar && (
         <form method="get" action="/team/admin/events" className="px-1 flex flex-wrap items-end gap-2" aria-label="Date range">
           {view === "past" && <input type="hidden" name="past" value="1" />}
           {marketFilter && <input type="hidden" name="market" value={marketFilter} />}
-          {calendar && <input type="hidden" name="layout" value="calendar" />}
           <label className="text-xs text-[#A39585] uppercase tracking-wide">
             From
             <input type="date" name="from" defaultValue={from ?? ""} className="block rounded-lg border border-[#DDD5CC] bg-white px-2 py-1 text-[#2C2420]" />
@@ -195,14 +208,15 @@ export default async function AdminEventsPage({
             Filter dates
           </button>
           {(from || to) && (
-            <Link href={href({ past: view === "past", market: marketFilter, layout: calendar ? "calendar" : null, dates: false })} className="text-sm text-[#B5845A] underline pb-1.5">
+            <Link href={href({ past: view === "past", market: marketFilter, dates: false })} className="text-sm text-[#B5845A] underline pb-1.5">
               Clear dates
             </Link>
           )}
         </form>
+        )}
         {view === "upcoming" && (
           <div className="px-1">
-            <ListCalendarToggle calendar={calendar} listHref={href({ market: marketFilter })} calendarHref={calLink({})} />
+            <ListCalendarToggle calendar={calendar} listHref={href({ market: marketFilter, layout: "list" })} calendarHref={href({ layout: "calendar", dates: false })} />
           </div>
         )}
         {view === "upcoming" && <PostAll count={unstaffed} market={marketFilter} />}
@@ -210,9 +224,11 @@ export default async function AdminEventsPage({
           <StaffingBoard
             calendar={calendar}
             sections={sections}
-            grid={grid}
-            links={grid ? calLinksOf(grid, calLink) : null}
-            empty={calendar ? (marketFilter ? "No events in this market in this range." : "No events in this range.") : marketFilter ? "No upcoming events in this market." : "No upcoming events."}
+            items={items}
+            today={today}
+            prefs={prefs}
+            markets={MARKETS.map((m) => ({ key: m, label: MARKET_INFO[m].label }))}
+            empty={calendar ? "No events in this range." : marketFilter ? "No upcoming events in this market." : "No upcoming events."}
             reasons={reasons}
           />
         ) : (

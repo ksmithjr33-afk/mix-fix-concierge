@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import type { StaffEventView } from "@/lib/team/event-view";
 import { CHECKLIST_INTRO, CHECKLIST_TITLE, CONFIRM_LABEL, type ResolvedGroup } from "@/lib/team/checklist-config";
 import type { ShopItem, ShoppingGroup } from "@/lib/team/shopping";
@@ -15,6 +15,9 @@ import ClockCard from "./clock-card";
 import GiveUp, { type GiveUpProps } from "./give-up";
 import type { ClockView } from "@/lib/team/clock-db";
 import ChatThread, { type ChatProps } from "./chat-thread";
+import { useLiveUnread, useOpenChat } from "../../chat-focus";
+import MyPickupCard from "../../menu-pickup-card";
+import type { MyPickup } from "@/lib/team/menu-pickup-db";
 
 
 export type Tab = "details" | "checklist" | "shopping" | "wrapup" | "chat";
@@ -537,8 +540,10 @@ export default function EventTabs({
   giveUp,
   chat,
   initialTab = "details",
+  menuPickup = null,
 }: {
   chat: ChatProps;
+  menuPickup?: MyPickup | null; // "Pick up the menu", when this person is picking it up
   initialTab?: Tab;
   giveUp: GiveUpProps | null;
   offered: boolean;
@@ -560,7 +565,8 @@ export default function EventTabs({
   pay?: string | null; // the viewer's own estimated pay
 }) {
   const [tab, setTab] = useState<Tab>(initialTab);
-  const [chatUnread, setChatUnread] = useState(initialTab === "chat" ? 0 : chat.unread);
+  const chatUnread = useLiveUnread(chat.sessionId, initialTab === "chat" ? 0 : chat.unread, tab === "chat");
+  useOpenChat(chat.sessionId, useCallback(() => setTab("chat"), []));
   const [wrapped, setWrapped] = useState(wrapUpDone);
   const tabs: [Tab, string][] = [
     ["details", "Details"],
@@ -591,6 +597,8 @@ export default function EventTabs({
 
       {offered && <RespondBanner sessionId={view.sessionId} />}
 
+      {menuPickup && <MyPickupCard pickup={menuPickup} showEvent={false} />}
+
       {giveUp?.handoff && <GiveUp {...giveUp} />}
 
       {clock.canPunch && (
@@ -615,7 +623,6 @@ export default function EventTabs({
             aria-selected={tab === key}
             onClick={() => {
               setTab(key);
-              if (key === "chat") setChatUnread(0);
             }}
             className={`py-2 px-0.5 rounded-lg text-[13px] sm:text-sm font-medium leading-tight transition-colors ${
               tab === key ? "bg-[#F5F0EB] text-[#2C2420] shadow-sm" : "text-[#6B5D52]"

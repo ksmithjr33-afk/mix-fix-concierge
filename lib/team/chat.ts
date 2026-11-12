@@ -76,3 +76,55 @@ export function unreadCount(messages: { staff_id: string | null; created_at: str
   const t = since ? new Date(since).getTime() : -Infinity;
   return messages.filter((m) => m.staff_id !== me && new Date(m.created_at).getTime() > t).length;
 }
+
+// ----- Notifications inside the app -----
+
+/** How far back the unread check looks. Older unread messages stop counting. */
+export const INBOX_DAYS = 60;
+export const INBOX_SNIPPET = 80;
+
+export interface InboxMessage {
+  id: string;
+  session_id: string;
+  staff_id: string | null;
+  body: string;
+  created_at: string;
+}
+
+export interface InboxEntry {
+  sessionId: string;
+  unread: number;
+  latest: InboxMessage;
+}
+
+/**
+ * Unread chats for one person, newest first: messages from others after they
+ * last read that thread, in threads they are notified for (`eligible`; null
+ * means every thread, for admins), leaving out muted threads.
+ */
+export function inboxFrom(
+  messages: InboxMessage[],
+  o: { me: string; lastRead: Map<string, string>; eligible: Set<string> | null; muted: Set<string> }
+): InboxEntry[] {
+  const by = new Map<string, InboxEntry>();
+  for (const m of messages) {
+    if (m.staff_id === o.me) continue;
+    if (o.eligible && !o.eligible.has(m.session_id)) continue;
+    if (o.muted.has(m.session_id)) continue;
+    const read = o.lastRead.get(m.session_id);
+    if (read && new Date(m.created_at).getTime() <= new Date(read).getTime()) continue;
+    const cur = by.get(m.session_id);
+    if (!cur) by.set(m.session_id, { sessionId: m.session_id, unread: 1, latest: m });
+    else {
+      cur.unread++;
+      if (m.created_at > cur.latest.created_at) cur.latest = m;
+    }
+  }
+  return [...by.values()].sort((a, b) => b.latest.created_at.localeCompare(a.latest.created_at));
+}
+
+/** The start of a message on one line, for the chat list and the pop up. */
+export function inboxSnippet(body: string): string {
+  const one = body.replace(/\s+/g, " ").trim();
+  return one.length > INBOX_SNIPPET ? `${one.slice(0, INBOX_SNIPPET).trimEnd()}...` : one;
+}

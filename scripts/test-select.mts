@@ -76,9 +76,10 @@ check("Calendar select all covers the days shown", shownEvents(grid).some((e) =>
 const board = src("app/team/admin/events/staffing-board.tsx");
 const list = src("app/team/events/event-list.tsx");
 check("The list's select all uses the searched list, not every event", /const ids = shown\.flatMap[\s\S]{0,120}!select\.reasons\[e\.id\]/.test(list));
-check("The calendar's select all uses the shown days and skips reasons", board.includes("shownEvents(grid).filter((e) => !reasons[e.id])"));
+const calView = src("app/team/calendar-view.tsx");
+check("The calendar's select all uses the shown days and skips reasons", calView.includes('visibleEvents.filter((e) => e.kind !== "shift" && !select.reasons[e.id])') && calView.includes("select.selectAll!(selectable)"));
 check("The bottom bar says Post <n> shifts and Cancel", board.includes("`Post ${selected.size} ${selected.size === 1 ? \"shift\" : \"shifts\"}`") && board.includes(">\n              Cancel"));
-check("Select mode works in list and calendar", board.includes("<CalendarView grid={grid} links={links} empty={empty} select={select} />") && board.includes("<EventList sections={sections} empty={empty} select={select} />"));
+check("Select mode works in list and calendar", board.includes('<CalendarView items={items} today={today} prefs={prefs} markets={markets} empty={empty} select={select} audience="admin" />') && board.includes("<EventList sections={sections} empty={empty} select={select} />"));
 const page = src("app/team/admin/events/page.tsx");
 check("Post all unstaffed is kept", page.includes("<PostAll count={unstaffed} market={marketFilter} />"));
 check("The per event Post shift button is kept", src("app/team/admin/e/[id]/shift-panel.tsx").includes('action: "post"'));

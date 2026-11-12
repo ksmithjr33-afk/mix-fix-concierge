@@ -502,7 +502,8 @@ const hideRoute = readFileSync(new URL("../app/api/team/admin/hide/route.ts", im
 check("/api/team/admin/hide is admin only", hideRoute.includes("getCurrentStaff()") && hideRoute.includes('role !== "admin"') && hideRoute.includes("status: 403"));
 check("Hidden events cannot be assigned", /assignStaff[\s\S]*?if \(await isHidden\(session\.id\)\) return \{ ok: false/.test(asgDb));
 const staffEventsSrc = readFileSync(new URL("../app/team/events/page.tsx", import.meta.url), "utf8");
-check("Hidden events are left out of /team/events", staffEventsSrc.includes("withoutHidden(all, hidden)"));
+const myEventsSrc = readFileSync(new URL("../lib/team/my-events.ts", import.meta.url), "utf8");
+check("Hidden events are left out of /team/events", staffEventsSrc.includes("await eventsForViewer(staff)") && myEventsSrc.includes("withoutHidden((data as (SessionRow & EventRowSource)[]) ?? [], hidden)") && myEventsSrc.includes("return withoutHidden(items, await hiddenEventIds());"));
 const adminEventsSrc = readFileSync(new URL("../app/team/admin/events/page.tsx", import.meta.url), "utf8");
 check("Hidden events are left out of staffing and its needs count", adminEventsSrc.includes("const visible = withoutHidden(allSessions, hidden);") && adminEventsSrc.includes("? visible.filter(") && adminEventsSrc.indexOf("withoutHidden(allSessions") < adminEventsSrc.indexOf("const open ="));
 check("The staffing page links to Hidden events", adminEventsSrc.includes('href="/team/admin/events?hidden=1"'));

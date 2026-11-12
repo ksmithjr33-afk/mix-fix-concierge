@@ -15,7 +15,7 @@ import { eventTitle } from "@/lib/team/event-list";
 import { eventData } from "@/lib/team/markets";
 import { sendStaffText } from "@/lib/team/sms";
 import { siteOrigin } from "@/lib/team/clock-db";
-import { canUseThread, chatNoticePlan, chatText, cleanMessage, unreadCount, type ChatNoticeRow } from "@/lib/team/chat";
+import { canUseThread, chatNoticePlan, chatText, cleanMessage, inboxFrom, inboxSnippet, redactClient, unreadCount, INBOX_DAYS, type ChatNoticeRow, type InboxMessage } from "@/lib/team/chat";
 
 interface MessageRow {
   id: string;
@@ -100,7 +100,8 @@ async function threadMembers(sessionId: string, messages: MessageRow[]): Promise
   const assigned = ((data as { staff_id: string; status: string }[]) ?? []).filter((a) => a.status !== "declined").map((a) => a.staff_id);
   const posters = messages.map((m) => m.staff_id).filter((x): x is string => !!x);
   const people = await staffMap([...new Set([...assigned, ...posters])]);
-  return [...people.values()].filter((p) => p.active && (assigned.includes(p.id) || p.role === "admin"));
+  const muted = await mutedBy(sessionId);
+  return [...people.values()].filter((p) => p.active && (assigned.includes(p.id) || (p.role === "admin" && !muted.has(p.id))));
 }
 
 async function noticeRow(sessionId: string, staffId: string): Promise<ChatNoticeRow | null> {
@@ -223,4 +224,94 @@ export async function unreadByEvent(staffId: string, sessionIds?: string[]): Pro
     if (n > 0) out.set(sid, n);
   }
   return out;
+}
+
+// ----- Notifications inside the app -----
+
+/** Admins who muted this event's chat. */
+async function mutedBy(sessionId: string): Promise<Set<string>> {
+  const { data, error } = await supabase.from("event_chat_mutes").select("staff_id").eq("session_id", sessionId);
+  if (error || !data) return new Set();
+  return new Set((data as { staff_id: string }[]).map((r) => r.staff_id));
+}
+
+/** The events whose chat this person muted. */
+export async function mutedChats(staffId: string): Promise<Set<string>> {
+  const { data, error } = await supabase.from("event_chat_mutes").select("session_id").eq("staff_id", staffId);
+  if (error || !data) return new Set();
+  return new Set((data as { session_id: string }[]).map((r) => r.session_id));
+}
+
+/** Admins only: mute or unmute an event's chat for themselves. */
+export async function setChatMuted(sessionId: string, staff: StaffMember, muted: boolean): Promise<Result<{ muted: boolean }>> {
+  if (staff.role !== "admin") return { ok: false, error: "Only admins can mute a chat.", status: 403 };
+  if (!(await getSubmittedSession(sessionId))) return { ok: false, error: "We could not find that event.", status: 404 };
+  const { error } = muted
+    ? await supabase.from("event_chat_mutes").upsert({ session_id: sessionId, staff_id: staff.id }, { onConflict: "session_id,staff_id", ignoreDuplicates: true })
+    : await supabase.from("event_chat_mutes").delete().eq("session_id", sessionId).eq("staff_id", staff.id);
+  if (error) return { ok: false, error: "Could not save. Try again.", status: 500 };
+  return { ok: true, muted };
+}
+
+/** The threads a person is notified for: every thread for admins (null), the events they are on for everyone else. */
+async function notifiedThreads(staff: StaffMember): Promise<Set<string> | null> {
+  if (staff.role === "admin") return null;
+  const { data } = await supabase.from("event_assignments").select("session_id, status").eq("staff_id", staff.id);
+  return new Set(((data as { session_id: string; status: string }[]) ?? []).filter((a) => canUseThread(staff, a.status)).map((a) => a.session_id));
+}
+
+export interface InboxChat {
+  sessionId: string;
+  title: string;
+  href: string; // the event's Chat tab
+  unread: number;
+  latest: { id: string; from: string; text: string; at: string };
+}
+
+/**
+ * The unread check: per chat with unread messages, the count and the newest
+ * message (sender's first name and the start of it), newest first. Bartenders
+ * only for events they are on; admins for every event they have not muted.
+ * Never the viewer's own messages, never client contact details.
+ */
+export async function chatInbox(staff: StaffMember, now: Date = new Date()): Promise<{ total: number; chats: InboxChat[] }> {
+  const empty = { total: 0, chats: [] };
+  if (!staff.active) return empty;
+  const eligible = await notifiedThreads(staff);
+  if (eligible && eligible.size === 0) return empty;
+  const since = new Date(now.getTime() - INBOX_DAYS * 86_400_000).toISOString();
+  let q = supabase.from("event_messages").select("id, session_id, staff_id, body, created_at").gte("created_at", since);
+  if (eligible) q = q.in("session_id", [...eligible]);
+  const [{ data, error }, { data: reads }, muted] = await Promise.all([q, supabase.from("event_message_reads").select("session_id, last_read_at").eq("staff_id", staff.id), mutedChats(staff.id)]);
+  if (error || !data) return empty;
+  const lastRead = new Map(((reads as { session_id: string; last_read_at: string }[]) ?? []).map((r) => [r.session_id, r.last_read_at]));
+  const entries = inboxFrom(data as InboxMessage[], { me: staff.id, lastRead, eligible, muted: staff.role === "admin" ? muted : new Set() });
+  if (entries.length === 0) return empty;
+  const ids = entries.map((e) => e.sessionId);
+  const [{ data: sessions }, people] = await Promise.all([
+    supabase.from("sessions").select("id, status, event_date, event_data").in("id", ids),
+    staffMap([...new Set(entries.map((e) => e.latest.staff_id).filter((x): x is string => !!x))]),
+  ]);
+  const byId = new Map(((sessions as (SessionRow & { status: string })[]) ?? []).filter((s) => s.status === "submitted").map((s) => [s.id, s]));
+  const chats: InboxChat[] = [];
+  for (const e of entries) {
+    const s = byId.get(e.sessionId);
+    if (!s) continue;
+    const ed = s.event_data ?? {};
+    const author = e.latest.staff_id ? people.get(e.latest.staff_id) : undefined;
+    chats.push({
+      sessionId: e.sessionId,
+      title: eventTitle(eventData(s)),
+      href: staff.role === "admin" ? `/team/admin/e/${encodeURIComponent(e.sessionId)}?tab=chat` : `/team/e/${encodeURIComponent(e.sessionId)}?tab=chat`,
+      unread: e.unread,
+      latest: {
+        id: e.latest.id,
+        from: firstName(author?.name) || "Mix Fix",
+        // Saved messages already have client details taken out; this is a second check.
+        text: inboxSnippet(redactClient(e.latest.body, { email: ed.client_email, phone: ed.client_phone, name: ed.client_name })),
+        at: e.latest.created_at,
+      },
+    });
+  }
+  return { total: chats.reduce((n, c) => n + c.unread, 0), chats };
 }

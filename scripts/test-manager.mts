@@ -66,7 +66,7 @@ const eventPage = src("app/team/e/[id]/page.tsx");
 check("The event page sends admins on before loading any event data", eventPage.indexOf("redirect(landing)") > 0 && eventPage.indexOf("redirect(landing)") < eventPage.indexOf("openEvent("));
 check("The bartender view offers admins Back to manager view", src("app/team/e/[id]/event-tabs.tsx").includes("Back to manager view") && eventPage.includes('managerHref={staff.role === "admin"'));
 check("Manage staff for this event is gone", !src("app/team/e/[id]/event-tabs.tsx").includes("Manage staff for this event"));
-check("Admin event lists open the manager view", src("app/team/events/page.tsx").includes("href: `/team/admin/e/${r.id}`") && src("app/team/admin/events/page.tsx").includes("href: `/team/admin/e/${s.id}`"));
+check("Admin event lists open the manager view", src("lib/team/my-events.ts").includes("href: `/team/admin/e/${r.id}`") && src("app/team/admin/events/page.tsx").includes("href: `/team/admin/e/${s.id}`"));
 
 // ----- Tabs and their links -----
 check("Six tabs in order", tabs.MANAGER_TABS.map(([, l]) => l).join(" | ") === "Details | Team | Shopping list | Client list | Day of | Chat");

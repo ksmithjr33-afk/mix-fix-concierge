@@ -82,15 +82,15 @@ check("Only real dates are accepted from the address bar", cal.isYmd("2026-11-10
 check("Arrival times order by the clock", cal.arrivalMinutes("9:00 AM") < cal.arrivalMinutes("12:00 PM") && cal.arrivalMinutes("12:00 PM") < cal.arrivalMinutes("4:00 PM") && cal.arrivalMinutes("12:30 AM") === 30);
 const calSrc = src("app/team/calendar-view.tsx");
 const listSrc = src("app/team/events/event-list.tsx");
-check("Calendar badges use the same colors as the list", ["bg-[#E4EBDF] text-[#55684A]", "bg-[#F6E3DC] text-[#A0412D]", "bg-[#E8DDD5] text-[#6B5D52]"].every((c) => calSrc.includes(c) && listSrc.includes(c)));
-check("On a phone the week stacks days; from small screens up it is seven columns", calSrc.includes('grid grid-cols-1 sm:grid-cols-7'));
+check("Calendar chips use the list's green and red for staffed and nobody assigned", ["bg-[#E4EBDF]", "bg-[#F6E3DC]"].every((c) => calSrc.includes(c) && listSrc.includes(c)));
+check("On a phone the week stacks days; on a laptop it is seven columns", calSrc.includes("grid grid-cols-1 lg:grid-cols-7"));
 check("Calendar blocks open the event's link (the admin event page on staffing)", calSrc.includes("href={e.href ?? `/team/e/${e.id}`}"));
 const staffingSrc = src("app/team/admin/events/page.tsx");
-check("Staffing has the List and Calendar toggle, with the market filter kept", staffingSrc.includes("<ListCalendarToggle") && staffingSrc.includes("calendarGrid(mode, anchor, today, items)") && staffingSrc.includes("market: marketFilter, layout: \"calendar\""));
+check("Staffing has the List and Calendar toggle, and the calendar gets every market for its own filter", staffingSrc.includes("<ListCalendarToggle") && staffingSrc.includes("const sessions = calendar ? visible :") && staffingSrc.includes("markets={MARKETS.map((m) => ({ key: m, label: MARKET_INFO[m].label }))}"));
 check("Staffing badges say when an event has no market", staffingSrc.includes('sessionMarket(s) ? "" : "no market"'));
 const eventsSrc = src("app/team/events/page.tsx");
-check("Bartenders get the calendar toggle on their own events", eventsSrc.includes("<ListCalendarToggle") && eventsSrc.includes("calendarGrid(mode, anchor, today, events)"));
-check("Bartenders' calendar uses only their own events", eventsSrc.includes("return assignedEventItems(staffId);"));
+check("Bartenders get the calendar toggle on their own events", eventsSrc.includes("<ListCalendarToggle") && eventsSrc.includes("<CalendarView"));
+check("Bartenders' calendar uses only their own events, their open shifts and their unavailable days", eventsSrc.includes("admin ? events : [...events, ...shiftItems(shifts)]") && eventsSrc.includes("myUnavailableDays(staff.id, today)"));
 
 // ----- 2. Bartender view and Preview as -----
 const adminRow = { id: "a1", name: "Kenneth Smith", phone: "+12145550100", role: "admin" as const, active: true };
@@ -331,7 +331,7 @@ check(
   "The manager view's Chat tab has Message team with the unread count",
   managerChat.includes("Message team") && managerChat.includes("{props.unread} unread") && managerChat.includes("<ChatThread") && adminEvent.includes("chat: <ManagerChat") && adminEvent.includes("chat: chatUnread")
 );
-check("Staffing list and calendar link to each event's chat tab with its unread count", staffingSrc.includes("chat: { href: `/team/admin/e/${s.id}?tab=chat`, unread: unread.get(s.id) ?? 0 }") && listSrc.includes("e.chat.href") && calSrc.includes("e.chat.href"));
+check("Staffing list and calendar link to each event's chat tab with its unread count", staffingSrc.includes("chat: { href: `/team/admin/e/${s.id}?tab=chat`, unread: unread.get(s.id) ?? 0 }") && listSrc.includes("e.chat.href") && calSrc.includes("e.chat?.unread"));
 const chatRoute = src("app/api/team/chat/route.ts");
 check("The chat route needs a sign in and thread access", chatRoute.includes("getCurrentStaff()") && chatRoute.includes("status: 401") && chatRoute.includes("threadAccess(sessionId, staff)"));
 

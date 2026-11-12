@@ -14,6 +14,7 @@ import { assignmentRef, clockView, punchesFor } from "@/lib/team/clock-db";
 import { eventData } from "@/lib/team/markets";
 import { myHandoff, teammateChoices } from "@/lib/team/shifts-db";
 import { markThreadRead, threadMessages, unreadByEvent } from "@/lib/team/chat-db";
+import { myPickupFor } from "@/lib/team/menu-pickup-db";
 import TeamHeader from "../../team-header";
 import EventTabs, { type Tab } from "./event-tabs";
 
@@ -62,13 +63,14 @@ export default async function TeamEventPage({
   }
 
   const ed = eventData(access.session);
-  const [data, entries, assignment, messages, unread, closeout] = await Promise.all([
+  const [data, entries, assignment, messages, unread, closeout, menuPickup] = await Promise.all([
     eventPageData(access.session, staff),
     barReadyEntries(id, staff),
     assignmentRef(id, staff.id),
     threadMessages(id, staff),
     unreadByEvent(staff.id, [id]),
     closeoutState(access.session, staff),
+    myPickupFor(id, staff),
   ]);
   if (chatTab) await markThreadRead(id, staff.id);
   const punches = assignment ? await punchesFor(assignment.id) : [];
@@ -120,6 +122,7 @@ export default async function TeamEventPage({
             : null
         }
         wrapUpDone={!!closeout.mine}
+        menuPickup={menuPickup}
       />
     </>
   );

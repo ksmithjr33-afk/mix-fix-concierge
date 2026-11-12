@@ -1,6 +1,7 @@
 "use client";
 
-import { createContext, useContext, useState } from "react";
+import { createContext, useCallback, useContext, useState } from "react";
+import { useLiveUnread, useOpenChat } from "../../../chat-focus";
 import { MANAGER_TABS, type ManagerTab } from "@/lib/team/manager-tabs";
 
 // The manager view's tab bar: the same look and spacing as the bartender
@@ -15,26 +16,28 @@ export function useActiveTab(): ManagerTab {
 }
 
 export default function ManagerTabs({
+  sessionId,
   initialTab,
   counts,
   panels,
   header,
 }: {
+  sessionId: string;
   initialTab: ManagerTab;
   counts: Partial<Record<ManagerTab, number>>; // something needs attention
   panels: Record<ManagerTab, React.ReactNode>;
   header: React.ReactNode;
 }) {
   const [tab, setTab] = useState<ManagerTab>(initialTab);
-  const [seen, setSeen] = useState<ManagerTab[]>(initialTab === "chat" ? ["chat"] : []);
-  const pick = (t: ManagerTab) => {
+  const chatUnread = useLiveUnread(sessionId, initialTab === "chat" ? 0 : (counts.chat ?? 0), tab === "chat");
+  const pick = useCallback((t: ManagerTab) => {
     setTab(t);
-    if (t === "chat") setSeen((s) => [...s, "chat"]);
     const url = new URL(window.location.href);
     if (t === "details") url.searchParams.delete("tab");
     else url.searchParams.set("tab", t);
     window.history.replaceState(null, "", url.toString());
-  };
+  }, []);
+  useOpenChat(sessionId, useCallback(() => pick("chat"), [pick]));
 
   return (
     <main className={`${tab === "order" ? "max-w-[52rem]" : "max-w-2xl"} mx-auto px-4 py-4 sm:py-6 space-y-4 print:max-w-none print:p-0`}>
@@ -42,7 +45,7 @@ export default function ManagerTabs({
       <nav className="-mx-4 px-4 overflow-x-auto print:hidden" aria-label="Manager view">
         <div className="flex sm:grid sm:grid-cols-6 gap-1 bg-[#DDD5CC] p-1 rounded-xl min-w-max sm:min-w-0" role="tablist">
           {MANAGER_TABS.map(([key, label]) => {
-            const n = key === "chat" && seen.includes("chat") ? 0 : (counts[key] ?? 0);
+            const n = key === "chat" ? chatUnread : (counts[key] ?? 0);
             return (
               <button
                 key={key}

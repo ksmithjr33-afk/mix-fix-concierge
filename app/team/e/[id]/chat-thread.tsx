@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChatMessage } from "@/lib/team/chat-db";
+import { CHAT_READ, setOpenChat } from "../../chat-focus";
 
 export interface ChatProps {
   sessionId: string;
@@ -29,11 +30,22 @@ export default function ChatThread({ sessionId, initial, active, timeZone }: Cha
     try {
       const res = await fetch(`/api/team/chat?sessionId=${encodeURIComponent(sessionId)}`, { cache: "no-store" });
       const data = await res.json().catch(() => ({}));
-      if (res.ok && Array.isArray(data.messages)) setMessages(data.messages);
+      if (res.ok && Array.isArray(data.messages)) {
+        setMessages(data.messages);
+        // Loading the thread marked it read: the chat icon checks again.
+        window.dispatchEvent(new Event(CHAT_READ));
+      }
     } catch {
       // Offline: keep what is shown.
     }
   }, [sessionId]);
+
+  // While this chat is on screen, no pop up for it.
+  useEffect(() => {
+    if (!active) return;
+    setOpenChat(sessionId);
+    return () => setOpenChat(null);
+  }, [active, sessionId]);
 
   useEffect(() => {
     if (!active) return;

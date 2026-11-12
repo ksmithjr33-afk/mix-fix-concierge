@@ -6,7 +6,9 @@ import { staffingCounts, staffingLabel } from "@/lib/team/assignments";
 import { bartendersNeeded } from "@/lib/team/event-view";
 import { eventTitle } from "@/lib/team/event-list";
 import TeamHeader from "../../../team-header";
-import { markThreadRead, threadMessages, unreadByEvent } from "@/lib/team/chat-db";
+import { markThreadRead, mutedChats, threadMessages, unreadByEvent } from "@/lib/team/chat-db";
+import { adminPickupView } from "@/lib/team/menu-pickup-db";
+import MenuPickupPanel from "./menu-pickup-panel";
 import AssignPanel from "./assign-panel";
 import HideAction from "./hide-action";
 import EditEvent, { type EditValues } from "./edit-event";
@@ -80,7 +82,7 @@ export default async function AdminEventPage({
   await ensureMarket(session); // works out the market from the address the first time, and after an address change
   await syncOrderSheet(session);
   const supplies = await staffSupplies(session); // the bartenders' list, read from the Shopping list
-  const [people, staff, hidden, panel, handoffs, unread, view, sheet, bar, missing, messages] = await Promise.all([
+  const [people, staff, hidden, panel, handoffs, unread, view, sheet, bar, missing, messages, pickup, muted] = await Promise.all([
     assigneeProgress(session, supplies.list),
     listStaff(),
     isHidden(id),
@@ -92,6 +94,8 @@ export default async function AdminEventPage({
     barReadyEntries(id, me),
     missingReports(id),
     threadMessages(id, me),
+    adminPickupView(session),
+    mutedChats(me.id),
   ]);
   if (tab === "chat") await markThreadRead(id, me.id);
   const v = { ...view, drinks: withDrinkEdits(view.drinks, supplies.recipes) };
@@ -173,6 +177,7 @@ export default async function AdminEventPage({
   const panels: Record<ManagerTab, React.ReactNode> = {
     details: (
       <>
+        <MenuPickupPanel initial={pickup} people={staff.filter((s) => s.active).map((s) => ({ id: s.id, name: s.name || s.phone, role: s.role }))} />
         <Details v={v} />
         {!hidden && <EditEvent sessionId={id} version={session.version} initial={editValues} packages={packages} />}
         <HideAction sessionId={id} hidden={hidden} />
@@ -234,7 +239,7 @@ export default async function AdminEventPage({
         <TimePunches people={people} timeZone={v.timeZone} />
       </>
     ),
-    chat: <ManagerChat sessionId={id} initial={messages} unread={chatUnread} timeZone={v.timeZone} />,
+    chat: <ManagerChat sessionId={id} initial={messages} unread={chatUnread} timeZone={v.timeZone} muted={muted.has(id)} />,
   };
 
   return (
@@ -242,9 +247,12 @@ export default async function AdminEventPage({
       <TeamHeader signedIn admin back={back} />
       <ManagerTabs
         initialTab={tab}
+        sessionId={id}
         header={header}
         panels={panels}
         counts={{
+          // The menu is not picked up (or nobody is assigned) and the event is inside 48 hours.
+          details: pickup.outstanding ? 1 : 0,
           team: hidden ? 0 : counts.stillNeeded + handoffs.length,
           order: sheetFlags,
           client: pendingHolds.length,
