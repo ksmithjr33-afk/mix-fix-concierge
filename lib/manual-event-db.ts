@@ -17,6 +17,7 @@
 
 import crypto from "crypto";
 import { supabase } from "@/lib/supabase";
+import { eventsInsertRow } from "@/lib/events-row";
 import { getSession, recordSubmission, type SessionRow } from "@/lib/event-updates";
 import { buildEventFields } from "@/lib/ghl-payload";
 import { createNoteByEmail } from "@/lib/ghl-api";
@@ -89,7 +90,7 @@ async function saveEventRow(eventData: Record<string, unknown>): Promise<void> {
     }
   });
   const { error } = await supabase.from("events").insert({
-    ...eventData,
+    ...eventsInsertRow(eventData).row,
     shopping_list: items.length > 0 ? items : null,
     shopping_list_text: items.length > 0 ? formatShoppingList(items) : null,
     conversation_transcript: null,

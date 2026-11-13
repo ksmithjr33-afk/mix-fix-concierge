@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 import { generateShoppingList, formatShoppingList } from "@/lib/shopping-list";
+import { eventsInsertRow } from "@/lib/events-row";
 
 async function markConversationCompleted(
   sessionId: string,
@@ -52,8 +53,12 @@ export async function POST(request: Request) {
     const { age_range: _age, menu_style: _ms, menu_notes: _mn, menu_design_preference: _mdp, ...rest } = eventData;
     cleanEventData = rest;
 
+    // Only columns the events table has. Fields kept on the session only
+    // (payment_preference, change_approval_needed) made every insert fail from 2026-11-06.
+    const { row: eventColumns, dropped } = eventsInsertRow(cleanEventData);
+    if (dropped.length > 0) console.log(`events insert: kept on the session only, not sent: ${dropped.join(", ")}`);
     const insertPayload = {
-      ...cleanEventData,
+      ...eventColumns,
       shopping_list: shoppingListItems.length > 0 ? shoppingListItems : null,
       shopping_list_text: shoppingListText || null,
       conversation_transcript: conversationTranscript || null,

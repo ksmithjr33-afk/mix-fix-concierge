@@ -148,6 +148,38 @@ export async function recordSubmission(sessionId: string, eventData: EventData):
   return true;
 }
 
+export type FinalSaveOutcome = "saved" | "already_submitted" | "failed";
+
+/**
+ * The concierge's final save: recordSubmission, tried a second time after a
+ * short pause when it fails, and a loud [FINAL SAVE FAILED] log line when it
+ * still does. A session that ends up here shows on the admin Staffing page
+ * under "Finished but not saved" (lib/unsaved-sessions-db.ts).
+ */
+export async function saveFinalSubmission(
+  sessionId: string,
+  eventData: EventData,
+  opts: { retryDelayMs?: number } = {}
+): Promise<FinalSaveOutcome> {
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const ok = await recordSubmission(sessionId, eventData).catch((err) => {
+      console.error(`final save attempt ${attempt} threw for session ${sessionId}:`, err);
+      return false;
+    });
+    if (ok) return "saved";
+    // false also means the row was already submitted (a repeat call), which is not a failure.
+    const { data } = await supabase.from("sessions").select("status, event_data").eq("id", sessionId).maybeSingle();
+    if (data?.status === "submitted" && data.event_data) return "already_submitted";
+    if (attempt === 1) await new Promise((r) => setTimeout(r, opts.retryDelayMs ?? 1500));
+  }
+  const ed = eventData as Record<string, unknown>;
+  console.error(
+    `[FINAL SAVE FAILED] session=${sessionId} client=${String(ed.client_name ?? "")} event_date=${String(ed.event_date ?? "")}: ` +
+      "the client finished the concierge but the session was not marked submitted. It is listed on the admin Staffing page."
+  );
+  return "failed";
+}
+
 export interface ApplyResult {
   eventData: EventData;
   version: number;

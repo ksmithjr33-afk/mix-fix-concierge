@@ -2,8 +2,30 @@
 // (lib/update-prompt.ts) can reuse the package, drink, add on, and deadline
 // rules word for word instead of keeping a second copy in sync.
 
-const INTAKE_INTRO = `You are the AI Bar Concierge for The Mix Fix, a premium private bartending service in Dallas, Texas. The current year is 2026.
-`;
+const CONCIERGE_INTRO = "You are the AI Bar Concierge for The Mix Fix, a premium private bartending service in Dallas, Texas.";
+
+/**
+ * Today's date in Dallas and how to read an event date. Before 2026-11-13 the
+ * prompt only said "The current year is 2026", so a booking date with no year
+ * ("April 11") was saved as April 11, 2026, already past, and the event only
+ * showed under Past events on the team side.
+ */
+export function todayAndDates(now: Date = new Date(), mode: "intake" | "update" = "intake"): string {
+  const zone = "America/Chicago";
+  const today = new Intl.DateTimeFormat("en-US", { timeZone: zone, weekday: "long", month: "long", day: "numeric", year: "numeric" }).format(now);
+  const year = Number(new Intl.DateTimeFormat("en-US", { timeZone: zone, year: "numeric" }).format(now));
+  const rule = `EVENT DATES: an event is always on a date that has not passed yet. A date with no year means the next time that date comes around, so a month and day that already passed this year is in ${year + 1}. Always write event_date with the full year.`;
+  const confirm =
+    mode === "intake"
+      ? " If the event date from the booking system or from the client is already in the past, ask the client to confirm their event date before moving on, and use the date they confirm."
+      : "";
+  return `Today is ${today}. ${rule}${confirm}`;
+}
+
+/** The first lines of the intake prompt, with today's date. */
+export function intakeIntro(now: Date = new Date()): string {
+  return `${CONCIERGE_INTRO} ${todayAndDates(now, "intake")}\n`;
+}
 
 // No markdown, no hyphens, one question per message, bartender voice.
 export const FORMATTING_RULES = `CRITICAL: NEVER use markdown formatting of any kind in your replies. No asterisks, no underscores, no pound signs, no bullet dashes. Do not write **bold**, *italics*, _emphasis_, # headings, or - bullet lists. The chat interface shows plain text only, so every one of those symbols shows up on the client's screen as a literal character and looks broken. Write emphasis with word choice, not symbols. If you want to list things, write them in a sentence separated by commas, or put each on its own line with no symbol in front of it. This applies to every message you send, including drink names, package names, and lists of options.
@@ -443,8 +465,8 @@ Tailored Bar Package (LEGACY, or "Bartender Only" if that's what the prefilled p
 
 START by greeting warmly. Say you are The Mix Fix bar planning concierge, welcome the client by name if available, and say you will walk through all the details for their event, help design their cocktail menu, and get everything locked in. Ask their name if not available and what they are celebrating.`;
 
+// The intake intro (with today's date) goes in front of these in buildIntakePrompt.
 const INTAKE_SECTIONS_BEFORE_PAYMENT = [
-  INTAKE_INTRO,
   FORMATTING_RULES,
   CONDUCT_RULE,
   INTAKE_SETUP,
@@ -460,8 +482,8 @@ const INTAKE_SECTIONS_BEFORE_PAYMENT = [
 const INTAKE_SECTIONS_AFTER_PAYMENT = [INTAKE_CLOSING_HEADER, CHANGE_DEADLINES, INTAKE_CLOSING_AND_FLOW];
 
 /** Intake prompt with the payment step for this session's booked total and deposit. */
-export function buildIntakePrompt(booking: { total: number | null; deposit: number } | null): string {
-  return [...INTAKE_SECTIONS_BEFORE_PAYMENT, paymentStep(booking), ...INTAKE_SECTIONS_AFTER_PAYMENT].join("\n");
+export function buildIntakePrompt(booking: { total: number | null; deposit: number } | null, now: Date = new Date()): string {
+  return [intakeIntro(now), ...INTAKE_SECTIONS_BEFORE_PAYMENT, paymentStep(booking), ...INTAKE_SECTIONS_AFTER_PAYMENT].join("\n");
 }
 
 /** Intake prompt for chats with no session row: payment step without an amount. */

@@ -27,6 +27,8 @@ import { ListCalendarToggle } from "../../calendar-view";
 import { orderStatuses } from "@/lib/order-sheet-db";
 import { STATUS_LABEL } from "@/lib/order-sheet";
 import { sessionsWithPendingHolds, sessionsWithPendingRequests } from "@/lib/client-list-db";
+import { saveAlerts } from "@/lib/unsaved-sessions-db";
+import SaveAlerts from "./save-alerts";
 
 export const dynamic = "force-dynamic";
 
@@ -47,7 +49,7 @@ async function AdminEventsPage({
   const to = isYmd(params.to) ? params.to : null;
   const admin = await requireAdmin(view === "upcoming" ? "/team/admin/events" : `/team/admin/events?${view}=1`);
   // List or calendar: the address bar, else what this admin used last. Read with the events and hidden list.
-  const [prefs, { data }, hidden, postRead] = await Promise.all([
+  const [prefs, { data }, hidden, postRead, alerts] = await Promise.all([
     getPrefs(admin.id).then(async (prefs) => {
       if (view === "upcoming" && (params.layout === "list" || params.layout === "calendar") && params.layout !== prefs.staffingLayout) {
         Object.assign(prefs, await savePrefs(admin.id, { staffingLayout: params.layout }, prefs));
@@ -57,6 +59,13 @@ async function AdminEventsPage({
     supabase.from("sessions").select("*").eq("status", "submitted"),
     hiddenEventIds(),
     view === "hidden" ? null : supabase.from("shift_posts").select("session_id, kind").eq("status", "posted"),
+    // Finished but not saved, and booked with a past date. Never breaks the page.
+    view === "hidden"
+      ? null
+      : saveAlerts().catch((err) => {
+          console.error("[save alerts] could not check:", err);
+          return null;
+        }),
   ]);
   const layout = pickLayout(params.layout, prefs.staffingLayout);
   const calendar = view === "upcoming" && layout === "calendar";
@@ -197,6 +206,7 @@ async function AdminEventsPage({
                 : "Every upcoming event is covered"}
           </p>
         </div>
+        <SaveAlerts alerts={alerts} />
         {!calendar && (
         <nav className="flex flex-wrap gap-1.5 px-1" aria-label="Market">
           {[null, ...MARKETS].map((m) => (

@@ -11,6 +11,7 @@ import {
   CHANGE_DEADLINES,
   CONDUCT_RULE,
   lateChargeRule,
+  todayAndDates,
 } from "@/lib/system-prompt";
 import { packageDrinkCount, type Deadlines, type EventData } from "@/lib/event-diff";
 import { CHANGE_REQUEST_MESSAGE } from "@/lib/client-list";
@@ -75,7 +76,7 @@ export function buildUpdatePrompt(
       ? `The event is ${deadlines.daysUntil === 0 ? "today" : deadlines.daysUntil === 1 ? "tomorrow" : `${deadlines.daysUntil} days away`}, so we are WITHIN 6 DAYS. A drink menu change is a REQUEST FOR APPROVAL. Everything else can still be changed.`
       : `The last day a drink menu change saves right away is ${longDate(deadlines.lastDrinkChangeDay)}. Today the drink menu is OPEN, and everything can be changed.`;
 
-  return `You are the AI Bar Concierge for The Mix Fix, a premium private bartending service in Dallas, Texas. The current year is 2026.
+  return `You are the AI Bar Concierge for The Mix Fix, a premium private bartending service in Dallas, Texas. ${todayAndDates(new Date(), "update")}
 
 ${FORMATTING_RULES}
 
