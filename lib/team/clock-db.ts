@@ -141,15 +141,16 @@ export async function recordPunch(opts: {
     return { ok: false, error: "Only staff who accepted this event can clock in.", status: 403 };
   }
   const clientId = typeof opts.clientId === "string" && /^[0-9a-f-]{36}$/i.test(opts.clientId) ? opts.clientId : null;
-  if (clientId) {
-    // A retry of a punch that already reached us: answer as if it just saved.
-    const { data: seen } = await supabase.from("time_punches").select("id").eq("client_id", clientId).maybeSingle();
-    if (seen) return { ok: true, duplicate: true, view: clockView(assignment, ed, await punchesFor(assignment.id)) };
-  }
+  // The retry check and this person's punches are read together.
+  const [seen, existing] = await Promise.all([
+    clientId ? supabase.from("time_punches").select("id").eq("client_id", clientId).maybeSingle().then((r) => r.data) : null,
+    punchesFor(assignment.id),
+  ]);
+  // A retry of a punch that already reached us: answer as if it just saved.
+  if (seen) return { ok: true, duplicate: true, view: clockView(assignment, ed, existing) };
 
   const receivedAt = new Date();
   const { punchedAt, late } = punchTime(opts.clientTime, receivedAt);
-  const existing = await punchesFor(assignment.id);
   const allowed = checkPunch(type, existing, punchedAt, clockInOpensAt(ed), eventTz(ed));
   if (!allowed.ok) return { ok: false, error: allowed.error, status: 409 };
 

@@ -1,10 +1,11 @@
+import { timed } from "@/lib/timing";
 import { NextResponse } from "next/server";
 import { getCurrentStaff } from "@/lib/team/auth";
 import { chatInbox } from "@/lib/team/chat-db";
 
 // The in-app chat check, called about every 20 seconds while a team page is
 // open and visible: unread counts and the newest message per chat, nothing more.
-export async function GET() {
+async function handleGet() {
   const staff = await getCurrentStaff();
   if (!staff) return NextResponse.json({ error: "Sign in again." }, { status: 401 });
   try {
@@ -15,4 +16,8 @@ export async function GET() {
     console.error("[team-chat] inbox error:", err);
     return NextResponse.json({ error: "Could not check messages." }, { status: 500 });
   }
+}
+
+export async function GET() {
+  return timed("chat-inbox", () => handleGet());
 }

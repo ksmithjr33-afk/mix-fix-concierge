@@ -174,11 +174,12 @@ async function clockedOutOn(sessionId: string, staffId: string): Promise<boolean
 export async function closeoutState(session: SessionRow, staff: StaffMember, now: Date = new Date()): Promise<CloseoutState> {
   const a = staff.role === "admin" ? null : await assignmentRef(session.id, staff.id);
   const accepted = a?.status === "accepted";
-  const clockedOut = accepted ? await clockedOutOn(session.id, staff.id) : false;
+  const [clockedOut, row] = accepted ? await Promise.all([clockedOutOn(session.id, staff.id), closeoutRow(session.id, staff.id)]) : [false, null];
   const open = accepted && closeoutOpen(eventData(session), { clockedOut, now });
-  const row = accepted ? await closeoutRow(session.id, staff.id) : null;
-  const urls = row ? await signed([row.photo_path, ...equipmentPaths(row)]) : new Map<string, string>();
-  const { items, clientAlcohol } = open || row ? await wrapUpItems(session) : { items: [], clientAlcohol: false };
+  const [urls, { items, clientAlcohol }] = await Promise.all([
+    row ? signed([row.photo_path, ...equipmentPaths(row)]) : new Map<string, string>(),
+    open || row ? wrapUpItems(session) : { items: [], clientAlcohol: false },
+  ]);
   return {
     open: open || !!row,
     clockedOut,
@@ -195,13 +196,18 @@ export async function closeoutsFor(sessionId: string): Promise<CloseoutView[]> {
   if (error || !data) return [];
   const rows = (data as CloseoutRow[]).sort((a, b) => a.submitted_at.localeCompare(b.submitted_at));
   if (rows.length === 0) return [];
-  const [{ data: vs }, { data: people }] = await Promise.all([
+  // The current photos are signed while the versions and names load; older version photos after, only when there are any new ones.
+  const rowPaths = [...rows.map((r) => r.photo_path), ...rows.flatMap(equipmentPaths)];
+  const [{ data: vs }, { data: people }, rowUrls] = await Promise.all([
     supabase.from("event_closeout_versions").select("*").in("closeout_id", rows.map((r) => r.id)),
     supabase.from("staff").select("id, name").in("id", rows.map((r) => r.staff_id)),
+    signed(rowPaths),
   ]);
   const versions = (vs as VersionRow[]) ?? [];
   const names = new Map(((people as { id: string; name: string }[]) ?? []).map((p) => [p.id, firstName(p.name)]));
-  const urls = await signed([...rows.map((r) => r.photo_path), ...rows.flatMap(equipmentPaths), ...versions.map((v) => v.photo_path)]);
+  const known = new Set(rowPaths.filter(Boolean));
+  const versionUrls = await signed(versions.map((v) => v.photo_path).filter((path) => path && !known.has(path)));
+  const urls = new Map([...rowUrls, ...versionUrls]);
   return rows.map((r) => toView(r, names.get(r.staff_id) || "Bartender", urls, versions));
 }
 

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { timed } from "@/lib/timing";
 import { requireStaff } from "@/lib/team/auth";
 import { firstName } from "@/lib/team/event-view";
 import { pastSection, upcomingSections } from "@/lib/team/event-list";
@@ -19,7 +20,7 @@ import MyPickupCard from "../menu-pickup-card";
 
 export const dynamic = "force-dynamic";
 
-export default async function TeamEventsPage({
+async function TeamEventsPage({
   searchParams,
 }: {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
@@ -29,28 +30,37 @@ export default async function TeamEventsPage({
   const askedPast = tab === "mine" && params.past === "1";
   const staff = await requireStaff(tab === "open" ? "/team/events?tab=open" : askedPast ? "/team/events?past=1" : "/team/events");
   const admin = staff.role === "admin";
-  // List or calendar: the address bar, else what this person used last.
-  const prefs = await getPrefs(staff.id);
-  if (tab === "mine" && (params.layout === "list" || params.layout === "calendar") && params.layout !== prefs.eventsLayout) {
-    Object.assign(prefs, await savePrefs(staff.id, { eventsLayout: params.layout }, prefs));
-  }
-  const calendar = tab === "mine" && !askedPast && pickLayout(params.layout, prefs.eventsLayout) === "calendar";
-  const past = askedPast;
-  const shifts = await openShiftsFor(staff);
-  const certNotes = tab === "open" && !admin ? await myCertNotices(staff.id) : { enforced: false, lines: [] };
-  // Admins: every event. Bartenders: only their own events. Hidden events never.
-  const visible = await eventsForViewer(staff);
-  // The viewer's own estimated pay, only on events they are on. Never anyone else's.
-  const pay = await myEstimates(staff.id, visible.filter((e) => e.status === "accepted" || e.status === "offered").map((e) => e.id));
-  const events = visible.map((e) => (pay[e.id] && (e.status === "accepted" || e.status === "offered") ? { ...e, pay: pay[e.id] } : e));
   const today = chicagoToday();
+  const past = askedPast;
+  // Everything below needs only who is signed in, so it is read together.
+  // List or calendar: the address bar, else what this person used last.
+  const prefsP = getPrefs(staff.id).then(async (prefs) => {
+    if (tab === "mine" && (params.layout === "list" || params.layout === "calendar") && params.layout !== prefs.eventsLayout) {
+      Object.assign(prefs, await savePrefs(staff.id, { eventsLayout: params.layout }, prefs));
+    }
+    return prefs;
+  });
+  const calendarP = prefsP.then((prefs) => tab === "mine" && !askedPast && pickLayout(params.layout, prefs.eventsLayout) === "calendar");
+  // Admins: every event. Bartenders: only their own events. Hidden events never.
+  const visibleP = eventsForViewer(staff);
+  const [prefs, calendar, shifts, certNotes, visible, pay, pickups, unavailable, filterMarkets] = await Promise.all([
+    prefsP,
+    calendarP,
+    openShiftsFor(staff),
+    tab === "open" && !admin ? myCertNotices(staff.id) : { enforced: false, lines: [] },
+    visibleP,
+    // The viewer's own estimated pay, only on events they are on. Never anyone else's.
+    visibleP.then((v) => myEstimates(staff.id, v.filter((e) => e.status === "accepted" || e.status === "offered").map((e) => e.id))),
+    tab === "mine" && !past ? myPickups(staff) : [],
+    // The calendar: bartenders also see their own unavailable days, as they do today elsewhere.
+    calendarP.then((c) => (c && !admin ? myUnavailableDays(staff.id, today) : [])),
+    calendarP.then((c) => (c ? (admin ? [...MARKETS] : staffMarkets(staff.id)) : [])),
+  ]);
+  const events = visible.map((e) => (pay[e.id] && (e.status === "accepted" || e.status === "offered") ? { ...e, pay: pay[e.id] } : e));
   const sections = past ? pastSection(events, today) : upcomingSections(events, today);
   const hasPast = events.some((e) => e.day && e.day < today);
-  const pickups = tab === "mine" && !past ? await myPickups(staff) : [];
-  // The calendar: bartenders also see open shifts in their markets and their own unavailable days, as they do today elsewhere.
+  // The calendar: bartenders also see open shifts in their markets.
   const calItems = calendar ? (admin ? events : [...events, ...shiftItems(shifts)]) : [];
-  const unavailable = calendar && !admin ? await myUnavailableDays(staff.id, today) : [];
-  const filterMarkets = calendar ? (admin ? [...MARKETS] : await staffMarkets(staff.id)) : [];
 
   return (
     <>
@@ -149,4 +159,8 @@ export default async function TeamEventsPage({
       </main>
     </>
   );
+}
+
+export default async function Page(props: { searchParams: Promise<{ [key: string]: string | string[] | undefined }> }) {
+  return timed(`events:${(await props.searchParams).tab === "open" ? "open" : (await props.searchParams).layout ?? "default"}`, () => TeamEventsPage(props));
 }

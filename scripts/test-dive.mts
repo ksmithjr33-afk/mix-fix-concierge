@@ -169,7 +169,7 @@ const v = view.buildStaffEventView({ id: "x", event_data: setEvent } as never);
 const alsoNames = (v.classics ?? []).flatMap((g) => g.drinks.map((d) => d.name));
 check("The bartender page shows the five as the set menu, with recipes", v.setMenu && v.drinks.map((d) => d.name).join() === FIVE && v.drinks[0].ingredients[0] === "2 oz tequila blanco");
 check("The bartender page lists the other classics as Also available", alsoNames.includes("Pina Colada") && !alsoNames.some((n) => FIVE.split(",").includes(n) || ELEVEN.includes(n)));
-const tabs = src("app/team/e/[id]/event-tabs.tsx");
+const tabs = src("app/team/e/[id]/event-details.tsx"); // the Details block, shared by both views
 check("The page labels them Dive Bar set menu and Also available", tabs.includes('v.setMenu ? "Dive Bar set menu" : "Signature drinks"') && tabs.includes(">Also available</h3>"));
 check("The CLASSICS section still has every recipe the five need", FIVE.split(",").every((n) => new RegExp(`^${n}: `, "m").test(DRINK_MENU_RULES)));
 

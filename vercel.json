@@ -1,3 +1,4 @@
 {
+  "regions": ["pdx1"],
   "crons": [{ "path": "/api/cron/team", "schedule": "*/5 * * * *" }]
 }

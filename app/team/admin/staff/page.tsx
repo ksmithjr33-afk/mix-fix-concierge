@@ -1,3 +1,4 @@
+import { timed } from "@/lib/timing";
 import { requireAdmin } from "@/lib/team/auth";
 import { listStaff } from "@/lib/team/assignments-db";
 import TeamHeader from "../../team-header";
@@ -17,18 +18,22 @@ import { staffOverview } from "@/lib/team/profile-db";
 
 export const dynamic = "force-dynamic";
 
-export default async function AdminStaffPage() {
+async function AdminStaffPage() {
   const me = await requireAdmin("/team/admin/staff");
-  const [staff, away] = await Promise.all([listStaff(), upcomingUnavailableByStaff(chicagoToday())]);
-  const [records, onboard, enforced, autoSend, suggestStores] = await Promise.all([
-    compactLines(staff.map((s) => s.id)),
-    onboardingProgress(staff.map((s) => s.id)),
+  // The staff list first; everything about each person is then read together, with the settings alongside.
+  const staffP = listStaff();
+  const ids = staffP.then((staff) => staff.map((s) => s.id));
+  const [staff, away, records, onboard, enforced, autoSend, suggestStores, rates, overview] = await Promise.all([
+    staffP,
+    upcomingUnavailableByStaff(chicagoToday()),
+    ids.then(compactLines),
+    ids.then(onboardingProgress),
     certsEnforced(),
     teamSetting(AUTO_SEND_KEY),
     teamSetting(SUGGEST_STORES_KEY),
+    ids.then((list) => ratesFor(me, list)),
+    staffP.then((list) => staffOverview(me, list)),
   ]);
-  const rates = await ratesFor(me, staff.map((s) => s.id));
-  const overview = await staffOverview(me, staff);
   // One line per person per topic, shown under their name.
   const notes: Record<string, string[]> = {};
   const add = (id: string, line: string) => (notes[id] = [...(notes[id] ?? []), line]);
@@ -73,4 +78,8 @@ export default async function AdminStaffPage() {
       </main>
     </>
   );
+}
+
+export default async function Page() {
+  return timed("staff", () => AdminStaffPage());
 }

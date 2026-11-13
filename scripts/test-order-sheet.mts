@@ -487,7 +487,7 @@ const pageSrc = src("app/team/admin/e/[id]/order/page.tsx");
 check("The order sheet link checks admin, then opens the Shopping list tab", pageSrc.indexOf("await requireAdmin(") > 0 && pageSrc.indexOf("await requireAdmin(") < pageSrc.indexOf('redirect(managerHref(id, "order"))'));
 const managerSrc = src("app/team/admin/e/[id]/page.tsx");
 check("The manager view checks admin before reading the sheet", managerSrc.indexOf("await requireAdmin(") > 0 && managerSrc.indexOf("await requireAdmin(") < managerSrc.indexOf("getSheetView("));
-check("The Shopping list tab shows the full order sheet", managerSrc.includes("order: <OrderSheet initial={sheet}"));
+check("The Shopping list tab shows the full order sheet", managerSrc.includes("order: () => <OrderSheet initial={sheet}"));
 const ui = src("app/team/admin/e/[id]/order/order-sheet.tsx");
 check(
   "The sheet has Sheet and By store views, Print or save as PDF, Reset to calculated, Keep mine and Use new, Set all, Add a store, Manage stores",

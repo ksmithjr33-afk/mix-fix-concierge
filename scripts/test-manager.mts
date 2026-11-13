@@ -74,7 +74,7 @@ check("Tab links", tabs.managerHref("s1") === "/team/admin/e/s1" && tabs.manager
 const page = src("app/team/admin/e/[id]/page.tsx");
 const bar = src("app/team/admin/e/[id]/manager-tabs.tsx");
 check("The page opens the tab in the address", page.includes("isManagerTab(asked) ? asked : \"details\"") && page.includes("initialTab={tab}"));
-check("Switching tabs puts the tab in the address", bar.includes('url.searchParams.set("tab", t)') && bar.includes("window.history.replaceState"));
+check("Switching tabs puts the tab in the address", bar.includes('url.searchParams.set("tab", t)') && bar.includes("router.replace(`${url.pathname}${url.search}`, { scroll: false })"));
 check("The tab bar has the bartender view's look and scrolls sideways on a phone", bar.includes("bg-[#DDD5CC] p-1 rounded-xl") && bar.includes("overflow-x-auto") && bar.includes("whitespace-nowrap") && bar.includes('bg-[#F5F0EB] text-[#2C2420] shadow-sm'));
 check("Tabs show a count when something needs attention", bar.includes("counts[key]") && page.includes("client: pendingHolds.length") && page.includes("counts.stillNeeded + handoffs.length") && page.includes("dayof: dayofCount") && page.includes("missingReports: missing.length"));
 const has = (tab: string, ...parts: string[]) => {

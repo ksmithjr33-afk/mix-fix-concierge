@@ -308,12 +308,15 @@ export interface InboxChat {
 export async function chatInbox(staff: StaffMember, now: Date = new Date()): Promise<{ total: number; chats: InboxChat[] }> {
   const empty = { total: 0, chats: [] };
   if (!staff.active) return empty;
+  // Read times and mutes do not depend on which threads count, so they load alongside.
+  const readsP = Promise.all([supabase.from("event_message_reads").select("session_id, last_read_at").eq("staff_id", staff.id), mutedChats(staff.id)]);
+  readsP.catch(() => {}); // unawaited when there is nothing to check
   const eligible = await notifiedThreads(staff);
   if (eligible && eligible.size === 0) return empty;
   const since = new Date(now.getTime() - INBOX_DAYS * 86_400_000).toISOString();
   let q = supabase.from("event_messages").select("*").gte("created_at", since);
   if (eligible) q = q.in("session_id", [...eligible]);
-  const [{ data, error }, { data: reads }, muted] = await Promise.all([q, supabase.from("event_message_reads").select("session_id, last_read_at").eq("staff_id", staff.id), mutedChats(staff.id)]);
+  const [{ data, error }, [{ data: reads }, muted]] = await Promise.all([q, readsP]);
   if (error || !data) return empty;
   const lastRead = new Map(((reads as { session_id: string; last_read_at: string }[]) ?? []).map((r) => [r.session_id, r.last_read_at]));
   const entries = inboxFrom(data as InboxMessage[], { me: staff.id, lastRead, eligible, muted: staff.role === "admin" ? muted : new Set() });

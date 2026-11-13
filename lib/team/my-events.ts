@@ -17,17 +17,16 @@ import { addDays, unavailableDays } from "@/lib/team/calendar";
 import type { SessionRow } from "@/lib/event-updates";
 
 export async function assignedEventItems(staffId: string): Promise<EventListItem[]> {
-  const { data, error } = await supabase
-    .from("event_assignments")
-    .select("status, session:session_id (*)")
-    .eq("staff_id", staffId)
-    .neq("status", "declined");
+  const [{ data, error }, hidden] = await Promise.all([
+    supabase.from("event_assignments").select("status, session:session_id (*)").eq("staff_id", staffId).neq("status", "declined"),
+    hiddenEventIds(),
+  ]);
   if (error || !data) return [];
   const items = data.flatMap((a) => {
     const s = (Array.isArray(a.session) ? a.session[0] : a.session) as (EventRowSource & { status: string }) | null;
     return s && s.status === "submitted" ? [eventListItem(s, a.status as string)] : [];
   });
-  return withoutHidden(items, await hiddenEventIds());
+  return withoutHidden(items, hidden);
 }
 
 // ----- What each role sees on /team/events and its calendar -----
@@ -40,11 +39,11 @@ export async function assignedEventItems(staffId: string): Promise<EventListItem
  * unread chat count. Hidden events are left out.
  */
 export async function eventsForViewer(staff: StaffMember): Promise<EventListItem[]> {
-  const hidden = await hiddenEventIds();
   if (staff.role === "admin") {
-    const [{ data }, { data: mine }] = await Promise.all([
+    const [{ data }, { data: mine }, hidden] = await Promise.all([
       supabase.from("sessions").select("*").eq("status", "submitted"),
       supabase.from("event_assignments").select("session_id, status").eq("staff_id", staff.id),
+      hiddenEventIds(),
     ]);
     const rows = withoutHidden((data as (SessionRow & EventRowSource)[]) ?? [], hidden);
     const own = new Map(((mine as { session_id: string; status: string }[]) ?? []).map((a) => [a.session_id, a.status]));

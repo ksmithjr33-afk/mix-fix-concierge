@@ -120,17 +120,20 @@ export async function getConfirmation(staffId: string, sessionId: string): Promi
  * and the drinks carry this event's recipe edits.
  */
 export async function eventPageData(session: SessionRow, staff: StaffMember): Promise<EventPageData> {
-  const [mates, update, supplies] = await Promise.all([teammates(session.id, staff.id), latestUpdate(session.id), staffSupplies(session)]);
+  const suppliesP = staffSupplies(session);
+  const [mates, update, supplies, checklistRows, shopRows, confirmedAt, updates] = await Promise.all([
+    teammates(session.id, staff.id),
+    latestUpdate(session.id),
+    suppliesP,
+    checkRows(staff.id, session.id, "checklist"),
+    checkRows(staff.id, session.id, "shopping"),
+    getConfirmation(staff.id, session.id),
+    suppliesP.then((s) => supplyUpdates(staff.id, session.id, s.list)),
+  ]);
   const base = buildStaffEventView(session, { teammates: mates, latestUpdate: update });
   const view = { ...base, drinks: withDrinkEdits(base.drinks, supplies.recipes) };
 
   const checklist = checklistFor(view.package);
-  const [checklistRows, shopRows, confirmedAt, updates] = await Promise.all([
-    checkRows(staff.id, session.id, "checklist"),
-    checkRows(staff.id, session.id, "shopping"),
-    getConfirmation(staff.id, session.id),
-    supplyUpdates(staff.id, session.id, supplies.list),
-  ]);
 
   const clState = checklistState(view.package, checklistRows);
   return {

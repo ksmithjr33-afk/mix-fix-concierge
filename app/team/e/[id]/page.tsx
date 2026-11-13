@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { timed } from "@/lib/timing";
 import { requireStaff } from "@/lib/team/auth";
 import { eventLanding } from "@/lib/team/manager-tabs";
 import { eventPageData, openEvent } from "@/lib/team/events";
@@ -29,7 +30,7 @@ function serverNow(): number {
 
 // Only the staff view built in lib/team/event-view.ts (an allowlist) and the
 // lists reach the client component. The raw session row never does.
-export default async function TeamEventPage({
+async function TeamEventPage({
   params,
   searchParams,
 }: {
@@ -65,22 +66,24 @@ export default async function TeamEventPage({
   }
 
   const ed = eventData(access.session);
-  const [data, entries, assignment, messages, unread, closeout, menuPickup, menuSection] = await Promise.all([
+  // What depends on this person's assignment starts as soon as it is read.
+  const assignmentP = assignmentRef(id, staff.id);
+  const [data, entries, assignment, messages, unread, closeout, menuPickup, menuSection, punches, pay, [handoff, teammates]] = await Promise.all([
     eventPageData(access.session, staff),
     barReadyEntries(id, staff),
-    assignmentRef(id, staff.id),
+    assignmentP,
     threadMessages(id, staff),
     unreadByEvent(staff.id, [id]),
     closeoutState(access.session, staff),
     myPickupFor(id, staff),
     staffMenuSection(access.session, staff),
+    assignmentP.then((a) => (a ? punchesFor(a.id) : [])),
+    // Only the viewer's own estimate, and only on an event they are on.
+    assignmentP.then((a) => (a && a.status !== "declined" ? myEstimate(staff.id, access.session) : null)),
+    assignmentP.then((a) => (a?.status === "accepted" ? Promise.all([myHandoff(id, staff.id), teammateChoices(access.session, staff.id)]) : ([null, []] as [null, never[]]))),
   ]);
   if (chatTab) await markThreadRead(id, staff.id);
-  const punches = assignment ? await punchesFor(assignment.id) : [];
   const accepted = assignment?.status === "accepted";
-  // Only the viewer's own estimate, and only on an event they are on.
-  const pay = assignment && assignment.status !== "declined" ? await myEstimate(staff.id, access.session) : null;
-  const [handoff, teammates] = accepted ? await Promise.all([myHandoff(id, staff.id), teammateChoices(access.session, staff.id)]) : [null, []];
   const renderedAt = serverNow();
   const open = barPhotosOpen(ed);
   const photoCount = entries.reduce((n, e) => n + e.photos.length, 0);
@@ -130,4 +133,8 @@ export default async function TeamEventPage({
       />
     </>
   );
+}
+
+export default async function Page(props: { params: Promise<{ id: string }>; searchParams: Promise<{ [key: string]: string | string[] | undefined }> }) {
+  return timed(`bartender-event:${(await props.searchParams).tab ?? "details"}`, () => TeamEventPage(props));
 }

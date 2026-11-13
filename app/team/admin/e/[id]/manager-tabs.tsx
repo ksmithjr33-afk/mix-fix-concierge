@@ -1,12 +1,18 @@
 "use client";
 
-import { createContext, useCallback, useContext, useState } from "react";
+import { createContext, useCallback, useContext, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { useLiveUnread, useOpenChat } from "../../../chat-focus";
 import { MANAGER_TABS, type ManagerTab } from "@/lib/team/manager-tabs";
 
 // The manager view's tab bar: the same look and spacing as the bartender
 // view's, scrolling sideways on a phone. The selected tab is in the address
 // (?tab=team) so a link can open a specific tab.
+//
+// The server sends only the open tab's panel. Opening another tab asks the
+// server for that tab (the address changes to ?tab=...), and every server
+// check runs again for it. A tab already seen stays on screen, with its own
+// state, while its fresh copy loads; a tab not seen yet shows a loading line.
 
 const ActiveTab = createContext<ManagerTab>("details");
 
@@ -19,24 +25,36 @@ export default function ManagerTabs({
   sessionId,
   initialTab,
   counts,
-  panels,
+  panel,
   header,
 }: {
   sessionId: string;
-  initialTab: ManagerTab;
+  initialTab: ManagerTab; // the tab the server built `panel` for
   counts: Partial<Record<ManagerTab, number>>; // something needs attention
-  panels: Record<ManagerTab, React.ReactNode>;
+  panel: React.ReactNode;
   header: React.ReactNode;
 }) {
+  const router = useRouter();
+  const [, startLoading] = useTransition();
   const [tab, setTab] = useState<ManagerTab>(initialTab);
+  const [panels, setPanels] = useState<Partial<Record<ManagerTab, React.ReactNode>>>({ [initialTab]: panel });
+  // Each server render (a tab opened, or a refresh after a save) brings the panel for its tab.
+  const [shown, setShown] = useState(panel);
+  if (panel !== shown) {
+    setShown(panel);
+    setPanels((p) => ({ ...p, [initialTab]: panel }));
+  }
   const chatUnread = useLiveUnread(sessionId, initialTab === "chat" ? 0 : (counts.chat ?? 0), tab === "chat");
-  const pick = useCallback((t: ManagerTab) => {
-    setTab(t);
-    const url = new URL(window.location.href);
-    if (t === "details") url.searchParams.delete("tab");
-    else url.searchParams.set("tab", t);
-    window.history.replaceState(null, "", url.toString());
-  }, []);
+  const pick = useCallback(
+    (t: ManagerTab) => {
+      setTab(t);
+      const url = new URL(window.location.href);
+      if (t === "details") url.searchParams.delete("tab");
+      else url.searchParams.set("tab", t);
+      startLoading(() => router.replace(`${url.pathname}${url.search}`, { scroll: false }));
+    },
+    [router]
+  );
   useOpenChat(sessionId, useCallback(() => pick("chat"), [pick]));
 
   return (
@@ -71,7 +89,7 @@ export default function ManagerTabs({
       <ActiveTab.Provider value={tab}>
         {MANAGER_TABS.map(([key]) => (
           <div key={key} role="tabpanel" hidden={tab !== key} className="space-y-4">
-            {panels[key]}
+            {panels[key] ?? (tab === key && <p className="px-1 py-6 text-center text-[15px] text-[#6B5D52]" role="status">Loading…</p>)}
           </div>
         ))}
       </ActiveTab.Provider>

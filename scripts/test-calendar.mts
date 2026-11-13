@@ -69,7 +69,7 @@ check("Admin items show the menu pickup status", adm.find((e) => e.id === "s4")!
 const asBartender = await myEvents.eventsForViewer({ ...admin, role: "bartender" });
 check("An admin in Bartender view sees only their own events (none)", asBartender.length === 0);
 const page = src("app/team/events/page.tsx");
-check("The events page and its calendar use the same per role events", page.includes("const visible = await eventsForViewer(staff);") && page.includes("admin ? events : [...events, ...shiftItems(shifts)]"));
+check("The events page and its calendar use the same per role events", page.includes("const visibleP = eventsForViewer(staff);") && page.includes("admin ? events : [...events, ...shiftItems(shifts)]"));
 
 // Open shifts: only the bartender's markets, and never a client name.
 await shiftsDb.postShift(db.sessions[3] as never, admin, time.zonedInstant(today, 12 * 60, "America/Chicago"));

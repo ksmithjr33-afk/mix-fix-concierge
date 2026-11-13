@@ -556,13 +556,17 @@ export async function openShiftsFor(staff: StaffMember): Promise<OpenShiftItem[]
   const markets = await staffMarkets(staff.id);
   const { data, error } = await supabase.from("shift_posts").select("*").eq("status", "posted").in("market", markets);
   if (error) return []; // before the tables exist
-  const out: OpenShiftItem[] = [];
-  for (const post of (data as PostRow[]) ?? []) {
-    const v = await visiblePost(post, staff);
-    if (!v) continue;
-    const shift = shiftSummary(v.session, post, v.spots);
-    out.push({ shift, myRequest: await myRequestStatus(post.id, staff.id), sameDay: await sameDayEvents(staff.id, shift) });
-  }
+  // Every post is checked at once rather than one after another.
+  const checked = await Promise.all(
+    ((data as PostRow[]) ?? []).map(async (post): Promise<OpenShiftItem | null> => {
+      const v = await visiblePost(post, staff);
+      if (!v) return null;
+      const shift = shiftSummary(v.session, post, v.spots);
+      const [myRequest, sameDay] = await Promise.all([myRequestStatus(post.id, staff.id), sameDayEvents(staff.id, shift)]);
+      return { shift, myRequest, sameDay };
+    })
+  );
+  const out = checked.filter((x): x is OpenShiftItem => x !== null);
   return out.sort((a, b) => (a.shift.window.from ?? "9").localeCompare(b.shift.window.from ?? "9"));
 }
 

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { timed } from "@/lib/timing";
 import { supabase } from "@/lib/supabase";
 import type { SessionRow } from "@/lib/event-updates";
 import { requireAdmin } from "@/lib/team/auth";
@@ -33,7 +34,7 @@ type View = "upcoming" | "past" | "hidden";
 
 // Every submitted event by date, with how many bartenders are assigned against
 // how many it needs. Hidden events only show under "Hidden events".
-export default async function AdminEventsPage({
+async function AdminEventsPage({
   searchParams,
 }: {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
@@ -45,14 +46,20 @@ export default async function AdminEventsPage({
   const from = isYmd(params.from) ? params.from : null;
   const to = isYmd(params.to) ? params.to : null;
   const admin = await requireAdmin(view === "upcoming" ? "/team/admin/events" : `/team/admin/events?${view}=1`);
-  // List or calendar: the address bar, else what this admin used last.
-  const prefs = await getPrefs(admin.id);
+  // List or calendar: the address bar, else what this admin used last. Read with the events and hidden list.
+  const [prefs, { data }, hidden, postRead] = await Promise.all([
+    getPrefs(admin.id).then(async (prefs) => {
+      if (view === "upcoming" && (params.layout === "list" || params.layout === "calendar") && params.layout !== prefs.staffingLayout) {
+        Object.assign(prefs, await savePrefs(admin.id, { staffingLayout: params.layout }, prefs));
+      }
+      return prefs;
+    }),
+    supabase.from("sessions").select("*").eq("status", "submitted"),
+    hiddenEventIds(),
+    view === "hidden" ? null : supabase.from("shift_posts").select("session_id, kind").eq("status", "posted"),
+  ]);
   const layout = pickLayout(params.layout, prefs.staffingLayout);
-  if (view === "upcoming" && (params.layout === "list" || params.layout === "calendar") && params.layout !== prefs.staffingLayout) {
-    Object.assign(prefs, await savePrefs(admin.id, { staffingLayout: params.layout }, prefs));
-  }
   const calendar = view === "upcoming" && layout === "calendar";
-  const [{ data }, hidden] = await Promise.all([supabase.from("sessions").select("*").eq("status", "submitted"), hiddenEventIds()]);
   const allSessions = (data as SessionRow[]) ?? [];
   const today = chicagoToday();
 
@@ -100,7 +107,7 @@ export default async function AdminEventsPage({
     sessionsWithPendingRequests(sessions.map((s) => s.id)),
     menuMissingIds(sessions),
   ]);
-  const { data: postRows, error: postErr } = await supabase.from("shift_posts").select("session_id, kind").eq("status", "posted");
+  const { data: postRows, error: postErr } = postRead ?? { data: null, error: null };
   const posted = new Set(postErr ? [] : ((postRows as { session_id: string; kind: string }[]) ?? []).filter((p) => p.kind === "open").map((p) => p.session_id));
   const cover = new Set(postErr ? [] : ((postRows as { session_id: string; kind: string }[]) ?? []).filter((p) => p.kind === "cover").map((p) => p.session_id));
   const items = sessions.map((s) => {
@@ -256,4 +263,8 @@ export default async function AdminEventsPage({
       </main>
     </>
   );
+}
+
+export default async function Page(props: { searchParams: Promise<{ [key: string]: string | string[] | undefined }> }) {
+  return timed(`admin-events:${(await props.searchParams).layout ?? "default"}`, () => AdminEventsPage(props));
 }

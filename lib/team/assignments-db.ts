@@ -304,19 +304,18 @@ export interface AssigneeProgress {
 
 /** Everyone on the event with their checklist, shopping, and check in progress. */
 export async function assigneeProgress(session: SessionRow, supplies?: Supplies): Promise<AssigneeProgress[]> {
-  const rows = await assignmentsFor(session.id);
+  // The assignments, bar photos and punches do not depend on each other: read them together.
+  const [rows, { data: bar }, { data: punchRows }] = await Promise.all([
+    assignmentsFor(session.id),
+    supabase.from("bar_ready_reports").select("staff_id, created_at").eq("session_id", session.id).order("created_at", { ascending: true }),
+    supabase.from("time_punches").select("staff_id, type, punched_at, flags").eq("session_id", session.id),
+  ]);
   if (rows.length === 0) return [];
   const { data: staffRows } = await supabase.from("staff").select(STAFF_COLUMNS).in("id", rows.map((r) => r.staff_id));
   const staff = new Map(((staffRows as StaffRecord[]) ?? []).map((s) => [s.id, s]));
-  const { data: bar } = await supabase
-    .from("bar_ready_reports")
-    .select("staff_id, created_at")
-    .eq("session_id", session.id)
-    .order("created_at", { ascending: true });
   const firstBar = new Map<string, string>();
   for (const b of (bar as { staff_id: string; created_at: string }[]) ?? []) if (!firstBar.has(b.staff_id)) firstBar.set(b.staff_id, b.created_at);
 
-  const { data: punchRows } = await supabase.from("time_punches").select("staff_id, type, punched_at, flags").eq("session_id", session.id);
   const punches = (punchRows as { staff_id: string; type: "in" | "out"; punched_at: string; flags: string[] | null }[]) ?? [];
 
   const order: Record<AssignmentStatus, number> = { accepted: 0, offered: 1, declined: 2 };

@@ -1,3 +1,4 @@
+import { timed } from "@/lib/timing";
 import { NextResponse } from "next/server";
 import { getCurrentStaff } from "@/lib/team/auth";
 import { openEvent } from "@/lib/team/events";
@@ -6,7 +7,7 @@ import { recordPunch } from "@/lib/team/clock-db";
 // Clock in or out. Body: { sessionId, type: "in" | "out", location, clientTime, clientId }.
 // clientTime and clientId come from the phone, so a punch queued offline keeps
 // its tap time (flagged sent late) and a retry is never saved twice.
-export async function POST(request: Request) {
+async function handlePost(request: Request) {
   const staff = await getCurrentStaff();
   if (!staff) return NextResponse.json({ error: "Sign in again." }, { status: 401 });
   try {
@@ -30,4 +31,8 @@ export async function POST(request: Request) {
     console.error("[team] punch error:", err);
     return NextResponse.json({ error: "Could not save. Try again." }, { status: 500 });
   }
+}
+
+export async function POST(request: Request) {
+  return timed("punch", () => handlePost(request));
 }

@@ -123,9 +123,11 @@ export async function removeUnavailable(staff: StaffMember, id: string, now: Dat
 export async function availableCounts(sessions: SessionRow[]): Promise<Map<string, number | null>> {
   const out = new Map<string, number | null>();
   const days = sessions.map((s) => eventDayOf(s)).filter((d): d is string => !!d).sort();
-  const { data } = await supabase.from("staff").select("id, role, active, markets").eq("active", true).eq("role", "bartender");
+  const [{ data }, rows] = await Promise.all([
+    supabase.from("staff").select("id, role, active, markets").eq("active", true).eq("role", "bartender"),
+    days.length ? unavailableBetween(days[0], days[days.length - 1]) : [],
+  ]);
   const bartenders = (data as { id: string; markets?: unknown }[]) ?? [];
-  const rows = days.length ? await unavailableBetween(days[0], days[days.length - 1]) : [];
   for (const s of sessions) {
     const day = eventDayOf(s);
     const market = sessionMarket(s) as Market | null;

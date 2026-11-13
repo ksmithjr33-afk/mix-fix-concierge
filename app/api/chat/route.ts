@@ -371,10 +371,14 @@ async function updateModeResponse(session: SessionRow, messages: ChatMessage[], 
   const deadlines = computeDeadlines(eventData.event_date ?? session.event_date, undefined, eventTimeZone(session));
   // Every change saved since this chat opened, for the final recap.
   const since = await changesSince(session.id, chatStartVersion).catch(() => null);
-  const system = buildUpdatePrompt(eventData, session.version, deadlines, {
+  const systemText = buildUpdatePrompt(eventData, session.version, deadlines, {
     booked: session.booked_price ?? null,
     recap: since ? { lines: recapLines(since.changes), totalBefore: since.totalBefore, totalAfter: since.totalAfter } : null,
   });
+  // Cached: the tools and this prompt are the same on every turn of the chat
+  // and on the follow up turn, so later requests reuse them instead of
+  // resending ~all of it. Same words to the model, only faster and cheaper.
+  const system: Anthropic.TextBlockParam[] = [{ type: "text", text: systemText, cache_control: { type: "ephemeral" } }];
   const tools = [quotePriceChangeTool, updateEventDataTool];
   const history: Anthropic.MessageParam[] = messages.map((m: ChatMessage) => ({
     role: m.role as "user" | "assistant",
@@ -569,9 +573,15 @@ export async function POST(request: Request) {
   const stream = anthropic.messages.stream({
     model: "claude-sonnet-4-6",
     max_tokens: 8192,
-    system: buildIntakePrompt(
-      booked ? { total: booked.total ?? null, deposit: booked.deposit_paid ?? DEFAULT_DEPOSIT } : null
-    ),
+    // Cached (with the tool before it): the ~18k token prompt is the same on
+    // every turn, so later turns read it from the cache. Same words to the model.
+    system: [
+      {
+        type: "text",
+        text: buildIntakePrompt(booked ? { total: booked.total ?? null, deposit: booked.deposit_paid ?? DEFAULT_DEPOSIT } : null),
+        cache_control: { type: "ephemeral" },
+      },
+    ],
     tools: [submitEventDataTool],
     messages: messages.map((m: ChatMessage) => ({
       role: m.role as "user" | "assistant",

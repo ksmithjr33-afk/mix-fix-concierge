@@ -67,9 +67,9 @@ check("Clocked in shows since when, Central", label.clockStatus({ clockIn: "2026
 check("Clocked out shows when", label.clockStatus({ clockIn: "2026-11-14T22:32:00Z", clockOut: "2026-11-15T04:05:00Z" }, "America/Chicago", new Date("2026-11-15T05:00:00Z")) === "Clocked out 10:05 PM");
 check("Nobody punched: Not clocked in", label.clockStatus({ clockIn: null, clockOut: null }, "America/Chicago", now) === "Not clocked in");
 check("Los Angeles events use Pacific time", label.clockStatus({ clockIn: "2026-11-14T22:32:00Z", clockOut: null }, "America/Los_Angeles", now) === "Clocked in since 2:32 PM");
-const details = page.slice(page.indexOf("    details: ("), page.indexOf("    team: "));
+const details = page.slice(page.indexOf("    details: "), page.indexOf("    team: "));
 check("The clock status is the first thing on the Details tab", details.indexOf("<ClockStatus people={people} timeZone={v.timeZone} />") > 0 && details.indexOf("<ClockStatus") < details.indexOf("<MenuPickupPanel") && details.indexOf("<ClockStatus") < details.indexOf("<Details v={v} />") && details.indexOf("<ClockStatus") < details.indexOf("<ClientLinksCard"));
-const dayof = page.slice(page.indexOf("    dayof: ("), page.indexOf("    chat: "));
+const dayof = page.slice(page.indexOf("    dayof: "), page.indexOf("    chat: "));
 check("The full punch list stays on Day of", dayof.includes("<TimePunches people={people} timeZone={v.timeZone} />") && !details.includes("<TimePunches"));
 const dayOfSrc = src("app/team/admin/e/[id]/day-of.tsx");
 check("Each person on the event gets a line, declined people left off", dayOfSrc.includes("export function ClockStatus") && dayOfSrc.includes('people.filter((p) => p.status !== "declined")') && dayOfSrc.includes("clockStatus(p, timeZone)"));

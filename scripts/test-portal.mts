@@ -329,7 +329,7 @@ const adminEvent = src("app/team/admin/e/[id]/page.tsx");
 const managerChat = src("app/team/admin/e/[id]/manager-chat.tsx");
 check(
   "The manager view's Chat tab has Message team with the unread count",
-  managerChat.includes("Message team") && managerChat.includes("{props.unread} unread") && managerChat.includes("<ChatThread") && adminEvent.includes("chat: <ManagerChat") && adminEvent.includes("chat: chatUnread")
+  managerChat.includes("Message team") && managerChat.includes("{props.unread} unread") && managerChat.includes("<ChatThread") && adminEvent.includes("chat: () => <ManagerChat") && adminEvent.includes("chat: chatUnread")
 );
 check("Staffing list and calendar link to each event's chat tab with its unread count", staffingSrc.includes("chat: { href: `/team/admin/e/${s.id}?tab=chat`, unread: unread.get(s.id) ?? 0 }") && listSrc.includes("e.chat.href") && calSrc.includes("e.chat?.unread"));
 const chatRoute = src("app/api/team/chat/route.ts");
