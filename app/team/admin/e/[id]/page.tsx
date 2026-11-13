@@ -42,6 +42,9 @@ import ClientLinksCard from "./client-links-card";
 import { clientLinks, clientStatusLine } from "@/lib/client-links";
 import { changeBlocks, type FieldChange } from "@/lib/event-diff";
 import { giphyEnabled } from "@/lib/team/media";
+import { eventNumberFor, historyFor } from "@/lib/client-history-db";
+import { repeatLabel } from "@/lib/client-history";
+import ClientHistoryCard from "./client-history-card";
 
 export const dynamic = "force-dynamic";
 
@@ -138,13 +141,22 @@ async function AdminEventPage({
           new Set<string>() as Awaited<ReturnType<typeof unavailableOn>>,
         ];
   // Details, Client list and Chat only.
-  const [links, autoSend, listEntries, messages, muted] = await Promise.all([
+  const [links, autoSend, listEntries, messages, muted, history, eventNumber] = await Promise.all([
     on("details") ? clientLinks(session, me) : null, // admins only: null for anyone else
     on("client") ? autoSendOn() : false,
     on("client") ? listLog(id) : [],
     on("chat") ? threadMessages(id, me) : [],
     on("chat") ? mutedChats(me.id) : new Set<string>(),
+    // Client history only with Details open; the header's repeat tag reads just this email's sessions. Admins only.
+    on("details")
+      ? historyFor(session, me).catch((err) => {
+          console.error("[client history] could not load:", err);
+          return null;
+        })
+      : null,
+    eventNumberFor(session, me).catch(() => null),
   ]);
+  const repeat = repeatLabel(eventNumber);
   if (tab === "chat") await markThreadRead(id, me.id);
   const v = { ...view, drinks: withDrinkEdits(view.drinks, supplies.recipes) };
   const addedBy = (session as { created_by?: string | null; created_by_name?: string | null }).created_by === "admin" ? (session as { created_by_name?: string | null }).created_by_name || "an admin" : null;
@@ -181,6 +193,7 @@ async function AdminEventPage({
           {[v.date, v.arrival ? `arrive ${v.arrival}` : "", v.serviceStart && v.serviceEnd ? `service ${v.serviceStart} to ${v.serviceEnd}` : ""].filter(Boolean).join(", ")}
         </p>
         <p className="text-[15px] text-[#6B5D52]">{[v.market, v.guestCount ? `${v.guestCount} guests` : "", v.package].filter(Boolean).join(" · ")}</p>
+        {repeat && <p className="mt-1 inline-block text-[11px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-[#EDE3F5] text-[#5B3F7A]">{repeat}</p>}
         {v.timeZone !== "America/Chicago" && <p className="text-sm text-[#9A7049]">Times are Pacific time.</p>}
       </div>
       <Link href={`/team/e/${encodeURIComponent(id)}?as=bartender`} className="shrink-0 pt-1 text-sm text-[#B5845A] underline">
@@ -220,6 +233,7 @@ async function AdminEventPage({
           {links && (
             <ClientLinksCard conciergeUrl={links.conciergeUrl} eventUrl={links.eventUrl} openConcierge={links.openConcierge} openEvent={links.openEvent} status={clientStatusLine(links, v.timeZone)} />
           )}
+          {history && <ClientHistoryCard history={history} clientKey={history.matchedOn} />}
           <Details v={v} />
           {!hidden && <EditEvent sessionId={id} version={session.version} initial={editValues} packages={packages} />}
           <HideAction sessionId={id} hidden={hidden} />

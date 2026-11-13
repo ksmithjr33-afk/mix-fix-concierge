@@ -26,7 +26,10 @@ export function parseEventDate(dateStr: string | null | undefined): Date | null 
     parsed = new Date(`${cleaned} ${new Date().getFullYear()}`);
   }
   if (isNaN(parsed.getTime())) return null;
-  if (parsed.getFullYear() < 2000) {
+  // The engine reads a date with no year ("April 11", "10/10") as 2001, so a
+  // string with no year in it also gets the current year.
+  const hasYear = /\b\d{4}\b/.test(cleaned) || /\b\d{1,2}[/.-]\d{1,2}[/.-]\d{2}\b/.test(cleaned) || /'\d{2}\b/.test(cleaned);
+  if (parsed.getFullYear() < 2000 || !hasYear) {
     parsed.setFullYear(new Date().getFullYear());
   }
   return parsed;

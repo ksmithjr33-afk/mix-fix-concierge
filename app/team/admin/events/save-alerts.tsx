@@ -11,7 +11,7 @@ function when(iso: string | null): string {
 // not save, and saved events whose date was already past when they booked.
 // Renders nothing when there is nothing to check.
 export default function SaveAlerts({ alerts }: { alerts: Alerts | null }) {
-  if (!alerts || (alerts.unsaved.length === 0 && alerts.pastDate.length === 0)) return null;
+  if (!alerts || (alerts.unsaved.length === 0 && alerts.pastDate.length === 0 && alerts.stale.length === 0)) return null;
   return (
     <div className="space-y-3" role="alert">
       {alerts.unsaved.length > 0 && (
@@ -24,6 +24,27 @@ export default function SaveAlerts({ alerts }: { alerts: Alerts | null }) {
             {alerts.unsaved.map((u) => (
               <li key={u.sessionId}>
                 <span className="font-medium">{u.name}</span> · event {u.eventDate} · finished {when(u.finishedAt)} · session {u.sessionId.slice(0, 8)}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+      {alerts.stale.length > 0 && (
+        <section className="rounded-xl border border-[#E0B04A] bg-[#FFF8EC] p-4 space-y-2">
+          <h2 className="font-semibold text-[#2C2420]">Possibly stale booking details, check with the client</h2>
+          <p className="text-sm text-[#6B5D52]">A repeat client&apos;s new booking arrived with the same details as their earlier event. The booking system may have copied the old ones.</p>
+          <ul className="text-sm space-y-1">
+            {alerts.stale.map((b) => (
+              <li key={b.sessionId}>
+                {b.submitted ? (
+                  <Link href={`/team/admin/e/${b.sessionId}`} className="text-[#B5845A] underline">
+                    {b.name}
+                  </Link>
+                ) : (
+                  <span className="font-medium">{b.name}</span>
+                )}{" "}
+                · same {b.fields.join(", ")} as their earlier booking · booked {when(b.createdAt)}
+                {b.submitted ? "" : " · has not finished the concierge"}
               </li>
             ))}
           </ul>

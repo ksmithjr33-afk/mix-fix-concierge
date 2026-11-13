@@ -28,6 +28,8 @@ import { orderStatuses } from "@/lib/order-sheet-db";
 import { STATUS_LABEL } from "@/lib/order-sheet";
 import { sessionsWithPendingHolds, sessionsWithPendingRequests } from "@/lib/client-list-db";
 import { saveAlerts } from "@/lib/unsaved-sessions-db";
+import { allClientRows, eventNumbersFor } from "@/lib/client-history-db";
+import { repeatLabel } from "@/lib/client-history";
 import SaveAlerts from "./save-alerts";
 
 export const dynamic = "force-dynamic";
@@ -48,8 +50,11 @@ async function AdminEventsPage({
   const from = isYmd(params.from) ? params.from : null;
   const to = isYmd(params.to) ? params.to : null;
   const admin = await requireAdmin(view === "upcoming" ? "/team/admin/events" : `/team/admin/events?${view}=1`);
+  // One light read of every session, shared by the stale booking alert and the repeat client tags.
+  const clientRowsP = view === "hidden" ? null : allClientRows();
+  clientRowsP?.catch(() => {});
   // List or calendar: the address bar, else what this admin used last. Read with the events and hidden list.
-  const [prefs, { data }, hidden, postRead, alerts] = await Promise.all([
+  const [prefs, { data }, hidden, postRead, alerts, numbers] = await Promise.all([
     getPrefs(admin.id).then(async (prefs) => {
       if (view === "upcoming" && (params.layout === "list" || params.layout === "calendar") && params.layout !== prefs.staffingLayout) {
         Object.assign(prefs, await savePrefs(admin.id, { staffingLayout: params.layout }, prefs));
@@ -62,10 +67,16 @@ async function AdminEventsPage({
     // Finished but not saved, and booked with a past date. Never breaks the page.
     view === "hidden"
       ? null
-      : saveAlerts().catch((err) => {
+      : saveAlerts(new Date(), clientRowsP ?? undefined).catch((err) => {
           console.error("[save alerts] could not check:", err);
           return null;
         }),
+    clientRowsP
+      ? clientRowsP.then((rows) => eventNumbersFor(admin, rows)).catch((err) => {
+          console.error("[repeat clients] could not check:", err);
+          return null;
+        })
+      : null,
   ]);
   const layout = pickLayout(params.layout, prefs.staffingLayout);
   const calendar = view === "upcoming" && layout === "calendar";
@@ -146,6 +157,7 @@ async function AdminEventsPage({
       staffing: staffingTone(c),
       ...(requests.has(s.id) ? { request: true } : {}),
       ...(noMenu.has(s.id) ? { noMenu: true } : {}),
+      ...(repeatLabel(numbers?.get(s.id)) ? { repeat: repeatLabel(numbers?.get(s.id))! } : {}),
       ...(menu ? { menu: { state: menu.state as "unassigned" | "assigned" | "picked_up", text: menu.text } } : {}),
     };
   });

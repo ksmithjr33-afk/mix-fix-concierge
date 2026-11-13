@@ -60,6 +60,9 @@ export default async function TeamHeader({
                 <Link href="/team/admin/staff" className="text-xs sm:text-sm font-medium text-[#9A7049] hover:text-[#B5845A]">
                   Staff
                 </Link>
+                <Link href="/team/admin/clients" className="text-xs sm:text-sm font-medium text-[#9A7049] hover:text-[#B5845A]">
+                  Clients
+                </Link>
                 <Link href="/team/admin/timesheets" className="text-xs sm:text-sm font-medium text-[#9A7049] hover:text-[#B5845A]">
                   Time
                 </Link>

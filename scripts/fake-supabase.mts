@@ -1,6 +1,6 @@
 // In-memory stand-in for the Supabase client, for tests that run the real
 // update path without a database. Supports the query shapes the app uses:
-// select (with "alias:fk (cols)" joins), eq, neq, in, is, gt, gte, lte, lt, order, limit,
+// select (with "alias:fk (cols)" joins), eq, neq, in, is, ilike, gt, gte, lte, lt, order, limit, range,
 // maybeSingle, single, insert, update, upsert, delete, head counts, and rpc.
 
 import { randomUUID } from "node:crypto";
@@ -38,6 +38,7 @@ class Query implements PromiseLike<Result> {
   private head = false;
   private orders: { col: string; asc: boolean }[] = [];
   private limitN: number | null = null;
+  private offsetN = 0;
   private conflict: string[] = [];
   private ignoreDuplicates = false;
 
@@ -85,7 +86,26 @@ class Query implements PromiseLike<Result> {
     this.filters.push((r) => String(r[c]) < v);
     return this;
   }
+  /** SQL ILIKE: % any run, _ any one character, backslash escapes either, any case. */
+  ilike(c: string, pattern: string) {
+    let re = "";
+    for (let i = 0; i < pattern.length; i++) {
+      const ch = pattern[i];
+      if (ch === "\\" && i + 1 < pattern.length) re += pattern[++i].replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      else if (ch === "%") re += ".*";
+      else if (ch === "_") re += ".";
+      else re += ch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    }
+    const rx = new RegExp(`^${re}$`, "is");
+    this.filters.push((r) => typeof r[c] === "string" && rx.test(r[c] as string));
+    return this;
+  }
   not() {
+    return this;
+  }
+  range(from: number, to: number) {
+    this.offsetN = from;
+    this.limitN = to - from + 1;
     return this;
   }
   order(col: string, opts: { ascending?: boolean } = {}) {
@@ -178,7 +198,7 @@ class Query implements PromiseLike<Result> {
       for (const o of [...this.orders].reverse()) {
         result.sort((a, b) => (String(a[o.col]) < String(b[o.col]) ? -1 : String(a[o.col]) > String(b[o.col]) ? 1 : 0) * (o.asc ? 1 : -1));
       }
-      if (this.limitN !== null) result = result.slice(0, this.limitN);
+      if (this.offsetN || this.limitN !== null) result = result.slice(this.offsetN, this.limitN === null ? undefined : this.offsetN + this.limitN);
     }
     const data = result.map((r) => this.withJoins(r));
     if (this.head) return { data: null, error: null, count: data.length };

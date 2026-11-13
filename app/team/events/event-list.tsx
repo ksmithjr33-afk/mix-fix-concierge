@@ -158,6 +158,7 @@ export default function EventList({ sections, empty, respond = false, select }: 
                             )}
                           </span>
                           <span className="block text-sm text-[#6B5D52] break-words">{e.detail}</span>
+                          {e.repeat && <span className="mt-0.5 mr-1 inline-block text-[11px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-[#EDE3F5] text-[#5B3F7A]">{e.repeat}</span>}
                           {e.noMenu && <span className="mt-0.5 inline-block text-[11px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-[#F6E3DC] text-[#A0412D]">No approved menu</span>}
                           {e.pay && <span className="block text-xs text-[#55684A]">{e.pay} estimated pay, before taxes and tips</span>}
                         </span>
