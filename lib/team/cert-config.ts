@@ -11,7 +11,15 @@ export const CERT_BY_MARKET: Record<Market, string> = {
   los_angeles: "California RBS",
 };
 
-export const CERT_TYPES = [...new Set(Object.values(CERT_BY_MARKET))];
+/** Every bartender keeps a food handler certificate on file too. It never gates shifts. */
+export const FOOD_HANDLER = "Food Handler";
+
+export const CERT_TYPES = [...new Set([...Object.values(CERT_BY_MARKET), FOOD_HANDLER])];
+
+/** The certificates a profile shows: the alcohol certificate each market needs, and Food Handler. */
+export function profileCertTypes(markets: Market[]): string[] {
+  return [...new Set([...markets.map((m) => CERT_BY_MARKET[m]).filter(Boolean), FOOD_HANDLER])];
+}
 
 /** Text reminders this many days before expiry (0 is the day it expires). */
 export const CERT_REMINDER_DAYS = [30, 7, 0];

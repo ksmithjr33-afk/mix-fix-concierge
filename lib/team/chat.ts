@@ -40,9 +40,13 @@ export function redactClient(body: string, client: { email?: unknown; phone?: un
 }
 
 /** A message ready to save, or an error. */
-export function cleanMessage(raw: unknown, client: { email?: unknown; phone?: unknown; name?: unknown }): { ok: true; body: string } | { ok: false; error: string } {
+export function cleanMessage(
+  raw: unknown,
+  client: { email?: unknown; phone?: unknown; name?: unknown },
+  opts: { hasAttachment?: boolean } = {}
+): { ok: true; body: string } | { ok: false; error: string } {
   const body = String(raw ?? "").replace(/\r\n/g, "\n").replace(/[ \t]+\n/g, "\n").trim();
-  if (!body) return { ok: false, error: "Write a message first." };
+  if (!body && !opts.hasAttachment) return { ok: false, error: "Write a message first." };
   if (body.length > CHAT_MAX) return { ok: false, error: `Keep it under ${CHAT_MAX} characters.` };
   return { ok: true, body: redactClient(body, client) };
 }
@@ -53,9 +57,16 @@ export function snippet(body: string): string {
   return one.length > CHAT_SNIPPET ? `${one.slice(0, CHAT_SNIPPET).trimEnd()}...` : one;
 }
 
-/** "Jordan on Justin's 30th: Running 10 minutes late (+2 more) https://..." */
-export function chatText(o: { from: string; title: string; body: string; more: number; link: string }): string {
-  return `${o.from} on ${o.title}: ${snippet(o.body)}${o.more > 0 ? ` (+${o.more} more)` : ""} ${o.link}`;
+/**
+ * "Jordan on Justin's 30th: Running 10 minutes late (+2 more) https://...".
+ * With a picture: "Jordan on Justin's 30th: sent a GIF https://..." (and the
+ * words after it, if any). The file itself is never in the text.
+ */
+export function chatText(o: { from: string; title: string; body: string; more: number; link: string; attachment?: "gif" | "photo" | null }): string {
+  const words = snippet(o.body);
+  const sent = o.attachment ? (o.attachment === "gif" ? "sent a GIF" : "sent a photo") : "";
+  const what = sent && words ? `${sent}: ${words}` : sent || words;
+  return `${o.from} on ${o.title}: ${what}${o.more > 0 ? ` (+${o.more} more)` : ""} ${o.link}`;
 }
 
 export type ChatNoticeRow = { last_sent_at: string | null; pending_after: string | null };
@@ -89,6 +100,7 @@ export interface InboxMessage {
   staff_id: string | null;
   body: string;
   created_at: string;
+  attachment_kind?: "gif" | "photo" | null;
 }
 
 export interface InboxEntry {
@@ -123,8 +135,8 @@ export function inboxFrom(
   return [...by.values()].sort((a, b) => b.latest.created_at.localeCompare(a.latest.created_at));
 }
 
-/** The start of a message on one line, for the chat list and the pop up. */
-export function inboxSnippet(body: string): string {
-  const one = body.replace(/\s+/g, " ").trim();
+/** The start of a message on one line, for the chat list and the pop up. A picture alone reads "sent a GIF". */
+export function inboxSnippet(body: string, attachment?: "gif" | "photo" | null): string {
+  const one = body.replace(/\s+/g, " ").trim() || (attachment === "gif" ? "sent a GIF" : attachment ? "sent a photo" : "");
   return one.length > INBOX_SNIPPET ? `${one.slice(0, INBOX_SNIPPET).trimEnd()}...` : one;
 }

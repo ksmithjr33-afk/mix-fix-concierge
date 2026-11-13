@@ -124,7 +124,7 @@ check("The manager view's Details tab gets a count inside 48 hours", view.outsta
 await mpDb.savePickup("s1", admin, { not_needed: true }, in30h);
 check("No printed menu takes it off the count", !(await mpDb.adminPickupView(db.sessions[0] as never, in30h)).outstanding);
 const mgr = src("app/team/admin/e/[id]/page.tsx");
-check("The Details tab count and the Menu pickup card are on the manager view", mgr.includes("details: pickup.outstanding ? 1 : 0") && mgr.includes("<MenuPickupPanel initial={pickup}"));
+check("The Details tab count and the Menu pickup card are on the manager view", mgr.includes("details: (pickup.outstanding ? 1 : 0) + (menuFile.missing ? 1 : 0)") && /<MenuPickupPanel\s+initial=\{pickup\}/.test(mgr));
 check("The admin events list shows the status", src("app/team/admin/events/page.tsx").includes('menus.get(s.id)?.text ?? ""'));
 
 // ----- 5. Cron: the morning reminder and the 24 hour admin alert -----

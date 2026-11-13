@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import type { PickupAdminView } from "@/lib/team/menu-pickup-db";
+import type { AdminMenuView } from "@/lib/team/approved-menu-db";
+import ApprovedMenuPanel from "./approved-menu-panel";
 
 const card = "bg-[#F5F0EB] rounded-2xl border border-[#DDD5CC] px-4 py-3 sm:px-5 sm:py-4";
 const field = "w-full rounded-lg border border-[#DDD5CC] bg-white px-3 py-2 text-[16px] text-[#2C2420] focus:outline-none focus:ring-2 focus:ring-[#B5845A]/30 focus:border-[#B5845A]";
@@ -10,9 +12,19 @@ const field = "w-full rounded-lg border border-[#DDD5CC] bg-white px-3 py-2 text
  * The manager view's "Menu pickup" card: where the cocktail menu is printed,
  * a note, the order number, who picks it up (active staff, admins included),
  * the "Picked up" check (records who and when; an admin can undo), and
- * "No printed menu for this event".
+ * "No printed menu for this event". Below it, the approved menu upload.
  */
-export default function MenuPickupPanel({ initial, people }: { initial: PickupAdminView; people: { id: string; name: string; role: string }[] }) {
+export default function MenuPickupPanel({
+  initial,
+  people,
+  menu,
+  today,
+}: {
+  initial: PickupAdminView;
+  people: { id: string; name: string; role: string }[];
+  menu: AdminMenuView;
+  today: string; // the event's time zone, for "Client approved on"
+}) {
   const [view, setView] = useState(initial);
   const [store, setStore] = useState(initial.store);
   const [storeOther, setStoreOther] = useState(initial.storeOther);
@@ -159,6 +171,7 @@ export default function MenuPickupPanel({ initial, people }: { initial: PickupAd
         </>
       )}
       {error && <p className="text-sm text-[#A0412D]">{error}</p>}
+      <ApprovedMenuPanel initial={menu} today={today} />
     </section>
   );
 }

@@ -9,11 +9,13 @@ import TeamHeader from "../../../team-header";
 import { markThreadRead, mutedChats, threadMessages, unreadByEvent } from "@/lib/team/chat-db";
 import { adminPickupView } from "@/lib/team/menu-pickup-db";
 import MenuPickupPanel from "./menu-pickup-panel";
+import { adminMenuView } from "@/lib/team/approved-menu-db";
+import { distancesToEvent } from "@/lib/team/profile-db";
 import AssignPanel from "./assign-panel";
 import HideAction from "./hide-action";
 import EditEvent, { type EditValues } from "./edit-event";
 import { PACKAGE_CHOICES } from "@/lib/team/admin-edit";
-import { eventDay, parseClock } from "@/lib/team/time";
+import { eventDay, eventSchedule, parseClock, todayIn } from "@/lib/team/time";
 import { isHidden } from "@/lib/team/hidden";
 import { ensureMarket } from "@/lib/team/markets-db";
 import { handoffPanel, postPanel } from "@/lib/team/shifts-db";
@@ -44,6 +46,7 @@ import { BartenderLists, ClockStatus, MissingReports, TimePunches } from "./day-
 import ClientLinksCard from "./client-links-card";
 import { clientLinks, clientStatusLine } from "@/lib/client-links";
 import { changeBlocks, type FieldChange } from "@/lib/event-diff";
+import { giphyEnabled } from "@/lib/team/media";
 
 export const dynamic = "force-dynamic";
 
@@ -85,7 +88,7 @@ export default async function AdminEventPage({
   await ensureMarket(session); // works out the market from the address the first time, and after an address change
   await syncOrderSheet(session);
   const supplies = await staffSupplies(session); // the bartenders' list, read from the Shopping list
-  const [people, staff, hidden, panel, handoffs, unread, view, sheet, bar, missing, messages, pickup, muted] = await Promise.all([
+  const [people, staff, hidden, panel, handoffs, unread, view, sheet, bar, missing, messages, pickup, muted, menuFile] = await Promise.all([
     assigneeProgress(session, supplies.list),
     listStaff(),
     isHidden(id),
@@ -99,6 +102,7 @@ export default async function AdminEventPage({
     threadMessages(id, me),
     adminPickupView(session),
     mutedChats(me.id),
+    adminMenuView(session),
   ]);
   if (tab === "chat") await markThreadRead(id, me.id);
   const v = { ...view, drinks: withDrinkEdits(view.drinks, supplies.recipes) };
@@ -108,7 +112,7 @@ export default async function AdminEventPage({
     ...panel.requesters.map((r) => r.staffId),
     ...handoffs.flatMap((h) => h.requesters.map((r) => r.staffId)),
   ];
-  const [closeouts, records, certs, autoSend, pendingHolds, listEntries, links] = await Promise.all([
+  const [closeouts, records, certs, autoSend, pendingHolds, listEntries, links, distances] = await Promise.all([
     closeoutsFor(id),
     compactLines(lookIds),
     certIssues(lookIds, panel.market),
@@ -116,6 +120,7 @@ export default async function AdminEventPage({
     holdsFor(id, "pending"),
     listLog(id),
     clientLinks(session, me), // admins only: null for anyone else
+    distancesToEvent(session, staff.filter((s) => s.active).map((s) => s.id)),
   ]);
   const addedBy = (session as { created_by?: string | null; created_by_name?: string | null }).created_by === "admin" ? (session as { created_by_name?: string | null }).created_by_name || "an admin" : null;
   const away = await unavailableOn(eventDayOf(session));
@@ -160,7 +165,7 @@ export default async function AdminEventPage({
   const onEvent = new Set(people.filter((p) => p.status !== "declined").map((p) => p.staffId));
   const available = staff
     .filter((s) => s.active && !onEvent.has(s.id))
-    .map((s) => ({ id: s.id, name: s.name || s.phone, role: s.role, declined: people.some((p) => p.staffId === s.id), markets: s.markets, unavailable: away.has(s.id), record: records[s.id], cert: certs[s.id] }));
+    .map((s) => ({ id: s.id, name: s.name || s.phone, role: s.role, declined: people.some((p) => p.staffId === s.id), markets: s.markets, unavailable: away.has(s.id), record: records[s.id], cert: certs[s.id], distance: distances.get(s.id) }));
   const sheetFlags = sheet.sheet.sections.flatMap((s) => s.lines).filter((l) => l.conflict || l.gone).length;
 
   const header = (
@@ -186,7 +191,12 @@ export default async function AdminEventPage({
         {addedBy && (
           <p className="px-1 text-sm text-[#6B5D52]">Added by {addedBy}</p>
         )}
-        <MenuPickupPanel initial={pickup} people={staff.filter((s) => s.active).map((s) => ({ id: s.id, name: s.name || s.phone, role: s.role }))} />
+        <MenuPickupPanel
+          initial={pickup}
+          people={staff.filter((s) => s.active).map((s) => ({ id: s.id, name: s.name || s.phone, role: s.role }))}
+          menu={menuFile}
+          today={todayIn(eventSchedule(edNow).tz, now)}
+        />
         {links && (
           <ClientLinksCard conciergeUrl={links.conciergeUrl} eventUrl={links.eventUrl} openConcierge={links.openConcierge} openEvent={links.openEvent} status={clientStatusLine(links, v.timeZone)} />
         )}
@@ -253,7 +263,7 @@ export default async function AdminEventPage({
         <TimePunches people={people} timeZone={v.timeZone} />
       </>
     ),
-    chat: <ManagerChat sessionId={id} initial={messages} unread={chatUnread} timeZone={v.timeZone} muted={muted.has(id)} />,
+    chat: <ManagerChat sessionId={id} initial={messages} unread={chatUnread} timeZone={v.timeZone} muted={muted.has(id)} isAdmin gifSearch={giphyEnabled()} />,
   };
 
   return (
@@ -265,8 +275,8 @@ export default async function AdminEventPage({
         header={header}
         panels={panels}
         counts={{
-          // The menu is not picked up (or nobody is assigned) and the event is inside 48 hours.
-          details: pickup.outstanding ? 1 : 0,
+          // The menu is not picked up (or nobody is assigned) inside 48 hours, and no approved menu inside 72 hours.
+          details: (pickup.outstanding ? 1 : 0) + (menuFile.missing ? 1 : 0),
           team: hidden ? 0 : counts.stillNeeded + handoffs.length,
           order: sheetFlags,
           client: pendingHolds.length,

@@ -1,7 +1,7 @@
 import { requireStaff } from "@/lib/team/auth";
 import { certRows, certsEnforced, myStandings } from "@/lib/team/certs-db";
 import { STATE_LABELS, blocks } from "@/lib/team/certs";
-import { CERT_TYPES } from "@/lib/team/cert-config";
+import { FOOD_HANDLER } from "@/lib/team/cert-config";
 import { marketLabel, marketTz } from "@/lib/team/markets";
 import { longDate, todayIn } from "@/lib/team/time";
 import TeamHeader from "../team-header";
@@ -31,7 +31,7 @@ export default async function CertificationsPage() {
       <main className="max-w-2xl mx-auto px-4 py-6 space-y-4">
         <div className="px-1">
           <h1 className="font-heading text-2xl font-bold text-[#2C2420]">My certifications</h1>
-          <p className="text-[15px] text-[#6B5D52]">Each market needs a current alcohol server certification. We text you before yours expires.</p>
+          <p className="text-[15px] text-[#6B5D52]">Each market needs a current alcohol server certification, and everyone keeps a food handler certificate on file. We text you 30 days and 7 days before one expires, and on the day.</p>
         </div>
         {standings.map(({ market, standing }) => (
           <section key={market} className={card}>
@@ -52,7 +52,7 @@ export default async function CertificationsPage() {
         ))}
         <section className={card}>
           <h2 className="font-heading text-base font-bold text-[#2C2420] mb-2">Upload a certificate</h2>
-          <CertUpload certTypes={needed.length ? needed : CERT_TYPES} defaultType={(needed[0] ?? CERT_TYPES[0]) as string} today={today} />
+          <CertUpload certTypes={[...new Set([...(needed.length ? needed : ["TABC"]), FOOD_HANDLER])]} defaultType={(needed[0] ?? "TABC") as string} today={today} />
         </section>
         {rows.length > 0 && (
           <section className={card}>

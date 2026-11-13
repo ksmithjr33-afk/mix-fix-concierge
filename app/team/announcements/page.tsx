@@ -5,6 +5,7 @@ import { audienceLabel } from "@/lib/team/announcements";
 import { marketLabel, MARKETS, MARKET_INFO } from "@/lib/team/markets";
 import TeamHeader from "../team-header";
 import Compose from "./compose";
+import { giphyEnabled } from "@/lib/team/media";
 
 export const dynamic = "force-dynamic";
 
@@ -27,7 +28,7 @@ export default async function AnnouncementsPage() {
           <h1 className="font-heading text-2xl font-bold text-[#2C2420]">Announcements</h1>
           <p className="text-[15px] text-[#6B5D52]">{unread ? `${unread} unread` : "You are all caught up."}</p>
         </div>
-        {admin && <Compose markets={MARKETS.map((m) => ({ id: m, label: MARKET_INFO[m].label }))} />}
+        {admin && <Compose markets={MARKETS.map((m) => ({ id: m, label: MARKET_INFO[m].label }))} gifSearch={giphyEnabled()} />}
         {items.length === 0 ? (
           <p className="text-[15px] text-[#6B5D52] bg-[#F5F0EB] rounded-2xl border border-[#DDD5CC] px-4 py-4">No announcements yet.</p>
         ) : (

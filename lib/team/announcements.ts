@@ -64,9 +64,14 @@ export function announcementSendAfter(now: Date, tz: string, sendNow: boolean): 
   return sendNow || !inQuietHours(now, tz) ? now : sendableAt(now, tz);
 }
 
-/** "Mix Fix announcement: Holiday schedule. Read it: https://..." */
-export function announcementText(o: { title: string; link: string }): string {
-  return `Mix Fix announcement: ${o.title}. Read it: ${o.link}`;
+/**
+ * "Mix Fix announcement: Holiday schedule. Read it: https://...". With a
+ * picture: "Mix Fix sent a GIF with an announcement: ...". The file itself is
+ * never in the text.
+ */
+export function announcementText(o: { title: string; link: string; attachment?: "gif" | "photo" | null }): string {
+  const lead = o.attachment ? `Mix Fix sent a ${o.attachment === "gif" ? "GIF" : "photo"} with an announcement` : "Mix Fix announcement";
+  return `${lead}: ${o.title}. Read it: ${o.link}`;
 }
 
 /** "To everyone", "To bartenders in Austin and Houston". */

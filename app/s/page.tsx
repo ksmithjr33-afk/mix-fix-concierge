@@ -4,6 +4,7 @@ import { SESSION_COLUMNS, type SessionRow } from "@/lib/event-updates";
 import UpdateMode from "./update-mode";
 import { clientCanSeeList, holdsFor } from "@/lib/client-list-db";
 import { recordClientOpen } from "@/lib/client-links";
+import { clientMenu } from "@/lib/team/approved-menu-db";
 
 // The booking fields /chat takes as query params for intake.
 const INTAKE_PARAMS = [
@@ -83,10 +84,11 @@ export default async function ShortRedirectPage({
 
   // Submitted sessions open in update mode: chat on top, event summary below.
   if (data.status === "submitted" && data.event_data) {
-    const [{ data: log }, showList, pending] = await Promise.all([
+    const [{ data: log }, showList, pending, menu] = await Promise.all([
       supabase.from("conversation_logs").select("update_messages").eq("session_id", sessionId).maybeSingle(),
       clientCanSeeList(sessionId).catch(() => false),
       holdsFor(sessionId, "pending").catch(() => []),
+      clientMenu(sessionId).catch(() => null),
     ]);
     return (
       <UpdateMode
@@ -98,6 +100,7 @@ export default async function ShortRedirectPage({
         initialMessages={Array.isArray(log?.update_messages) ? log.update_messages : []}
         showList={showList}
         listPending={pending.some((h) => h.kind === "change")}
+        menu={menu}
       />
     );
   }

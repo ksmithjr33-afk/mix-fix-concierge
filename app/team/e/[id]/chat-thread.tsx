@@ -3,12 +3,16 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChatMessage } from "@/lib/team/chat-db";
 import { CHAT_READ, setOpenChat } from "../../chat-focus";
+import { AttachControls, useAttachment } from "../../attach-picker";
+import AttachmentView from "../../attachment-view";
 
 export interface ChatProps {
   sessionId: string;
   initial: ChatMessage[];
   unread: number;
   timeZone: string;
+  isAdmin?: boolean; // admins can remove any picture
+  gifSearch?: boolean; // GIPHY_API_KEY is set: show the GIF button
 }
 
 function when(iso: string, tz: string): string {
@@ -19,8 +23,9 @@ function when(iso: string, tz: string): string {
 }
 
 /** The event's team thread. Loads fresh messages (and marks them read) while open. */
-export default function ChatThread({ sessionId, initial, active, timeZone }: ChatProps & { active: boolean }) {
+export default function ChatThread({ sessionId, initial, active, timeZone, isAdmin = false, gifSearch = false }: ChatProps & { active: boolean }) {
   const [messages, setMessages] = useState<ChatMessage[]>(initial);
+  const att = useAttachment("chat", sessionId);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -60,19 +65,20 @@ export default function ChatThread({ sessionId, initial, active, timeZone }: Cha
 
   const send = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!draft.trim() || busy) return;
+    if ((!draft.trim() && !att.pending) || busy || att.busy) return;
     setBusy(true);
     setError("");
     try {
       const res = await fetch("/api/team/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId, body: draft }),
+        body: JSON.stringify({ sessionId, body: draft, ...(att.pending ? { attachmentId: att.pending.id } : {}) }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error ?? "Could not send.");
       setMessages((m) => [...m, data.message]);
       setDraft("");
+      att.clear();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not send.");
     } finally {
@@ -84,7 +90,7 @@ export default function ChatThread({ sessionId, initial, active, timeZone }: Cha
     <section className="bg-[#F5F0EB] rounded-2xl border border-[#DDD5CC] overflow-hidden">
       <div className="px-4 py-3 border-b border-[#DDD5CC]">
         <h2 className="font-heading text-lg font-bold text-[#2C2420]">Team chat</h2>
-        <p className="text-xs text-[#6B5D52]">For the staff on this event and the Mix Fix office. The client never sees it. Client contact details are removed from messages.</p>
+        <p className="text-xs text-[#6B5D52]">For the staff on this event and the Mix Fix office. The client never sees it. Client contact details are removed from messages. You can add one photo or GIF per message.</p>
       </div>
       <ol className="px-3 py-3 space-y-2 max-h-[60dvh] overflow-y-auto">
         {messages.length === 0 && <li className="text-sm text-[#6B5D52] px-1">No messages yet. Say hi to your team.</li>}
@@ -95,7 +101,12 @@ export default function ChatThread({ sessionId, initial, active, timeZone }: Cha
                 {m.mine ? "You" : m.from}
                 {m.fromAdmin && !m.mine ? " · Mix Fix" : ""} · {when(m.at, timeZone)}
               </p>
-              <p className="text-[15px] whitespace-pre-wrap break-words">{m.body}</p>
+              {m.attachment && (
+                <div className="mt-1">
+                  <AttachmentView attachment={m.attachment} isAdmin={isAdmin} />
+                </div>
+              )}
+              {m.body && <p className="text-[15px] whitespace-pre-wrap break-words">{m.body}</p>}
             </div>
           </li>
         ))}
@@ -109,14 +120,16 @@ export default function ChatThread({ sessionId, initial, active, timeZone }: Cha
           id="chat-draft"
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
+          onPaste={att.onPaste}
           rows={2}
           maxLength={2000}
           placeholder="Message the team"
           className="w-full rounded-xl border border-[#DDD5CC] bg-white px-3 py-2 text-[16px] text-[#2C2420] placeholder:text-[#A39585] focus:outline-none focus:ring-2 focus:ring-[#B5845A]/30 focus:border-[#B5845A]"
         />
+        <AttachControls att={att} gifSearch={gifSearch} />
         <div className="flex items-center justify-between gap-3">
           {error ? <p className="text-sm text-[#A0412D]">{error}</p> : <span />}
-          <button type="submit" disabled={busy || !draft.trim()} className="rounded-lg bg-[#2C2420] text-white px-4 py-2 text-sm font-medium disabled:opacity-40">
+          <button type="submit" disabled={busy || att.busy || (!draft.trim() && !att.pending)} className="rounded-lg bg-[#2C2420] text-white px-4 py-2 text-sm font-medium disabled:opacity-40">
             {busy ? "Sending..." : "Send"}
           </button>
         </div>

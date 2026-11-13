@@ -31,6 +31,7 @@ export interface EventListItem {
   staffing?: "full" | "open" | "none"; // admins: fully staffed, spots open, nobody assigned
   menu?: { state: "unassigned" | "assigned" | "picked_up"; text: string }; // admins: the cocktail menu pickup
   request?: boolean; // admins: a client change request is waiting for Approve or Decline
+  noMenu?: boolean; // admins: inside 72 hours and no approved menu uploaded
 }
 
 /** "Justin · Wedding": client first name and event type. */

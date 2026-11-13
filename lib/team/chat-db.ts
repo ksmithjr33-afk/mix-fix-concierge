@@ -15,6 +15,7 @@ import { eventTitle } from "@/lib/team/event-list";
 import { eventData } from "@/lib/team/markets";
 import { sendStaffText } from "@/lib/team/sms";
 import { siteOrigin } from "@/lib/team/clock-db";
+import { attach, attachmentViews, claimAttachment, type AttachmentView } from "@/lib/team/media-db";
 import { canUseThread, chatNoticePlan, chatText, cleanMessage, inboxFrom, inboxSnippet, redactClient, unreadCount, INBOX_DAYS, type ChatNoticeRow, type InboxMessage } from "@/lib/team/chat";
 
 interface MessageRow {
@@ -23,6 +24,8 @@ interface MessageRow {
   staff_id: string | null;
   body: string;
   created_at: string;
+  attachment_id?: string | null;
+  attachment_kind?: "gif" | "photo" | null;
 }
 
 interface Member {
@@ -40,6 +43,7 @@ export interface ChatMessage {
   mine: boolean;
   body: string;
   at: string;
+  attachment?: AttachmentView | null; // one picture or GIF; removed ones say so
 }
 
 type Result<T> = ({ ok: true } & T) | { ok: false; error: string; status: number };
@@ -73,7 +77,7 @@ async function staffMap(ids: string[]): Promise<Map<string, Member>> {
 /** The whole thread, oldest first. Call threadAccess first. */
 export async function threadMessages(sessionId: string, staff: StaffMember): Promise<ChatMessage[]> {
   const rows = await messagesOf(sessionId);
-  const people = await staffMap([...new Set(rows.map((r) => r.staff_id).filter((x): x is string => !!x))]);
+  const [people, pics] = await Promise.all([staffMap([...new Set(rows.map((r) => r.staff_id).filter((x): x is string => !!x))]), attachmentViews(rows.map((r) => r.attachment_id))]);
   return rows.map((r) => {
     const p = r.staff_id ? people.get(r.staff_id) : undefined;
     return {
@@ -83,6 +87,7 @@ export async function threadMessages(sessionId: string, staff: StaffMember): Pro
       mine: r.staff_id === staff.id,
       body: r.body,
       at: r.created_at,
+      attachment: r.attachment_id ? (pics.get(r.attachment_id) ?? null) : null,
     };
   });
 }
@@ -126,19 +131,37 @@ async function hold(sessionId: string, staffId: string, until: Date): Promise<vo
 }
 
 /** Post a message to the event's thread and text the other members. A failed text never fails the post. */
-export async function postMessage(sessionId: string, staff: StaffMember, raw: unknown, now: Date = new Date()): Promise<Result<{ message: ChatMessage }>> {
+export async function postMessage(
+  sessionId: string,
+  staff: StaffMember,
+  raw: unknown,
+  now: Date = new Date(),
+  attachmentId?: unknown
+): Promise<Result<{ message: ChatMessage }>> {
   const access = await threadAccess(sessionId, staff);
   if (!access.ok) return { ok: false, error: access.reason === "not_found" ? "We could not find that event." : "You are not on this event.", status: access.reason === "not_found" ? 404 : 403 };
   const ed = access.session.event_data ?? {};
-  const clean = cleanMessage(raw, { email: ed.client_email, phone: ed.client_phone, name: ed.client_name });
+  const hasAttachment = typeof attachmentId === "string" && !!attachmentId;
+  const clean = cleanMessage(raw, { email: ed.client_email, phone: ed.client_phone, name: ed.client_name }, { hasAttachment });
   if (!clean.ok) return { ok: false, error: clean.error, status: 400 };
+  // One picture or GIF per message: this person's own upload, for this chat, checked again in storage.
+  const pic = hasAttachment ? await claimAttachment(staff, attachmentId, "chat", sessionId) : null;
+  if (pic && !pic.ok) return pic;
+  const picRow = pic && pic.ok ? pic.row : null;
   const { data, error } = await supabase
     .from("event_messages")
-    .insert({ session_id: sessionId, staff_id: staff.id, body: clean.body, created_at: now.toISOString() })
+    .insert({
+      session_id: sessionId,
+      staff_id: staff.id,
+      body: clean.body,
+      created_at: now.toISOString(),
+      ...(picRow ? { attachment_id: picRow.id, attachment_kind: picRow.kind } : {}),
+    })
     .select("*")
     .single();
   if (error || !data) return { ok: false, error: "Could not send. Try again.", status: 500 };
   const row = data as MessageRow;
+  if (picRow) await attach(picRow.id, { message_id: row.id }, picRow);
   await markThreadRead(sessionId, staff.id, now);
 
   try {
@@ -155,14 +178,22 @@ export async function postMessage(sessionId: string, staff: StaffMember, raw: un
         await hold(sessionId, m.id, new Date(now.getTime() + 5 * 60_000));
         continue;
       }
-      await sendStaffText(m.phone, m.name, chatText({ from, title, body: clean.body, more: 0, link: threadLink(sessionId) }));
+      await sendStaffText(m.phone, m.name, chatText({ from, title, body: clean.body, more: 0, link: threadLink(sessionId), attachment: picRow?.kind ?? null }));
     }
   } catch (err) {
     console.error("[team-chat] texting the thread failed:", err instanceof Error ? err.message : String(err));
   }
   return {
     ok: true,
-    message: { id: row.id, from: firstName(staff.name) || "Mix Fix", fromAdmin: staff.role === "admin", mine: true, body: row.body, at: row.created_at },
+    message: {
+      id: row.id,
+      from: firstName(staff.name) || "Mix Fix",
+      fromAdmin: staff.role === "admin",
+      mine: true,
+      body: row.body,
+      at: row.created_at,
+      attachment: picRow ? (await attachmentViews([picRow.id])).get(picRow.id) ?? null : null,
+    },
   };
 }
 
@@ -199,7 +230,7 @@ export async function deliverChatNotices(now: Date = new Date()): Promise<number
     const ok = await sendStaffText(
       person.phone,
       person.name,
-      chatText({ from: firstName(author?.name) || "Mix Fix", title: eventTitle(eventData(access.session)), body: latest.body, more: fresh.length - 1, link: threadLink(r.session_id) })
+      chatText({ from: firstName(author?.name) || "Mix Fix", title: eventTitle(eventData(access.session)), body: latest.body, more: fresh.length - 1, link: threadLink(r.session_id), attachment: latest.attachment_kind ?? null })
     );
     if (ok) sent++;
   }
@@ -280,7 +311,7 @@ export async function chatInbox(staff: StaffMember, now: Date = new Date()): Pro
   const eligible = await notifiedThreads(staff);
   if (eligible && eligible.size === 0) return empty;
   const since = new Date(now.getTime() - INBOX_DAYS * 86_400_000).toISOString();
-  let q = supabase.from("event_messages").select("id, session_id, staff_id, body, created_at").gte("created_at", since);
+  let q = supabase.from("event_messages").select("*").gte("created_at", since);
   if (eligible) q = q.in("session_id", [...eligible]);
   const [{ data, error }, { data: reads }, muted] = await Promise.all([q, supabase.from("event_message_reads").select("session_id, last_read_at").eq("staff_id", staff.id), mutedChats(staff.id)]);
   if (error || !data) return empty;
@@ -308,7 +339,7 @@ export async function chatInbox(staff: StaffMember, now: Date = new Date()): Pro
         id: e.latest.id,
         from: firstName(author?.name) || "Mix Fix",
         // Saved messages already have client details taken out; this is a second check.
-        text: inboxSnippet(redactClient(e.latest.body, { email: ed.client_email, phone: ed.client_phone, name: ed.client_name })),
+        text: inboxSnippet(redactClient(e.latest.body, { email: ed.client_email, phone: ed.client_phone, name: ed.client_name }), e.latest.attachment_kind),
         at: e.latest.created_at,
       },
     });

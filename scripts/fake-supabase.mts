@@ -197,5 +197,38 @@ export const rpcs: Record<string, (args: Record<string, unknown>) => { data: unk
 export const supabase = {
   from: (table: string) => new Query(table),
   rpc: async (name: string, args: Record<string, unknown> = {}) => (rpcs[name] ? rpcs[name](args) : { data: null, error: { message: `function ${name} does not exist` } }),
-  storage: { from: () => ({ upload: async () => ({ error: null }), remove: async () => ({ error: null }), createSignedUrls: async () => ({ data: [], error: null }), createSignedUrl: async (p: string) => ({ data: { signedUrl: `https://signed.test/${p}` }, error: null }) }) },
+  storage: {
+    from: (bucket: string) => ({
+      upload: async (p: string, body: Blob | null, opts: { contentType?: string } = {}) => {
+        objects.set(`${bucket}/${p}`, { size: body?.size ?? 0, contentType: opts.contentType ?? body?.type ?? "" });
+        return { error: null };
+      },
+      remove: async (paths: string[]) => {
+        for (const p of paths) {
+          objects.delete(`${bucket}/${p}`);
+          removed.push(`${bucket}/${p}`);
+        }
+        return { error: null };
+      },
+      createSignedUrls: async () => ({ data: [], error: null }),
+      createSignedUrl: async (p: string, secs: number, opts: { download?: string | boolean } = {}) => {
+        signed.push({ bucket, path: p, seconds: secs, download: opts.download ?? null });
+        return { data: { signedUrl: `https://signed.test/${p}${opts.download ? "?download" : ""}` }, error: null };
+      },
+      list: async () => ({ data: [], error: null }),
+      createSignedUploadUrl: async (p: string) => ({ data: { signedUrl: `https://upload.test/${bucket}/${p}?token=t`, path: p, token: "t" }, error: null }),
+      info: async (p: string) => {
+        const o = objects.get(`${bucket}/${p}`);
+        return o ? { data: { size: o.size, contentType: o.contentType }, error: null } : { data: null, error: { message: "Object not found" } };
+      },
+    }),
+  },
 };
+
+/** Files in the fake storage, by "bucket/path". Tests stand in for a browser upload with putObject. */
+export const objects = new Map<string, { size: number; contentType: string }>();
+export const removed: string[] = [];
+export const signed: { bucket: string; path: string; seconds: number; download: string | boolean | null }[] = [];
+export function putObject(bucket: string, path: string, size: number, contentType: string) {
+  objects.set(`${bucket}/${path}`, { size, contentType });
+}

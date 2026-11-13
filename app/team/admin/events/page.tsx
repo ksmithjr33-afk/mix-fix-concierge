@@ -21,6 +21,7 @@ import { isYmd, pickLayout } from "@/lib/team/calendar";
 import { unreadByEvent } from "@/lib/team/chat-db";
 import { getPrefs, savePrefs } from "@/lib/team/prefs-db";
 import { pickupBadges } from "@/lib/team/menu-pickup-db";
+import { menuMissingIds } from "@/lib/team/approved-menu-db";
 import { ListCalendarToggle } from "../../calendar-view";
 import { orderStatuses } from "@/lib/order-sheet-db";
 import { STATUS_LABEL } from "@/lib/order-sheet";
@@ -89,7 +90,7 @@ export default async function AdminEventsPage({
   };
   // The calendar gets every market and date: it has its own market filter and navigation.
   const sessions = calendar ? visible : (marketFilter ? visible.filter((s) => sessionMarket(s) === marketFilter) : visible).filter(inRange);
-  const [counts, unread, availability, orders, heldLists, menus, requests] = await Promise.all([
+  const [counts, unread, availability, orders, heldLists, menus, requests, noMenu] = await Promise.all([
     staffingByEvent(sessions),
     unreadByEvent(admin.id, sessions.map((s) => s.id)),
     view === "upcoming" ? availableCounts(sessions) : Promise.resolve(new Map<string, number | null>()),
@@ -97,6 +98,7 @@ export default async function AdminEventsPage({
     sessionsWithPendingHolds(sessions.map((s) => s.id)),
     pickupBadges(sessions.map((s) => s.id)),
     sessionsWithPendingRequests(sessions.map((s) => s.id)),
+    menuMissingIds(sessions),
   ]);
   const { data: postRows, error: postErr } = await supabase.from("shift_posts").select("session_id, kind").eq("status", "posted");
   const posted = new Set(postErr ? [] : ((postRows as { session_id: string; kind: string }[]) ?? []).filter((p) => p.kind === "open").map((p) => p.session_id));
@@ -115,6 +117,7 @@ export default async function AdminEventsPage({
       orders.has(s.id) ? STATUS_LABEL[orders.get(s.id)!] : "",
       requests.has(s.id) ? "change request waiting" : heldLists.has(s.id) ? "first list waiting for review" : "",
       menus.get(s.id)?.text ?? "",
+      noMenu.has(s.id) ? "no approved menu" : "",
     ]
       .filter(Boolean)
       .join(" · ");
@@ -126,6 +129,7 @@ export default async function AdminEventsPage({
       chat: { href: `/team/admin/e/${s.id}?tab=chat`, unread: unread.get(s.id) ?? 0 },
       staffing: staffingTone(c),
       ...(requests.has(s.id) ? { request: true } : {}),
+      ...(noMenu.has(s.id) ? { noMenu: true } : {}),
       ...(menu ? { menu: { state: menu.state as "unassigned" | "assigned" | "picked_up", text: menu.text } } : {}),
     };
   });

@@ -3,7 +3,7 @@ import { getCurrentStaff } from "@/lib/team/auth";
 import { markThreadRead, postMessage, threadAccess, threadMessages } from "@/lib/team/chat-db";
 
 // The event team chat. GET ?sessionId= returns the thread (and marks it read);
-// POST { sessionId, body } posts a message. Admins and staff on the event only.
+// POST { sessionId, body, attachmentId? } posts a message, with one picture or GIF. Admins and staff on the event only.
 export async function GET(request: Request) {
   const staff = await getCurrentStaff();
   if (!staff) return NextResponse.json({ error: "Sign in again." }, { status: 401 });
@@ -25,9 +25,9 @@ export async function POST(request: Request) {
   const staff = await getCurrentStaff();
   if (!staff) return NextResponse.json({ error: "Sign in again." }, { status: 401 });
   try {
-    const { sessionId, body } = await request.json().catch(() => ({}));
+    const { sessionId, body, attachmentId } = await request.json().catch(() => ({}));
     if (typeof sessionId !== "string") return NextResponse.json({ error: "Bad request" }, { status: 400 });
-    const r = await postMessage(sessionId, staff, body);
+    const r = await postMessage(sessionId, staff, body, new Date(), attachmentId);
     if (!r.ok) return NextResponse.json({ error: r.error }, { status: r.status });
     return NextResponse.json({ ok: true, message: r.message });
   } catch (err) {

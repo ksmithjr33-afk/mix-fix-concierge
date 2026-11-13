@@ -60,6 +60,7 @@ export interface MyPickup {
   note: string;
   order: string;
   eventHref: string | null; // their event page, when they are on the event
+  printFileHref: string | null; // "Download print file": the approved menu, once it is uploaded
 }
 
 interface Person {
@@ -246,6 +247,9 @@ export async function myPickups(staff: StaffMember, now: Date = new Date()): Pro
   const rows = (data as PickupRow[]).filter((r) => pickupState(r) === "assigned");
   if (rows.length === 0) return [];
   const hidden = await hiddenEventIds();
+  // Events with an approved menu uploaded (read here directly: the approved menu module reads pickups).
+  const { data: files } = await supabase.from("event_menu_files").select("session_id, status").in("session_id", rows.map((r) => r.session_id)).eq("status", "current");
+  const withFile = new Set(((files as { session_id: string }[]) ?? []).map((f) => f.session_id));
   const out: (MyPickup & { day: string })[] = [];
   for (const r of rows) {
     if (hidden.has(r.session_id)) continue;
@@ -265,11 +269,12 @@ export async function myPickups(staff: StaffMember, now: Date = new Date()): Pro
       note: f.note,
       order: f.order,
       eventHref: onEvent ? (staff.role === "admin" ? `/team/admin/e/${encodeURIComponent(r.session_id)}` : `/team/e/${encodeURIComponent(r.session_id)}`) : null,
+      printFileHref: withFile.has(r.session_id) ? `/api/team/menu-file?sessionId=${encodeURIComponent(r.session_id)}&download=1` : null,
       day: s.day,
     });
   }
   out.sort((a, b) => a.day.localeCompare(b.day));
-  return out.map((p) => ({ sessionId: p.sessionId, title: p.title, date: p.date, store: p.store, note: p.note, order: p.order, eventHref: p.eventHref }));
+  return out.map((p) => ({ sessionId: p.sessionId, title: p.title, date: p.date, store: p.store, note: p.note, order: p.order, eventHref: p.eventHref, printFileHref: p.printFileHref }));
 }
 
 /** One of this person's pickups, for their event page. */

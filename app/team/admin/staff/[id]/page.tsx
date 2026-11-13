@@ -9,13 +9,15 @@ import RecordCard from "../../../record-card";
 import { staffRecord } from "@/lib/team/reliability-db";
 import { certRows, myStandings, onboardingDone } from "@/lib/team/certs-db";
 import { STATE_LABELS } from "@/lib/team/certs";
-import { CERT_TYPES, ONBOARDING } from "@/lib/team/cert-config";
+import { FOOD_HANDLER, ONBOARDING } from "@/lib/team/cert-config";
 import { longDate } from "@/lib/team/time";
 import CertUpload from "../../../certifications/cert-upload";
 import CertReview from "./cert-review";
 import RateForm from "./rate-form";
 import { rateFor } from "@/lib/team/pay-db";
 import { PAY_LABEL } from "@/lib/team/pay";
+import { viewProfile } from "@/lib/team/profile-db";
+import ProfileForm from "../../../me/profile/profile-form";
 
 export const dynamic = "force-dynamic";
 
@@ -40,6 +42,7 @@ export default async function StaffDetailPage({ params }: { params: Promise<{ id
   const [away, record, certs, standings, onboard] = await Promise.all([upcomingUnavailable(id, today), staffRecord(id), certRows([id]), myStandings(id), onboardingDone(id)]);
   const needed = [...new Set(standings.map((s) => s.standing.certType))];
   const rate = await rateFor(id); // admins only: this page is behind requireAdmin
+  const profile = await viewProfile(me, id);
   return (
     <>
       <TeamHeader signedIn admin back={back} />
@@ -53,6 +56,13 @@ export default async function StaffDetailPage({ params }: { params: Promise<{ id
             Preview as
           </Link>
         </div>
+
+        {profile && (
+          <section className={card} aria-label="Profile">
+            <h2 className="font-heading text-base font-bold text-[#2C2420] mb-1">Profile</h2>
+            <ProfileForm initial={profile} staffId={id} admin />
+          </section>
+        )}
 
         <RecordCard record={record} />
 
@@ -101,7 +111,7 @@ export default async function StaffDetailPage({ params }: { params: Promise<{ id
             <details className="mt-3">
               <summary className="text-sm text-[#B5845A] underline cursor-pointer">Enter a certification for {person.name?.split(" ")[0] || "them"}</summary>
               <div className="mt-2">
-                <CertUpload certTypes={needed.length ? needed : CERT_TYPES} defaultType={needed[0] ?? CERT_TYPES[0]} today={today} staffId={id} button="Save certification" />
+                <CertUpload certTypes={[...new Set([...(needed.length ? needed : ["TABC"]), FOOD_HANDLER])]} defaultType={needed[0] ?? "TABC"} today={today} staffId={id} button="Save certification" />
               </div>
             </details>
           )}

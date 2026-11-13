@@ -68,6 +68,13 @@ export default function MyPickupCard({ pickup, showEvent = true }: { pickup: MyP
           </div>
         )}
       </dl>
+      {pickup.printFileHref ? (
+        <a href={pickup.printFileHref} className="block w-full rounded-xl border-2 border-[#B5845A] bg-white text-[#9A7049] py-3 text-center text-[15px] font-medium hover:bg-[#FFF3DF]">
+          Download print file
+        </a>
+      ) : (
+        <p className="text-sm text-[#6B5D52]">The print file shows here once the office uploads the approved menu.</p>
+      )}
       {done ? (
         <p className="w-full rounded-xl bg-[#8B9E7E] text-white py-3 text-center text-[15px] font-medium">{done}</p>
       ) : (

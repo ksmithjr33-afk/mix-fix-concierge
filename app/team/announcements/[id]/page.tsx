@@ -3,6 +3,7 @@ import { openAnnouncement } from "@/lib/team/announcements-db";
 import { audienceLabel } from "@/lib/team/announcements";
 import { marketLabel } from "@/lib/team/markets";
 import TeamHeader from "../../team-header";
+import AttachmentView from "../../attachment-view";
 
 export const dynamic = "force-dynamic";
 
@@ -40,6 +41,7 @@ export default async function AnnouncementPage({ params }: { params: Promise<{ i
             {at(item.createdAt)}
             {admin && ` · ${audienceLabel(item.audience, (m) => marketLabel(m as never))}`}
           </p>
+          {item.attachment && <AttachmentView attachment={item.attachment} isAdmin={admin} />}
           <p className="text-[15px] text-[#2C2420] whitespace-pre-wrap break-words">{item.body}</p>
         </article>
         {opens && (

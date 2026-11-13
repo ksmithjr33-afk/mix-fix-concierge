@@ -11,6 +11,7 @@ import type { StaffMember } from "@/lib/team/event-view";
 import { sendStaffText } from "@/lib/team/sms";
 import { siteOrigin } from "@/lib/team/clock-db";
 import { inQuietHours } from "@/lib/team/shifts";
+import { attach, attachmentKind, attachmentViews, claimAttachment, type AttachmentView } from "@/lib/team/media-db";
 import { announcementSendAfter, announcementText, audienceOf, recipientTz, validateAnnouncement, type StaffLike } from "@/lib/team/announcements";
 
 interface AnnouncementRow {
@@ -22,6 +23,7 @@ interface AnnouncementRow {
   send_now: boolean;
   created_by: string | null;
   created_at: string;
+  attachment_id?: string | null;
 }
 
 interface RecipientRow {
@@ -56,13 +58,27 @@ export async function createAnnouncement(
   const { data: staffRows } = await supabase.from("staff").select("*").eq("active", true);
   const people = audienceOf((staffRows as StaffFull[]) ?? [], a, admin.id);
   if (people.length === 0) return { ok: false, error: "Nobody matches that audience.", status: 400 };
+  // One picture or GIF: the admin's own upload, checked again in storage.
+  const pic = typeof raw.attachmentId === "string" && raw.attachmentId ? await claimAttachment(admin, raw.attachmentId, "announcement", null) : null;
+  if (pic && !pic.ok) return pic;
+  const picRow = pic && pic.ok ? pic.row : null;
   const { data, error } = await supabase
     .from("announcements")
-    .insert({ title: a.title, body: a.body, markets: a.markets, bartenders_only: a.bartendersOnly, send_now: a.sendNow, created_by: admin.id, created_at: now.toISOString() })
+    .insert({
+      title: a.title,
+      body: a.body,
+      markets: a.markets,
+      bartenders_only: a.bartendersOnly,
+      send_now: a.sendNow,
+      created_by: admin.id,
+      created_at: now.toISOString(),
+      ...(picRow ? { attachment_id: picRow.id } : {}),
+    })
     .select("*")
     .single();
   if (error || !data) return { ok: false, error: "Could not save. Try again.", status: 500 };
   const row = data as AnnouncementRow;
+  if (picRow) await attach(picRow.id, { announcement_id: row.id }, picRow);
   const { error: rErr } = await supabase.from("announcement_recipients").upsert(
     people.map((p) => {
       const tz = recipientTz(p, a.markets);
@@ -92,6 +108,8 @@ export async function deliverAnnouncements(now: Date = new Date(), announcementI
   const byId = new Map(((aRows as AnnouncementRow[]) ?? []).map((a) => [a.id, a]));
   const { data: sRows } = await supabase.from("staff").select("*").in("id", [...new Set(due.map((r) => r.staff_id))]);
   const staff = new Map(((sRows as StaffFull[]) ?? []).map((s) => [s.id, s]));
+  const kinds = new Map<string, "gif" | "photo" | null>();
+  for (const a of byId.values()) kinds.set(a.id, await attachmentKind(a.attachment_id));
   let sent = 0;
   for (const r of due) {
     const a = byId.get(r.announcement_id);
@@ -104,7 +122,7 @@ export async function deliverAnnouncements(now: Date = new Date(), announcementI
       await supabase.from("announcement_recipients").update({ status: "skipped" }).eq("id", r.id);
       continue;
     }
-    const ok = await sendStaffText(s.phone, s.name, announcementText({ title: a.title, link: announcementLink(a.id) }));
+    const ok = await sendStaffText(s.phone, s.name, announcementText({ title: a.title, link: announcementLink(a.id), attachment: kinds.get(a.id) ?? null }));
     await supabase.from("announcement_recipients").update({ status: ok ? "sent" : "failed", sent_at: now.toISOString() }).eq("id", r.id);
     if (ok) sent++;
   }
@@ -120,6 +138,7 @@ export interface AnnouncementItem {
   audience: { markets: string[]; bartenders_only: boolean };
   opened?: number; // admins: how many recipients opened it
   recipients?: number;
+  attachment?: AttachmentView | null; // one picture or GIF
 }
 
 /** Announcements this person can read, newest first: every one for admins, their own for everyone else. */
@@ -191,6 +210,8 @@ export async function openAnnouncement(id: string, staff: StaffMember, now: Date
       }))
       .sort((x, y) => Number(!!y.openedAt) - Number(!!x.openedAt) || x.name.localeCompare(y.name));
   }
+  // The viewer passed the check above: they were sent it, or they are an admin.
+  const pics = await attachmentViews([row.attachment_id]);
   return {
     item: {
       id: row.id,
@@ -199,6 +220,7 @@ export async function openAnnouncement(id: string, staff: StaffMember, now: Date
       createdAt: row.created_at,
       unread: false,
       audience: { markets: row.markets ?? [], bartenders_only: row.bartenders_only },
+      attachment: row.attachment_id ? (pics.get(row.attachment_id) ?? null) : null,
     },
     opens,
   };

@@ -15,6 +15,8 @@ import { eventData } from "@/lib/team/markets";
 import { myHandoff, teammateChoices } from "@/lib/team/shifts-db";
 import { markThreadRead, threadMessages, unreadByEvent } from "@/lib/team/chat-db";
 import { myPickupFor } from "@/lib/team/menu-pickup-db";
+import { staffMenuSection } from "@/lib/team/approved-menu-db";
+import { giphyEnabled } from "@/lib/team/media";
 import TeamHeader from "../../team-header";
 import EventTabs, { type Tab } from "./event-tabs";
 
@@ -63,7 +65,7 @@ export default async function TeamEventPage({
   }
 
   const ed = eventData(access.session);
-  const [data, entries, assignment, messages, unread, closeout, menuPickup] = await Promise.all([
+  const [data, entries, assignment, messages, unread, closeout, menuPickup, menuSection] = await Promise.all([
     eventPageData(access.session, staff),
     barReadyEntries(id, staff),
     assignmentRef(id, staff.id),
@@ -71,6 +73,7 @@ export default async function TeamEventPage({
     unreadByEvent(staff.id, [id]),
     closeoutState(access.session, staff),
     myPickupFor(id, staff),
+    staffMenuSection(access.session, staff),
   ]);
   if (chatTab) await markThreadRead(id, staff.id);
   const punches = assignment ? await punchesFor(assignment.id) : [];
@@ -88,7 +91,7 @@ export default async function TeamEventPage({
       <TeamHeader signedIn admin={staff.role === "admin"} back={back} />
       <EventTabs
         initialTab={askedTab === "wrapup" && !closeout.open ? "details" : askedTab}
-        chat={{ sessionId: id, initial: messages, unread: unread.get(id) ?? 0, timeZone: data.view.timeZone }}
+        chat={{ sessionId: id, initial: messages, unread: unread.get(id) ?? 0, timeZone: data.view.timeZone, isAdmin: staff.role === "admin", gifSearch: giphyEnabled() }}
         offered={assignment?.status === "offered"}
         giveUp={accepted ? { sessionId: id, handoff, teammates, canStart: punches.length === 0 } : null}
         clock={clockView(assignment, ed, punches)}
@@ -123,6 +126,7 @@ export default async function TeamEventPage({
         }
         wrapUpDone={!!closeout.mine}
         menuPickup={menuPickup}
+        menuSection={menuSection}
       />
     </>
   );

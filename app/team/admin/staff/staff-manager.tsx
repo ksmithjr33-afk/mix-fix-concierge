@@ -2,6 +2,38 @@
 
 import { useState } from "react";
 import type { StaffRecord } from "@/lib/team/assignments";
+import type { StaffOverview } from "@/lib/team/profile-db";
+
+const CERT_TONE: Record<string, string> = {
+  ok: "bg-[#E4EBDF] text-[#55684A]",
+  amber: "bg-[#FFF3DF] text-[#9A5B12]",
+  red: "bg-[#F6E3DC] text-[#A0412D]",
+  missing: "bg-[#E8DDD5] text-[#6B5D52]",
+};
+
+/** Markets, drop off time, max distance, certificates and completeness, at a glance. */
+function Glance({ o }: { o: StaffOverview }) {
+  return (
+    <div className="space-y-1">
+      <p className="text-sm text-[#6B5D52]">
+        Drop offs: {o.dropoffTime || "not set"} · Drives up to {o.maxMiles ? `${o.maxMiles} mi` : "not set"}
+      </p>
+      <div className="flex flex-wrap gap-1.5">
+        {o.certs.map((c) => (
+          <span key={c.certType} className={`text-[11px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded ${CERT_TONE[c.tone]}`}>
+            {c.certType} {c.text}
+          </span>
+        ))}
+        <span
+          className={`text-[11px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded ${o.done === o.total ? "bg-[#E4EBDF] text-[#55684A]" : "bg-[#E8DDD5] text-[#6B5D52]"}`}
+          title={o.missing.length ? `Missing: ${o.missing.join(", ")}` : "Profile complete"}
+        >
+          {o.done === o.total ? "Profile complete" : `Profile ${o.done} of ${o.total}`}
+        </span>
+      </div>
+    </div>
+  );
+}
 
 const MARKET_CHOICES: [string, string][] = [
   ["dallas", "Dallas"],
@@ -132,7 +164,7 @@ function Toggle({ on, label, disabled, onChange }: { on: boolean; label: string;
   );
 }
 
-function StaffRow({ s, meId, onSaved, notes }: { s: StaffRecord; meId: string; onSaved: (s: StaffRecord) => void; notes?: string[] }) {
+function StaffRow({ s, meId, onSaved, notes, overview }: { s: StaffRecord; meId: string; onSaved: (s: StaffRecord) => void; notes?: string[]; overview?: StaffOverview }) {
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -183,6 +215,7 @@ function StaffRow({ s, meId, onSaved, notes }: { s: StaffRecord; meId: string; o
             {!s.active && " · Inactive"}
           </p>
           <p className="text-sm text-[#6B5D52]">Markets: {marketNames(s.markets) || "None"}</p>
+          {overview && <Glance o={overview} />}
           {(notes ?? []).map((n) => (
             <p key={n} className="text-sm text-[#6B5D52] break-words">
               {n}
@@ -214,12 +247,30 @@ function StaffRow({ s, meId, onSaved, notes }: { s: StaffRecord; meId: string; o
   );
 }
 
-export default function StaffManager({ initial, meId, notes = {} }: { initial: StaffRecord[]; meId: string; notes?: Record<string, string[]> }) {
+type Filter = "all" | "expiring" | "incomplete";
+
+export default function StaffManager({
+  initial,
+  meId,
+  notes = {},
+  overview = {},
+}: {
+  initial: StaffRecord[];
+  meId: string;
+  notes?: Record<string, string[]>;
+  overview?: Record<string, StaffOverview>;
+}) {
   const [staff, setStaff] = useState(initial);
   const [adding, setAdding] = useState(false);
+  const [filter, setFilter] = useState<Filter>("all");
   const upsert = (s: StaffRecord) => setStaff((list) => (list.some((x) => x.id === s.id) ? list.map((x) => (x.id === s.id ? s : x)) : [s, ...list]));
-  const active = staff.filter((s) => s.active);
-  const inactive = staff.filter((s) => !s.active);
+  const shown = staff.filter((s) => filter === "all" || (filter === "expiring" ? overview[s.id]?.expiringSoon : overview[s.id] && overview[s.id].done < overview[s.id].total));
+  const active = shown.filter((s) => s.active);
+  const inactive = shown.filter((s) => !s.active);
+  const counts = {
+    expiring: staff.filter((s) => s.active && overview[s.id]?.expiringSoon).length,
+    incomplete: staff.filter((s) => s.active && overview[s.id] && overview[s.id].done < overview[s.id].total).length,
+  };
 
   return (
     <div className="space-y-3">
@@ -244,11 +295,32 @@ export default function StaffManager({ initial, meId, notes = {} }: { initial: S
           </button>
         )}
       </section>
+      <div className="flex flex-wrap gap-1 bg-[#DDD5CC] p-1 rounded-xl" role="tablist" aria-label="Show">
+        {(
+          [
+            ["all", "Everyone"],
+            ["expiring", `Expiring soon (${counts.expiring})`],
+            ["incomplete", `Profile incomplete (${counts.incomplete})`],
+          ] as [Filter, string][]
+        ).map(([k, l]) => (
+          <button
+            key={k}
+            type="button"
+            role="tab"
+            aria-selected={filter === k}
+            onClick={() => setFilter(k)}
+            className={`flex-1 whitespace-nowrap px-2 py-1.5 rounded-lg text-sm font-medium ${filter === k ? "bg-[#F5F0EB] text-[#2C2420] shadow-sm" : "text-[#6B5D52]"}`}
+          >
+            {l}
+          </button>
+        ))}
+      </div>
       <section className={card}>
         <h2 className="font-heading text-base font-bold text-[#2C2420]">Active ({active.length})</h2>
+        {active.length === 0 && filter !== "all" && <p className="text-sm text-[#6B5D52] py-2">Nobody matches.</p>}
         <ul className="divide-y divide-[#DDD5CC]">
           {active.map((s) => (
-            <StaffRow key={s.id} s={s} meId={meId} onSaved={upsert} notes={notes[s.id]} />
+            <StaffRow key={s.id} s={s} meId={meId} onSaved={upsert} notes={notes[s.id]} overview={overview[s.id]} />
           ))}
         </ul>
       </section>
@@ -257,7 +329,7 @@ export default function StaffManager({ initial, meId, notes = {} }: { initial: S
           <h2 className="font-heading text-base font-bold text-[#2C2420]">Inactive ({inactive.length})</h2>
           <ul className="divide-y divide-[#DDD5CC]">
             {inactive.map((s) => (
-              <StaffRow key={s.id} s={s} meId={meId} onSaved={upsert} notes={notes[s.id]} />
+              <StaffRow key={s.id} s={s} meId={meId} onSaved={upsert} notes={notes[s.id]} overview={overview[s.id]} />
             ))}
           </ul>
         </section>

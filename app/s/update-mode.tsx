@@ -36,7 +36,9 @@ export default function UpdateMode({
   initialMessages,
   showList = false,
   listPending = false,
+  menu = null,
 }: {
+  menu?: { type: string; typeLabel: string; viewHref: string; downloadHref: string } | null; // "Your menu": the approved menu, once uploaded
   sessionId: string;
   clientName: string | null;
   initialEventData: EventData;
@@ -260,6 +262,26 @@ export default function UpdateMode({
           )}
           <EventSummary data={eventData} />
         </div>
+
+        {menu && (
+          <section id="your-menu" className="bg-[#F5F0EB] rounded-2xl border border-[#DDD5CC] px-4 py-4 space-y-3" aria-label="Your menu">
+            <h2 className="font-heading text-lg font-bold text-[#2C2420]">Your menu</h2>
+            {menu.type !== "application/pdf" && (
+              <a href={menu.viewHref} target="_blank" rel="noopener noreferrer" className="block">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={menu.viewHref} alt="Your approved cocktail menu" className="max-h-[28rem] w-auto max-w-full rounded-lg border border-[#DDD5CC] bg-white" />
+              </a>
+            )}
+            <div className="flex flex-wrap gap-3">
+              <a href={menu.viewHref} target="_blank" rel="noopener noreferrer" className="rounded-lg bg-[#2C2420] text-white px-4 py-2 text-sm font-medium">
+                View{menu.type === "application/pdf" ? " (PDF)" : ""}
+              </a>
+              <a href={menu.downloadHref} className="rounded-lg border border-[#2C2420] text-[#2C2420] px-4 py-2 text-sm font-medium">
+                Download
+              </a>
+            </div>
+          </section>
+        )}
 
         {showList && <ShoppingList data={eventData} pending={pending} />}
       </main>

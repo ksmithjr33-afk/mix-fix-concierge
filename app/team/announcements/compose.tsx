@@ -2,12 +2,14 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { AttachControls, useAttachment } from "../attach-picker";
 
 type Who = "everyone" | "markets";
 
 /** Admins write an announcement: title, message, who gets it, and whether to skip quiet hours. */
-export default function Compose({ markets }: { markets: { id: string; label: string }[] }) {
+export default function Compose({ markets, gifSearch = false }: { markets: { id: string; label: string }[]; gifSearch?: boolean }) {
   const router = useRouter();
+  const att = useAttachment("announcement");
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
@@ -24,7 +26,7 @@ export default function Compose({ markets }: { markets: { id: string; label: str
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!ready || busy) return;
+    if (!ready || busy || att.busy) return;
     setBusy(true);
     setError("");
     setDone("");
@@ -32,7 +34,7 @@ export default function Compose({ markets }: { markets: { id: string; label: str
       const res = await fetch("/api/team/admin/announcements", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title, body, markets: who === "markets" ? picked : [], bartendersOnly, sendNow }),
+        body: JSON.stringify({ title, body, markets: who === "markets" ? picked : [], bartendersOnly, sendNow, ...(att.pending ? { attachmentId: att.pending.id } : {}) }),
       });
       const d = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(d.error ?? "Could not send.");
@@ -42,6 +44,7 @@ export default function Compose({ markets }: { markets: { id: string; label: str
       );
       setTitle("");
       setBody("");
+      att.clear();
       setOpen(false);
       router.refresh();
     } catch (err) {
@@ -71,8 +74,12 @@ export default function Compose({ markets }: { markets: { id: string; label: str
       </label>
       <label className="block space-y-1">
         <span className="text-sm font-medium text-[#2C2420]">Message</span>
-        <textarea value={body} onChange={(e) => setBody(e.target.value)} rows={5} maxLength={2000} className={field} />
+        <textarea value={body} onChange={(e) => setBody(e.target.value)} onPaste={att.onPaste} rows={5} maxLength={2000} className={field} />
       </label>
+      <div className="space-y-1">
+        <span className="text-sm font-medium text-[#2C2420]">Picture or GIF (optional, one)</span>
+        <AttachControls att={att} gifSearch={gifSearch} />
+      </div>
       <fieldset className="space-y-2">
         <legend className="text-sm font-medium text-[#2C2420]">Send to</legend>
         <label className="flex items-center gap-2 text-[15px] text-[#2C2420]">
@@ -103,7 +110,7 @@ export default function Compose({ markets }: { markets: { id: string; label: str
       </label>
       {error && <p className="text-sm text-[#A0412D]">{error}</p>}
       <div className="flex items-center gap-3">
-        <button type="submit" disabled={!ready || busy} className="rounded-lg bg-[#2C2420] text-white px-4 py-2 text-sm font-medium disabled:opacity-40">
+        <button type="submit" disabled={!ready || busy || att.busy} className="rounded-lg bg-[#2C2420] text-white px-4 py-2 text-sm font-medium disabled:opacity-40">
           {busy ? "Sending..." : "Send announcement"}
         </button>
         <button type="button" onClick={() => setOpen(false)} className="text-sm text-[#6B5D52] underline">

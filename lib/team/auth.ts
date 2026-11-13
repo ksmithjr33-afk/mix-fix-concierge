@@ -77,7 +77,7 @@ export async function requestLoginCode(raw: unknown): Promise<void> {
   if (!sent && process.env.NODE_ENV !== "production") console.log(`[team-auth] dev login code for ${phone}: ${code}`);
 }
 
-export type VerifyResult = { ok: true; token: string } | { ok: false; message: string };
+export type VerifyResult = { ok: true; token: string; staffId: string } | { ok: false; message: string };
 
 /** Check a code against the latest one sent to the phone and start a session. */
 export async function verifyLoginCode(rawPhone: unknown, rawCode: unknown): Promise<VerifyResult> {
@@ -121,7 +121,7 @@ export async function verifyLoginCode(rawPhone: unknown, rawCode: unknown): Prom
     expires_at: new Date(Date.now() + SESSION_DAYS * 86_400_000).toISOString(),
   });
   if (error) throw new Error(`session insert failed: ${error.message}`);
-  return { ok: true, token };
+  return { ok: true, token, staffId: staff.id };
 }
 
 export const sessionCookieOptions = {

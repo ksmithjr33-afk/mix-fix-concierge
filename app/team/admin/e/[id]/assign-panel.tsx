@@ -47,7 +47,17 @@ export default function AssignPanel({
   summary: string;
   covered: boolean;
   people: AssigneeProgress[];
-  available: { id: string; name: string; role: string; declined: boolean; markets: string[]; unavailable: boolean; record?: string; cert?: string }[];
+  available: {
+    id: string;
+    name: string;
+    role: string;
+    declined: boolean;
+    markets: string[];
+    unavailable: boolean;
+    record?: string;
+    cert?: string;
+    distance?: { miles: number; maxMiles: number | null; over: boolean; text: string }; // straight line from home: a warning, never a block
+  }[];
 }) {
   const router = useRouter();
   const [pick, setPick] = useState("");
@@ -168,6 +178,7 @@ export default function AssignPanel({
                   {market && !s.markets.includes(market) ? " (other market)" : ""}
                   {s.unavailable ? " (Unavailable)" : ""}
                   {s.cert ? ` (${s.cert})` : ""}
+                  {s.distance ? ` · ${s.distance.over ? "⚠ " : ""}${s.distance.miles} mi${s.distance.over ? ` (max ${s.distance.maxMiles})` : ""}` : ""}
                   {s.record ? ` · ${s.record}` : ""}
                 </option>
               ))}
@@ -187,6 +198,11 @@ export default function AssignPanel({
             <span className="font-bold uppercase tracking-wide">Unavailable</span> {available.find((s) => s.id === pick)?.name.split(" ")[0]} marked this day unavailable.
           </p>
         )}
+        {pick && available.find((s) => s.id === pick)?.distance?.over && (
+          <p className="text-xs text-[#9A7049] mt-2">
+            <span className="font-bold uppercase tracking-wide">Far away</span> {available.find((s) => s.id === pick)?.name.split(" ")[0]} lives {available.find((s) => s.id === pick)?.distance?.text}. You can still assign them.
+          </p>
+        )}
         {confirm && (
           <div className="mt-2 flex flex-wrap items-center gap-2 rounded-xl border border-[#E8C9A8] bg-[#FFF3DF] px-3 py-2">
             <span className="text-sm text-[#2C2420]">{confirm.message}</span>
@@ -198,7 +214,7 @@ export default function AssignPanel({
             </button>
           </div>
         )}
-        <p className="text-xs text-[#A39585] mt-2">They get a text with a link to accept or decline.</p>
+        <p className="text-xs text-[#A39585] mt-2">They get a text with a link to accept or decline. Miles are a straight line from their home address, a rough estimate of the drive.</p>
         {error && <p className="text-sm text-[#A0412D] mt-2">{error}</p>}
       </section>
     </div>

@@ -18,6 +18,8 @@ import ChatThread, { type ChatProps } from "./chat-thread";
 import { useLiveUnread, useOpenChat } from "../../chat-focus";
 import MyPickupCard from "../../menu-pickup-card";
 import type { MyPickup } from "@/lib/team/menu-pickup-db";
+import type { StaffMenuSection } from "@/lib/team/approved-menu-db";
+import MenuSection from "./menu-section";
 
 
 export type Tab = "details" | "checklist" | "shopping" | "wrapup" | "chat";
@@ -541,7 +543,9 @@ export default function EventTabs({
   chat,
   initialTab = "details",
   menuPickup = null,
+  menuSection = null,
 }: {
+  menuSection?: StaffMenuSection | null; // the menu on the Details tab, for staff on the event
   chat: ChatProps;
   menuPickup?: MyPickup | null; // "Pick up the menu", when this person is picking it up
   initialTab?: Tab;
@@ -633,7 +637,8 @@ export default function EventTabs({
         ))}
       </nav>
 
-      <div hidden={tab !== "details"}>
+      <div hidden={tab !== "details"} className="space-y-4">
+        {menuSection && <MenuSection menu={menuSection} />}
         <Details v={view} />
         {giveUp && !giveUp.handoff && giveUp.canStart && (
           <div className="mt-4">

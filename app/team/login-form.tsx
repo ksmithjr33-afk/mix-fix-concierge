@@ -45,14 +45,14 @@ export default function LoginForm({ next }: { next: string }) {
       const res = await fetch("/api/team/verify-code", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone, code }),
+        body: JSON.stringify({ phone, code, next }),
       });
       const data = await res.json();
       if (!res.ok) {
         setError(data.error ?? "That code did not work.");
         return;
       }
-      router.replace(next);
+      router.replace(typeof data.redirect === "string" && data.redirect.startsWith("/team/") ? data.redirect : next);
       router.refresh();
     } catch {
       setError("Could not reach the server. Try again.");
