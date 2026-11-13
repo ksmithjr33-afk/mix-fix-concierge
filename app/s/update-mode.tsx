@@ -44,7 +44,7 @@ export default function UpdateMode({
   initialUpdatedAt: string | null;
   initialMessages: Message[];
   showList?: boolean; // auto send is on and the first list is out
-  listPending?: boolean; // a change that would change the list is waiting for approval
+  listPending?: boolean; // a change request made inside 6 days is waiting for approval
 }) {
   const [messages, setMessages] = useState<Message[]>(
     initialMessages.length > 0
@@ -180,8 +180,8 @@ export default function UpdateMode({
           <div className="px-4 py-2.5 border-b border-[#DDD5CC]">
             <h1 className="font-heading text-base font-bold text-[#2C2420]">Update your event</h1>
             <p className="text-xs text-[#6B5D52] mt-0.5 leading-snug">
-              Change anything up to 6 days before your event. After that, you can still change everything
-              except your drink menu.
+              Changes save right away up to 6 days before your event. After that, a change to your drink
+              menu or shopping list is sent to our team for approval.
             </p>
           </div>
           <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 py-3 space-y-3">
@@ -244,7 +244,7 @@ export default function UpdateMode({
         </section>
 
         {/* Read only summary */}
-        <div>
+        <div id="event-details" className="scroll-mt-4">
           <div className="flex items-baseline justify-between mb-2 px-1">
             <h2 className="font-heading text-lg font-bold text-[#2C2420]">Your event details</h2>
             {lastUpdated && (
@@ -253,6 +253,11 @@ export default function UpdateMode({
               </span>
             )}
           </div>
+          {pending && (
+            <p className="mb-2 rounded-xl border border-[#E3C9A0] bg-[#FFF8EC] px-3 py-2 text-sm text-[#6B5D52]">
+              A change you asked for is waiting for our team&apos;s approval. It is not confirmed yet, and the details below do not include it.
+            </p>
+          )}
           <EventSummary data={eventData} />
         </div>
 

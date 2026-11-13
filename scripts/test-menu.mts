@@ -215,6 +215,7 @@ const priceChange = await import("../lib/price-change.ts");
 const notes = await import("../lib/update-notes.ts");
 const { buildUpdatePrompt } = await import("../lib/update-prompt.ts");
 const { CHANGE_DEADLINES } = await import("../lib/system-prompt.ts");
+const { CHANGE_REQUEST_MESSAGE } = await import("../lib/client-list.ts");
 const { readFileSync } = await import("node:fs");
 
 // 9 PM in Dallas on Nov 9 is already Nov 10 in UTC: the cutoff counts Dallas days.
@@ -239,17 +240,17 @@ const stored = {
 };
 const swapped = [PINA, NO_MINT, BLOODY];
 const inside = diff.planUpdate(stored, { guest_count: 120, signature_drinks: swapped, day_of_contact_name: "Jordan" }, { deadlines: d5 });
-check("Inside 6 days a drink change is refused", inside.refusedDrinks && !inside.applied!.changes.some((c) => c.field.startsWith("signature_drinks")));
+check("Inside 6 days a drink change is set aside as a request, not applied", inside.cutoffChanges.some((c) => c.field.startsWith("signature_drinks")) && !inside.applied!.changes.some((c) => c.field.startsWith("signature_drinks")));
 check("Inside 6 days the drinks on file stay the same", (inside.next.signature_drinks as { name: string }[])[0].name === "Margarita");
 check("Inside 6 days other changes still apply now", inside.next.guest_count === 120 && inside.next.day_of_contact_name === "Jordan" && inside.applied!.applied);
-check("A refused drink change is not sent to a manager", inside.requests === null);
+check("A drink change request is not a manager request", inside.requests === null);
 const insideExtra = diff.planUpdate(stored, { signature_drinks: [...stored.signature_drinks, PINA] }, { deadlines: d5 });
-check("Inside 6 days extra drinks are refused, not relayed", insideExtra.refusedDrinks && insideExtra.requests === null && insideExtra.applied === null);
+check("Inside 6 days extra drinks are relayed to a manager like any other day, never refused", insideExtra.requests !== null && insideExtra.cutoffChanges.length === 0 && insideExtra.applied === null);
 const insideDive = diff.planUpdate(stored, { dive_menu_requested: true }, { deadlines: d5 });
-check("Inside 6 days a Dive Bar menu request is refused", insideDive.refusedDrinks && insideDive.applied === null);
+check("Inside 6 days a Dive Bar menu request becomes a request", insideDive.cutoffChanges.some((c) => c.field === "dive_menu_requested") && insideDive.applied === null);
 
 const outside = diff.planUpdate(stored, { signature_drinks: swapped, event_date: "2026-11-21", guest_count: 150 }, { deadlines: d6 });
-check("6 or more days out a drink change applies", !outside.refusedDrinks && (outside.next.signature_drinks as { name: string }[])[0].name === "Pina Colada");
+check("6 or more days out a drink change applies", outside.cutoffChanges.length === 0 && (outside.next.signature_drinks as { name: string }[])[0].name === "Pina Colada");
 check("Date and guest count apply now, nothing held", outside.next.event_date === "2026-11-21" && outside.next.guest_count === 150 && outside.applied!.applied);
 check("No pending change or change order fields are left in the plan", !("pendingChanges" in outside) && !("changeOrder" in outside));
 
@@ -316,14 +317,17 @@ const promptOpen = buildUpdatePrompt(stored, 3, d6, { booked });
 const promptLocked = buildUpdatePrompt(stored, 3, d5, { booked, recap: { lines: ["Guest count: from 100 to 150"], totalBefore: 1749, totalAfter: 2100 } });
 check("Update prompt has no signing or change order wording", !NO_SIGNING.test(promptOpen), promptOpen.match(NO_SIGNING)?.[0]);
 check("Intake change deadline copy has no signing wording", !NO_SIGNING.test(CHANGE_DEADLINES));
-check("Intake change deadline copy uses the 6 day rule", CHANGE_DEADLINES.includes("up to 6 days before your event") && CHANGE_DEADLINES.includes("everything except your drink menu"));
-check("Update prompt carries the exact drink lock message", promptLocked.includes(diff.DRINKS_LOCKED_MESSAGE));
-check("Drink lock message is word for word", diff.DRINKS_LOCKED_MESSAGE === "We are within 6 days of your event, so your drink menu is locked in. Our team has already started preparing for it.");
-check("Locked prompt says within 6 days", promptLocked.includes("WITHIN 6 DAYS") && promptLocked.includes("LOCKED"));
+check("Intake change deadline copy uses the 6 day rule", CHANGE_DEADLINES.includes("Up to 6 days before your event they save right away") && CHANGE_DEADLINES.includes("sent to our team for approval"));
+check("Intake change deadline copy never says drinks cannot change", !/except your drink menu|cannot change|locked/i.test(CHANGE_DEADLINES));
+check("Update prompt carries the exact request message", promptLocked.includes(CHANGE_REQUEST_MESSAGE));
+check("Request message says it went to our team and is not confirmed, never saved", CHANGE_REQUEST_MESSAGE.includes("sent this change to our team for approval") && CHANGE_REQUEST_MESSAGE.includes("not confirmed yet") && !/\bsaved\b/i.test(CHANGE_REQUEST_MESSAGE));
+check("Prompt inside 6 days says drink changes are requests", promptLocked.includes("WITHIN 6 DAYS") && promptLocked.includes("REQUEST FOR APPROVAL") && !promptLocked.includes("drink menu is LOCKED"));
+check("Prompt no longer says drinks cannot change inside 6 days", !/everything can still be changed except drinks|is refused\. Do NOT confirm it/.test(promptLocked));
+check("Prompt tells the bot never to call a request saved", promptLocked.includes("Never say a request was saved"));
 check("Open prompt says the drink menu is open", promptOpen.includes("drink menu is OPEN"));
 check("Prompt tells the bot to quote with the pricing engine before saving", promptOpen.includes("quote_price_change") && promptOpen.includes("quoted_new_total"));
 check("Prompt says a time shift with the same hours is no change in price", promptOpen.includes("There is no change in price."));
-check("Prompt refuses locked drinks without relaying or noting", promptOpen.includes("do NOT pass it to management, and do NOT note it anywhere"));
+check("Prompt sends a drink change inside 6 days with the complete drinks array", promptOpen.includes("call update_event_data with the COMPLETE signature_drinks array exactly like a normal drink change"));
 check("Prompt recap lists the chat's changes", promptLocked.includes("Guest count: from 100 to 150") && promptLocked.includes("Total: from $1,749 to $2,100"));
 check("Prompt has no Monday or Wednesday drink deadline", !/Monday before|Wednesday before/.test(promptOpen + CHANGE_DEADLINES));
 
@@ -343,7 +347,7 @@ check("Recap: unchanged fields drop out", !recap.some((l) => l.startsWith("Theme
 const completePage = readFileSync(new URL("../app/complete/page.tsx", import.meta.url), "utf8").replace(/\s+/g, " ");
 const updatePage = readFileSync(new URL("../app/s/update-mode.tsx", import.meta.url), "utf8").replace(/\s+/g, " ");
 for (const [name, text] of [["Completion page", completePage], ["Update page", updatePage]]) {
-  check(`${name} has the 6 day deadline copy`, text.includes("up to 6 days before your event") && text.includes("everything except your drink menu"));
+  check(`${name} has the 6 day deadline copy`, text.includes("up to 6 days before your event") && /sent to our team for\s+approval/.test(text) && !text.includes("except your drink menu"));
   check(`${name} has no signing or old deadline wording`, !NO_SIGNING.test(text.replace(/signature_drinks|Signature Drinks|signature menu/gi, "")) && !/Monday before|Wednesday before/.test(text));
 }
 check("Update page sends the chat start version for the recap", updatePage.includes("chatStartVersion"));

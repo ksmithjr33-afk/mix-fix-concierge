@@ -162,9 +162,30 @@ export const NOT_SENT_TEXT: Record<"unchanged" | "locked" | "admin_unchecked" | 
   awaiting_review: "Not sent: the first list is waiting for admin review.",
 };
 
-/** What the client hears when a change that would change their list is held inside six days. */
-export const LIST_CHANGE_HELD_MESSAGE =
-  "We are within 6 days of your event, so your shopping list is locked. I have sent this change to our team to approve, and we will text you as soon as it is confirmed.";
+/**
+ * What the client hears when a change inside six days is sent to our team as a
+ * request (a drink change, or a change to their shopping list). It is not
+ * saved, so it never says it was.
+ */
+export const CHANGE_REQUEST_MESSAGE =
+  "We are within 6 days of your event, so I have sent this change to our team for approval. It is not confirmed yet, and we will text you as soon as our team approves or declines it.";
+
+export type ChangeRequestFields = {
+  change_request_pending: boolean;
+  change_request_approved: boolean;
+  change_request_declined: boolean;
+  change_request_summary: string; // plain words, for GHL to message the client
+};
+
+/** The change request fields every update payload carries. All false and empty unless one is set. */
+export function changeRequestFields(o: { pending?: boolean; approved?: boolean; declined?: boolean; summary?: string } = {}): ChangeRequestFields {
+  return {
+    change_request_pending: o.pending === true,
+    change_request_approved: o.approved === true,
+    change_request_declined: o.declined === true,
+    change_request_summary: o.summary ?? "",
+  };
+}
 
 export interface ClientListFields {
   client_shopping_list_send: boolean;

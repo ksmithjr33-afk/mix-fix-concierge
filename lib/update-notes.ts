@@ -23,6 +23,7 @@ import { pendingChangeFields, withHoursBooked } from "@/lib/price-change";
 import { parseEventDate } from "@/lib/event-date";
 import type { EventUpdateRow, SessionRow } from "@/lib/event-updates";
 import { eventTimeZone } from "@/lib/team/markets";
+import { changeRequestFields } from "@/lib/client-list";
 
 /** "Nov 4, 2026, 9:10 PM" in Dallas time. */
 function noteTimestamp(iso: string): string {
@@ -84,6 +85,16 @@ export function buildUpdateSummary(row: EventUpdateRow): string {
   return summarizeRow(row);
 }
 
+/**
+ * Who created the event: "client" for a booking that went through the
+ * concierge, "admin" with the admin's name for an event added by hand, so GHL
+ * never messages that client on its own.
+ */
+export function createdByFields(session: object): { created_by: "admin" | "client"; created_by_name: string } {
+  const s = session as { created_by?: string | null; created_by_name?: string | null };
+  return s.created_by === "admin" ? { created_by: "admin", created_by_name: s.created_by_name || "" } : { created_by: "client", created_by_name: "" };
+}
+
 /** GHL webhook payload for one update: the merged event plus regenerated documents. */
 export function buildUpdatePayload(session: SessionRow, row: EventUpdateRow, extra: Record<string, unknown> = {}): Record<string, unknown> {
   const eventData = withHoursBooked(session.event_data ?? {}, session);
@@ -108,6 +119,9 @@ export function buildUpdatePayload(session: SessionRow, row: EventUpdateRow, ext
     // Who made the change, so the team can tell an admin edit from a client change.
     updated_by: row.updated_by === "admin" ? "admin" : "client",
     updated_by_name: row.updated_by === "admin" ? row.updated_by_name || "" : "",
+    // Change requests inside six days: all false unless an approval is being delivered.
+    ...changeRequestFields(),
+    ...createdByFields(session),
     // The client shopping list fields and order_sheet_url, from deliverEventUpdates.
     ...extra,
   };

@@ -22,3 +22,10 @@ export function timeLabel(iso: string | null | undefined, now: Date = new Date()
     .format(d)
     .replace(/[  ]/g, " ");
 }
+
+/** "Clocked in since 4:32 PM", "Clocked out 10:05 PM", or "Not clocked in", in the event's time zone. */
+export function clockStatus(p: { clockIn: string | null; clockOut: string | null }, tz: string = TZ, now: Date = new Date()): string {
+  if (p.clockOut) return `Clocked out ${timeLabel(p.clockOut, now, tz)}`;
+  if (p.clockIn) return `Clocked in since ${timeLabel(p.clockIn, now, tz)}`;
+  return "Not clocked in";
+}

@@ -3,6 +3,8 @@ import Anthropic from "@anthropic-ai/sdk";
 import { buildEventFields } from "@/lib/ghl-payload";
 import { createNoteByEmail } from "@/lib/ghl-api";
 import { completionFields } from "@/lib/client-list-db";
+import { createdByFields } from "@/lib/update-notes";
+import { supabase } from "@/lib/supabase";
 
 const anthropic = new Anthropic();
 
@@ -99,6 +101,10 @@ export async function POST(request: Request) {
           })
         : null;
 
+    // An event an admin added by hand and sent the concierge link for says so, so GHL never messages that client on its own.
+    const { data: sessionRow } =
+      typeof sessionId === "string" && sessionId ? await supabase.from("sessions").select("*").eq("id", sessionId).maybeSingle() : { data: null };
+
     const payload: Record<string, unknown> = {
       ...cleanEventData,
       conversation_transcript: conversationTranscript || null,
@@ -112,6 +118,7 @@ export async function POST(request: Request) {
       list_change_declined: false,
       order_sheet_url: "",
       ...(listFields ?? {}),
+      ...createdByFields(sessionRow ?? {}),
     };
 
     // Ensure email is always present — use eventData.email if the AI included it,

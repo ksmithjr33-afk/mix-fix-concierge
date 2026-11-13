@@ -24,7 +24,7 @@ import { pickupBadges } from "@/lib/team/menu-pickup-db";
 import { ListCalendarToggle } from "../../calendar-view";
 import { orderStatuses } from "@/lib/order-sheet-db";
 import { STATUS_LABEL } from "@/lib/order-sheet";
-import { sessionsWithPendingHolds } from "@/lib/client-list-db";
+import { sessionsWithPendingHolds, sessionsWithPendingRequests } from "@/lib/client-list-db";
 
 export const dynamic = "force-dynamic";
 
@@ -89,13 +89,14 @@ export default async function AdminEventsPage({
   };
   // The calendar gets every market and date: it has its own market filter and navigation.
   const sessions = calendar ? visible : (marketFilter ? visible.filter((s) => sessionMarket(s) === marketFilter) : visible).filter(inRange);
-  const [counts, unread, availability, orders, heldLists, menus] = await Promise.all([
+  const [counts, unread, availability, orders, heldLists, menus, requests] = await Promise.all([
     staffingByEvent(sessions),
     unreadByEvent(admin.id, sessions.map((s) => s.id)),
     view === "upcoming" ? availableCounts(sessions) : Promise.resolve(new Map<string, number | null>()),
     orderStatuses(sessions),
     sessionsWithPendingHolds(sessions.map((s) => s.id)),
     pickupBadges(sessions.map((s) => s.id)),
+    sessionsWithPendingRequests(sessions.map((s) => s.id)),
   ]);
   const { data: postRows, error: postErr } = await supabase.from("shift_posts").select("session_id, kind").eq("status", "posted");
   const posted = new Set(postErr ? [] : ((postRows as { session_id: string; kind: string }[]) ?? []).filter((p) => p.kind === "open").map((p) => p.session_id));
@@ -112,7 +113,7 @@ export default async function AdminEventsPage({
       // Bartenders in the event's market who did not mark the day unavailable.
       typeof availability.get(s.id) === "number" && (item.day ?? "") >= today ? `${availability.get(s.id)} available` : "",
       orders.has(s.id) ? STATUS_LABEL[orders.get(s.id)!] : "",
-      heldLists.has(s.id) ? "list change waiting" : "",
+      requests.has(s.id) ? "change request waiting" : heldLists.has(s.id) ? "first list waiting for review" : "",
       menus.get(s.id)?.text ?? "",
     ]
       .filter(Boolean)
@@ -124,6 +125,7 @@ export default async function AdminEventsPage({
       badge: { text, tone },
       chat: { href: `/team/admin/e/${s.id}?tab=chat`, unread: unread.get(s.id) ?? 0 },
       staffing: staffingTone(c),
+      ...(requests.has(s.id) ? { request: true } : {}),
       ...(menu ? { menu: { state: menu.state as "unassigned" | "assigned" | "picked_up", text: menu.text } } : {}),
     };
   });
@@ -167,9 +169,14 @@ export default async function AdminEventsPage({
         <div className="px-1">
           <div className="flex items-baseline justify-between gap-3">
             <h1 className="font-heading text-2xl font-bold text-[#2C2420]">Staffing</h1>
-            <Link href="/team/admin/leftovers" className="text-sm text-[#B5845A] underline shrink-0">
-              Leftover stock
-            </Link>
+            <div className="flex items-baseline gap-4 shrink-0">
+              <Link href="/team/admin/leftovers" className="text-sm text-[#B5845A] underline">
+                Leftover stock
+              </Link>
+              <Link href="/team/admin/events/new" className="rounded-lg bg-[#B5845A] text-white px-3 py-1.5 text-sm font-medium">
+                Add event
+              </Link>
+            </div>
           </div>
           <p className="text-[15px] text-[#6B5D52]">
             {view === "past"

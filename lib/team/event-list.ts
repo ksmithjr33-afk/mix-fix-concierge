@@ -30,6 +30,7 @@ export interface EventListItem {
   kind?: "event" | "shift"; // "shift": an open shift in the bartender's markets (href to the shift)
   staffing?: "full" | "open" | "none"; // admins: fully staffed, spots open, nobody assigned
   menu?: { state: "unassigned" | "assigned" | "picked_up"; text: string }; // admins: the cocktail menu pickup
+  request?: boolean; // admins: a client change request is waiting for Approve or Decline
 }
 
 /** "Justin · Wedding": client first name and event type. */

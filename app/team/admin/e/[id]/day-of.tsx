@@ -4,7 +4,7 @@ import type { MissingReport } from "@/lib/team/events";
 import type { ListDetail } from "@/lib/team/supplies";
 import { SUPPLIES_PROGRESS } from "@/lib/team/supplies";
 import { CHECKLIST_TITLE } from "@/lib/team/checklist-config";
-import { timeLabel } from "@/lib/team/clock-label";
+import { clockStatus, timeLabel } from "@/lib/team/clock-label";
 import { FLAG_LABELS, formatWorked, type PunchFlag } from "@/lib/team/clock";
 
 // The manager view's Day of tab, read only: for each person, what is not
@@ -156,6 +156,31 @@ export function MissingReports({ reports, timeZone }: { reports: MissingReport[]
               {r.note && <p className="text-[#4A3F38]">Note: {r.note}</p>}
             </li>
           ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+/** Top of the Details tab: who is clocked in right now, one line per person on the event. The full punch list stays on Day of. */
+export function ClockStatus({ people, timeZone }: { people: AssigneeProgress[]; timeZone: string }) {
+  const on = people.filter((p) => p.status !== "declined");
+  return (
+    <section className={card} aria-label="Clock status">
+      <h2 className="font-heading text-base font-bold text-[#2C2420] mb-1">Clocked in</h2>
+      {on.length === 0 ? (
+        <p className="text-[15px] text-[#6B5D52]">Nobody on this event yet.</p>
+      ) : (
+        <ul className="divide-y divide-[#DDD5CC]">
+          {on.map((p) => {
+            const line = clockStatus(p, timeZone);
+            return (
+              <li key={p.staffId} className="py-1.5 flex flex-wrap items-baseline justify-between gap-x-3 text-[15px]">
+                <span className="font-medium text-[#2C2420]">{p.name}</span>
+                <span className={`text-sm ${p.clockIn && !p.clockOut ? "text-[#55684A] font-medium" : "text-[#6B5D52]"}`}>{line}</span>
+              </li>
+            );
+          })}
         </ul>
       )}
     </section>

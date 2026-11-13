@@ -206,9 +206,9 @@ check("A drinks only edit is refused as nothing to save", !onlyDrinks.ok);
 reset();
 const drinkChange = { signature_drinks: [{ name: "Paloma", base_spirit: "tequila", ingredients: ["2 oz tequila", "Top with grapefruit soda"] }, baseEvent().signature_drinks[1]] };
 const clientTry = await updates.applyEventUpdate("s1", drinkChange as never, {});
-check("Control: the client path refuses drink changes inside six days", clientTry?.refusedDrinks === true && session().version === 1);
+check("Control: the client path turns a drink change inside six days into a request, not saved", !!clientTry?.held && clientTry.rows.length === 0 && session().version === 1);
 const adminTry = await updates.applyEventUpdate("s1", drinkChange as never, { ignoreCutoff: true, editor: { name: "Kenneth", staffId: admin.id } });
-check("With the admin option the six day cutoff is not applied", adminTry?.refusedDrinks === false && session().version === 2);
+check("With the admin option the six day cutoff is not applied", adminTry?.held === null && adminTry?.requestFailed === false && session().version === 2);
 const dateEdit = await (async () => {
   reset();
   return editDb.saveAdminEdit({ sessionId: "s1", admin, changes: { event_date: SOON_FORM, bar_service_start: "17:00" }, price: { mode: "keep" }, expectedVersion: 1, origin });

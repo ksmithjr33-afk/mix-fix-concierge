@@ -79,7 +79,7 @@ function Chip({ e, big, select, marketLabel }: { e: EventListItem; big: boolean;
   const on = !!select?.selected.has(e.id);
   const unread = e.chat?.unread ?? 0;
   const market = marketLabel(e.market);
-  const title = [e.arrival || "Time TBD", e.title, market, tone.label, e.menu?.text, unread ? `${unread} unread messages` : ""].filter(Boolean).join(" · ");
+  const title = [e.arrival || "Time TBD", e.title, market, tone.label, e.menu?.text, e.request ? "Change request waiting" : "", unread ? `${unread} unread messages` : ""].filter(Boolean).join(" · ");
   return (
     <div className={`relative rounded-lg border border-l-4 ${tone.chip} ${on ? "ring-2 ring-[#B5845A]" : ""} hover:brightness-[0.97] transition`}>
       {select && <Pick e={e} select={select} />}
@@ -91,9 +91,11 @@ function Chip({ e, big, select, marketLabel }: { e: EventListItem; big: boolean;
         </span>
         <span className={`block font-heading font-bold text-[#2C2420] ${big ? "text-base break-words" : "text-[13px] leading-snug truncate"}`}>{e.title}</span>
         {e.menu && <span className={`block ${big ? "text-sm" : "text-[11px] truncate"} ${MENU_TEXT[e.menu.state]}`}>{e.menu.text}</span>}
+        {e.request && <span className={`block font-semibold text-[#9A5B12] ${big ? "text-sm" : "text-[11px] truncate"}`}>Change request</span>}
         {big && e.badge && <span className="block text-sm text-[#6B5D52] break-words">{e.badge.text}</span>}
       </Link>
       {unread > 0 && <span className="absolute right-1.5 top-1.5 h-2.5 w-2.5 rounded-full bg-[#A0412D] ring-2 ring-white" aria-hidden="true" />}
+      {e.request && <span className={`absolute ${unread > 0 ? "right-5" : "right-1.5"} top-1.5 h-2.5 w-2.5 rotate-45 bg-[#D9902F] ring-2 ring-white`} aria-hidden="true" />}
     </div>
   );
 }
@@ -250,6 +252,12 @@ export default function CalendarView({
             <span className="h-2.5 w-2.5 rounded-full bg-[#A0412D] ring-2 ring-white" />
             Unread chat
           </li>
+          {audience === "admin" && (
+            <li className="flex items-center gap-1.5">
+              <span className="h-2.5 w-2.5 rotate-45 bg-[#D9902F] ring-2 ring-white" />
+              Change request
+            </li>
+          )}
         </ul>
       </div>
 

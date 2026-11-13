@@ -418,8 +418,9 @@ If they pick a specific date or a payment plan, ask one follow up for the date o
 
 const INTAKE_CLOSING_HEADER = `PHASE 6 CLOSING once everything confirmed:`;
 
-// Everything can change up to 6 days before the event, after that everything but the drink menu.
-export const CHANGE_DEADLINES = `CHANGE DEADLINES: If the client asks whether they can make changes later, the answer is yes. Tell them: "Yes, you can make changes any time up to 6 days before your event using your event link. After that, you can still change everything except your drink menu, since our team starts preparing it. You can also text us at 469 754 8512." Do NOT put this in the closing message. Only mention it if the client asks about making changes.`;
+// Everything saves right away up to 6 days before the event. After that a drink
+// menu change (or a change to the client's shopping list) is a request our team approves.
+export const CHANGE_DEADLINES = `CHANGE DEADLINES: If the client asks whether they can make changes later, the answer is yes. Tell them: "Yes, you can make changes any time using your event link. Up to 6 days before your event they save right away. After that, a change to your drink menu or your shopping list is sent to our team for approval, since we start preparing. You can also text us at 469 754 8512." Do NOT put this in the closing message. Only mention it if the client asks about making changes.`;
 
 const INTAKE_CLOSING_AND_FLOW = `
 The very last message before finalizing should be: "Do you have any more questions, or is there anything you would like to change before we wrap up?" Do NOT list next steps. Only after the client confirms they are good should you send the closing message and call the submit_event_data tool.

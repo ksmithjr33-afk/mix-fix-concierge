@@ -1,6 +1,6 @@
 // Pure update mode logic: diff a partial event against the current event_data,
-// refuse drink changes inside the six day cutoff, split out requests a manager
-// has to handle, and rebuild any version from event_updates history. No database access here, see
+// set aside drink changes inside the six day cutoff (they become a request for
+// an admin to approve), split out requests a manager has to handle, and rebuild any version from event_updates history. No database access here, see
 // lib/event-updates.ts for that.
 
 import { parseEventDate } from "@/lib/event-date";
@@ -88,18 +88,14 @@ export function isPricedField(field: string): boolean {
   return (PRICED_FIELDS as readonly string[]).includes(field);
 }
 
-/** Fields that make up the drink menu, locked inside the six day cutoff. */
+/** Fields that make up the drink menu. Inside the six day cutoff a change to them waits for an admin. */
 export const DRINK_FIELDS = ["signature_drinks", "dive_menu_requested"] as const;
 
 export function isDrinkField(field: string): boolean {
   return field.startsWith("signature_drinks") || (DRINK_FIELDS as readonly string[]).includes(field);
 }
 
-/** What the client hears when they try to change drinks inside the cutoff. */
-export const DRINKS_LOCKED_MESSAGE =
-  "We are within 6 days of your event, so your drink menu is locked in. Our team has already started preparing for it.";
-
-/** Days before the event that drink changes are still allowed. */
+/** Days before the event that drink changes still save right away. */
 export const DRINK_CUTOFF_DAYS = 6;
 
 const FIELD_LABELS: Record<string, string> = {
@@ -164,7 +160,7 @@ export interface Deadlines {
   eventDay: string | null;
   daysUntil: number | null; // calendar days from today to the event day
   lastDrinkChangeDay: string | null; // the last day drinks can change, 6 days before the event
-  withinSixDays: boolean; // fewer than 6 days out: everything but drinks can still change
+  withinSixDays: boolean; // fewer than 6 days out: drink changes become requests for an admin
   eventPassed: boolean;
 }
 
@@ -188,8 +184,8 @@ function ymdToUtc(ymd: string): number {
 
 /**
  * Six or more days before the event date everything can change. Fewer than six
- * days out everything but the drink menu can, and the client shopping list is
- * locked. Days are counted in the event's market time zone (tz, America/Chicago
+ * days out a drink menu change (and, with auto send on, a change to the client
+ * shopping list) is sent to our team as a request instead of saving. Days are counted in the event's market time zone (tz, America/Chicago
  * when the event has no market yet). An unreadable event date never counts as
  * inside the cutoff, so the client is not told something false.
  */
@@ -500,11 +496,11 @@ export interface UpdatePlan {
   next: EventData;
   applied: PlannedRow | null; // merged now, bumps the version
   requests: PlannedRow | null; // extra drinks beyond the package: a manager reaches out
-  // Drink menu changes asked for inside the six day cutoff. Not saved, not noted,
-  // not sent anywhere: the client is told the drink menu is locked.
-  refusedDrinks: boolean;
-  // Drink menu changes on Dive Bar, which has a set menu. Refused the same way,
-  // and the client is told the menu is set for the package.
+  // Drink menu changes asked for inside the six day cutoff. Not applied here:
+  // the caller saves them as a request for an admin to approve or decline.
+  cutoffChanges: FieldChange[];
+  // Drink menu changes on Dive Bar, which has a set menu. Refused, and the
+  // client is told the menu is set for the package. Not a cutoff rule.
   diveMenuSet: boolean;
 }
 
@@ -529,8 +525,11 @@ function row(changes: FieldChange[], applied: boolean, within: boolean | null): 
 }
 
 /**
- * Every confirmed change applies now. Inside the six day cutoff, drink menu
- * changes (and extra drink requests) are dropped and flagged as refused.
+ * Every confirmed change applies now, with two exceptions. Dive Bar has a set
+ * menu, so its drink changes are refused at any date. Inside the six day
+ * cutoff, other drink menu changes are set aside in cutoffChanges for the
+ * caller to save as a request. Extra drink requests are a manager request on
+ * either side of the cutoff.
  */
 export function planUpdate(
   current: EventData,
@@ -573,27 +572,29 @@ export function planUpdate(
   }
   if (newDrinks) changes.push(...diffDrinks(currentDrinks, newDrinks));
 
-  // Inside the cutoff the drink menu is locked: drop drink changes and extra drink requests.
-  let refusedDrinks = false;
   let kept = changes;
   let keptRequests = requests;
-  if (deadlines.withinSixDays) {
-    kept = changes.filter((c) => !isDrinkField(c.field));
-    keptRequests = requests.filter((c) => !String(c.new).startsWith("Add drinks beyond"));
-    refusedDrinks = kept.length < changes.length || keptRequests.length < requests.length;
-  }
+  let cutoffChanges: FieldChange[] = [];
 
   // Dive Bar has a set menu: drink changes are refused while the event stays on Dive Bar.
   let diveMenuSet = false;
   const nextPkg = "package" in updates ? updates.package : current.package;
-  if (isDiveBarPackage(current.package) && isDiveBarPackage(nextPkg)) {
+  const staysDive = isDiveBarPackage(current.package) && isDiveBarPackage(nextPkg);
+  if (staysDive) {
     const before = kept.length + keptRequests.length;
     kept = kept.filter((c) => !isDrinkField(c.field));
     keptRequests = keptRequests.filter((c) => !String(c.new).startsWith("Add drinks beyond"));
     diveMenuSet = kept.length + keptRequests.length < before;
-  } else if (!isDiveBarPackage(current.package) && isDiveBarPackage(nextPkg) && kept.some((c) => c.field === "package")) {
+  } else if (deadlines.withinSixDays) {
+    // Inside the cutoff a drink menu change waits for an admin instead of applying.
+    cutoffChanges = kept.filter((c) => isDrinkField(c.field));
+    kept = kept.filter((c) => !isDrinkField(c.field));
+  }
+
+  if (!isDiveBarPackage(current.package) && isDiveBarPackage(nextPkg) && kept.some((c) => c.field === "package")) {
     // Switching to Dive Bar brings its set menu with it.
     kept = kept.filter((c) => !isDrinkField(c.field));
+    cutoffChanges = [];
     kept.push({ field: "signature_drinks", old: current.signature_drinks ?? null, new: diveSetMenuDrinks() });
     if (current.dive_set_menu !== true) kept.push({ field: "dive_set_menu", old: current.dive_set_menu ?? null, new: true });
     keptRequests = keptRequests.filter((c) => !String(c.new).startsWith("Add drinks beyond"));
@@ -606,9 +607,14 @@ export function planUpdate(
     next: applyChanges(current, kept),
     applied: row(kept, true, true),
     requests: row(keptRequests, false, null),
-    refusedDrinks,
+    cutoffChanges,
     diveMenuSet,
   };
+}
+
+/** The top level event_data key a change is for: "signature_drinks" for "signature_drinks[1].name". */
+export function topField(field: string): string {
+  return field.replace(/\[.*$/, "").replace(/\..*$/, "");
 }
 
 // ---------- recap ----------

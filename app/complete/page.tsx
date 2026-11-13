@@ -319,9 +319,9 @@ export default function CompletePage() {
           </div>
           <p className="text-sm text-[#6B5D52] mt-6 pt-4 border-t border-[#DDD5CC] leading-relaxed">
             Need to change something? Use the View or update your event button
-            on this page. You can change anything up to 6 days before your
-            event. After that, you can still change everything except your
-            drink menu. Questions? Text us at 469 754 8512.
+            on this page. Changes save right away up to 6 days before your
+            event. After that, a change to your drink menu or shopping list is
+            sent to our team for approval. Questions? Text us at 469 754 8512.
           </p>
         </section>
 

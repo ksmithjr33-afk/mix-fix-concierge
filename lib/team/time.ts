@@ -122,7 +122,7 @@ export interface EventSchedule {
   day: string | null; // YYYY-MM-DD
   startMin: number | null;
   endMin: number | null; // past 1440 when service ends after midnight
-  arrivalMin: number | null; // 2 hours before service, 3 for weddings
+  arrivalMin: number | null; // 2 hours before service, 3 for weddings, or the arrival time an admin typed
   start: Date | null; // service start instant
   end: Date | null;
   arrival: Date | null;
@@ -133,7 +133,10 @@ export function eventSchedule(ed: Record<string, unknown>): EventSchedule {
   const startMin = parseClock(ed.bar_service_start);
   let endMin = parseClock(ed.bar_service_end);
   if (startMin !== null && endMin !== null && endMin <= startMin) endMin += 1440;
-  const arrivalMin = startMin === null ? null : startMin - (isWeddingEvent(ed) ? 180 : 120);
+  // An arrival time typed by an admin (events added by hand) wins over the usual 2 hours (3 for weddings) before service.
+  const typedArrival = parseClock(ed.arrival_time);
+  const arrivalMin =
+    startMin === null ? null : typedArrival !== null ? (typedArrival > startMin ? typedArrival - 1440 : typedArrival) : startMin - (isWeddingEvent(ed) ? 180 : 120);
   const tz = eventTz(ed);
   return {
     tz,

@@ -151,6 +151,8 @@ export interface HoldRow {
   decided_by: string | null;
   decided_by_name: string | null;
   decided_at: string | null;
+  admin_text_after?: string | null; // the admin text waits for 8 AM after quiet hours
+  admin_texted_at?: string | null; // the admins were texted about this request
 }
 
 export async function holdsFor(sessionId: string, status?: HoldRow["status"]): Promise<HoldRow[]> {
@@ -175,9 +177,18 @@ export async function sessionsWithPendingHolds(sessionIds: string[]): Promise<Se
   return new Set(((data as { session_id: string }[]) ?? []).map((r) => r.session_id));
 }
 
+/** Sessions with a client change request waiting on an admin, for the events list and calendar marker. */
+export async function sessionsWithPendingRequests(sessionIds: string[]): Promise<Set<string>> {
+  if (sessionIds.length === 0) return new Set();
+  const { data, error } = await supabase.from("client_list_holds").select("session_id").eq("status", "pending").eq("kind", "change").in("session_id", sessionIds);
+  if (error) return new Set();
+  return new Set(((data as { session_id: string }[]) ?? []).map((r) => r.session_id));
+}
+
 /**
- * A client update inside six days that would change their list, held for an
- * admin. The same change asked for twice is held once.
+ * A client request inside six days, held for an admin: a drink change, or
+ * (auto send on) a change that would change their list. The same change asked
+ * for twice is held once; fresh is true only for a new request.
  */
 export async function holdChange(o: {
   sessionId: string;
@@ -187,10 +198,10 @@ export async function holdChange(o: {
   listChanges: string;
   price: PriceChange | null;
   baseVersion: number;
-}): Promise<HoldRow | null> {
+}): Promise<(HoldRow & { fresh: boolean }) | null> {
   const pending = await holdsFor(o.sessionId, "pending");
   const same = pending.find((h) => h.kind === "change" && JSON.stringify(h.partial) === JSON.stringify(o.partial));
-  if (same) return same;
+  if (same) return { ...same, fresh: false };
   const { data, error } = await supabase
     .from("client_list_holds")
     .insert({
@@ -215,7 +226,7 @@ export async function holdChange(o: {
     session_id: o.sessionId,
     action: "held",
     reason: null,
-    detail: `Client change held for admin approval (within 6 days): ${o.summary.split("\n")[0]}`,
+    detail: `Client change request inside 6 days, waiting for admin approval: ${o.summary.split("\n")[0]}`,
     changes: o.listChanges,
     list_text: null,
     update_id: null,
@@ -225,7 +236,7 @@ export async function holdChange(o: {
     dry_run: false,
     version: o.baseVersion,
   });
-  return hold;
+  return { ...hold, fresh: true };
 }
 
 /** Marks a pending hold approved or declined. False when someone already decided it. */
@@ -257,8 +268,8 @@ async function legacyBaseline(sessionId: string, version: number): Promise<Clien
 export async function completionFields(sessionId: string): Promise<ClientListFields & { order_sheet_url: string }> {
   const url = clientListLink(sessionId);
   const order_sheet_url = orderSheetLink(sessionId);
-  const { data: row } = await supabase.from("sessions").select("id, version, event_data, status").eq("id", sessionId).maybeSingle();
-  const session = row as (SessionLike & { status?: string }) | null;
+  const { data: row } = await supabase.from("sessions").select("*").eq("id", sessionId).maybeSingle();
+  const session = row as (SessionLike & { status?: string; created_by?: string | null; send_client_list?: boolean | null }) | null;
   const enabled = await autoSendOn();
   if (!session?.event_data || session.status !== "submitted") {
     return { ...clientListFields({ enabled, send: false, reason: null, changes: "", url, list: { sections: [], notes: [] } }), order_sheet_url };
@@ -272,6 +283,12 @@ export async function completionFields(sessionId: string): Promise<ClientListFie
 
   const action = completionAction({ customRecipe: hasCustomRecipe(session.event_data), empty: listIsEmpty(list) });
   const base = { session_id: sessionId, update_id: null, by_staff_id: null, by_name: null, dry_run: !enabled, version: session.version ?? 1 };
+  // An event an admin added by hand never sends the client a list unless the admin ticked "Send the client their list".
+  if (session.created_by === "admin" && session.send_client_list !== true && action !== "no_list") {
+    await saveState(sessionId, { last_list: list, released: true });
+    await log({ ...base, action: "not_sent", reason: null, detail: "Not sent: the event was added by hand and Send the client their list was not ticked.", changes: null, list_text: null, hold_id: null });
+    return { ...clientListFields({ enabled, send: false, reason: null, changes: "", url, list }), order_sheet_url };
+  }
   if (action === "no_list") {
     await saveState(sessionId, { last_list: list, released: true });
     await log({ ...base, action: "not_sent", reason: null, detail: "Not sent: this package has no client shopping list.", changes: null, list_text: null, hold_id: null });

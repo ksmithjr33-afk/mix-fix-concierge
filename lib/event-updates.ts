@@ -10,7 +10,9 @@ import {
   UPDATABLE_FIELDS,
   planUpdate,
   snapshotChanges,
+  summarizeChanges,
   summarizeRow,
+  topField,
   type Deadlines,
   type EventData,
   type FieldChange,
@@ -155,13 +157,17 @@ export interface ApplyResult {
   // Set when the update changed the price but the bot had not quoted this new
   // total. Nothing was saved: the bot states the price and asks for a yes first.
   needsQuote: PriceChange | null;
-  refusedDrinks: boolean; // drink changes inside the six day cutoff, dropped
+  // A drink change inside the six day cutoff that could not be saved as a
+  // request (the database refused it). Nothing was saved.
+  requestFailed: boolean;
   diveMenuSet: boolean; // drink changes on Dive Bar, which has a set menu, dropped
   withinSixDays: boolean;
   paymentPreference: string | null;
-  // Inside six days, a client change that would change their shopping list is
-  // not saved: it waits for an admin to approve or decline it (auto send on only).
-  held: { id: string; listChanges: string } | null;
+  // Inside six days a client drink change, and (auto send on) a client change
+  // that would change their shopping list, is not saved: it is a request for an
+  // admin to approve or decline. fresh is false when the same request was
+  // already waiting, so the admins are only texted once.
+  held: { id: string; listChanges: string; fresh: boolean } | null;
 }
 
 function toInsert(
@@ -217,7 +223,7 @@ interface PreparedUpdate {
   price: PriceChange | null;
   booked: BookedPrice | null;
   bookedComputed: boolean;
-  refusedDrinks: boolean;
+  cutoffChanges: FieldChange[]; // drink changes inside the cutoff, for a request
   diveMenuSet: boolean;
 }
 
@@ -269,13 +275,12 @@ function prepareUpdate(
     }
   }
 
-  return { current, deadlines, applied, requests: plan.requests, next, price, booked, bookedComputed, refusedDrinks: plan.refusedDrinks, diveMenuSet: plan.diveMenuSet };
+  return { current, deadlines, applied, requests: plan.requests, next, price, booked, bookedComputed, cutoffChanges: plan.cutoffChanges, diveMenuSet: plan.diveMenuSet };
 }
 
 export interface QuoteResult {
   price: PriceChange | null; // null when nothing priced changes
-  listHold: boolean; // saving it will hold it for admin approval: it changes the shopping list inside six days
-  refusedDrinks: boolean;
+  listHold: boolean; // saving it will send it to an admin as a request: it changes the shopping list inside six days
   diveMenuSet: boolean;
   withinSixDays: boolean;
   changes: FieldChange[]; // what would apply, implied changes included
@@ -296,7 +301,6 @@ export async function quoteEventUpdate(
   return {
     price: prep.price,
     listHold,
-    refusedDrinks: prep.refusedDrinks,
     diveMenuSet: prep.diveMenuSet,
     withinSixDays: prep.deadlines.withinSixDays,
     changes: prep.applied?.changes ?? [],
@@ -314,7 +318,9 @@ export function quoteMatches(price: PriceChange, quotedNewTotal: unknown): boole
  * Apply a confirmed update right away: merge it into event_data and bump the
  * version, price any priced field against what the client booked and move the
  * booked price to the new total, and record extra drink requests as unapplied
- * rows. Drink changes inside the six day cutoff are dropped. With
+ * rows. Inside the six day cutoff a client drink change (and, with auto send
+ * on, a client change to their shopping list) is saved as a request for an
+ * admin instead (see requestParts). With
  * requireQuote, an update that changes the price saves nothing unless
  * quotedNewTotal matches. Returns null if the session is not submitted.
  */
@@ -356,7 +362,7 @@ export async function applyEventUpdate(
     const base = {
       priceChange: null,
       needsQuote: null,
-      refusedDrinks: prep.refusedDrinks,
+      requestFailed: false,
       diveMenuSet: prep.diveMenuSet,
       withinSixDays: prep.deadlines.withinSixDays,
       paymentPreference: (current.payment_preference as string | undefined) || null,
@@ -367,26 +373,34 @@ export async function applyEventUpdate(
       return { ...base, eventData: current, version, updatedAt, rows: [], needsQuote: price };
     }
 
-    // Inside six days the client's shopping list is locked: a client change that
-    // would change it waits for an admin instead of saving. Manager requests in
-    // the same update are still recorded below. Admin edits are never held.
-    if (applied && source === "concierge" && !options.ignoreCutoff && prep.deadlines.withinSixDays) {
-      const would = listWouldChange(current, next);
-      if (would.changed && (await autoSendOn())) {
-        const heldPartial = Object.fromEntries(
-          Object.entries(partial).filter(([k, v]) => (UPDATABLE_FIELDS as readonly string[]).includes(k) && v !== undefined && !isDrinkField(k))
-        );
+    // Inside six days a client change can become a request for an admin: drink
+    // changes always, and with auto send on anything that changes the client's
+    // shopping list. Manager requests in the same update are still recorded
+    // below. Admin edits (ignoreCutoff) are never held.
+    const cutoff = prep.cutoffChanges;
+    if (source === "concierge" && !options.ignoreCutoff && prep.deadlines.withinSixDays) {
+      const listHold = !!applied && listWouldChange(current, next).changed && (await autoSendOn());
+      if (listHold || cutoff.length > 0) {
+        const parts = requestParts(current, partial, listHold ? applied!.changes : [], cutoff);
+        const would = listWouldChange(current, applyChanges(current, parts.changes));
         const hold = await holdChange({
           sessionId,
-          partial: heldPartial,
-          changes: applied.changes,
-          summary: applied.summary,
+          partial: parts.partial,
+          changes: parts.changes,
+          summary: summarizeChanges(parts.changes),
           listChanges: would.changes,
-          price,
+          price: listHold ? price : null,
           baseVersion: version,
         });
         if (hold) {
-          base.held = { id: hold.id, listChanges: would.changes };
+          base.held = { id: hold.id, listChanges: would.changes, fresh: hold.fresh === true };
+          if (listHold) {
+            applied = null;
+            next = current;
+          }
+        } else if (cutoff.length > 0) {
+          // Nothing is saved when the request could not be recorded.
+          base.requestFailed = true;
           applied = null;
           next = current;
         }
@@ -458,6 +472,34 @@ export async function applyEventUpdate(
   }
 
   throw new Error("event update kept conflicting with a concurrent update");
+}
+
+/**
+ * What goes into a request inside the six day cutoff: the field changes the
+ * admin sees (before and after), and the partial update that Approve applies
+ * through the normal update path. Non drink fields come from what the client
+ * asked for, so Approve prices and works out hours exactly as a normal update
+ * would. Drink fields come from the event with the drink changes applied.
+ */
+export function requestParts(
+  current: EventData,
+  partial: EventData,
+  heldApplied: FieldChange[],
+  cutoff: FieldChange[]
+): { partial: EventData; changes: FieldChange[] } {
+  const out: EventData = {};
+  if (heldApplied.length > 0) {
+    for (const [k, v] of Object.entries(partial)) {
+      if ((UPDATABLE_FIELDS as readonly string[]).includes(k) && v !== undefined && !isDrinkField(k)) out[k] = v;
+    }
+  }
+  if (cutoff.length > 0) {
+    const after = applyChanges(current, cutoff);
+    for (const key of new Set(cutoff.map((c) => topField(c.field)))) {
+      if ((UPDATABLE_FIELDS as readonly string[]).includes(key)) out[key] = after[key];
+    }
+  }
+  return { partial: out, changes: [...heldApplied, ...cutoff] };
 }
 
 /** The event changed since the admin opened the form. */

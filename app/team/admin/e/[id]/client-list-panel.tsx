@@ -9,8 +9,10 @@ export interface PanelHold {
   kind: "change" | "custom_recipe";
   createdAt: string;
   summary: string;
+  blocks: string[]; // every change, before and after in full
   listChanges: string;
   price: string;
+  priceAmount: number | null;
 }
 
 export interface PanelLog {
@@ -32,7 +34,7 @@ const ACTION_LABEL: Record<string, string> = {
   not_sent: "Not sent",
 };
 
-/** The client shopping list on the admin event page: what is waiting on an admin, the list now, and every send and hold. */
+/** The Client list tab: change requests waiting on an admin, the client's list now, and every send and hold. */
 export default function ClientListPanel({
   sessionId,
   autoSend,
@@ -88,11 +90,19 @@ export default function ClientListPanel({
         <div key={h.id} className="rounded-xl border border-[#E3C9A0] bg-[#FFF8EC] px-3 py-3 space-y-2">
           {h.kind === "change" ? (
             <>
-              <p className="text-[15px] font-medium text-[#2C2420]">Client change waiting for approval</p>
-              <p className="text-sm text-[#6B5D52]">Asked {timeLabel(h.createdAt, undefined, timeZone)}, inside 6 days of the event.</p>
-              <p className="text-sm text-[#2C2420] whitespace-pre-line">{h.summary}</p>
-              {h.price && <p className="text-sm text-[#6B5D52]">Price: {h.price}</p>}
-              {h.listChanges && <p className="text-sm text-[#6B5D52] whitespace-pre-line">List changes:{"\n"}{h.listChanges}</p>}
+              <p className="text-[15px] font-medium text-[#2C2420]">Client change request</p>
+              <p className="text-sm text-[#6B5D52]">Asked {timeLabel(h.createdAt, undefined, timeZone)}, inside 6 days of the event. Not saved until you approve it.</p>
+              <div className="space-y-2">
+                {(h.blocks.length > 0 ? h.blocks : [h.summary]).map((b, i) => (
+                  <p key={i} className="text-sm text-[#2C2420] whitespace-pre-line rounded-lg bg-white border border-[#EDE6DF] px-2.5 py-1.5">
+                    {b}
+                  </p>
+                ))}
+              </div>
+              <p className="text-sm text-[#6B5D52]">
+                {h.price ? `Price difference: ${h.price}` : h.priceAmount === 0 ? "Price difference: none." : "No price difference."}
+              </p>
+              {h.listChanges && <p className="text-sm text-[#6B5D52] whitespace-pre-line">Client list changes:{"\n"}{h.listChanges}</p>}
               <div className="flex gap-2">
                 <button type="button" disabled={!!busy} onClick={() => act("approve", h.id)} className="rounded-lg bg-[#B5845A] text-white px-4 py-2 text-sm font-medium disabled:opacity-40">
                   {busy === `approve:${h.id}` ? "Approving..." : "Approve"}
@@ -101,7 +111,7 @@ export default function ClientListPanel({
                   {busy === `decline:${h.id}` ? "Declining..." : "Decline"}
                 </button>
               </div>
-              <p className="text-xs text-[#A39585]">Approve saves the change and sends the updated list. Decline leaves the event as it is and tells GHL so it can text the client.</p>
+              <p className="text-xs text-[#A39585]">Approve saves it like any update: the lists, the bartenders&apos; supplies list and staff texts follow, and GHL is told so it can text the client. Decline changes nothing and GHL is told.</p>
             </>
           ) : (
             <>

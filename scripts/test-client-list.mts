@@ -165,13 +165,15 @@ check("The lock uses the same cutoff as drink changes, in the market's time zone
 reset({ date: NEAR });
 await cldb.completionFields("s1");
 const drinkTry = await clientUpdate({ signature_drinks: [{ ...MULE, name: "Big Mule" }, MARG] });
-check("Inside 6 days drink changes are still refused", drinkTry?.refusedDrinks === true && session().version === 1);
+check("Inside 6 days a drink change becomes a request, not saved", !!drinkTry?.held && drinkTry.rows.length === 0 && session().version === 1);
+const changeHold = (pred: (p: Record<string, unknown>) => boolean) => holds().find((h) => h.kind === "change" && pred(h.partial as Record<string, unknown>))!;
 const parking = await clientUpdate({ parking_info: "Valet" });
 check("Inside 6 days an update that does not touch the list applies as today", parking?.held === null && session().event_data.parking_info === "Valet" && session().version === 2);
 const held = await clientUpdate({ guest_count: 150 });
 check("Inside 6 days a guest count change is held, not saved", !!held?.held && held.rows.length === 0 && session().event_data.guest_count === 100 && session().version === 2);
-check("The held change is waiting for an admin", holds().length === 1 && holds()[0].status === "pending" && (holds()[0].partial as Record<string, unknown>).guest_count === 150);
-check("The hold is logged", logRows().some((l) => l.action === "held" && l.hold_id === holds()[0].id));
+const guestHold = changeHold((p) => p.guest_count === 150);
+check("The held change is waiting for an admin", holds().length === 2 && guestHold?.status === "pending");
+check("The hold is logged", logRows().some((l) => l.action === "held" && l.hold_id === guestHold.id));
 const hoursHeld = await clientUpdate({ bar_service_end: "11:00pm" });
 check("Inside 6 days an hours change that leaves the list the same (100 guests, 4 to 5 hours) applies as today", hoursHeld?.held === null && session().event_data.bar_service_end === "11:00pm");
 const extraHeld = await clientUpdate({ extra_bottles: "Fireball" });
@@ -179,21 +181,22 @@ check("Inside 6 days an extra bottle is held too", !!extraHeld?.held && !session
 const quote = await updates.quoteEventUpdate("s1", { guest_count: 150 });
 check("The bot's quote says the change will be held", quote?.listHold === true);
 const chatSrc = src("app/api/chat/route.ts");
-check("The bot tells the client the change is held, not saved", chatSrc.includes("HELD FOR APPROVAL") && chatSrc.includes("LIST_CHANGE_HELD_MESSAGE"));
+check("The bot tells the client the change is sent for approval, not saved", chatSrc.includes("SENT TO OUR TEAM FOR APPROVAL") && chatSrc.includes("CHANGE_REQUEST_MESSAGE"));
 
 hooks.length = 0;
-const approve = await actions.approveHold(admin, "s1", holds()[0].id, origin);
+const approve = await actions.approveHold(admin, "s1", guestHold.id, origin);
 check("Approve saves the change", approve.ok && session().event_data.guest_count === 150, JSON.stringify(approve));
 const ap = lastHook();
 check("Approve sends the list with reason approved", ap?.client_shopping_list_send === true && ap?.client_shopping_list_reason === "approved", JSON.stringify(ap && { s: ap.client_shopping_list_send, r: ap.client_shopping_list_reason }));
 check("Approve is logged with who approved it", logRows().some((l) => l.action === "approved" && l.reason === "approved" && l.by_name === "Kenneth"));
-check("An approved hold cannot be approved twice", !(await actions.approveHold(admin, "s1", holds()[0].id, origin)).ok);
+check("An approved hold cannot be approved twice", !(await actions.approveHold(admin, "s1", guestHold.id, origin)).ok);
 
 const versionBefore = session().version;
 const bottlesBefore = session().event_data.extra_bottles;
 hooks.length = 0;
-const decline = await actions.declineHold(admin, "s1", holds()[1].id);
-check("Decline leaves the event unchanged", decline.ok && session().version === versionBefore && session().event_data.extra_bottles === bottlesBefore && holds()[1].status === "declined");
+const bottleHold = changeHold((p) => p.extra_bottles === "Fireball");
+const decline = await actions.declineHold(admin, "s1", bottleHold.id);
+check("Decline leaves the event unchanged", decline.ok && session().version === versionBefore && session().event_data.extra_bottles === bottlesBefore && bottleHold.status === "declined");
 const dc = lastHook();
 check("Decline sends list_change_declined true and no list", dc?.list_change_declined === true && dc?.client_shopping_list_send === false && dc?.event_updated === false);
 check("Decline is logged with who declined it", logRows().some((l) => l.action === "declined" && l.by_name === "Kenneth"));

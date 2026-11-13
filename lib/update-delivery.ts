@@ -8,7 +8,10 @@ import { supabase } from "@/lib/supabase";
 import { createNoteByEmail } from "@/lib/ghl-api";
 import { getSession, type EventUpdateRow, type SessionRow } from "@/lib/event-updates";
 import { eventTimeZone } from "@/lib/team/markets";
-import { buildUpdateNote, buildUpdatePayload } from "@/lib/update-notes";
+import { buildUpdateNote, buildUpdatePayload, createdByFields } from "@/lib/update-notes";
+import { buildEventFields, buildNatalieSupplyList } from "@/lib/ghl-payload";
+import { withHoursBooked } from "@/lib/price-change";
+import { changeRequestFields } from "@/lib/client-list";
 import { notifyStaffOfUpdate } from "@/lib/team/assignments-db";
 import { deliveryFields, type DeliveryListOptions } from "@/lib/client-list-db";
 import { computeDeadlines } from "@/lib/event-diff";
@@ -35,6 +38,36 @@ export async function postWebhook(url: string, payload: Record<string, unknown>)
   } catch (err) {
     return `GHL webhook request failed: ${err instanceof Error ? err.message : String(err)}`;
   }
+}
+
+/**
+ * A GHL payload that is not an event update: the first list after a custom
+ * recipe review, a change request waiting for an admin, an approved request
+ * with nothing new to apply, or a decline. Goes to the update webhook with
+ * event_updated false, so the intake workflow never runs again.
+ */
+export function listOnlyPayload(session: SessionRow, extra: Record<string, unknown>): Record<string, unknown> {
+  const eventData = withHoursBooked(session.event_data ?? {}, session);
+  const { cleanEventData, fields } = buildEventFields(eventData);
+  const payload: Record<string, unknown> = {
+    ...cleanEventData,
+    ...fields,
+    natalie_supply_list: buildNatalieSupplyList(eventData) || null,
+    event_updated: false,
+    event_update_applied: false,
+    list_change_declined: false,
+    ...changeRequestFields(),
+    ...createdByFields(session),
+    ...extra,
+  };
+  if (!payload.email && session.email) payload.email = session.email;
+  return payload;
+}
+
+export async function postListOnly(session: SessionRow, extra: Record<string, unknown>): Promise<string | null> {
+  const url = process.env.GHL_UPDATE_WEBHOOK_URL;
+  if (!url) return "GHL_UPDATE_WEBHOOK_URL is not set in this environment, payload NOT sent";
+  return postWebhook(url, listOnlyPayload(session, extra));
 }
 
 async function deliverRow(
@@ -102,11 +135,12 @@ async function deliverRow(
  * update, see deliveryFields) and the order sheet link. clientList says who
  * caused the update: the client (the default), an admin edit and whether its
  * "Send updated list to client" box was on, or an approved held change.
+ * extra is added to every payload (an approved change request says so).
  */
 export async function deliverEventUpdates(
   sessionId: string,
   rows: EventUpdateRow[],
-  opts: { staffOrigin?: string; clientList?: DeliveryListOptions } = {}
+  opts: { staffOrigin?: string; clientList?: DeliveryListOptions; extra?: Record<string, unknown> } = {}
 ): Promise<DeliveryResult[]> {
   if (rows.length === 0) return [];
   const session = await getSession(sessionId);
@@ -138,7 +172,7 @@ export async function deliverEventUpdates(
   const results: DeliveryResult[] = [];
   for (const row of rows) {
     try {
-      results.push(await deliverRow(session, row, { list_change_declined: false, ...((listFields.get(row.id) ?? {}) as Record<string, unknown>) }));
+      results.push(await deliverRow(session, row, { list_change_declined: false, ...((listFields.get(row.id) ?? {}) as Record<string, unknown>), ...(opts.extra ?? {}) }));
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
       console.error(`[update-webhook] session ${sessionId} update ${row.id} failed:`, error);

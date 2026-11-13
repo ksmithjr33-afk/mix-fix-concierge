@@ -6,7 +6,6 @@ import {
   approvalReason,
   changeBlocks,
   computeDeadlines,
-  DRINKS_LOCKED_MESSAGE,
   PRICED_FIELDS,
   recapLines,
   UPDATABLE_FIELDS,
@@ -27,7 +26,8 @@ import { deliverEventUpdates } from "@/lib/update-delivery";
 import { allowedMenus, createMenuFilter, type MenuKey } from "@/lib/menu-markers";
 import { applyDiveSetMenu, DIVE_MENU_SET_MESSAGE } from "@/lib/dive-menu";
 import { DEFAULT_DEPOSIT, impliedLine, money, paymentPhrase, type PriceChange } from "@/lib/price-change";
-import { LIST_CHANGE_HELD_MESSAGE } from "@/lib/client-list";
+import { CHANGE_REQUEST_MESSAGE } from "@/lib/client-list";
+import { announceRequest } from "@/lib/change-requests";
 import { eventTimeZone } from "@/lib/team/markets";
 
 const anthropic = new Anthropic();
@@ -299,9 +299,8 @@ function quoteToolResult(quote: QuoteResult | null): string {
   if (!quote) return "TOOL RESULT: This event could not be priced right now. Tell the client our team will confirm the price, and do not quote anything.";
   const parts: string[] = [];
   if (quote.diveMenuSet) parts.push(`DRINK MENU SET, Dive Bar has a set menu and drinks cannot be changed. Say exactly: "${DIVE_MENU_SET_MESSAGE}"`);
-  else if (quote.refusedDrinks) parts.push(`DRINK MENU LOCKED, within 6 days of the event. Say exactly: "${DRINKS_LOCKED_MESSAGE}"`);
   if (quote.listHold) {
-    parts.push(`SHOPPING LIST LOCKED, within 6 days of the event. This change would change the client's shopping list, so after they say yes it goes to our team for approval instead of saving. Tell them that when you ask, and after update_event_data say exactly: "${LIST_CHANGE_HELD_MESSAGE}"`);
+    parts.push(`REQUEST FOR APPROVAL, within 6 days of the event. This change would change the client's shopping list, so after they say yes it is sent to our team for approval instead of saving. Tell them that when you ask, and after update_event_data say exactly: "${CHANGE_REQUEST_MESSAGE}"`);
   }
   if (!quote.price) {
     parts.push("NOTHING TO PRICE: these values are already on file or do not change the price. Do not quote a price.");
@@ -336,13 +335,14 @@ function updateToolResult(result: ApplyResult | null): string {
   }
   if (result.diveMenuSet) {
     parts.push(`DRINK CHANGE NOT SAVED, Dive Bar has a set menu. Say exactly: "${DIVE_MENU_SET_MESSAGE}"`);
-  } else if (result.refusedDrinks) {
-    parts.push(`DRINK CHANGE NOT SAVED, the drink menu is locked within 6 days of the event. Say exactly: "${DRINKS_LOCKED_MESSAGE}"`);
+  }
+  if (result.requestFailed) {
+    parts.push("NOTHING SAVED AND NOT SENT: this change is within 6 days of the event and could not be sent to our team for approval right now. Tell the client honestly it did not go through and our team will follow up. Do not say it was saved or sent.");
   }
   if (result.held) {
-    parts.push(`NOT SAVED YET, HELD FOR APPROVAL: within 6 days of the event this change would change the client's shopping list, so our team approves or declines it first. Do not say it was saved. Say exactly: "${LIST_CHANGE_HELD_MESSAGE}"`);
+    parts.push(`NOT SAVED, SENT TO OUR TEAM FOR APPROVAL: within 6 days of the event this change is a request that our team approves or declines first. It is NOT confirmed. Never say it was saved, updated, changed, or done. Say exactly: "${CHANGE_REQUEST_MESSAGE}" Anything listed below as SAVED AND APPLIED NOW was saved separately and can be confirmed.`);
   }
-  if (result.rows.length === 0 && !result.refusedDrinks && !result.diveMenuSet && !result.held) {
+  if (result.rows.length === 0 && !result.requestFailed && !result.diveMenuSet && !result.held) {
     return "TOOL RESULT: NOTHING was recorded because every value sent already matches what is on file. Tell the client it is already on file. Do not say you updated or saved anything.";
   }
   for (const r of result.rows) {
@@ -444,7 +444,11 @@ async function updateModeResponse(session: SessionRow, messages: ChatMessage[], 
               quotedNewTotal,
             });
             lastApply = result;
-            if (result?.held) send(controller, { event: "held" });
+            if (result?.held) {
+              send(controller, { event: "held" });
+              // GHL gets change_request_pending and the admins get one text (8 AM after quiet hours).
+              if (result.held.fresh) await announceRequest(result.held.id);
+            }
 
             if (result && result.rows.length > 0) {
               // Refresh the event details on the page as soon as the save lands.
@@ -497,22 +501,24 @@ async function updateModeResponse(session: SessionRow, messages: ChatMessage[], 
                 ? `${lastQuote.price.price_text} Should I make that change?`
                 : lastQuote?.diveMenuSet
                   ? DIVE_MENU_SET_MESSAGE
-                  : lastQuote?.refusedDrinks
-                  ? DRINKS_LOCKED_MESSAGE
                   : "Anything else you would like to change?";
             } else if (!lastApply) {
               text = "Sorry, that change did not go through. Our team will follow up with you.";
             } else if (lastApply.needsQuote) {
               text = `${lastApply.needsQuote.price_text} Should I make that change?`;
+            } else if (lastApply.requestFailed && lastApply.rows.length === 0) {
+              text = "Sorry, that change did not go through. Our team will follow up with you.";
             } else if (lastApply.held && lastApply.rows.length === 0) {
-              text = `${LIST_CHANGE_HELD_MESSAGE} Anything else you would like to change?`;
+              text = `${CHANGE_REQUEST_MESSAGE} Anything else you would like to change?`;
             } else if (lastApply.rows.length === 0) {
-              text = lastApply.diveMenuSet ? DIVE_MENU_SET_MESSAGE : lastApply.refusedDrinks ? DRINKS_LOCKED_MESSAGE : "That is already on file. Anything else you would like to change?";
+              text = lastApply.diveMenuSet ? DIVE_MENU_SET_MESSAGE : "That is already on file. Anything else you would like to change?";
             } else {
               const saved = lastApply.rows.some((r) => r.applied)
-                ? "That change is saved."
+                ? lastApply.held
+                  ? "Your other changes are saved."
+                  : "That change is saved."
                 : "I have sent that to a manager who will reach out to you shortly.";
-              text = [lastApply.diveMenuSet ? DIVE_MENU_SET_MESSAGE : lastApply.refusedDrinks ? DRINKS_LOCKED_MESSAGE : "", saved, "Anything else you would like to change?"]
+              text = [lastApply.diveMenuSet ? DIVE_MENU_SET_MESSAGE : "", lastApply.held ? CHANGE_REQUEST_MESSAGE : "", saved, "Anything else you would like to change?"]
                 .filter(Boolean)
                 .join(" ");
             }

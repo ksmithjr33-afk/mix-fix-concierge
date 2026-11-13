@@ -3,6 +3,7 @@ import { supabase } from "@/lib/supabase";
 import { SESSION_COLUMNS, type SessionRow } from "@/lib/event-updates";
 import UpdateMode from "./update-mode";
 import { clientCanSeeList, holdsFor } from "@/lib/client-list-db";
+import { recordClientOpen } from "@/lib/client-links";
 
 // The booking fields /chat takes as query params for intake.
 const INTAKE_PARAMS = [
@@ -76,6 +77,9 @@ export default async function ShortRedirectPage({
       </div>
     );
   }
+
+  // When the client last opened their link, for the manager view. An admin's Open button adds admin=1.
+  if (params.admin !== "1") await recordClientOpen(sessionId).catch(() => {});
 
   // Submitted sessions open in update mode: chat on top, event summary below.
   if (data.status === "submitted" && data.event_data) {

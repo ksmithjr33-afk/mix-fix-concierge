@@ -40,7 +40,10 @@ import BarReadyCard from "../../../e/[id]/bar-ready";
 import OrderSheet from "./order/order-sheet";
 import ManagerTabs from "./manager-tabs";
 import ManagerChat from "./manager-chat";
-import { BartenderLists, MissingReports, TimePunches } from "./day-of";
+import { BartenderLists, ClockStatus, MissingReports, TimePunches } from "./day-of";
+import ClientLinksCard from "./client-links-card";
+import { clientLinks, clientStatusLine } from "@/lib/client-links";
+import { changeBlocks, type FieldChange } from "@/lib/event-diff";
 
 export const dynamic = "force-dynamic";
 
@@ -105,14 +108,16 @@ export default async function AdminEventPage({
     ...panel.requesters.map((r) => r.staffId),
     ...handoffs.flatMap((h) => h.requesters.map((r) => r.staffId)),
   ];
-  const [closeouts, records, certs, autoSend, pendingHolds, listEntries] = await Promise.all([
+  const [closeouts, records, certs, autoSend, pendingHolds, listEntries, links] = await Promise.all([
     closeoutsFor(id),
     compactLines(lookIds),
     certIssues(lookIds, panel.market),
     autoSendOn(),
     holdsFor(id, "pending"),
     listLog(id),
+    clientLinks(session, me), // admins only: null for anyone else
   ]);
+  const addedBy = (session as { created_by?: string | null; created_by_name?: string | null }).created_by === "admin" ? (session as { created_by_name?: string | null }).created_by_name || "an admin" : null;
   const away = await unavailableOn(eventDayOf(session));
   const onEventIds = people.filter((p) => p.status !== "declined").map((p) => p.staffId);
   const lists = await teamLists(session, onEventIds, supplies.list);
@@ -177,7 +182,14 @@ export default async function AdminEventPage({
   const panels: Record<ManagerTab, React.ReactNode> = {
     details: (
       <>
+        <ClockStatus people={people} timeZone={v.timeZone} />
+        {addedBy && (
+          <p className="px-1 text-sm text-[#6B5D52]">Added by {addedBy}</p>
+        )}
         <MenuPickupPanel initial={pickup} people={staff.filter((s) => s.active).map((s) => ({ id: s.id, name: s.name || s.phone, role: s.role }))} />
+        {links && (
+          <ClientLinksCard conciergeUrl={links.conciergeUrl} eventUrl={links.eventUrl} openConcierge={links.openConcierge} openEvent={links.openEvent} status={clientStatusLine(links, v.timeZone)} />
+        )}
         <Details v={v} />
         {!hidden && <EditEvent sessionId={id} version={session.version} initial={editValues} packages={packages} />}
         <HideAction sessionId={id} hidden={hidden} />
@@ -212,8 +224,10 @@ export default async function AdminEventPage({
           kind: h.kind,
           createdAt: h.created_at,
           summary: h.summary ?? "",
+          blocks: changeBlocks((h.changes ?? []) as FieldChange[]),
           listChanges: h.list_changes ?? "",
           price: h.price?.price_text ?? "",
+          priceAmount: h.price?.amount ?? null,
         }))}
         log={listEntries.map((l) => ({
           id: l.id,
