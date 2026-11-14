@@ -45,6 +45,8 @@ import { giphyEnabled } from "@/lib/team/media";
 import { eventNumberFor, historyFor } from "@/lib/client-history-db";
 import { repeatLabel } from "@/lib/client-history";
 import ClientHistoryCard from "./client-history-card";
+import PriceNeededCard from "./price-needed-card";
+import { pendingBlocks, pendingSummary } from "@/lib/price-pending";
 
 export const dynamic = "force-dynamic";
 
@@ -220,6 +222,9 @@ async function AdminEventPage({
       const packages = PACKAGE_CHOICES.includes(editValues.package) || !editValues.package ? PACKAGE_CHOICES : [editValues.package, ...PACKAGE_CHOICES];
       return (
         <>
+          {session.price_pending && (
+            <PriceNeededCard sessionId={id} summary={pendingSummary(session.price_pending_info)} blocks={pendingBlocks(session.price_pending_info)} />
+          )}
           <ClockStatus people={people} timeZone={v.timeZone} />
           {addedBy && (
             <p className="px-1 text-sm text-[#6B5D52]">Added by {addedBy}</p>
@@ -317,7 +322,7 @@ async function AdminEventPage({
         panel={panels[tab]()}
         counts={{
           // The menu is not picked up (or nobody is assigned) inside 48 hours, and no approved menu inside 72 hours.
-          details: (pickup.outstanding ? 1 : 0) + (menuFile.missing ? 1 : 0),
+          details: (pickup.outstanding ? 1 : 0) + (menuFile.missing ? 1 : 0) + (session.price_pending ? 1 : 0),
           team: hidden ? 0 : counts.stillNeeded + handoffs.length,
           order: sheetFlags,
           client: pendingHolds.length,

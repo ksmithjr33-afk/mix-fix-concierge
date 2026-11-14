@@ -30,6 +30,8 @@ import { CHANGE_REQUEST_MESSAGE } from "@/lib/client-list";
 import { announceRequest } from "@/lib/change-requests";
 import { eventTimeZone } from "@/lib/team/markets";
 import { submitEventDataTool } from "@/lib/intake-tools";
+import { createFillerFilter, pendingLines, PRICE_PENDING_CLIENT_MESSAGE, quotedAmount, unpriced, type PricePendingInfo } from "@/lib/price-pending";
+import { recordClientQuoted, textPricePending } from "@/lib/price-pending-db";
 
 const anthropic = new Anthropic();
 
@@ -215,14 +217,16 @@ function priceLines(p: PriceChange): string[] {
 }
 
 /** What quote_price_change priced, handed back so the bot states it and asks for a yes. */
-function quoteToolResult(quote: QuoteResult | null): string {
+function quoteToolResult(quote: QuoteResult | null, pending: PricePendingInfo | null = null): string {
   if (!quote) return "TOOL RESULT: This event could not be priced right now. Tell the client our team will confirm the price, and do not quote anything.";
   const parts: string[] = [];
   if (quote.diveMenuSet) parts.push(`DRINK MENU SET, Dive Bar has a set menu and drinks cannot be changed. Say exactly: "${DIVE_MENU_SET_MESSAGE}"`);
   if (quote.listHold) {
     parts.push(`REQUEST FOR APPROVAL, within 6 days of the event. This change would change the client's shopping list, so after they say yes it is sent to our team for approval instead of saving. Tell them that when you ask, and after update_event_data say exactly: "${CHANGE_REQUEST_MESSAGE}"`);
   }
-  if (!quote.price) {
+  if (!quote.price && pending) {
+    parts.push(`ALREADY SAVED, PRICE PENDING: this is already saved and waiting for our management team to set the new total (${pendingLines(pending).join("; ")}). Acknowledge it in a few words, do not mention the price again, do not ask them to confirm it, and ask if there is anything else they would like to change.`);
+  } else if (!quote.price) {
     parts.push("NOTHING TO PRICE: these values are already on file or do not change the price. Do not quote a price.");
   } else {
     parts.push(
@@ -263,7 +267,15 @@ function updateToolResult(result: ApplyResult | null): string {
     parts.push(`NOT SAVED, SENT TO OUR TEAM FOR APPROVAL: within 6 days of the event this change is a request that our team approves or declines first. It is NOT confirmed. Never say it was saved, updated, changed, or done. Say exactly: "${CHANGE_REQUEST_MESSAGE}" Anything listed below as SAVED AND APPLIED NOW was saved separately and can be confirmed.`);
   }
   if (result.rows.length === 0 && !result.requestFailed && !result.diveMenuSet && !result.held) {
+    if (result.pricePending) {
+      return `TOOL RESULT: ALREADY SAVED, PRICE PENDING: this is already saved and waiting for our management team to set the new total. Acknowledge it in a few words, do not mention the price again, do not ask them to confirm it, and ask if there is anything else they would like to change.`;
+    }
     return "TOOL RESULT: NOTHING was recorded because every value sent already matches what is on file. Tell the client it is already on file. Do not say you updated or saved anything.";
+  }
+  if (result.pricePending?.fresh) {
+    parts.push(
+      `SAVED, PRICE PENDING: the change below is saved exactly as the client asked, but our pricing engine cannot price it, so our management team will set the new total and reach out. Say exactly, once: "${PRICE_PENDING_CLIENT_MESSAGE}" Then ask if there is anything else they would like to change. Never state, estimate, or confirm any total or difference, even one the client mentions, and never ask them to confirm this change again.`
+    );
   }
   for (const r of result.rows) {
     const details = changeBlocks(r.changes).join("\n\n");
@@ -273,7 +285,7 @@ function updateToolResult(result: ApplyResult | null): string {
         : `NOT SAVED, sent to a manager (${approvalReason(r)}):\n${details}`
     );
   }
-  if (result.priceChange) {
+  if (result.priceChange && !result.pricePending) {
     const phrase = paymentPhrase(result.paymentPreference);
     parts.push(
       [
@@ -294,7 +306,14 @@ async function updateModeResponse(session: SessionRow, messages: ChatMessage[], 
   const systemText = buildUpdatePrompt(eventData, session.version, deadlines, {
     booked: session.booked_price ?? null,
     recap: since ? { lines: recapLines(since.changes), totalBefore: since.totalBefore, totalAfter: since.totalAfter } : null,
+    pricePending: session.price_pending ? (session.price_pending_info ?? null) : null,
   });
+  // A price the client mentions while one is pending goes on the admins' summary.
+  const lastUser = [...messages].reverse().find((m) => m.role === "user")?.content ?? "";
+  const mentioned = quotedAmount(lastUser);
+  if (session.price_pending && mentioned) await recordClientQuoted(session, mentioned);
+  // For a change saved without a price: what the client says they were quoted in this chat, latest first.
+  const clientQuoted = [...messages].reverse().filter((m) => m.role === "user").map((m) => quotedAmount(m.content)).find(Boolean) ?? null;
   // Cached: the tools and this prompt are the same on every turn of the chat
   // and on the follow up turn, so later requests reuse them instead of
   // resending ~all of it. Same words to the model, only faster and cheaper.
@@ -328,18 +347,49 @@ async function updateModeResponse(session: SessionRow, messages: ChatMessage[], 
         },
         (menu) => send(controller, { event: "menu", menu })
       );
+      // "Let me get a price" and the like never reach the client: the price is never in that sentence.
+      let filler = createFillerFilter((t) => menuFilter.push(t));
       try {
         for await (const event of stream) {
           if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
-            menuFilter.push(event.delta.text);
+            filler.push(event.delta.text);
           }
         }
+        filler.finish();
         menuFilter.flush();
 
         const finalMessage = await stream.finalMessage();
         const toolUses = finalMessage.content.filter(
           (block): block is Anthropic.ToolUseBlock => block.type === "tool_use"
         );
+
+        // What follows any save: the page refresh, a change request's text, the
+        // price pending admin text, and the GHL update.
+        const afterApply = async (result: ApplyResult | null) => {
+          if (!result) return;
+          if (result.held) {
+            send(controller, { event: "held" });
+            // GHL gets change_request_pending and the admins get one text (8 AM after quiet hours).
+            if (result.held.fresh) await announceRequest(result.held.id);
+          }
+          if (result.rows.length === 0) return;
+          // Refresh the event details on the page as soon as the save lands.
+          send(controller, {
+            event: "updated",
+            eventData: result.eventData,
+            version: result.version,
+            updatedAt: result.updatedAt,
+            updates: result.rows.map((r) => ({ version: r.version, applied: r.applied, summary: r.summary })),
+          });
+          // Saved without a price: the admins get one text right away.
+          if (result.pricePending?.fresh) {
+            const fresh = await getSession(session.id);
+            await textPricePending(fresh ?? session, result.pricePending.info);
+          }
+          // Send the GHL note and update webhook before the bot confirms the change.
+          // Assigned staff get a text with their event page link; it never blocks the update.
+          await deliverEventUpdates(session.id, result.rows, { staffOrigin: origin });
+        };
 
         if (toolUses.length > 0) {
           const toolResults: Anthropic.ToolResultBlockParam[] = [];
@@ -352,7 +402,21 @@ async function updateModeResponse(session: SessionRow, messages: ChatMessage[], 
                 console.error("quote_price_change failed:", err);
                 return null;
               });
-              toolResults.push({ type: "tool_result", tool_use_id: toolUse.id, content: quoteToolResult(lastQuote) });
+              // The engine cannot price it: save it now as the client asked (no retry,
+              // no second confirmation), mark the price pending, and text the admins.
+              // A change that goes to our team as a request inside six days stays a request.
+              if (lastQuote && unpriced(lastQuote.price) && !lastQuote.listHold && !lastQuote.diveMenuSet) {
+                const saved = await applyEventUpdate(session.id, input, { clientQuoted }).catch((err) => {
+                  console.error("price pending save failed:", err);
+                  return null;
+                });
+                lastApply = saved;
+                lastQuote = undefined;
+                await afterApply(saved);
+                toolResults.push({ type: "tool_result", tool_use_id: toolUse.id, content: updateToolResult(saved) });
+                continue;
+              }
+              toolResults.push({ type: "tool_result", tool_use_id: toolUse.id, content: quoteToolResult(lastQuote, session.price_pending ? (session.price_pending_info ?? null) : null) });
               continue;
             }
             const {
@@ -366,31 +430,10 @@ async function updateModeResponse(session: SessionRow, messages: ChatMessage[], 
               changeApprovalNeeded: changeApprovalNeeded === true,
               requireQuote: true,
               quotedNewTotal,
+              clientQuoted,
             });
             lastApply = result;
-            if (result?.held) {
-              send(controller, { event: "held" });
-              // GHL gets change_request_pending and the admins get one text (8 AM after quiet hours).
-              if (result.held.fresh) await announceRequest(result.held.id);
-            }
-
-            if (result && result.rows.length > 0) {
-              // Refresh the event details on the page as soon as the save lands.
-              send(controller, {
-                event: "updated",
-                eventData: result.eventData,
-                version: result.version,
-                updatedAt: result.updatedAt,
-                updates: result.rows.map((r) => ({
-                  version: r.version,
-                  applied: r.applied,
-                  summary: r.summary,
-                })),
-              });
-              // Send the GHL note and update webhook before the bot confirms the change.
-              // Assigned staff get a text with their event page link; it never blocks the update.
-              await deliverEventUpdates(session.id, result.rows, { staffOrigin: origin });
-            }
+            await afterApply(result);
             toolResults.push({ type: "tool_result", tool_use_id: toolUse.id, content: updateToolResult(result) });
           }
 
@@ -410,12 +453,14 @@ async function updateModeResponse(session: SessionRow, messages: ChatMessage[], 
           });
           let separated = !fullText.trim();
           const beforeConfirmation = fullText.length;
+          filler = createFillerFilter((t) => menuFilter.push(t));
           for await (const event of followUp) {
             if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
-              menuFilter.push(separated ? event.delta.text : `\n\n${event.delta.text}`);
+              filler.push(separated ? event.delta.text : `\n\n${event.delta.text}`);
               separated = true;
             }
           }
+          filler.finish();
           menuFilter.flush();
 
           if (!fullText.slice(beforeConfirmation).trim()) {
@@ -428,6 +473,10 @@ async function updateModeResponse(session: SessionRow, messages: ChatMessage[], 
                   : "Anything else you would like to change?";
             } else if (!lastApply) {
               text = "Sorry, that change did not go through. Our team will follow up with you.";
+            } else if (lastApply.pricePending?.fresh) {
+              text = `${PRICE_PENDING_CLIENT_MESSAGE} Anything else you would like to change?`;
+            } else if (lastApply.pricePending && lastApply.rows.length === 0) {
+              text = "That is already saved. Anything else you would like to change?";
             } else if (lastApply.needsQuote) {
               text = `${lastApply.needsQuote.price_text} Should I make that change?`;
             } else if (lastApply.requestFailed && lastApply.rows.length === 0) {

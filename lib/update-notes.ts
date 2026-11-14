@@ -17,6 +17,7 @@
 // changed the price has the price line under the title, and one made inside six
 // days of the event says so.
 
+import { pendingSummary } from "@/lib/price-pending";
 import { buildEventFields, buildNatalieSupplyList } from "@/lib/ghl-payload";
 import { approvalReason, changeBlocks, computeDeadlines, summarizeRow } from "@/lib/event-diff";
 import { pendingChangeFields, withHoursBooked } from "@/lib/price-change";
@@ -116,6 +117,11 @@ export function buildUpdatePayload(session: SessionRow, row: EventUpdateRow, ext
     payment_preference: (eventData.payment_preference as string | undefined) || "",
     change_approval_needed: row.change_approval_needed ? "Yes" : "No",
     booked_total: session.booked_price?.total ?? null,
+    // Price pending: a saved change still waiting for its price. Workflows branch
+    // on this: no change order agreement, no auto charge, and no balance
+    // reminder until an admin sets the new total.
+    price_pending: session.price_pending ? "Yes" : "No",
+    price_pending_summary: session.price_pending ? pendingSummary(session.price_pending_info) : "",
     // Who made the change, so the team can tell an admin edit from a client change.
     updated_by: row.updated_by === "admin" ? "admin" : "client",
     updated_by_name: row.updated_by === "admin" ? row.updated_by_name || "" : "",
@@ -126,5 +132,10 @@ export function buildUpdatePayload(session: SessionRow, row: EventUpdateRow, ext
     ...extra,
   };
   if (!payload.email && session.email) payload.email = session.email;
+  // While the price is pending no total goes out, not the old one and not a guess.
+  if (session.price_pending) {
+    for (const k of ["pending_change_amount", "pending_change_new_total", "pending_change_package_price", "pending_change_gratuity", "pending_change_booked_total", "booked_total"]) payload[k] = null;
+    payload.pending_change_price_text = "Price needed. Our team will confirm the new total.";
+  }
   return payload;
 }

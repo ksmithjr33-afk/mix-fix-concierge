@@ -23,6 +23,7 @@ import {
   bookedAfter,
   buildPriceChange,
   computeBaseline,
+  priceText,
   withImpliedChanges,
   toCount,
   withHoursBooked,
@@ -31,6 +32,8 @@ import {
   type PriceChange,
 } from "@/lib/price-change";
 import { eventTimeZone } from "@/lib/team/markets";
+import { addPending, unpriced, unpricedReason, type PricePendingInfo } from "@/lib/price-pending";
+import { packageKey } from "@/lib/pricing";
 import { autoSendOn, holdChange, listWouldChange } from "@/lib/client-list-db";
 
 export const SESSION_COLUMNS =
@@ -54,6 +57,9 @@ export interface SessionRow {
   // before every update applied right away, read by /api/manager-update.
   pending_change?: PendingChange | null;
   booked_price?: BookedPrice | null;
+  // Set while a saved change could not be priced (supabase/migrations/20261203_price_pending.sql).
+  price_pending?: boolean | null;
+  price_pending_info?: PricePendingInfo | null;
 }
 
 export interface EventUpdateRow {
@@ -200,6 +206,9 @@ export interface ApplyResult {
   // admin to approve or decline. fresh is false when the same request was
   // already waiting, so the admins are only texted once.
   held: { id: string; listChanges: string; fresh: boolean } | null;
+  // A saved change the engine could not price: the event is now price pending.
+  // fresh is true when this call added it (text the admins), false when nothing new was saved.
+  pricePending: { info: PricePendingInfo; fresh: boolean; marked: boolean } | null;
 }
 
 function toInsert(
@@ -299,6 +308,10 @@ function prepareUpdate(
       baseVersion: session.version,
       now: options.now,
     });
+    // While an earlier change waits for its price, the total this would build on is unknown.
+    if (session.price_pending && price.new_total !== null) {
+      price = { ...price, amount: null, new_total: null, package_price: null, gratuity: null, price_text: priceText(null, null) };
+    }
     // Hours follow new times, and bartenders follow what the change was priced with.
     const all = withImpliedChanges(current, { changes: asked, basis: price.basis }, booked?.bartenders ?? original?.bartenders ?? null);
     if (all.length > asked.length) {
@@ -374,6 +387,8 @@ export async function applyEventUpdate(
     editor?: AdminEditor | null;
     // Refuse to save when someone else changed the event since this version was read.
     expectedVersion?: number;
+    // A price the client says they were quoted, for the price pending summary.
+    clientQuoted?: string | null;
   } = {}
 ): Promise<ApplyResult | null> {
   const source = options.source ?? "concierge";
@@ -399,6 +414,9 @@ export async function applyEventUpdate(
       withinSixDays: prep.deadlines.withinSixDays,
       paymentPreference: (current.payment_preference as string | undefined) || null,
       held: null as ApplyResult["held"],
+      pricePending: (session.price_pending && session.price_pending_info
+        ? { info: session.price_pending_info, fresh: false, marked: true }
+        : null) as ApplyResult["pricePending"],
     };
 
     if (price && options.requireQuote && !quoteMatches(price, options.quotedNewTotal)) {
@@ -489,6 +507,28 @@ export async function applyEventUpdate(
       const { data, error } = await supabase.from("event_updates").insert(inserts).select("*");
       if (error) throw new Error(`event_updates insert failed: ${error.message}`);
       rows = (data as EventUpdateRow[]) ?? [];
+    }
+
+    // Saved but not priced (rule: save it anyway, price later): mark the event
+    // price pending. The admin's own total (priceOverride) is never pending.
+    if (applied && rows.length > 0 && unpriced(price) && !options.priceOverride) {
+      const pkgChange = applied.changes.find((c) => c.field === "package");
+      const oldPackage = String(pkgChange?.old ?? current.package ?? session.package_type ?? "") || null;
+      const info = addPending(session.price_pending ? session.price_pending_info : null, {
+        changes: price!.changes,
+        oldPackage,
+        newPackage: pkgChange ? String(pkgChange.new ?? "") || null : null,
+        oldTotal: booked?.total ?? null,
+        clientQuoted: options.clientQuoted ?? null,
+        reason: unpricedReason(oldPackage, packageKey(oldPackage) !== null, booked?.total ?? null),
+        at: nowIso,
+      });
+      const { error: markErr } = await supabase
+        .from("sessions")
+        .update({ price_pending: true, price_pending_info: info, ...(session.price_pending ? {} : { price_pending_at: nowIso }) })
+        .eq("id", sessionId);
+      if (markErr) console.error(`[PRICE PENDING NOT MARKED] session=${sessionId}: ${markErr.message}. The change is saved; the admins are still texted.`);
+      base.pricePending = { info, fresh: true, marked: !markErr };
     }
 
     const eventData = applied ? next : current;
