@@ -32,6 +32,7 @@ export interface EventListItem {
   menu?: { state: "unassigned" | "assigned" | "picked_up"; text: string }; // admins: the cocktail menu pickup
   request?: boolean; // admins: a client change request is waiting for Approve or Decline
   noMenu?: boolean; // admins: inside 72 hours and no approved menu uploaded
+  noIce?: boolean; // admins: inside 48 hours of service start and nobody picking up ice
   repeat?: string; // admins: "Repeat client, 3rd event"
 }
 

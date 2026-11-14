@@ -16,6 +16,7 @@ import { eventData } from "@/lib/team/markets";
 import { myHandoff, teammateChoices } from "@/lib/team/shifts-db";
 import { markThreadRead, threadMessages, unreadByEvent } from "@/lib/team/chat-db";
 import { myPickupFor } from "@/lib/team/menu-pickup-db";
+import { staffIceView } from "@/lib/team/ice-pickup-db";
 import { staffMenuSection } from "@/lib/team/approved-menu-db";
 import { giphyEnabled } from "@/lib/team/media";
 import TeamHeader from "../../team-header";
@@ -68,7 +69,7 @@ async function TeamEventPage({
   const ed = eventData(access.session);
   // What depends on this person's assignment starts as soon as it is read.
   const assignmentP = assignmentRef(id, staff.id);
-  const [data, entries, assignment, messages, unread, closeout, menuPickup, menuSection, punches, pay, [handoff, teammates]] = await Promise.all([
+  const [data, entries, assignment, messages, unread, closeout, menuPickup, menuSection, punches, pay, [handoff, teammates], ice] = await Promise.all([
     eventPageData(access.session, staff),
     barReadyEntries(id, staff),
     assignmentP,
@@ -81,6 +82,8 @@ async function TeamEventPage({
     // Only the viewer's own estimate, and only on an event they are on.
     assignmentP.then((a) => (a && a.status !== "declined" ? myEstimate(staff.id, access.session) : null)),
     assignmentP.then((a) => (a?.status === "accepted" ? Promise.all([myHandoff(id, staff.id), teammateChoices(access.session, staff.id)]) : ([null, []] as [null, never[]]))),
+    // The ice pickup card: everyone on the event sees who is picking up and each status.
+    staffIceView(access.session, staff),
   ]);
   if (chatTab) await markThreadRead(id, staff.id);
   const accepted = assignment?.status === "accepted";
@@ -130,6 +133,7 @@ async function TeamEventPage({
         wrapUpDone={!!closeout.mine}
         menuPickup={menuPickup}
         menuSection={menuSection}
+        ice={ice}
       />
     </>
   );

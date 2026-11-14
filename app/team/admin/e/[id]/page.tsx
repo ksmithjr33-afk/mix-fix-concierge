@@ -10,6 +10,8 @@ import TeamHeader from "../../../team-header";
 import { markThreadRead, mutedChats, threadMessages, unreadByEvent } from "@/lib/team/chat-db";
 import { adminPickupView } from "@/lib/team/menu-pickup-db";
 import MenuPickupPanel from "./menu-pickup-panel";
+import IcePickupPanel from "./ice-pickup-panel";
+import { iceView, pastPlaces, sheetIceBags } from "@/lib/team/ice-pickup-db";
 import { adminMenuView } from "@/lib/team/approved-menu-db";
 import { distancesToEvent } from "@/lib/team/profile-db";
 import HideAction from "./hide-action";
@@ -100,6 +102,10 @@ async function AdminEventPage({
   const staffP = on("team") || on("details") ? listStaff() : none<Awaited<ReturnType<typeof listStaff>>>([]);
   const panelP = on("team") ? postPanel(session) : null;
   const handoffsP = handoffPanel(session);
+  const sheetP = getSheetView(session);
+  // Ice: the Shopping list's ice prefills the total bags. Used before locations only with Details open.
+  const iceP = sheetP.then((s) => iceView(session, me, { listBags: sheetIceBags(session, s.sheet.sections) }));
+  const placesP = on("details") ? pastPlaces() : none<Awaited<ReturnType<typeof pastPlaces>>>([]);
   const lookIdsP = panelP
     ? early(Promise.all([staffP, handoffsP, panelP]).then(([staff, handoffs, panel]) => [
         ...staff.filter((s) => s.active).map((s) => s.id),
@@ -109,7 +115,7 @@ async function AdminEventPage({
       ]))
     : null;
 
-  const [supplies, people, lists, staff, panel, handoffs, hidden, unread, view, sheet, bar, missing, pickup, menuFile, closeouts, pendingHolds] = await Promise.all([
+  const [supplies, people, lists, staff, panel, handoffs, hidden, unread, view, sheet, bar, missing, pickup, menuFile, closeouts, pendingHolds, ice, places] = await Promise.all([
     suppliesP,
     peopleP,
     listsP,
@@ -119,13 +125,15 @@ async function AdminEventPage({
     isHidden(id),
     unreadByEvent(me.id, [id]),
     managerEventView(session),
-    getSheetView(session),
+    sheetP,
     barReadyEntries(id, me),
     missingReports(id),
     adminPickupView(session),
     adminMenuView(session),
     closeoutsFor(id),
     holdsFor(id, "pending"),
+    iceP,
+    placesP,
   ]);
   // Team tab only.
   const [records, certs, distances, away] =
@@ -235,6 +243,11 @@ async function AdminEventPage({
             menu={menuFile}
             today={todayIn(eventSchedule(edNow).tz, now)}
           />
+          <IcePickupPanel
+            initial={ice}
+            people={staff.filter((s) => s.active).map((s) => ({ id: s.id, name: s.name || s.phone, role: s.role }))}
+            places={places}
+          />
           {links && (
             <ClientLinksCard conciergeUrl={links.conciergeUrl} eventUrl={links.eventUrl} openConcierge={links.openConcierge} openEvent={links.openEvent} status={clientStatusLine(links, v.timeZone)} />
           )}
@@ -322,7 +335,7 @@ async function AdminEventPage({
         panel={panels[tab]()}
         counts={{
           // The menu is not picked up (or nobody is assigned) inside 48 hours, and no approved menu inside 72 hours.
-          details: (pickup.outstanding ? 1 : 0) + (menuFile.missing ? 1 : 0) + (session.price_pending ? 1 : 0),
+          details: (pickup.outstanding ? 1 : 0) + (menuFile.missing ? 1 : 0) + (session.price_pending ? 1 : 0) + (ice.outstanding ? 1 : 0),
           team: hidden ? 0 : counts.stillNeeded + handoffs.length,
           order: sheetFlags,
           client: pendingHolds.length,

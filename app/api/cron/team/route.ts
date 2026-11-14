@@ -8,6 +8,7 @@ import { sendCertReminders } from "@/lib/team/certs-db";
 import { deliverAnnouncements } from "@/lib/team/announcements-db";
 import { deliverChatNotices } from "@/lib/team/chat-db";
 import { sendMenuPickupNotices } from "@/lib/team/menu-pickup-db";
+import { sendIcePickupNotices } from "@/lib/team/ice-pickup-db";
 import { sendRequestTexts } from "@/lib/change-requests";
 import { supabase } from "@/lib/supabase";
 import type { SessionRow } from "@/lib/event-updates";
@@ -31,7 +32,7 @@ export async function GET(request: Request) {
   // Each job runs on its own, so one failing never stops the others.
   // Markets first, so the time math below uses each event's time zone.
   const markets = await Promise.allSettled([fillMarkets()]);
-  const [reminders, alerts, short, shiftTexts, announcementTexts, chatTexts, closeoutTexts, certTexts, supplyTexts, menuTexts, requestTexts] = await Promise.allSettled([
+  const [reminders, alerts, short, shiftTexts, announcementTexts, chatTexts, closeoutTexts, certTexts, supplyTexts, menuTexts, requestTexts, iceTexts] = await Promise.allSettled([
     sendClockOutReminders(now),
     sendLateSetupAlerts(now),
     sendShortShiftAlerts(now),
@@ -43,6 +44,7 @@ export async function GET(request: Request) {
     sendSupplyNotices(now), // admin edits to the supplies list inside 48 hours, once the edits settle
     sendMenuPickupNotices(now), // menu pickup: held assignment texts, the morning reminder, and the 24 hour admin alert
     sendRequestTexts(now), // client change requests that came in during quiet hours, texted to admins at 8:00 AM
+    sendIcePickupNotices(now), // ice pickup texts held for quiet hours
   ]);
   const result = (r: PromiseSettledResult<number>) => (r.status === "fulfilled" ? r.value : `failed: ${String(r.reason)}`);
   const out = {
@@ -57,6 +59,7 @@ export async function GET(request: Request) {
     certReminders: result(certTexts),
     supplyTexts: result(supplyTexts),
     menuPickupTexts: result(menuTexts),
+    icePickupTexts: result(iceTexts),
     changeRequestTexts: result(requestTexts),
   };
   console.log("[team-cron]", JSON.stringify(out));

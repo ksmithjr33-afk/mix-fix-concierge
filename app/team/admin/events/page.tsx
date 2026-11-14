@@ -22,6 +22,7 @@ import { isYmd, pickLayout } from "@/lib/team/calendar";
 import { unreadByEvent } from "@/lib/team/chat-db";
 import { getPrefs, savePrefs } from "@/lib/team/prefs-db";
 import { pickupBadges } from "@/lib/team/menu-pickup-db";
+import { iceUnassignedIds } from "@/lib/team/ice-pickup-db";
 import { menuMissingIds } from "@/lib/team/approved-menu-db";
 import { ListCalendarToggle } from "../../calendar-view";
 import { orderStatuses } from "@/lib/order-sheet-db";
@@ -117,7 +118,7 @@ async function AdminEventsPage({
   };
   // The calendar gets every market and date: it has its own market filter and navigation.
   const sessions = calendar ? visible : (marketFilter ? visible.filter((s) => sessionMarket(s) === marketFilter) : visible).filter(inRange);
-  const [counts, unread, availability, orders, heldLists, menus, requests, noMenu] = await Promise.all([
+  const [counts, unread, availability, orders, heldLists, menus, requests, noMenu, noIce] = await Promise.all([
     staffingByEvent(sessions),
     unreadByEvent(admin.id, sessions.map((s) => s.id)),
     view === "upcoming" ? availableCounts(sessions) : Promise.resolve(new Map<string, number | null>()),
@@ -126,6 +127,7 @@ async function AdminEventsPage({
     pickupBadges(sessions.map((s) => s.id)),
     sessionsWithPendingRequests(sessions.map((s) => s.id)),
     menuMissingIds(sessions),
+    iceUnassignedIds(sessions),
   ]);
   const { data: postRows, error: postErr } = postRead ?? { data: null, error: null };
   const posted = new Set(postErr ? [] : ((postRows as { session_id: string; kind: string }[]) ?? []).filter((p) => p.kind === "open").map((p) => p.session_id));
@@ -145,6 +147,7 @@ async function AdminEventsPage({
       requests.has(s.id) ? "change request waiting" : heldLists.has(s.id) ? "first list waiting for review" : "",
       menus.get(s.id)?.text ?? "",
       noMenu.has(s.id) ? "no approved menu" : "",
+      noIce.has(s.id) ? "ice not assigned" : "",
     ]
       .filter(Boolean)
       .join(" · ");
@@ -157,6 +160,7 @@ async function AdminEventsPage({
       staffing: staffingTone(c),
       ...(requests.has(s.id) ? { request: true } : {}),
       ...(noMenu.has(s.id) ? { noMenu: true } : {}),
+      ...(noIce.has(s.id) ? { noIce: true } : {}),
       ...(repeatLabel(numbers?.get(s.id)) ? { repeat: repeatLabel(numbers?.get(s.id))! } : {}),
       ...(menu ? { menu: { state: menu.state as "unassigned" | "assigned" | "picked_up", text: menu.text } } : {}),
     };

@@ -13,6 +13,8 @@ import { eventsForViewer, myUnavailableDays, shiftItems } from "@/lib/team/my-ev
 import { pickLayout } from "@/lib/team/calendar";
 import { getPrefs, savePrefs } from "@/lib/team/prefs-db";
 import { myPickups } from "@/lib/team/menu-pickup-db";
+import { myIcePickups } from "@/lib/team/ice-pickup-db";
+import IcePickupCard from "../ice-pickup-card";
 import { staffMarkets } from "@/lib/team/markets-db";
 import { MARKETS, MARKET_INFO } from "@/lib/team/markets";
 import CalendarView, { ListCalendarToggle } from "../calendar-view";
@@ -43,7 +45,7 @@ async function TeamEventsPage({
   const calendarP = prefsP.then((prefs) => tab === "mine" && !askedPast && pickLayout(params.layout, prefs.eventsLayout) === "calendar");
   // Admins: every event. Bartenders: only their own events. Hidden events never.
   const visibleP = eventsForViewer(staff);
-  const [prefs, calendar, shifts, certNotes, visible, pay, pickups, unavailable, filterMarkets] = await Promise.all([
+  const [prefs, calendar, shifts, certNotes, visible, pay, pickups, unavailable, filterMarkets, icePickups] = await Promise.all([
     prefsP,
     calendarP,
     openShiftsFor(staff),
@@ -55,6 +57,8 @@ async function TeamEventsPage({
     // The calendar: bartenders also see their own unavailable days, as they do today elsewhere.
     calendarP.then((c) => (c && !admin ? myUnavailableDays(staff.id, today) : [])),
     calendarP.then((c) => (c ? (admin ? [...MARKETS] : staffMarkets(staff.id)) : [])),
+    // Ice this person is picking up and has not marked yet.
+    tab === "mine" && !past ? myIcePickups(staff) : [],
   ]);
   const events = visible.map((e) => (pay[e.id] && (e.status === "accepted" || e.status === "offered") ? { ...e, pay: pay[e.id] } : e));
   const sections = past ? pastSection(events, today) : upcomingSections(events, today);
@@ -82,6 +86,9 @@ async function TeamEventsPage({
         </nav>
         {pickups.map((p) => (
           <MyPickupCard key={p.sessionId} pickup={p} />
+        ))}
+        {icePickups.map((v) => (
+          <IcePickupCard key={v.sessionId} initial={v} showEvent />
         ))}
         {tab === "open" && certNotes.lines.length > 0 && (
           <div className={`rounded-2xl px-4 py-3 text-[15px] space-y-1 ${certNotes.enforced ? "bg-[#F6E3DC] text-[#A0412D]" : "bg-[#FFF8EC] border border-[#E3C9A0] text-[#2C2420]"}`}>

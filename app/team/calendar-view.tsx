@@ -79,7 +79,7 @@ function Chip({ e, big, select, marketLabel }: { e: EventListItem; big: boolean;
   const on = !!select?.selected.has(e.id);
   const unread = e.chat?.unread ?? 0;
   const market = marketLabel(e.market);
-  const title = [e.arrival || "Time TBD", e.title, market, tone.label, e.menu?.text, e.request ? "Change request waiting" : "", e.noMenu ? "No approved menu" : "", e.repeat ?? "", unread ? `${unread} unread messages` : ""].filter(Boolean).join(" · ");
+  const title = [e.arrival || "Time TBD", e.title, market, tone.label, e.menu?.text, e.request ? "Change request waiting" : "", e.noMenu ? "No approved menu" : "", e.noIce ? "Ice not assigned" : "", e.repeat ?? "", unread ? `${unread} unread messages` : ""].filter(Boolean).join(" · ");
   return (
     <div className={`relative rounded-lg border border-l-4 ${tone.chip} ${on ? "ring-2 ring-[#B5845A]" : ""} hover:brightness-[0.97] transition`}>
       {select && <Pick e={e} select={select} />}
@@ -93,6 +93,7 @@ function Chip({ e, big, select, marketLabel }: { e: EventListItem; big: boolean;
         {e.menu && <span className={`block ${big ? "text-sm" : "text-[11px] truncate"} ${MENU_TEXT[e.menu.state]}`}>{e.menu.text}</span>}
         {e.request && <span className={`block font-semibold text-[#9A5B12] ${big ? "text-sm" : "text-[11px] truncate"}`}>Change request</span>}
         {e.noMenu && <span className={`block font-semibold text-[#A0412D] ${big ? "text-sm" : "text-[11px] truncate"}`}>No approved menu</span>}
+        {e.noIce && <span className={`block font-semibold text-[#A0412D] ${big ? "text-sm" : "text-[11px] truncate"}`}>Ice not assigned</span>}
         {e.repeat && <span className={`block font-semibold text-[#5B3F7A] ${big ? "text-sm" : "text-[11px] truncate"}`}>{e.repeat}</span>}
         {big && e.badge && <span className="block text-sm text-[#6B5D52] break-words">{e.badge.text}</span>}
       </Link>

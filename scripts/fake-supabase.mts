@@ -15,6 +15,7 @@ const UNIQUE: Record<string, string[][]> = {
   team_notices: [["key"]],
   time_punches: [["assignment_id", "type"], ["client_id"]],
   event_assignments: [["session_id", "staff_id"]],
+  event_ice_pickup_people: [["session_id", "staff_id"]],
   time_approvals: [["assignment_id"]],
   announcement_recipients: [["announcement_id", "staff_id"]],
   event_message_reads: [["session_id", "staff_id"]],

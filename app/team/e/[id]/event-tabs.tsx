@@ -17,6 +17,8 @@ import type { ClockView } from "@/lib/team/clock-db";
 import ChatThread, { type ChatProps } from "./chat-thread";
 import { useLiveUnread, useOpenChat } from "../../chat-focus";
 import MyPickupCard from "../../menu-pickup-card";
+import IcePickupCard from "../../ice-pickup-card";
+import type { IceView } from "@/lib/team/ice-pickup-db";
 import type { MyPickup } from "@/lib/team/menu-pickup-db";
 import type { StaffMenuSection } from "@/lib/team/approved-menu-db";
 import MenuSection from "./menu-section";
@@ -397,7 +399,9 @@ export default function EventTabs({
   initialTab = "details",
   menuPickup = null,
   menuSection = null,
+  ice = null,
 }: {
+  ice?: IceView | null; // the ice pickup card on the Details tab, for people on the event
   menuSection?: StaffMenuSection | null; // the menu on the Details tab, for staff on the event
   chat: ChatProps;
   menuPickup?: MyPickup | null; // "Pick up the menu", when this person is picking it up
@@ -491,6 +495,7 @@ export default function EventTabs({
       </nav>
 
       <div hidden={tab !== "details"} className="space-y-4">
+        {ice && <IcePickupCard initial={ice} />}
         {menuSection && <MenuSection menu={menuSection} />}
         <Details v={view} />
         {giveUp && !giveUp.handoff && giveUp.canStart && (

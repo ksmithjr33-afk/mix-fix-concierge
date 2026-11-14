@@ -11,6 +11,7 @@ import { staffingByEvent } from "@/lib/team/assignments-db";
 import { staffingTone } from "@/lib/team/assignments";
 import { unreadByEvent } from "@/lib/team/chat-db";
 import { pickupBadges } from "@/lib/team/menu-pickup-db";
+import { iceUnassignedIds } from "@/lib/team/ice-pickup-db";
 import { unavailableBetween } from "@/lib/team/availability-db";
 import { MARKETS, MARKET_INFO } from "@/lib/team/markets";
 import { addDays, unavailableDays } from "@/lib/team/calendar";
@@ -48,7 +49,7 @@ export async function eventsForViewer(staff: StaffMember): Promise<EventListItem
     const rows = withoutHidden((data as (SessionRow & EventRowSource)[]) ?? [], hidden);
     const own = new Map(((mine as { session_id: string; status: string }[]) ?? []).map((a) => [a.session_id, a.status]));
     const ids = rows.map((r) => r.id);
-    const [counts, unread, menus] = await Promise.all([staffingByEvent(rows), unreadByEvent(staff.id, ids), pickupBadges(ids)]);
+    const [counts, unread, menus, noIce] = await Promise.all([staffingByEvent(rows), unreadByEvent(staff.id, ids), pickupBadges(ids), iceUnassignedIds(rows)]);
     return rows.map((r) => {
       const c = counts.get(r.id);
       const menu = menus.get(r.id);
@@ -58,6 +59,7 @@ export async function eventsForViewer(staff: StaffMember): Promise<EventListItem
         chat: { href: `/team/admin/e/${r.id}?tab=chat`, unread: unread.get(r.id) ?? 0 },
         ...(c ? { staffing: staffingTone(c) } : {}),
         ...(menu ? { menu: { state: menu.state as "unassigned" | "assigned" | "picked_up", text: menu.text } } : {}),
+        ...(noIce.has(r.id) ? { noIce: true } : {}),
       };
     });
   }
