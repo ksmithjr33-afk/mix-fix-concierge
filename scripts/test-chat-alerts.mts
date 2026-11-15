@@ -122,7 +122,7 @@ check("Only while the page is visible: stops in the background", alerts.includes
 check("No constant connection", !/EventSource|WebSocket|realtime|channel\(/.test(alerts));
 check("No pop up for the chat on screen", alerts.includes("c.sessionId !== onScreen") && src("app/team/e/[id]/chat-thread.tsx").includes("setOpenChat(sessionId)"));
 check("No pop up for old messages on first load", alerts.includes("if (seen === null)"));
-check("The chat icon is in the header on every page", src("app/team/team-header.tsx").includes("{viewed && <ChatAlerts />}"));
+check("The chat icon is in the header on every page", src("app/team/team-header.tsx").includes("showChat={!!viewed}") && src("app/team/header-nav.tsx").includes("{showChat && <ChatAlerts />}"));
 check("Unread count on the Chat tab, kept live", src("app/team/e/[id]/event-tabs.tsx").includes("useLiveUnread(chat.sessionId") && src("app/team/admin/e/[id]/manager-tabs.tsx").includes("useLiveUnread(sessionId"));
 check("Unread dot on the events list and calendar", src("app/team/events/event-list.tsx").includes("!!e.chat?.unread &&") && src("app/team/calendar-view.tsx").includes("{unread > 0 && <span"));
 check("Mute this chat on the manager view", src("app/team/admin/e/[id]/manager-chat.tsx").includes('"Mute this chat"'));

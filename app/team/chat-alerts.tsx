@@ -141,7 +141,8 @@ export default function ChatAlerts() {
   const total = chats.reduce((n, c) => n + c.unread, 0);
 
   return (
-    <div className="relative" ref={box}>
+    // Static on phones so the list opens under the whole header, full width, not clipped by the Menu button beside it.
+    <div className="md:relative" ref={box}>
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}

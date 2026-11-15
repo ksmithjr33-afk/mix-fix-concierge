@@ -497,7 +497,7 @@ check("No controls on a line at rest: no Edit name, no store dropdown, no placeh
 check("The Delivery checkbox is gone from the sheet", !ui.includes('action: "delivery"') && !ui.includes("deliveryDayOf"));
 check("The store list offers no retired store, except the one a line already has", ui.includes("stores.filter((s) => !s.retired || s.id === current)"));
 check("The page is a plain white Arial page", src("app/globals.css").includes(".doc-page") && src("app/globals.css").includes("font-family: Arial"));
-check("Print hides the app menus", src("app/team/team-header.tsx").includes("print:hidden"));
+check("Print hides the app menus", src("app/team/team-header.tsx").includes("print:hidden") && src("app/team/header-nav.tsx").includes('<div className="relative z-40 print:hidden">'));
 const eventsPage = src("app/team/admin/events/page.tsx");
 check("The admin events list shows order status and has a date range filter", eventsPage.includes("orderStatuses(") && eventsPage.includes('name="from"') && eventsPage.includes('name="to"'));
 

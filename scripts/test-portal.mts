@@ -103,8 +103,9 @@ check("Every page and route sees the viewed role", authSrc.includes("return appl
 const viewRoute = src("app/api/team/view/route.ts");
 check("Only a real admin can turn Bartender view on", viewRoute.includes('form?.get("mode") === "bartender" && staff.role === "admin"') && viewRoute.includes("getSignedInStaff()"));
 const header = src("app/team/team-header.tsx");
-check("The header has the switch, the banner, and the way back", header.includes("Bartender view") && header.includes("Switch back") && header.includes('value="bartender"') && header.includes('value="admin"'));
-check("In Bartender view the admin links are gone", header.includes("const showAdmin = admin && !bartenderView && viewed?.role === \"admin\";") && header.includes("{showAdmin && ("));
+const headerNavSrc = src("app/team/header-nav.tsx");
+check("The header has the switch, the banner, and the way back", headerNavSrc.includes("Bartender view") && header.includes("Switch back") && headerNavSrc.includes('mode === "bartender"') && header.includes('value="admin"') && headerNavSrc.includes("Back to manager view"));
+check("In Bartender view the admin links are gone", header.includes("const showAdmin = admin && !bartenderView && viewed?.role === \"admin\";") && header.includes("headerLinks(showAdmin, { unreadNews: unread })"));
 check("Signing out ends Bartender view too", src("app/api/team/logout/route.ts").includes("res.cookies.delete(VIEW_COOKIE)"));
 for (const p of ["app/api/team/admin/shifts/route.ts", "app/api/team/admin/assign/route.ts", "app/api/team/admin/timesheets/route.ts", "app/api/team/admin/announcements/route.ts"]) {
   check(`Admin route refuses Bartender view: ${p}`, src(p).includes("getCurrentStaff()") && src(p).includes('role !== "admin"'));
@@ -238,7 +239,7 @@ const adminList = await annDb.announcementsFor(admin);
 check("The admin list shows opened by N of M", adminList.find((a) => a.id === austinId)?.opened === 1 && adminList.find((a) => a.id === austinId)?.recipients === 2);
 check("Another admin who got it sees it unread", (await annDb.announcementsFor(admin2)).find((a) => a.title === "Everyone")?.unread === true);
 check("Bartender view (an admin as a bartender) shows only their own", (await annDb.announcementsFor({ ...admin2, role: "bartender" })).map((a) => a.title).join() === "Everyone");
-check("The header shows the unread count", header.includes("unreadAnnouncements(viewed.id)") && header.includes('href="/team/announcements"'));
+check("The header shows the unread count", header.includes("unreadAnnouncements(viewed.id)") && src("lib/team/header-nav.ts").includes('href: "/team/announcements"'));
 check("Only admins see the composer", src("app/team/announcements/page.tsx").includes("{admin && <Compose"));
 check("The composer has Send now, markets, and bartenders only", ["Send now", "Some markets", "Bartenders only", "bartendersOnly, sendNow"].every((x) => src("app/team/announcements/compose.tsx").includes(x)));
 
@@ -345,6 +346,41 @@ check("Migration: RLS on every new table", ["announcements", "announcement_recip
 check("Migration: chat goes with the event", mig.includes("session_id text not null references public.sessions(id) on delete cascade"));
 
 console.log = out;
+// ----- Header on phones and wider screens -----
+{
+  const nav = await import("../lib/team/header-nav.ts");
+  const hn = src("app/team/header-nav.tsx");
+  const th = src("app/team/team-header.tsx");
+  const adminLinks = nav.headerLinks(true, { unreadNews: 0 });
+  const barLinks = nav.headerLinks(false, { unreadNews: 0 });
+  check("Admins get every link, in order: Staffing, Staff, Clients, Time, News, Me", adminLinks.map((l) => l.label).join() === "Staffing,Staff,Clients,Time,News,Me", adminLinks.map((l) => l.label).join());
+  check("The admin links keep their routes", adminLinks.map((l) => l.href).join() === "/team/admin/events,/team/admin/staff,/team/admin/clients,/team/admin/timesheets,/team/announcements,/team/me");
+  check("Bartenders (and Bartender view) get Events, News, Me, and no admin links", barLinks.map((l) => l.label).join() === "Events,News,Me" && !barLinks.some((l) => l.href.startsWith("/team/admin")));
+  check("Me is in the name dropdown on wider screens, the rest inline", adminLinks.filter((l) => !l.inline).map((l) => l.label).join() === "Me" && barLinks.filter((l) => !l.inline).map((l) => l.label).join() === "Me");
+  check("The current page is picked from the path", nav.currentHref(adminLinks, "/team/admin/e/abc") === "/team/admin/events" && nav.currentHref(adminLinks, "/team/admin/staff/b1") === "/team/admin/staff" && nav.currentHref(adminLinks, "/team/pay") === "/team/me" && nav.currentHref(barLinks, "/team/e/s1") === "/team/events" && nav.currentHref(adminLinks, "/team/welcome") === null);
+  check("The current page is highlighted in the panel and inline", (hn.match(/aria-current=\{current === l\.href \? "page" : undefined\}/g) ?? []).length === 2 && hn.includes("border-l-4 border-[#B5845A]"));
+  const withNews = nav.headerLinks(true, { unreadNews: 3 });
+  check("Badges: unread News shows its count on its row", withNews.find((l) => l.label === "News")!.badge === 3 && withNews.find((l) => l.label === "News")!.badgeLabel === "3 unread" && nav.badgeText(3) === "3" && nav.badgeText(120) === "99+");
+  check("A dot on Menu when any row has a badge, none otherwise", nav.menuHasBadge(withNews) && !nav.menuHasBadge(adminLinks) && hn.includes("{dot && (") && hn.includes("const dot = menuHasBadge(links);"));
+  check("Each panel row puts its badge on the right", /<span>\{l\.label\}<\/span>\s*<Badge n=\{l\.badge\}/.test(hn) && hn.includes("justify-between"));
+  // A 390px wide phone is under md (768px): what shows there and what is hidden.
+  const menuBtn = hn.slice(hn.indexOf("ref={menuButton}"), hn.indexOf("Menu\n", hn.indexOf("ref={menuButton}")));
+  check("At 390px the row is the logo, chat, the alert slot, and Menu: inline links, the back link and the name dropdown are md and up only", hn.includes('className="hidden md:flex shrink-0 items-center') && hn.includes('className="hidden md:block min-w-0 truncate') && hn.includes('<div className="relative hidden md:block">') && menuBtn.includes('className="md:hidden relative inline-flex min-h-[44px]'));
+  const panelSrc = hn.slice(hn.indexOf("id={panelId}"), hn.indexOf("{/* 768px and up: the name dropdown. */}"));
+  check("At 390px Bartender view (or Back to manager view) and Sign out are reachable in the Menu panel", panelSrc.includes("<SwitchForm mode={canSwitch ? \"bartender\" : \"admin\"}") && panelSrc.includes("<SignOutForm") && panelSrc.includes("{(canSwitch || canSwitchBack) && ("));
+  check("Bartender view is offered to a real admin, Back to manager view in Bartender view", th.includes('const canSwitch = real?.role === "admin" && !bartenderView;') && th.includes('const canSwitchBack = real?.role === "admin" && bartenderView;'));
+  check("Panel rows are at least 48px tall with 17px text; Menu is at least 44px tall with the word Menu", hn.includes('const row = "flex min-h-[48px] items-center justify-between gap-3 px-4 text-[17px]";') && menuBtn.includes("min-h-[44px]") && menuBtn.includes("<Burger />"));
+  check("The panel closes on a link tap", (panelSrc.match(/<Link[^>]*?onClick=\{\(\) => closeMenu\(false\)\}/gs) ?? []).length === (panelSrc.match(/<Link/g) ?? []).length && (panelSrc.match(/<Link/g) ?? []).length >= 1);
+  check("and on a tap outside, Escape, navigation, and widening past 768px", hn.includes('e.key === "Escape" && closeMenu()') && hn.includes('document.addEventListener("pointerdown", away)') && hn.includes("onClick={() => closeMenu()}") && hn.includes("const menuOpen = menuAt !== null && menuAt === pathname;") && hn.includes('matchMedia("(min-width: 768px)")'));
+  check("The panel overlays the page under the header and locks the scroll", panelSrc.includes("absolute inset-x-0 top-full") && hn.includes('body.style.overflow = "hidden"') && hn.includes("const unlock = lockScroll();"));
+  check("Accessibility: aria-expanded and aria-controls on Menu, the panel follows it in Tab order, focus goes in and comes back", menuBtn.includes("aria-expanded={menuOpen}") && menuBtn.includes("aria-controls={panelId}") && hn.indexOf("ref={menuButton}") < hn.indexOf("id={panelId}") && hn.includes('panel.current?.querySelector<HTMLElement>("a, button")?.focus();') && hn.includes("if (refocus) menuButton.current?.focus();"));
+  check("Wider screens: Me, the view switch and Sign out in a dropdown under the first name", hn.includes("{firstName || \"Account\"}") && hn.slice(hn.indexOf("id={accountId}")).includes("<SignOutForm") && hn.slice(hn.indexOf("id={accountId}")).includes("<SwitchForm") && hn.slice(hn.indexOf("id={accountId}")).includes("href={me.href}"));
+  check("The chat icon renders once, so its pop up and 20 second check run once", (hn.match(/<ChatAlerts \/>/g) ?? []).length === 1 && !th.includes("<ChatAlerts") && src("app/team/chat-alerts.tsx").includes("const POLL_MS = 20_000;"));
+  check("An open slot beside the chat icon for a second alert", hn.includes('data-header-slot="alert"') && hn.includes("{alert}") && hn.indexOf("<ChatAlerts />") < hn.indexOf('data-header-slot="alert"') && hn.indexOf('data-header-slot="alert"') < hn.indexOf("ref={menuButton}"));
+  check("The view switch still posts to /api/team/view, sign out to /api/team/logout", hn.includes('action="/api/team/view" method="post"') && hn.includes('action="/api/team/logout" method="post"'));
+  check("The header is built in one place", th.includes("<HeaderNav") && !th.includes("<header"));
+}
+
 if (failed > 0) {
   console.error(`\n${failed} of ${total} portal checks failed.`);
   process.exit(1);

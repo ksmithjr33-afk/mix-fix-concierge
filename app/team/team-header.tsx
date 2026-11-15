@@ -1,7 +1,8 @@
-import Link from "next/link";
 import { getCurrentStaff, getSignedInStaff } from "@/lib/team/auth";
 import { unreadAnnouncements } from "@/lib/team/announcements-db";
-import ChatAlerts from "./chat-alerts";
+import { firstName } from "@/lib/team/event-view";
+import { headerLinks } from "@/lib/team/header-nav";
+import HeaderNav from "./header-nav";
 
 /**
  * Header shared by the team pages: logo, admin links for admins, the
@@ -9,6 +10,10 @@ import ChatAlerts from "./chat-alerts";
  * admins, and a sign out button when signed in. In Bartender view the admin
  * links are gone and a banner offers the way back. The chat icon shows
  * unread team chat messages on every page, with a pop up for new ones.
+ *
+ * This part reads who is signed in and the counts; the layout (one row with a
+ * Menu panel on phones, inline links and a name dropdown from 768px) is in
+ * ./header-nav.tsx and the links themselves in lib/team/header-nav.ts.
  */
 export default async function TeamHeader({
   signedIn,
@@ -23,7 +28,10 @@ export default async function TeamHeader({
   const bartenderView = !!viewed?.bartenderView;
   const showAdmin = admin && !bartenderView && viewed?.role === "admin";
   const canSwitch = real?.role === "admin" && !bartenderView;
+  const canSwitchBack = real?.role === "admin" && bartenderView;
   const unread = viewed ? await unreadAnnouncements(viewed.id).catch(() => 0) : 0;
+  const links = headerLinks(showAdmin, { unreadNews: unread });
+  const name = real?.name ?? viewed?.name ?? "";
   return (
     <>
       {bartenderView && (
@@ -39,64 +47,16 @@ export default async function TeamHeader({
           </form>
         </div>
       )}
-      <header className="flex items-center justify-between gap-3 px-3 sm:px-4 py-2 sm:py-3 bg-[#F5F0EB] border-b border-[#DDD5CC] print:hidden">
-        <div className="flex items-center gap-3 min-w-0">
-          <Link href="/team/events" className="shrink-0">
-            <img src="/logo.png" alt="The Mix Fix" className="h-8 sm:h-10" />
-          </Link>
-          {back && (
-            <Link href={back.href} className="text-sm text-[#6B5D52] hover:text-[#B5845A] truncate">
-              {back.label}
-            </Link>
-          )}
-        </div>
-        {signedIn && (
-          <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1 sm:gap-x-4 shrink-0">
-            {showAdmin && (
-              <>
-                <Link href="/team/admin/events" className="text-xs sm:text-sm font-medium text-[#9A7049] hover:text-[#B5845A]">
-                  Staffing
-                </Link>
-                <Link href="/team/admin/staff" className="text-xs sm:text-sm font-medium text-[#9A7049] hover:text-[#B5845A]">
-                  Staff
-                </Link>
-                <Link href="/team/admin/clients" className="text-xs sm:text-sm font-medium text-[#9A7049] hover:text-[#B5845A]">
-                  Clients
-                </Link>
-                <Link href="/team/admin/timesheets" className="text-xs sm:text-sm font-medium text-[#9A7049] hover:text-[#B5845A]">
-                  Time
-                </Link>
-              </>
-            )}
-            {viewed && <ChatAlerts />}
-            <Link href="/team/me" className="text-xs sm:text-sm font-medium text-[#9A7049] hover:text-[#B5845A]">
-              Me
-            </Link>
-            <Link href="/team/announcements" className="text-xs sm:text-sm font-medium text-[#9A7049] hover:text-[#B5845A]">
-              <span className="hidden sm:inline">Announcements</span>
-              <span className="sm:hidden">News</span>
-              {unread > 0 && (
-                <span className="ml-1 inline-block min-w-[1.25rem] rounded-full bg-[#A0412D] px-1.5 text-center text-[11px] font-bold text-white" aria-label={`${unread} unread`}>
-                  {unread}
-                </span>
-              )}
-            </Link>
-            {canSwitch && (
-              <form action="/api/team/view" method="post">
-                <input type="hidden" name="mode" value="bartender" />
-                <button type="submit" className="text-xs sm:text-sm text-[#6B5D52] hover:text-[#B5845A] underline">
-                  Bartender view
-                </button>
-              </form>
-            )}
-            <form action="/api/team/logout" method="post">
-              <button type="submit" className="text-xs text-[#6B5D52] hover:text-[#B5845A]">
-                Sign out
-              </button>
-            </form>
-          </div>
-        )}
-      </header>
+      <HeaderNav
+        signedIn={signedIn}
+        firstName={firstName(name) || name}
+        links={links}
+        back={back}
+        canSwitch={canSwitch}
+        canSwitchBack={canSwitchBack}
+        showChat={!!viewed}
+        // alert={<RunningLowAlert />} goes here next: the open slot beside the chat icon.
+      />
     </>
   );
 }

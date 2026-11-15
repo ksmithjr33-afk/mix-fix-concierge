@@ -140,7 +140,7 @@ check("Staffing rows and calendar blocks show the available count", staffing.inc
 check("The assign dropdown tags Unavailable and confirms", src("app/team/admin/e/[id]/assign-panel.tsx").includes('{s.unavailable ? " (Unavailable)" : ""}') && src("app/team/admin/e/[id]/assign-panel.tsx").includes("Assign anyway"));
 check("Request and handoff approvals tag Unavailable and confirm", src("app/team/admin/e/[id]/shift-panel.tsx").includes(">Unavailable</span>") && src("app/team/admin/e/[id]/shift-panel.tsx").includes("Approve anyway"));
 check("The staff page shows each person's unavailable days, with a detail page", src("app/team/admin/staff/page.tsx").includes("Unavailable: ") && src("app/team/admin/staff/[id]/page.tsx").includes('aria-label="Availability"'));
-check("Bartenders reach Availability from Me in the header", src("app/team/team-header.tsx").includes('href="/team/me"') && src("app/team/me/page.tsx").includes('"/team/availability"'));
+check("Bartenders reach Availability from Me in the header", src("lib/team/header-nav.ts").includes('href: "/team/me"') && src("app/team/me/page.tsx").includes('"/team/availability"'));
 const route = src("app/api/team/availability/route.ts");
 check("The availability route needs a sign in and only touches your own rows", route.includes("getCurrentStaff()") && route.includes("status: 401") && src("lib/team/availability-db.ts").includes("row.staff_id !== staff.id"));
 check("The date picker starts at today", src("app/team/availability/availability-form.tsx").includes("min={today}"));
