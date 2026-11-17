@@ -18,6 +18,7 @@ import { allSupplies, bartenderLists, supplyState, type ListDetail, type Supplie
 import { staffSupplies, supplyUpdates } from "@/lib/team/supplies-db";
 import type { SheetRecipe } from "@/lib/order-sheet";
 import { withDrinkEdits } from "@/lib/team/event-view";
+import { isAdminRole, roleSuffix } from "@/lib/team/roles";
 
 /** The staff member's assignment to an event. Null when there is none, or before the assignments table exists. */
 export async function getAssignment(sessionId: string, staffId: string): Promise<AssignmentLike | null> {
@@ -35,15 +36,15 @@ export async function getAssignment(sessionId: string, staffId: string): Promise
 async function teammates(sessionId: string, staffId: string): Promise<string[]> {
   const { data, error } = await supabase
     .from("event_assignments")
-    .select("status, staff:staff_id (id, name)")
+    .select("status, staff:staff_id (id, name, role)")
     .eq("session_id", sessionId)
     .neq("status", "declined");
   if (error || !data) return [];
   return data
-    .map((r) => (Array.isArray(r.staff) ? r.staff[0] : r.staff) as { id: string; name: string } | null)
-    .filter((s): s is { id: string; name: string } => !!s && s.id !== staffId)
-    .map((s) => firstName(s.name))
-    .filter(Boolean);
+    .map((r) => (Array.isArray(r.staff) ? r.staff[0] : r.staff) as { id: string; name: string; role?: string } | null)
+    .filter((s): s is { id: string; name: string; role?: string } => !!s && s.id !== staffId && !!firstName(s.name))
+    // "Sam (bar back)": the role after everyone but bartenders.
+    .map((s) => `${firstName(s.name)}${roleSuffix(s.role)}`);
 }
 
 export async function getSubmittedSession(sessionId: string): Promise<SessionRow | null> {
@@ -73,11 +74,11 @@ export type EventAccess =
 export async function openEvent(sessionId: string, staff: StaffMember): Promise<EventAccess> {
   const session = await getSubmittedSession(sessionId);
   if (!session) return { ok: false, reason: "not_found" };
-  const assignment = staff.role === "admin" ? null : await getAssignment(sessionId, staff.id);
+  const assignment = isAdminRole(staff.role) ? null : await getAssignment(sessionId, staff.id);
   return canOpenEvent(staff, assignment) ? { ok: true, session } : { ok: false, reason: "not_assigned" };
 }
 
-async function checkRows(staffId: string, sessionId: string, list: ListName): Promise<(CheckRow & { updated_at?: string | null })[]> {
+export async function checkRows(staffId: string, sessionId: string, list: ListName): Promise<(CheckRow & { updated_at?: string | null })[]> {
   const { data, error } = await supabase
     .from("staff_checks")
     .select("item_key, checked, quantity, updated_at")
@@ -92,14 +93,15 @@ export interface EventPageData {
   view: StaffEventView;
   checklist: ResolvedGroup[];
   checklistState: Record<string, CheckState>;
-  confirmedAt: string | null;
+  confirmedAt: string | null; // step 1, Tools: "I have everything"
+  suppliesConfirmedAt: string | null; // step 2, Supplies: "I have gone through the supplies list"
   shopping: Supplies; // read from the admin Shopping list
   shoppingState: Record<string, CheckState>;
   supplyUpdates: string[]; // what changed on the list since this person last looked
   recipes: SheetRecipe[];
 }
 
-function checklistState(pkg: unknown, rows: CheckRow[]): Record<string, CheckState> {
+export function checklistState(pkg: unknown, rows: CheckRow[]): Record<string, CheckState> {
   return mergeChecks(checklistKeys(pkg).map((key) => ({ key, quantity: "" })), rows, { trackChanges: false });
 }
 
@@ -114,6 +116,13 @@ export async function getConfirmation(staffId: string, sessionId: string): Promi
   return (data?.confirmed_at as string | undefined) ?? null;
 }
 
+/** "I have gone through the supplies list" (step 2), or null. Its own table: unchecking Tools never clears it. */
+export async function suppliesConfirmation(staffId: string, sessionId: string): Promise<string | null> {
+  const { data, error } = await supabase.from("staff_supplies_confirmations").select("confirmed_at").eq("staff_id", staffId).eq("session_id", sessionId).maybeSingle();
+  if (error) return null; // before the table exists
+  return (data?.confirmed_at as string | undefined) ?? null;
+}
+
 /**
  * Everything the event page renders. The supplies list is the admin Shopping
  * list for the event, so renamed, resized, added and removed lines all show,
@@ -121,7 +130,7 @@ export async function getConfirmation(staffId: string, sessionId: string): Promi
  */
 export async function eventPageData(session: SessionRow, staff: StaffMember): Promise<EventPageData> {
   const suppliesP = staffSupplies(session);
-  const [mates, update, supplies, checklistRows, shopRows, confirmedAt, updates] = await Promise.all([
+  const [mates, update, supplies, checklistRows, shopRows, confirmedAt, updates, suppliesConfirmedAt] = await Promise.all([
     teammates(session.id, staff.id),
     latestUpdate(session.id),
     suppliesP,
@@ -129,6 +138,7 @@ export async function eventPageData(session: SessionRow, staff: StaffMember): Pr
     checkRows(staff.id, session.id, "shopping"),
     getConfirmation(staff.id, session.id),
     suppliesP.then((s) => supplyUpdates(staff.id, session.id, s.list)),
+    suppliesConfirmation(staff.id, session.id),
   ]);
   const base = buildStaffEventView(session, { teammates: mates, latestUpdate: update });
   const view = { ...base, drinks: withDrinkEdits(base.drinks, supplies.recipes) };
@@ -141,6 +151,7 @@ export async function eventPageData(session: SessionRow, staff: StaffMember): Pr
     checklist,
     checklistState: clState,
     confirmedAt: activeConfirmation(confirmedAt, clState),
+    suppliesConfirmedAt,
     shopping: supplies.list,
     shoppingState: supplyState(supplies.list, shopRows),
     supplyUpdates: updates,
@@ -234,11 +245,11 @@ export async function saveCheck(
 }
 
 /**
- * Admins who get alert texts (declines, missing items, bar ready): active
- * admins with alerts on. Alerts count as on until the column exists.
+ * Admins and managers who get alert texts (declines, missing items, bar
+ * ready): active, with alerts on. Alerts count as on until the column exists.
  */
 export async function alertAdmins(): Promise<StaffMember[]> {
-  const { data, error } = await supabase.from("staff").select("*").eq("role", "admin").eq("active", true);
+  const { data, error } = await supabase.from("staff").select("*").in("role", ["admin", "manager"]).eq("active", true);
   if (error) {
     console.error("admin lookup failed:", error.message);
     return [];

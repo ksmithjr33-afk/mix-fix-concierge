@@ -124,10 +124,10 @@ db.sessions.push(
 const h2 = await chdb.historyFor({ id: "d-new" }, ADMIN, today);
 check("Statuses: hidden and upcoming", h2!.rows.find((r) => r.id === "d-past")!.status === "hidden" && h2!.rows.find((r) => r.id === "d-up")!.status === "upcoming");
 const up = h2!.rows.find((r) => r.id === "d-up")!;
-check("Each row has the event name, date, package, guests and booked total", up.title === "New Year" && up.day === addDays(today, 50) && up.pkg === "Full Bar" && up.guests === "25" && up.total === 2100);
+check("Each row has the client name, the event name below it, date, package, guests and booked total", up.title === "Dulari Gandhi" && up.subtitle === "New Year" && up.day === addDays(today, 50) && up.pkg === "Full Bar" && up.guests === "25" && up.total === 2100, JSON.stringify([up.title, up.subtitle, byId("d-old").title, byId("d-old").subtitle]));
 check("Each row opens the manager view and has both client links", up.managerHref === "/team/admin/e/d-up" && up.conciergeUrl.endsWith("/s?id=d-up") && up.eventUrl.endsWith("/s?id=d-up#event-details"));
 check("An event with details pending has no manager view to open, but still has its links", byId("d-old").managerHref === null && byId("d-old").conciergeUrl.endsWith("/s?id=d-old"));
-check("A booking with no details yet shows the event name it was booked with", byId("d-old").title === "Social Gathering");
+check("A booking with no details yet shows the event name it was booked with", byId("d-old").subtitle === "Social Gathering");
 
 // ---- Repeat tag and count ----
 reset();

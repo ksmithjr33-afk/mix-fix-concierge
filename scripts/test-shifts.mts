@@ -667,7 +667,7 @@ const src = (p: string) => readFileSync(new URL(`../${p}`, import.meta.url), "ut
 const shiftsSrc = src("lib/team/shifts-db.ts");
 check("Every shift text goes through sendStaffText", !/fetch\(/.test(shiftsSrc) && shiftsSrc.includes("sendStaffText("));
 check("Shift pages only show the allowlisted summary", src("app/team/shifts/shift-card.tsx").includes("ShiftSummary") && !/event_data|client_name|event_address/.test(src("app/team/shifts/shift-card.tsx")));
-check("Admin shift and handoff routes are admin only", ["app/api/team/admin/shifts/route.ts", "app/api/team/admin/handoff/route.ts", "app/api/team/admin/market/route.ts"].every((p) => src(p).includes('role !== "admin"') && src(p).includes("status: 403")));
+check("Admin shift and handoff routes are admin only", ["app/api/team/admin/shifts/route.ts", "app/api/team/admin/handoff/route.ts", "app/api/team/admin/market/route.ts"].every((p) => src(p).includes('isAdminRole(') && src(p).includes("status: 403")));
 check("Bartender shift routes need a sign in", ["app/api/team/shifts/route.ts", "app/api/team/handoff/route.ts"].every((p) => src(p).includes("getCurrentStaff()") && src(p).includes("status: 401")));
 check("The cron sends held shift texts", src("app/api/cron/team/route.ts").includes("deliverShiftNotices(now)"));
 check("Only new shift texts are queued: one place writes shift_notices rows", (shiftsSrc.match(/from\("shift_notices"\)\.upsert/g) ?? []).length === 1);

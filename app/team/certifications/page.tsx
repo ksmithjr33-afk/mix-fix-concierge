@@ -6,6 +6,7 @@ import { marketLabel, marketTz } from "@/lib/team/markets";
 import { longDate, todayIn } from "@/lib/team/time";
 import TeamHeader from "../team-header";
 import CertUpload from "./cert-upload";
+import { isAdminRole } from "@/lib/team/roles";
 
 export const dynamic = "force-dynamic";
 
@@ -27,7 +28,7 @@ export default async function CertificationsPage() {
   const needed = types.map((t) => t.standing.certType);
   return (
     <>
-      <TeamHeader signedIn admin={staff.role === "admin"} back={{ href: "/team/me", label: "Me" }} />
+      <TeamHeader signedIn admin={isAdminRole(staff.role)} back={{ href: "/team/me", label: "Me" }} />
       <main className="max-w-2xl mx-auto px-4 py-6 space-y-4">
         <div className="px-1">
           <h1 className="font-heading text-2xl font-bold text-[#2C2420]">My certifications</h1>

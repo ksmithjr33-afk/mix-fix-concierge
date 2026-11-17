@@ -9,7 +9,7 @@
 import { supabase } from "@/lib/supabase";
 import type { SessionRow } from "@/lib/event-updates";
 import { firstName, type StaffMember } from "@/lib/team/event-view";
-import { eventTitle } from "@/lib/team/event-list";
+import { eventTitle, adminEventTitle } from "@/lib/team/event-list";
 import { eventData } from "@/lib/team/markets";
 import { eventSchedule, shortDate, todayIn } from "@/lib/team/time";
 import { sendStaffText } from "@/lib/team/sms";
@@ -34,6 +34,7 @@ import {
   type PickupRow,
   type PickupState,
 } from "@/lib/team/menu-pickup";
+import { isAdminRole } from "@/lib/team/roles";
 
 type Result<T = object> = ({ ok: true } & T) | { ok: false; error: string; status: number };
 
@@ -161,7 +162,7 @@ async function notifyAssignee(session: SessionRow, row: PickupRow, now: Date): P
 
 /** Admin: save the store, note, order number, person, and "No printed menu". Admins only: the caller checks. */
 export async function savePickup(sessionId: string, admin: StaffMember, raw: Record<string, unknown>, now: Date = new Date()): Promise<Result<{ view: PickupAdminView }>> {
-  if (admin.role !== "admin") return { ok: false, error: "Admins only.", status: 403 };
+  if (!isAdminRole(admin.role)) return { ok: false, error: "Admins only.", status: 403 };
   const session = await getSubmittedSession(sessionId);
   if (!session) return { ok: false, error: "We could not find that event.", status: 404 };
   const { data: active } = await supabase.from("staff").select("id").eq("active", true);
@@ -225,7 +226,7 @@ export async function markPickedUp(sessionId: string, staff: StaffMember, now: D
 
 /** Admin: undo "Picked up". The undo is recorded on the row and in the log. */
 export async function undoPickedUp(sessionId: string, admin: StaffMember, now: Date = new Date()): Promise<Result<{ view: PickupAdminView }>> {
-  if (admin.role !== "admin") return { ok: false, error: "Only an admin can undo this.", status: 403 };
+  if (!isAdminRole(admin.role)) return { ok: false, error: "Only an admin can undo this.", status: 403 };
   const session = await getSubmittedSession(sessionId);
   if (!session) return { ok: false, error: "We could not find that event.", status: 404 };
   const row = await getPickup(sessionId);
@@ -258,8 +259,8 @@ export async function myPickups(staff: StaffMember, now: Date = new Date()): Pro
     const ed = eventData(session);
     const s = eventSchedule(ed);
     if (!s.day || s.day < todayIn(s.tz, now)) continue;
-    const a = staff.role === "admin" ? null : await getAssignment(r.session_id, staff.id);
-    const onEvent = staff.role === "admin" || (!!a && a.status !== "declined");
+    const a = isAdminRole(staff.role) ? null : await getAssignment(r.session_id, staff.id);
+    const onEvent = isAdminRole(staff.role) || (!!a && a.status !== "declined");
     const f = textFields(session, r);
     out.push({
       sessionId: r.session_id,
@@ -268,7 +269,7 @@ export async function myPickups(staff: StaffMember, now: Date = new Date()): Pro
       store: f.store,
       note: f.note,
       order: f.order,
-      eventHref: onEvent ? (staff.role === "admin" ? `/team/admin/e/${encodeURIComponent(r.session_id)}` : `/team/e/${encodeURIComponent(r.session_id)}`) : null,
+      eventHref: onEvent ? (isAdminRole(staff.role) ? `/team/admin/e/${encodeURIComponent(r.session_id)}` : `/team/e/${encodeURIComponent(r.session_id)}`) : null,
       printFileHref: withFile.has(r.session_id) ? `/api/team/menu-file?sessionId=${encodeURIComponent(r.session_id)}&download=1` : null,
       day: s.day,
     });
@@ -327,7 +328,7 @@ export async function sendMenuPickupNotices(now: Date = new Date()): Promise<num
       if (await sendStaffText(p.phone, p.name, morningText({ firstName: firstName(p.name), title: f.title, store: f.store, note: f.note, order: f.order, link: f.link }))) sent++;
     } else if (unassignedAlertDue(row, ed, now)) {
       if (!(await claimNotice(`menu_pickup_unassigned:${session.id}:${eventSchedule(ed).day}`, "menu_pickup_unassigned"))) continue;
-      const message = unassignedText({ title: eventTitle(ed), date: shortDate(eventSchedule(ed).day), link: `${siteOrigin()}/team/admin/e/${encodeURIComponent(session.id)}` });
+      const message = unassignedText({ title: adminEventTitle(ed), date: shortDate(eventSchedule(ed).day), link: `${siteOrigin()}/team/admin/e/${encodeURIComponent(session.id)}` });
       const admins = await alertAdmins();
       const results = await Promise.all(admins.map((a) => sendStaffText(a.phone, a.name, message)));
       sent += results.filter(Boolean).length;

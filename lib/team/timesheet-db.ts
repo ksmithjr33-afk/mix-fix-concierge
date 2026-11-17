@@ -161,7 +161,7 @@ async function buildRows(filter: { from: string; to: string } | { assignmentIds:
         staffPhone: person?.phone ?? "",
         sessionId: a.session_id,
         timeZone: sched.tz,
-        eventTitle: eventTitle(ed),
+        eventTitle: eventTitle(ed), // first name only: these rows go out in the payroll CSV
         eventDay: sched.day,
         scheduledStart: sched.startMin === null ? "" : formatClock(sched.startMin),
         scheduledEnd: sched.endMin === null ? "" : formatClock(sched.endMin),
@@ -192,7 +192,7 @@ function refusal(message: string, kind: "edit" | "approve" | "reopen"): string {
   if (own === "approve") return OWN_APPROVE_MESSAGE;
   if (own === "reopen") return OWN_REOPEN_MESSAGE;
   if (/is not approved/i.test(message)) return "This row is not approved.";
-  if (/only an admin can reopen/i.test(message)) return "Admins only.";
+  if (/only an admin (or manager )?can reopen/i.test(message)) return "Admins only.";
   if (/time_reopens_reason_check/.test(message)) return "Give a reason for reopening.";
   if (/approved and locked/i.test(message)) return LOCKED_MESSAGE;
   if (/duplicate key|unique/i.test(message)) return kind === "approve" ? "This row is already approved." : "That punch already exists. Correct it instead.";

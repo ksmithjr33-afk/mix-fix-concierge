@@ -30,6 +30,7 @@ import {
   type MediaKind,
   type MediaScope,
 } from "@/lib/team/media";
+import { isAdminRole } from "@/lib/team/roles";
 
 export const MEDIA_BUCKET = "team-media";
 
@@ -53,7 +54,7 @@ async function row(id: string): Promise<AttachmentRow | null> {
 /** Whether this person may attach to (and so upload for) this chat or announcement. */
 async function mayAttach(staff: StaffMember, scope: MediaScope, sessionId: string | null): Promise<Result> {
   if (!staff.active) return { ok: false, error: "Sign in again.", status: 401 };
-  if (scope === "announcement") return staff.role === "admin" ? { ok: true } : { ok: false, error: "Admins only.", status: 403 };
+  if (scope === "announcement") return isAdminRole(staff.role) ? { ok: true } : { ok: false, error: "Admins only.", status: 403 };
   if (scope !== "chat" || !sessionId) return { ok: false, error: "Bad request", status: 400 };
   const access = await threadAccess(sessionId, staff);
   if (!access.ok) return { ok: false, error: access.reason === "not_found" ? "We could not find that event." : "You are not on this event.", status: access.reason === "not_found" ? 404 : 403 };
@@ -210,7 +211,7 @@ export async function canViewAttachment(viewer: StaffMember, r: AttachmentRow): 
   if (!viewer.active || r.status === "removed") return false;
   if (r.status === "pending") return r.uploaded_by === viewer.id;
   if (r.scope === "chat") return !!r.session_id && (await threadAccess(r.session_id, viewer)).ok;
-  if (viewer.role === "admin") return true;
+  if (isAdminRole(viewer.role)) return true;
   if (!r.announcement_id) return false;
   const { data } = await supabase.from("announcement_recipients").select("id").eq("announcement_id", r.announcement_id).eq("staff_id", viewer.id).maybeSingle();
   return !!data;
@@ -241,7 +242,7 @@ export async function attachmentKind(id: string | null | undefined): Promise<Med
 
 /** Admins: remove any attachment. The file is deleted; the message stays and says the picture was removed. */
 export async function removeAttachment(admin: StaffMember, id: string, now: Date = new Date()): Promise<Result> {
-  if (admin.role !== "admin" || !admin.active) return { ok: false, error: "Only an admin can remove a picture.", status: 403 };
+  if (!isAdminRole(admin.role) || !admin.active) return { ok: false, error: "Only an admin can remove a picture.", status: 403 };
   const r = await row(id);
   if (!r) return { ok: false, error: "We could not find that picture.", status: 404 };
   if (r.status === "removed") return { ok: true };

@@ -19,6 +19,7 @@ import { staffMarkets } from "@/lib/team/markets-db";
 import { MARKETS, MARKET_INFO } from "@/lib/team/markets";
 import CalendarView, { ListCalendarToggle } from "../calendar-view";
 import MyPickupCard from "../menu-pickup-card";
+import { isAdminRole } from "@/lib/team/roles";
 
 export const dynamic = "force-dynamic";
 
@@ -31,7 +32,7 @@ async function TeamEventsPage({
   const tab = params.tab === "open" ? "open" : "mine";
   const askedPast = tab === "mine" && params.past === "1";
   const staff = await requireStaff(tab === "open" ? "/team/events?tab=open" : askedPast ? "/team/events?past=1" : "/team/events");
-  const admin = staff.role === "admin";
+  const admin = isAdminRole(staff.role);
   const today = chicagoToday();
   const past = askedPast;
   // Everything below needs only who is signed in, so it is read together.

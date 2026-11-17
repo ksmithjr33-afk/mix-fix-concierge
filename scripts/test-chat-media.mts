@@ -112,19 +112,19 @@ check("A GIF alone can be sent", sent.ok && sent.message.attachment?.kind === "g
 check("It is attached to the message", db.team_attachments.find((a) => a.id === gif.id)!.status === "attached" && db.team_attachments.find((a) => a.id === gif.id)!.message_id === (sent.ok ? sent.message.id : ""));
 check("Only one picture per message: the same upload cannot be sent twice", !(await chatDb.postMessage("s1", taylor, "again", now, gif.id)).ok);
 const toJordan = textsTo(jordan);
-check("The text says sent a GIF and links to the app", toJordan.length === 1 && toJordan[0].message === "Taylor on Justin's 30th: sent a GIF https://plan.test/team/e/s1?tab=chat");
+check("The text says sent a GIF and links to the app", toJordan.length === 1 && toJordan[0].message === "Taylor on Justin · Birthday: sent a GIF https://plan.test/team/e/s1?tab=chat");
 check("The file is never in the text", !texts.some((t) => /signed\.test|team-media|upload\.test|\.gif\b/.test(t.message)));
 const photo = await pick(taylor, "chat", "image/jpeg", 1 * MB);
 const later = new Date(now.getTime() + 10 * 60_000);
 const sentPhoto = await chatDb.postMessage("s1", taylor, "Bar is set. Call Justin at 972-555-0199 or justin@example.com", later, photo.id);
 check("Client contact details are still stripped from a message with a picture", sentPhoto.ok && noClientData(sentPhoto.message.body) && sentPhoto.message.body.includes("[client contact removed]"));
-check("A photo's text says sent a photo, with the words", textsTo(jordan).length === 2 && textsTo(jordan)[1].message.startsWith("Taylor on Justin's 30th: sent a photo: Bar is set.") && noClientData(textsTo(jordan)[1].message));
+check("A photo's text says sent a photo, with the words", textsTo(jordan).length === 2 && textsTo(jordan)[1].message.startsWith("Taylor on Justin · Birthday: sent a photo: Bar is set.") && noClientData(textsTo(jordan)[1].message));
 // A held text (sent within 5 minutes of the last) says the same when it goes out.
 const gif2 = await pick(taylor, "chat", "image/gif", 1000);
 await chatDb.postMessage("s1", taylor, "", new Date(later.getTime() + 60_000), gif2.id);
 check("Inside 5 minutes the text is held", textsTo(jordan).length === 2);
 await chatDb.deliverChatNotices(new Date(later.getTime() + 6 * 60_000));
-check("The held text says sent a GIF", textsTo(jordan).length === 3 && textsTo(jordan)[2].message.startsWith("Taylor on Justin's 30th: sent a GIF") && !/signed\.test|team-media/.test(textsTo(jordan)[2].message));
+check("The held text says sent a GIF", textsTo(jordan).length === 3 && textsTo(jordan)[2].message.startsWith("Taylor on Justin · Birthday: sent a GIF") && !/signed\.test|team-media/.test(textsTo(jordan)[2].message));
 check("The chat list snippet for a picture alone reads sent a GIF", chat.inboxSnippet("", "gif") === "sent a GIF" && chat.inboxSnippet("", "photo") === "sent a photo");
 
 // ----- 3. Who can view -----
@@ -197,6 +197,6 @@ delete process.env.GIPHY_API_KEY;
 
 // ----- 6. Routes -----
 const route = src("app/api/team/media/route.ts");
-check("The media route signs people in and the remove action is admin checked in the code it calls", route.includes("getCurrentStaff()") && src("lib/team/media-db.ts").includes('admin.role !== "admin"'));
+check("The media route signs people in and the remove action is admin checked in the code it calls", route.includes("getCurrentStaff()") && src("lib/team/media-db.ts").includes('!isAdminRole(admin.role)'));
 
 done("chat picture and GIF");

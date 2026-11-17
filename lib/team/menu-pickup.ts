@@ -8,6 +8,7 @@
 
 import { eventSchedule } from "@/lib/team/time";
 import { inQuietHours } from "@/lib/team/shifts";
+import { isAdminRole } from "@/lib/team/roles";
 
 export const PRINT_STORES = ["walmart", "walgreens", "other"] as const;
 export type PrintStore = (typeof PRINT_STORES)[number];
@@ -103,7 +104,7 @@ export function cleanPickupInput(raw: Record<string, unknown>, activeStaffIds: S
 /** Who may check "Picked up": admins on any event, others only on their own assigned pickup. */
 export function canMarkPickedUp(staff: { id: string; role: string; active: boolean }, row: Pick<PickupRow, "assignee_id" | "not_needed"> | null): boolean {
   if (!staff.active || !row || row.not_needed || !row.assignee_id) return false;
-  return staff.role === "admin" || row.assignee_id === staff.id;
+  return isAdminRole(staff.role) || row.assignee_id === staff.id;
 }
 
 /** When the event starts for pickup purposes: arrival, else service start, else noon. Null without a date. */

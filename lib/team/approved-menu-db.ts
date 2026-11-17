@@ -7,7 +7,7 @@
 import { supabase } from "@/lib/supabase";
 import type { SessionRow } from "@/lib/event-updates";
 import { firstName, type StaffMember } from "@/lib/team/event-view";
-import { eventTitle } from "@/lib/team/event-list";
+import { clientEventTitle, eventTitle } from "@/lib/team/event-list";
 import { eventData } from "@/lib/team/markets";
 import { eventSchedule, todayIn } from "@/lib/team/time";
 import { getAssignment, getSubmittedSession } from "@/lib/team/events";
@@ -29,6 +29,7 @@ import {
   typeLabel,
   type MenuFileRow,
 } from "@/lib/team/approved-menu";
+import { isAdminRole } from "@/lib/team/roles";
 
 export const MENU_BUCKET = "event-menus";
 
@@ -127,7 +128,7 @@ export async function startMenuUpload(
   file: { type: string; size: number; name?: string },
   now: Date = new Date()
 ): Promise<Result<{ id: string; uploadUrl: string }>> {
-  if (admin.role !== "admin") return { ok: false, error: "Admins only.", status: 403 };
+  if (!isAdminRole(admin.role)) return { ok: false, error: "Admins only.", status: 403 };
   const session = await getSubmittedSession(sessionId);
   if (!session) return { ok: false, error: "We could not find that event.", status: 404 };
   const bad = menuFileError(file);
@@ -161,7 +162,7 @@ export async function startMenuUpload(
  * The one it replaces goes to the history.
  */
 export async function finishMenuUpload(admin: StaffMember, fileId: string, approvedOn: unknown, now: Date = new Date()): Promise<Result<{ view: AdminMenuView }>> {
-  if (admin.role !== "admin") return { ok: false, error: "Admins only.", status: 403 };
+  if (!isAdminRole(admin.role)) return { ok: false, error: "Admins only.", status: 403 };
   const { data } = await supabase.from("event_menu_files").select("*").eq("id", fileId).maybeSingle();
   const row = data as MenuFileRow | null;
   if (!row || row.status !== "pending") return { ok: false, error: "We could not find that upload. Try again.", status: 404 };
@@ -186,7 +187,7 @@ export async function finishMenuUpload(admin: StaffMember, fileId: string, appro
 
 /** Admin: change the "Client approved on" date of the current menu. */
 export async function setApprovedOn(admin: StaffMember, sessionId: string, approvedOn: unknown, now: Date = new Date()): Promise<Result<{ view: AdminMenuView }>> {
-  if (admin.role !== "admin") return { ok: false, error: "Admins only.", status: 403 };
+  if (!isAdminRole(admin.role)) return { ok: false, error: "Admins only.", status: 403 };
   const session = await getSubmittedSession(sessionId);
   if (!session) return { ok: false, error: "We could not find that event.", status: 404 };
   const cur = await currentMenu(sessionId);
@@ -200,7 +201,7 @@ export async function setApprovedOn(admin: StaffMember, sessionId: string, appro
 /** Whether this staff member may open the event's approved menu. */
 export async function staffCanSeeMenu(viewer: StaffMember, sessionId: string): Promise<boolean> {
   if (!viewer.active) return false;
-  if (viewer.role === "admin") return true;
+  if (isAdminRole(viewer.role)) return true;
   const [assignment, pickup] = await Promise.all([getAssignment(sessionId, viewer.id), getPickup(sessionId)]);
   const isPickupPerson = !!pickup && !pickup.not_needed && pickup.assignee_id === viewer.id;
   return canSeeMenu(viewer, assignment?.status ?? null, isPickupPerson);
@@ -215,7 +216,7 @@ export async function staffMenuLink(viewer: StaffMember, sessionId: string, opts
   const session = await getSubmittedSession(sessionId);
   if (!session || !(await staffCanSeeMenu(viewer, sessionId))) return null;
   const all = await rows(sessionId);
-  const file = opts.fileId && viewer.role === "admin" ? all.find((r) => r.id === opts.fileId && r.status !== "pending") : all.find((r) => r.status === "current");
+  const file = opts.fileId && isAdminRole(viewer.role) ? all.find((r) => r.id === opts.fileId && r.status !== "pending") : all.find((r) => r.status === "current");
   if (!file) return null;
   return shortLink(MENU_BUCKET, file.file_path, MENU_LINK_SECONDS, opts.download ? downloadName(eventTitle(eventData(session)), file.file_type) : undefined);
 }
@@ -229,7 +230,7 @@ export async function clientMenuLink(sessionId: string, download = false): Promi
   if (!session) return null;
   const file = await currentMenu(sessionId);
   if (!file) return null;
-  return shortLink(MENU_BUCKET, file.file_path, MENU_LINK_SECONDS, download ? downloadName(eventTitle(eventData(session)), file.file_type) : undefined);
+  return shortLink(MENU_BUCKET, file.file_path, MENU_LINK_SECONDS, download ? downloadName(clientEventTitle(eventData(session)), file.file_type) : undefined);
 }
 
 /** What the client's page shows under "Your menu". Null when nothing is uploaded. */
@@ -246,8 +247,8 @@ export async function clientMenu(sessionId: string): Promise<{ type: string; typ
  */
 export async function staffMenuSection(session: SessionRow, viewer: StaffMember): Promise<StaffMenuSection | null> {
   if (!viewer.active) return null;
-  const [assignment, pickup, file] = await Promise.all([viewer.role === "admin" ? null : getAssignment(session.id, viewer.id), getPickup(session.id), currentMenu(session.id)]);
-  const onEvent = viewer.role === "admin" || (!!assignment && assignment.status !== "declined");
+  const [assignment, pickup, file] = await Promise.all([isAdminRole(viewer.role) ? null : getAssignment(session.id, viewer.id), getPickup(session.id), currentMenu(session.id)]);
+  const onEvent = isAdminRole(viewer.role) || (!!assignment && assignment.status !== "declined");
   if (!onEvent) return null;
   let pickupPerson = "";
   if (pickup?.assignee_id) {

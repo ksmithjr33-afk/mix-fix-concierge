@@ -11,12 +11,13 @@ import { supabase } from "@/lib/supabase";
 import type { SessionRow } from "@/lib/event-updates";
 import { firstName, type StaffMember } from "@/lib/team/event-view";
 import { getAssignment, getSubmittedSession } from "@/lib/team/events";
-import { eventTitle } from "@/lib/team/event-list";
+import { eventTitle, titleFor } from "@/lib/team/event-list";
 import { eventData } from "@/lib/team/markets";
 import { sendStaffText } from "@/lib/team/sms";
 import { siteOrigin } from "@/lib/team/clock-db";
 import { attach, attachmentViews, claimAttachment, type AttachmentView } from "@/lib/team/media-db";
 import { canUseThread, chatNoticePlan, chatText, cleanMessage, inboxFrom, inboxSnippet, redactClient, unreadCount, INBOX_DAYS, type ChatNoticeRow, type InboxMessage } from "@/lib/team/chat";
+import { isAdminRole } from "@/lib/team/roles";
 
 interface MessageRow {
   id: string;
@@ -58,7 +59,7 @@ export function threadLink(sessionId: string): string {
 export async function threadAccess(sessionId: string, staff: StaffMember): Promise<ThreadAccess> {
   const session = await getSubmittedSession(sessionId);
   if (!session) return { ok: false, reason: "not_found" };
-  const status = staff.role === "admin" ? null : ((await getAssignment(sessionId, staff.id))?.status ?? null);
+  const status = isAdminRole(staff.role) ? null : ((await getAssignment(sessionId, staff.id))?.status ?? null);
   return canUseThread(staff, status) ? { ok: true, session } : { ok: false, reason: "not_assigned" };
 }
 
@@ -83,7 +84,7 @@ export async function threadMessages(sessionId: string, staff: StaffMember): Pro
     return {
       id: r.id,
       from: firstName(p?.name) || "Mix Fix",
-      fromAdmin: p?.role === "admin",
+      fromAdmin: isAdminRole(p?.role),
       mine: r.staff_id === staff.id,
       body: r.body,
       at: r.created_at,
@@ -106,7 +107,7 @@ async function threadMembers(sessionId: string, messages: MessageRow[]): Promise
   const posters = messages.map((m) => m.staff_id).filter((x): x is string => !!x);
   const people = await staffMap([...new Set([...assigned, ...posters])]);
   const muted = await mutedBy(sessionId);
-  return [...people.values()].filter((p) => p.active && (assigned.includes(p.id) || (p.role === "admin" && !muted.has(p.id))));
+  return [...people.values()].filter((p) => p.active && (assigned.includes(p.id) || (isAdminRole(p.role) && !muted.has(p.id))));
 }
 
 async function noticeRow(sessionId: string, staffId: string): Promise<ChatNoticeRow | null> {
@@ -166,7 +167,7 @@ export async function postMessage(
 
   try {
     const messages = await messagesOf(sessionId);
-    const title = eventTitle(eventData(access.session));
+    const ed = eventData(access.session);
     const from = firstName(staff.name) || "Mix Fix";
     for (const m of await threadMembers(sessionId, messages)) {
       if (m.id === staff.id) continue;
@@ -178,7 +179,7 @@ export async function postMessage(
         await hold(sessionId, m.id, new Date(now.getTime() + 5 * 60_000));
         continue;
       }
-      await sendStaffText(m.phone, m.name, chatText({ from, title, body: clean.body, more: 0, link: threadLink(sessionId), attachment: picRow?.kind ?? null }));
+      await sendStaffText(m.phone, m.name, chatText({ from, title: titleFor(ed, m.role), body: clean.body, more: 0, link: threadLink(sessionId), attachment: picRow?.kind ?? null }));
     }
   } catch (err) {
     console.error("[team-chat] texting the thread failed:", err instanceof Error ? err.message : String(err));
@@ -188,7 +189,7 @@ export async function postMessage(
     message: {
       id: row.id,
       from: firstName(staff.name) || "Mix Fix",
-      fromAdmin: staff.role === "admin",
+      fromAdmin: isAdminRole(staff.role),
       mine: true,
       body: row.body,
       at: row.created_at,
@@ -230,7 +231,7 @@ export async function deliverChatNotices(now: Date = new Date()): Promise<number
     const ok = await sendStaffText(
       person.phone,
       person.name,
-      chatText({ from: firstName(author?.name) || "Mix Fix", title: eventTitle(eventData(access.session)), body: latest.body, more: fresh.length - 1, link: threadLink(r.session_id), attachment: latest.attachment_kind ?? null })
+      chatText({ from: firstName(author?.name) || "Mix Fix", title: titleFor(eventData(access.session), person.role), body: latest.body, more: fresh.length - 1, link: threadLink(r.session_id), attachment: latest.attachment_kind ?? null })
     );
     if (ok) sent++;
   }
@@ -275,7 +276,7 @@ export async function mutedChats(staffId: string): Promise<Set<string>> {
 
 /** Admins only: mute or unmute an event's chat for themselves. */
 export async function setChatMuted(sessionId: string, staff: StaffMember, muted: boolean): Promise<Result<{ muted: boolean }>> {
-  if (staff.role !== "admin") return { ok: false, error: "Only admins can mute a chat.", status: 403 };
+  if (!isAdminRole(staff.role)) return { ok: false, error: "Only admins can mute a chat.", status: 403 };
   if (!(await getSubmittedSession(sessionId))) return { ok: false, error: "We could not find that event.", status: 404 };
   const { error } = muted
     ? await supabase.from("event_chat_mutes").upsert({ session_id: sessionId, staff_id: staff.id }, { onConflict: "session_id,staff_id", ignoreDuplicates: true })
@@ -286,7 +287,7 @@ export async function setChatMuted(sessionId: string, staff: StaffMember, muted:
 
 /** The threads a person is notified for: every thread for admins (null), the events they are on for everyone else. */
 async function notifiedThreads(staff: StaffMember): Promise<Set<string> | null> {
-  if (staff.role === "admin") return null;
+  if (isAdminRole(staff.role)) return null;
   const { data } = await supabase.from("event_assignments").select("session_id, status").eq("staff_id", staff.id);
   return new Set(((data as { session_id: string; status: string }[]) ?? []).filter((a) => canUseThread(staff, a.status)).map((a) => a.session_id));
 }
@@ -319,7 +320,7 @@ export async function chatInbox(staff: StaffMember, now: Date = new Date()): Pro
   const [{ data, error }, [{ data: reads }, muted]] = await Promise.all([q, readsP]);
   if (error || !data) return empty;
   const lastRead = new Map(((reads as { session_id: string; last_read_at: string }[]) ?? []).map((r) => [r.session_id, r.last_read_at]));
-  const entries = inboxFrom(data as InboxMessage[], { me: staff.id, lastRead, eligible, muted: staff.role === "admin" ? muted : new Set() });
+  const entries = inboxFrom(data as InboxMessage[], { me: staff.id, lastRead, eligible, muted: isAdminRole(staff.role) ? muted : new Set() });
   if (entries.length === 0) return empty;
   const ids = entries.map((e) => e.sessionId);
   const [{ data: sessions }, people] = await Promise.all([
@@ -335,8 +336,8 @@ export async function chatInbox(staff: StaffMember, now: Date = new Date()): Pro
     const author = e.latest.staff_id ? people.get(e.latest.staff_id) : undefined;
     chats.push({
       sessionId: e.sessionId,
-      title: eventTitle(eventData(s)),
-      href: staff.role === "admin" ? `/team/admin/e/${encodeURIComponent(e.sessionId)}?tab=chat` : `/team/e/${encodeURIComponent(e.sessionId)}?tab=chat`,
+      title: titleFor(eventData(s), staff.role),
+      href: isAdminRole(staff.role) ? `/team/admin/e/${encodeURIComponent(e.sessionId)}?tab=chat` : `/team/e/${encodeURIComponent(e.sessionId)}?tab=chat`,
       unread: e.unread,
       latest: {
         id: e.latest.id,

@@ -1,3 +1,4 @@
+import { isAdminRole } from "@/lib/team/roles";
 // The admin manager view's tabs, in order. The selected tab is in the address
 // (/team/admin/e/<id>?tab=order) so a link can open a specific tab.
 
@@ -27,6 +28,6 @@ export function managerHref(sessionId: string, tab?: ManagerTab): string {
  * (who come back from auth as bartenders), stay on the bartender view: null.
  */
 export function eventLanding(staff: { role: string }, sessionId: string, query: { tab?: unknown; as?: unknown }): string | null {
-  if (staff.role !== "admin" || query.as === "bartender") return null;
+  if (!isAdminRole(staff.role) || query.as === "bartender") return null;
   return managerHref(sessionId, isManagerTab(query.tab) ? query.tab : undefined);
 }

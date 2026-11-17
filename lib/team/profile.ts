@@ -6,6 +6,7 @@
 // admins and the person themself ever see them.
 
 import { daysLeft, type CertRow, certStanding } from "@/lib/team/certs";
+import { isAdminRole } from "@/lib/team/roles";
 
 export interface ProfileRow {
   staff_id: string;
@@ -61,7 +62,7 @@ export function cleanFullName(first: unknown, last: unknown): string | null {
 /** Home address and email: only admins and the person themself. */
 export function canSeePrivate(viewer: { id: string; role: string; active: boolean }, staffId: string): boolean {
   if (!viewer.active) return false;
-  return viewer.role === "admin" || viewer.id === staffId;
+  return isAdminRole(viewer.role) || viewer.id === staffId;
 }
 
 /** Who may change a profile: admins, and the person themself. */
@@ -124,7 +125,7 @@ export function completeness(missing: string[], certTypes: string[]): { done: nu
 
 /** Bartenders are asked once after sign in when something is missing. Admins are not asked. */
 export function needsPrompt(person: { role: string }, row: ProfileRow | null, missing: string[]): boolean {
-  if (person.role === "admin") return false;
+  if (isAdminRole(person.role)) return false;
   return !row?.prompted_at && missing.length > 0;
 }
 

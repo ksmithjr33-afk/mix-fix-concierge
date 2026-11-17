@@ -22,6 +22,7 @@ import {
   SESSION_DAYS,
   type CodeRow,
 } from "@/lib/team/codes";
+import { isAdminRole } from "@/lib/team/roles";
 
 const STAFF_COLUMNS = "id, name, phone, role, active";
 
@@ -195,6 +196,6 @@ export async function saveStaffName(staffId: string, name: string): Promise<void
 /** For admin pages: signed in, named, and an admin. Bartenders go to their own events. */
 export async function requireAdmin(path: string): Promise<ViewedStaff> {
   const staff = await requireStaff(path);
-  if (staff.role !== "admin") redirect("/team/events");
+  if (!isAdminRole(staff.role)) redirect("/team/events");
   return staff;
 }

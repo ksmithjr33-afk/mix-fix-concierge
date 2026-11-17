@@ -164,7 +164,7 @@ check("The Staff page has the Expiring soon filter and amber and red badges", mg
 const csv = (await prDb.staffCsv(admin, morning))!;
 check("Admins download a CSV with the profile fields", csv.startsWith("Name,Role,Active,Phone,Email,Home address,Markets,Drop off time,Max miles,Certificates,Profile complete,Missing") && csv.includes("taylor@example.com") && csv.includes('"100 Elm St, Dallas, TX 75201"'));
 check("CSV cells can never run as spreadsheet formulas", pr.csvCell("=HYPERLINK(1)") === "'=HYPERLINK(1)" && pr.csvCell("+1") === "'+1");
-check("The CSV route is admins only", src("app/api/team/admin/staff/export/route.ts").includes('staff.role !== "admin"'));
+check("The CSV route is admins only", src("app/api/team/admin/staff/export/route.ts").includes('!isAdminRole(staff.role)'));
 
 // ----- 7. Distance on the assign panel: a warning, never a block -----
 reset();

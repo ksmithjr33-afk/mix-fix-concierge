@@ -1,3 +1,4 @@
+import { isAdminRole } from "@/lib/team/roles";
 // Event team chat rules. Pure, no database.
 //
 // The thread belongs to the event: admins and the staff assigned to it (not
@@ -12,7 +13,7 @@ export const CHAT_SNIPPET = 100;
 /** Who may open an event's thread. */
 export function canUseThread(staff: { role: string; active: boolean }, assignmentStatus: string | null): boolean {
   if (!staff.active) return false;
-  if (staff.role === "admin") return true;
+  if (isAdminRole(staff.role)) return true;
   return assignmentStatus === "offered" || assignmentStatus === "accepted";
 }
 

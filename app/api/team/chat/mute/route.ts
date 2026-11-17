@@ -1,13 +1,14 @@
 import { NextResponse } from "next/server";
 import { getCurrentStaff } from "@/lib/team/auth";
 import { setChatMuted } from "@/lib/team/chat-db";
+import { isAdminRole } from "@/lib/team/roles";
 
 // "Mute this chat" for admins: POST { sessionId, muted }. Muted chats leave
 // the admin's chat icon, pop ups and texts. Admins only, checked on the server.
 export async function POST(request: Request) {
   const staff = await getCurrentStaff();
   if (!staff) return NextResponse.json({ error: "Sign in again." }, { status: 401 });
-  if (staff.role !== "admin") return NextResponse.json({ error: "Only admins can mute a chat." }, { status: 403 });
+  if (!isAdminRole(staff.role)) return NextResponse.json({ error: "Only admins can mute a chat." }, { status: 403 });
   try {
     const { sessionId, muted } = await request.json().catch(() => ({}));
     if (typeof sessionId !== "string" || typeof muted !== "boolean") return NextResponse.json({ error: "Bad request" }, { status: 400 });

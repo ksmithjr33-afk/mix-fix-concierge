@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
 import { getCurrentStaff } from "@/lib/team/auth";
 import { createAnnouncement } from "@/lib/team/announcements-db";
+import { isAdminRole } from "@/lib/team/roles";
 
 // An admin sends an announcement: { title, body, markets: string[], bartendersOnly, sendNow }.
 export async function POST(request: Request) {
   const staff = await getCurrentStaff();
   if (!staff) return NextResponse.json({ error: "Sign in again." }, { status: 401 });
-  if (staff.role !== "admin") return NextResponse.json({ error: "Admins only." }, { status: 403 });
+  if (!isAdminRole(staff.role)) return NextResponse.json({ error: "Admins only." }, { status: 403 });
   try {
     const raw = await request.json().catch(() => ({}));
     const r = await createAnnouncement(staff, raw && typeof raw === "object" ? raw : {});

@@ -38,6 +38,7 @@ export default function ClientHistoryCard({ history, clientKey, title = "Client 
                 ) : (
                   <span className="font-medium text-[#2C2420]">{r.title}</span>
                 )}
+                {r.subtitle && <span className="basis-full text-sm text-[#6B5D52] break-words">{r.subtitle}</span>}
                 <span className={`text-[11px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded ${STATUS_TONE[r.status]}`}>{r.status}</span>
                 {r.matchedBy === "phone" && (
                   <span className="text-[11px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-[#F6E3DC] text-[#A0412D]" title="Different email, same phone number. Check it is the same client.">

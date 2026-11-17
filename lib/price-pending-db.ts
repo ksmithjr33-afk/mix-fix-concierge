@@ -19,6 +19,7 @@ import { eventSchedule, shortDate } from "@/lib/team/time";
 import { eventData } from "@/lib/team/markets";
 import { siteOrigin } from "@/lib/team/clock-db";
 import { managerHref } from "@/lib/team/manager-tabs";
+import { isAdminRole } from "@/lib/team/roles";
 
 /** Text every admin who gets alerts, right away. Returns how many texts went. Never throws. */
 export async function textPricePending(session: SessionRow, info: PricePendingInfo): Promise<number> {
@@ -58,7 +59,7 @@ export async function setPendingPrice(
   admin: { id: string; name: string; role: string },
   now: Date = new Date()
 ): Promise<SetPriceResult> {
-  if (admin.role !== "admin") return { ok: false, error: "Admins only.", status: 403 };
+  if (!isAdminRole(admin.role)) return { ok: false, error: "Admins only.", status: 403 };
   const total = typeof rawTotal === "number" ? rawTotal : parseFloat(String(rawTotal ?? "").replace(/[$,\s]/g, ""));
   if (!Number.isFinite(total) || total <= 0 || total > 100_000) return { ok: false, error: "Type the new total in dollars, like 1850.", status: 400 };
   const newTotal = Math.round(total * 100) / 100;

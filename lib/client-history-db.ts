@@ -21,6 +21,7 @@ import {
   type ClientSummary,
   type HistoryEntry,
 } from "@/lib/client-history";
+import { isAdminRole } from "@/lib/team/roles";
 
 type Viewer = { role: string };
 
@@ -97,7 +98,7 @@ function withLinks(entries: HistoryEntry[]): HistoryRow[] {
 
 /** The Client history card on the manager view's Details tab. Null unless the viewer is an admin. */
 export async function historyFor(session: Pick<SessionRow, "id">, viewer: Viewer, today: string = chicagoToday()): Promise<ClientHistoryView | null> {
-  if (viewer.role !== "admin") return null;
+  if (!isAdminRole(viewer.role)) return null;
   const [rows, hidden] = await Promise.all([allClientRows(), hiddenEventIds()]);
   const target = rows.find((r) => r.id === session.id);
   if (!target) return { matchedOn: "", rows: [] };
@@ -110,7 +111,7 @@ export async function historyFor(session: Pick<SessionRow, "id">, viewer: Viewer
  * unless the viewer is an admin.
  */
 export async function eventNumberFor(session: Pick<SessionRow, "id" | "email">, viewer: Viewer): Promise<number | null> {
-  if (viewer.role !== "admin") return null;
+  if (!isAdminRole(viewer.role)) return null;
   const key = emailKey(session.email);
   if (!key) return 1;
   // ilike ignores case; % and _ in the email are escaped so they match only themselves.
@@ -123,13 +124,13 @@ export async function eventNumberFor(session: Pick<SessionRow, "id" | "email">, 
 
 /** Booking numbers for every session, for the admin events list and calendar. Null unless admin. */
 export async function eventNumbersFor(viewer: Viewer, rows?: ClientRow[]): Promise<Map<string, number> | null> {
-  if (viewer.role !== "admin") return null;
+  if (!isAdminRole(viewer.role)) return null;
   return eventNumbers(rows ?? (await allClientRows()));
 }
 
 /** The Clients page. Null unless the viewer is an admin. */
 export async function clientsList(viewer: Viewer, today: string = chicagoToday()): Promise<ClientSummary[] | null> {
-  if (viewer.role !== "admin") return null;
+  if (!isAdminRole(viewer.role)) return null;
   return clientDirectory(await allClientRows(), today);
 }
 
@@ -140,7 +141,7 @@ export interface ClientPage {
 
 /** One client's full event list, by email key. Null unless admin; "none" when no session has that email. */
 export async function clientPage(key: string, viewer: Viewer, today: string = chicagoToday()): Promise<ClientPage | null | "none"> {
-  if (viewer.role !== "admin") return null;
+  if (!isAdminRole(viewer.role)) return null;
   const [rows, hidden] = await Promise.all([allClientRows(), hiddenEventIds()]);
   const mine = rows.filter((r) => emailKey(r.email) === key);
   if (mine.length === 0) return "none";

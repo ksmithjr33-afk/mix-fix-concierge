@@ -2,11 +2,12 @@ import { NextResponse } from "next/server";
 import { getCurrentStaff } from "@/lib/team/auth";
 import { getSubmittedSession } from "@/lib/team/events";
 import { assignStaff, removeStaff } from "@/lib/team/assignments-db";
+import { isAdminRole } from "@/lib/team/roles";
 
 async function setup(request: Request) {
   const staff = await getCurrentStaff();
   if (!staff) return { error: NextResponse.json({ error: "Sign in again." }, { status: 401 }) };
-  if (staff.role !== "admin") return { error: NextResponse.json({ error: "Admins only." }, { status: 403 }) };
+  if (!isAdminRole(staff.role)) return { error: NextResponse.json({ error: "Admins only." }, { status: 403 }) };
   const { sessionId, staffId, confirmUnavailable } = await request.json().catch(() => ({}));
   if (typeof sessionId !== "string" || typeof staffId !== "string") return { error: NextResponse.json({ error: "Bad request" }, { status: 400 }) };
   const session = await getSubmittedSession(sessionId);

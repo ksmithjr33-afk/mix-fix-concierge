@@ -3,6 +3,7 @@ import { todayFor, upcomingUnavailable } from "@/lib/team/availability-db";
 import { rangeLabel } from "@/lib/team/availability";
 import TeamHeader from "../team-header";
 import AvailabilityForm from "./availability-form";
+import { isAdminRole } from "@/lib/team/roles";
 
 export const dynamic = "force-dynamic";
 
@@ -14,7 +15,7 @@ export default async function AvailabilityPage() {
   const rows = await upcomingUnavailable(staff.id, today);
   return (
     <>
-      <TeamHeader signedIn admin={staff.role === "admin"} back={{ href: "/team/me", label: "Me" }} />
+      <TeamHeader signedIn admin={isAdminRole(staff.role)} back={{ href: "/team/me", label: "Me" }} />
       <main className="max-w-2xl mx-auto px-4 py-6 space-y-4">
         <div className="px-1">
           <h1 className="font-heading text-2xl font-bold text-[#2C2420]">Availability</h1>

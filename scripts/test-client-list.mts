@@ -252,9 +252,9 @@ const hookSrc = src("app/api/webhook/route.ts");
 check("The intake webhook adds the list fields from the saved session", hookSrc.includes("completionFields(sessionId)") && hookSrc.includes("client_shopping_list_send: false"));
 check("The chat route passes the session to the intake webhook", /fetch\(`\$\{origin\}\/api\/webhook`[\s\S]{0,200}sessionId,/.test(chatSrc));
 const clRoute = src("app/api/team/admin/client-list/route.ts");
-check("Approve, Decline, and Review and send are admin only", clRoute.includes('staff.role !== "admin"') && clRoute.includes("status: 403") && clRoute.includes("status: 401"));
+check("Approve, Decline, and Review and send are admin only", clRoute.includes('!isAdminRole(staff.role)') && clRoute.includes("status: 403") && clRoute.includes("status: 401"));
 const adminPage = src("app/team/admin/e/[id]/page.tsx");
 check("The admin event page shows the list panel with its log", adminPage.includes("<ClientListPanel") && adminPage.includes("listLog(id)"));
-check("The settings route is admin only", src("app/api/team/admin/settings/route.ts").includes('staff.role !== "admin"'));
+check("The settings route is admin only", src("app/api/team/admin/settings/route.ts").includes('!isAdminRole(staff.role)'));
 
 done("client list");

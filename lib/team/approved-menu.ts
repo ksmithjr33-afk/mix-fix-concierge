@@ -7,6 +7,7 @@
 // short history only admins open.
 
 import { pickupDeadline } from "@/lib/team/menu-pickup";
+import { isAdminRole } from "@/lib/team/roles";
 
 export const MENU_FILE_TYPES = ["application/pdf", "image/png", "image/jpeg"];
 export const MENU_MAX_BYTES = 15 * 1024 * 1024;
@@ -81,7 +82,7 @@ export interface MenuViewer {
  */
 export function canSeeMenu(viewer: MenuViewer, assignmentStatus: string | null, isPickupPerson: boolean): boolean {
   if (!viewer.active) return false;
-  if (viewer.role === "admin") return true;
+  if (isAdminRole(viewer.role)) return true;
   if (isPickupPerson) return true;
   return assignmentStatus === "offered" || assignmentStatus === "accepted";
 }

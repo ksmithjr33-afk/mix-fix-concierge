@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
 import { getCurrentStaff } from "@/lib/team/auth";
 import { reviewCert, setCertsEnforced } from "@/lib/team/certs-db";
+import { isAdminRole } from "@/lib/team/roles";
 
 // Admins: { action: "review", id, decision: "approve" | "reject", note } or { action: "enforce", on }.
 export async function POST(request: Request) {
   const staff = await getCurrentStaff();
-  if (!staff || staff.role !== "admin") return NextResponse.json({ error: "Admins only." }, { status: 403 });
+  if (!staff || !isAdminRole(staff.role)) return NextResponse.json({ error: "Admins only." }, { status: 403 });
   try {
     const body = await request.json().catch(() => ({}));
     if (body.action === "enforce" && typeof body.on === "boolean") {

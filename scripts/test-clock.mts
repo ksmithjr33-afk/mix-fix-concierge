@@ -199,8 +199,8 @@ check("No late setup alert before 30 minutes ahead", (await clockDb.sendLateSetu
 const ls = await clockDb.sendLateSetupAlerts(at(17 * 60 + 30));
 check("Late setup alert texts admins with alerts on", ls === 1 && texts.length === 1 && texts[0].phone === admin.phone, JSON.stringify(texts));
 check(
-  "Late setup alert wording and admin link",
-  texts[0]?.message === "No bar ready check in yet for Justin · Birthday, service starts at 6:00 PM. https://plan.test/team/admin/e/s1",
+  "Late setup alert wording and admin link (admins see the full name)",
+  texts[0]?.message === "No bar ready check in yet for Justin Reyes · Birthday, service starts at 6:00 PM. https://plan.test/team/admin/e/s1",
   texts[0]?.message,
 );
 check("Admins with alerts off are not texted", !texts.some((t) => t.phone === quietAdmin.phone));

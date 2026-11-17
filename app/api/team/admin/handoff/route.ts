@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
 import { getCurrentStaff } from "@/lib/team/auth";
 import { approveHandoff, declineHandoff } from "@/lib/team/shifts-db";
+import { isAdminRole } from "@/lib/team/roles";
 
 // An admin approves the teammate who accepted a handoff, or declines the handoff: { action, handoffId }.
 export async function POST(request: Request) {
   const staff = await getCurrentStaff();
   if (!staff) return NextResponse.json({ error: "Sign in again." }, { status: 401 });
-  if (staff.role !== "admin") return NextResponse.json({ error: "Admins only." }, { status: 403 });
+  if (!isAdminRole(staff.role)) return NextResponse.json({ error: "Admins only." }, { status: 403 });
   try {
     const { action, handoffId, confirmUnavailable } = await request.json().catch(() => ({}));
     if (typeof handoffId !== "string" || (action !== "approve" && action !== "decline")) {

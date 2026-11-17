@@ -130,7 +130,7 @@ reset();
 await clientUpdate({ signature_drinks: [PALOMA, MARG] }, NOON);
 check("At noon the admins are texted right away, once each", adminTexts().length === 2 && textsTo(admin).length === 1 && textsTo(bartender).length === 0);
 const msg = textsTo(admin)[0]?.message ?? "";
-check("The text has the event name, date and what was asked", msg.includes("Alex's 40th") && msg.includes(time.shortDate(addDays(today, 3))) && msg.includes("Drink 1: from Mule to Paloma"), msg);
+check("The text has the event name, date and what was asked", msg.includes("Alex Butler · Birthday") && msg.includes(time.shortDate(addDays(today, 3))) && msg.includes("Drink 1: from Mule to Paloma"), msg);
 check("The text links to the Client list tab", msg.includes("https://plan.test/team/admin/e/s1?tab=client"));
 check("The text never has oz amounts", !/\boz\b/.test(msg));
 await requests.announceRequest(String(holds()[0].id), NOON);
@@ -227,7 +227,7 @@ const managerPage = src("app/team/admin/e/[id]/page.tsx");
 check("The Client list tab has a count of requests waiting", managerPage.includes("client: pendingHolds.length"));
 const panel = src("app/team/admin/e/[id]/client-list-panel.tsx");
 check("The Client list tab shows the full before and after and the price difference, with Approve and Decline", panel.includes("h.blocks") && panel.includes("Price difference") && panel.includes('act("approve"') && panel.includes('act("decline"') && managerPage.includes("changeBlocks("));
-check("Approve and Decline are admin only on the server", src("app/api/team/admin/client-list/route.ts").includes('staff.role !== "admin"') && src("lib/client-list-actions.ts").includes('admin.role !== "admin"'));
+check("Approve and Decline are admin only on the server", src("app/api/team/admin/client-list/route.ts").includes('!isAdminRole(staff.role)') && src("lib/client-list-actions.ts").includes('!isAdminRole(admin.role)'));
 check("The request message is plain and honest", cl.CHANGE_REQUEST_MESSAGE.includes("not confirmed yet") && !/\bsaved\b/i.test(cl.CHANGE_REQUEST_MESSAGE));
 
 done("change request");

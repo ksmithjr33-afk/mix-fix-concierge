@@ -12,6 +12,7 @@ export interface EventRowSource {
   package_type?: string | null;
   event_data: Record<string, unknown> | null;
   team_market?: string | null;
+  calendar_only?: boolean | null;
 }
 
 export interface EventListItem {
@@ -19,6 +20,7 @@ export interface EventListItem {
   day: string | null; // YYYY-MM-DD in Chicago
   arrival: string; // "4:00 PM", or "" when unknown
   title: string;
+  subtitle?: string; // the client's own event name ("Justin's 30th"), a smaller second line, never the title
   detail: string;
   search: string; // lower case text the search box matches
   status?: string; // the bartender's assignment status, when there is one
@@ -34,6 +36,7 @@ export interface EventListItem {
   noMenu?: boolean; // admins: inside 72 hours and no approved menu uploaded
   noIce?: boolean; // admins: inside 48 hours of service start and nobody picking up ice
   repeat?: string; // admins: "Repeat client, 3rd event"
+  calendarOnly?: boolean; // admins: added to our calendar only, nothing goes to GHL or the client
 }
 
 /** "Justin · Wedding": client first name and event type. */
@@ -41,11 +44,45 @@ export function nameAndType(ed: Record<string, unknown>): string {
   return [firstName(ed.client_name), scrub(ed.event_type)].filter(Boolean).join(" · ");
 }
 
+/** "Justin Reyes · Wedding": client full name and event type. Admins and managers only. */
+export function fullNameAndType(ed: Record<string, unknown>): string {
+  return [scrub(ed.client_name), scrub(ed.event_type)].filter(Boolean).join(" · ");
+}
+
 /**
- * The title shape used everywhere staff see an event: the client's own event
- * name when they gave one, otherwise first name and event type.
+ * The event title staff see (bartenders, bar backs, servers, helpers, and
+ * every text to staff): "Justin · Wedding", client first name and event type.
+ * The client's own event name is never the title: it is eventSubtitle, a
+ * smaller second line. Falls back to the event name only when there is no
+ * client name or type at all.
  */
 export function eventTitle(ed: Record<string, unknown>): string {
+  return nameAndType(ed) || scrub(ed.event_name) || "Event";
+}
+
+/** The title admins and managers see: "Justin Reyes · Wedding". Same fallbacks. */
+export function adminEventTitle(ed: Record<string, unknown>): string {
+  return fullNameAndType(ed) || scrub(ed.event_name) || "Event";
+}
+
+/** The title for this viewer: full name for admins and managers, first name for everyone else. */
+export function titleFor(ed: Record<string, unknown>, role: unknown): string {
+  return role === "admin" || role === "manager" ? adminEventTitle(ed) : eventTitle(ed);
+}
+
+/** The client's own event name as a second line. Empty when none, or when it is already the title. */
+export function eventSubtitle(ed: Record<string, unknown>): string {
+  const named = scrub(ed.event_name);
+  if (!named) return "";
+  return nameAndType(ed) || scrub(ed.client_name) || scrub(ed.event_type) ? named : "";
+}
+
+/**
+ * The title the client side and GHL have always used: the client's event name
+ * first. Kept for anything that can reach the client (the closeout webhook),
+ * so nothing the client sees changes.
+ */
+export function clientEventTitle(ed: Record<string, unknown>): string {
   return scrub(ed.event_name) || nameAndType(ed) || "Event";
 }
 
@@ -69,22 +106,26 @@ function guests(ed: Record<string, unknown>, row: EventRowSource): string {
   return Number.isFinite(n) && n > 0 ? `${n} guests` : "";
 }
 
-export function eventListItem(row: EventRowSource, status?: string, opts: { showMarket?: boolean } = {}): EventListItem {
+export function eventListItem(row: EventRowSource, status?: string, opts: { showMarket?: boolean; admin?: boolean } = {}): EventListItem {
   const ed = eventData(row);
   const market = sessionMarket(row);
   const s = eventSchedule(ed);
   const named = scrub(ed.event_name);
-  const title = eventTitle(ed);
+  const title = opts.admin ? adminEventTitle(ed) : eventTitle(ed);
+  const subtitle = eventSubtitle(ed);
   const times = s.startMin !== null && s.endMin !== null ? `${formatClock(s.startMin)} to ${formatClock(s.endMin)}` : s.startMin !== null ? formatClock(s.startMin) : "";
   const pkg = scrub(ed.package) || scrub(row.package_type);
-  const detail = [opts.showMarket ? marketLabel(market) : "", named ? nameAndType(ed) : "", times, guests(ed, row), pkg, cityFrom(ed.event_address)].filter(Boolean).join(" · ");
+  const detail = [opts.showMarket ? marketLabel(market) : "", times, guests(ed, row), pkg, cityFrom(ed.event_address)].filter(Boolean).join(" · ");
   return {
     id: row.id,
     day: eventDay(ed.event_date),
     arrival: s.arrivalMin === null ? "" : formatClock(s.arrivalMin),
     title,
+    ...(subtitle ? { subtitle } : {}),
+    ...(opts.admin && row.calendar_only === true ? { calendarOnly: true } : {}),
     detail,
-    search: [title, firstName(ed.client_name), scrub(ed.event_type), named].join(" ").toLowerCase(),
+    // Search matches the client name (full for admins), the event type and the client's event name.
+    search: [title, opts.admin ? scrub(ed.client_name) : firstName(ed.client_name), scrub(ed.event_type), named].join(" ").toLowerCase(),
     market,
     ...(status ? { status } : {}),
   };

@@ -1,13 +1,14 @@
 import { NextResponse } from "next/server";
 import { getCurrentStaff } from "@/lib/team/auth";
 import { addStore, listStores, moveStore, updateStore } from "@/lib/order-sheet-stores";
+import { isAdminRole } from "@/lib/team/roles";
 
 // Manage stores, admins only. Bartenders (and admins in Bartender view) get
 // 403, signed out gets 401. { action: "add" | "update" | "move", ... } returns the list as it now stands.
 export async function POST(request: Request) {
   const staff = await getCurrentStaff();
   if (!staff) return NextResponse.json({ error: "Sign in again." }, { status: 401 });
-  if (staff.role !== "admin") return NextResponse.json({ error: "Admins only." }, { status: 403 });
+  if (!isAdminRole(staff.role)) return NextResponse.json({ error: "Admins only." }, { status: 403 });
   try {
     const body = await request.json().catch(() => ({}));
     const r =

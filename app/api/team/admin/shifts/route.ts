@@ -3,6 +3,7 @@ import { getCurrentStaff } from "@/lib/team/auth";
 import { getSubmittedSession } from "@/lib/team/events";
 import { approveRequest, postAllUnstaffed, postSelected, postShift, unpostShift } from "@/lib/team/shifts-db";
 import { isMarket } from "@/lib/team/markets";
+import { isAdminRole } from "@/lib/team/roles";
 
 // Admin open shift actions.
 //   { action: "post", sessionId }      post the event's unfilled spots to its market
@@ -13,7 +14,7 @@ import { isMarket } from "@/lib/team/markets";
 export async function POST(request: Request) {
   const staff = await getCurrentStaff();
   if (!staff) return NextResponse.json({ error: "Sign in again." }, { status: 401 });
-  if (staff.role !== "admin") return NextResponse.json({ error: "Admins only." }, { status: 403 });
+  if (!isAdminRole(staff.role)) return NextResponse.json({ error: "Admins only." }, { status: 403 });
   try {
     const body = await request.json().catch(() => ({}));
     if (body.action === "post") {

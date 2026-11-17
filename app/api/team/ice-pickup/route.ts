@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCurrentStaff } from "@/lib/team/auth";
 import { assignIce, iceInstead, markIce, removeIce, saveIce, undoIce } from "@/lib/team/ice-pickup-db";
+import { isAdminRole } from "@/lib/team/roles";
 
 // The ice pickup. POST { sessionId, action }:
 //   "save" (admins): location_name, location_address, total_bags, notes
@@ -22,7 +23,7 @@ export async function POST(request: Request) {
     const sessionId = body.sessionId;
     const action = String(body.action ?? "");
     if (typeof sessionId !== "string" || !sessionId) return NextResponse.json({ error: "Bad request" }, { status: 400 });
-    if (ADMIN_ACTIONS.has(action) && staff.role !== "admin") return NextResponse.json({ error: "Admins only." }, { status: 403 });
+    if (ADMIN_ACTIONS.has(action) && !isAdminRole(staff.role)) return NextResponse.json({ error: "Admins only." }, { status: 403 });
     const r =
       action === "save" ? await saveIce(sessionId, staff, body)
       : action === "assign" ? await assignIce(sessionId, staff, body.staffId, body.bags)

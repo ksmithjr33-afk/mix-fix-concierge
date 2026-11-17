@@ -11,6 +11,7 @@ import { cityFrom } from "@/lib/team/event-list";
 import { bartendersNeeded, firstName, scrub, type SessionLike, type StaffMember } from "@/lib/team/event-view";
 import { eventData, marketLabel, staffMarketsOf, type Market } from "@/lib/team/markets";
 import { eventDayStart, eventSchedule, formatClock, longDate, shortDate, todayIn, zonedInstant } from "@/lib/team/time";
+import { isAdminRole } from "@/lib/team/roles";
 
 export const SHORT_ALERT_DAYS = 5; // admins hear once when a posted shift is still short 5 days out
 export const URGENT_HOURS = 48; // a handoff inside 48 hours of the event is marked URGENT
@@ -122,7 +123,7 @@ export function overlaps(a: { from: string | null; to: string | null }, b: { fro
 /** A bartender sees a posted shift only when it is posted to one of their markets. */
 export function canSeePost(staff: StaffMember & { markets?: unknown }, post: Pick<PostRow, "market" | "status">): boolean {
   if (!staff.active || post.status !== "posted") return false;
-  if (staff.role === "admin") return true;
+  if (isAdminRole(staff.role)) return true;
   return staffMarketsOf(staff).includes(post.market);
 }
 

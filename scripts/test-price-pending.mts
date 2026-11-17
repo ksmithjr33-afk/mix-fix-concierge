@@ -154,7 +154,7 @@ const page = src("app/team/admin/e/[id]/page.tsx");
 check("The manager view shows the Price needed card at the top of Details", page.includes("{session.price_pending && (") && page.indexOf("<PriceNeededCard") < page.indexOf("<ClockStatus"));
 check("Bartenders cannot set a price", (await ppdb.setPendingPrice("cand1", 1865, { id: "b1", name: "Sam Lee", role: "bartender" })).ok === false && s.price_pending === true);
 const routeSrc = src("app/api/team/admin/price-pending/route.ts");
-check("The price route checks admin on the server", routeSrc.includes('staff.role !== "admin"') && routeSrc.indexOf("getCurrentStaff()") < routeSrc.indexOf("setPendingPrice("));
+check("The price route checks admin on the server", routeSrc.includes('!isAdminRole(staff.role)') && routeSrc.indexOf("getCurrentStaff()") < routeSrc.indexOf("setPendingPrice("));
 check("A bad total is refused", (await ppdb.setPendingPrice("cand1", "abc", admin)).ok === false);
 
 hooks.length = 0;

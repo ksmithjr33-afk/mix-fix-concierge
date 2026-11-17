@@ -3,6 +3,7 @@ import { requireStaff } from "@/lib/team/auth";
 import { viewProfile } from "@/lib/team/profile-db";
 import TeamHeader from "../../team-header";
 import ProfileForm from "./profile-form";
+import { isAdminRole } from "@/lib/team/roles";
 
 export const dynamic = "force-dynamic";
 
@@ -19,7 +20,7 @@ export default async function MyProfilePage({ searchParams }: { searchParams: Pr
   const certsMissing = profile ? profile.certTypes.filter((t) => profile.missing.includes(t)) : [];
   return (
     <>
-      <TeamHeader signedIn admin={staff.role === "admin"} back={first ? undefined : { href: "/team/me", label: "Me" }} />
+      <TeamHeader signedIn admin={isAdminRole(staff.role)} back={first ? undefined : { href: "/team/me", label: "Me" }} />
       <main className="max-w-2xl mx-auto px-4 py-6 space-y-4">
         <div className="px-1">
           <h1 className="font-heading text-2xl font-bold text-[#2C2420]">{first ? "Finish your profile" : "My profile"}</h1>

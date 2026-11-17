@@ -3,6 +3,7 @@ import { getCurrentStaff } from "@/lib/team/auth";
 import { timesheetRows } from "@/lib/team/timesheet-db";
 import { isYmd, timesheetCsv } from "@/lib/team/timesheet";
 import { ratesFor } from "@/lib/team/pay-db";
+import { isAdminRole } from "@/lib/team/roles";
 
 const MAX_DAYS = 366;
 
@@ -10,7 +11,7 @@ const MAX_DAYS = 366;
 export async function GET(request: Request) {
   const staff = await getCurrentStaff();
   if (!staff) return NextResponse.json({ error: "Sign in again." }, { status: 401 });
-  if (staff.role !== "admin") return NextResponse.json({ error: "Admins only." }, { status: 403 });
+  if (!isAdminRole(staff.role)) return NextResponse.json({ error: "Admins only." }, { status: 403 });
   const url = new URL(request.url);
   const from = url.searchParams.get("from");
   const to = url.searchParams.get("to");

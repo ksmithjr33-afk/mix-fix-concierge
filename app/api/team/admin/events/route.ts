@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCurrentStaff } from "@/lib/team/auth";
 import { addManualEvent } from "@/lib/manual-event-db";
+import { isAdminRole } from "@/lib/team/roles";
 
 // Add an event by hand, admins only. The body is the Add event form, with
 // mode "confirmed" (Save as a confirmed event) or "link" (Save and send the
@@ -9,7 +10,7 @@ import { addManualEvent } from "@/lib/manual-event-db";
 export async function POST(request: Request) {
   const staff = await getCurrentStaff();
   if (!staff) return NextResponse.json({ error: "Sign in again." }, { status: 401 });
-  if (staff.role !== "admin") return NextResponse.json({ error: "Admins only." }, { status: 403 });
+  if (!isAdminRole(staff.role)) return NextResponse.json({ error: "Admins only." }, { status: 403 });
   try {
     const body = await request.json().catch(() => ({}));
     const r = await addManualEvent(staff, body);

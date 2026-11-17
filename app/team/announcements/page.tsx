@@ -6,6 +6,7 @@ import { marketLabel, MARKETS, MARKET_INFO } from "@/lib/team/markets";
 import TeamHeader from "../team-header";
 import Compose from "./compose";
 import { giphyEnabled } from "@/lib/team/media";
+import { isAdminRole } from "@/lib/team/roles";
 
 export const dynamic = "force-dynamic";
 
@@ -17,7 +18,7 @@ function sentOn(iso: string): string {
 // Admins also write new ones and see how many people opened each.
 export default async function AnnouncementsPage() {
   const staff = await requireStaff("/team/announcements");
-  const admin = staff.role === "admin";
+  const admin = isAdminRole(staff.role);
   const items = await announcementsFor(staff);
   const unread = items.filter((i) => i.unread).length;
   return (

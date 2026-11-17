@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCurrentStaff } from "@/lib/team/auth";
 import { approveHold, declineHold, reviewAndSend } from "@/lib/client-list-actions";
+import { isAdminRole } from "@/lib/team/roles";
 
 // Held client shopping lists, admins only:
 // { action: "approve" | "decline", sessionId, holdId } for a change held inside six days,
@@ -8,7 +9,7 @@ import { approveHold, declineHold, reviewAndSend } from "@/lib/client-list-actio
 export async function POST(request: Request) {
   const staff = await getCurrentStaff();
   if (!staff) return NextResponse.json({ error: "Sign in again." }, { status: 401 });
-  if (staff.role !== "admin") return NextResponse.json({ error: "Admins only." }, { status: 403 });
+  if (!isAdminRole(staff.role)) return NextResponse.json({ error: "Admins only." }, { status: 403 });
   try {
     const body = await request.json().catch(() => ({}));
     const origin = new URL(request.url).origin;

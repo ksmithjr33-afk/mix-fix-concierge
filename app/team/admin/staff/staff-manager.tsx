@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { StaffRecord } from "@/lib/team/assignments";
 import type { StaffOverview } from "@/lib/team/profile-db";
+import { roleLabel, isAdminRole, isFullAdmin, ROLES, ROLE_LABEL, type Role } from "@/lib/team/roles";
 
 const CERT_TONE: Record<string, string> = {
   ok: "bg-[#E4EBDF] text-[#55684A]",
@@ -74,8 +75,10 @@ function StaffForm({
   submitLabel,
   onSubmit,
   onCancel,
+  viewerRole,
 }: {
-  initial: { first: string; last: string; phone: string; role: "bartender" | "admin"; markets: string[] };
+  initial: { first: string; last: string; phone: string; role: Role; markets: string[] };
+  viewerRole: Role;
   submitLabel: string;
   onSubmit: (v: { first: string; last: string; phone: string; role: string; markets: string[] }) => Promise<void>;
   onCancel?: () => void;
@@ -109,9 +112,19 @@ function StaffForm({
       </div>
       <div className="grid grid-cols-[1fr_auto] gap-2">
         <input className={input} type="tel" inputMode="tel" placeholder="Phone" value={v.phone} onChange={(e) => setV({ ...v, phone: e.target.value })} required />
-        <select className={input} value={v.role} onChange={(e) => setV({ ...v, role: e.target.value as "bartender" | "admin" })} aria-label="Role">
-          <option value="bartender">Bartender</option>
-          <option value="admin">Admin</option>
+        {/* Managers never pick Admin, and cannot change an admin's role (the server checks both). */}
+        <select
+          className={input}
+          value={v.role}
+          onChange={(e) => setV({ ...v, role: e.target.value as Role })}
+          aria-label="Role"
+          disabled={!isFullAdmin(viewerRole) && initial.role === "admin"}
+        >
+          {ROLES.filter((r) => isFullAdmin(viewerRole) || r !== "admin" || initial.role === "admin").map((r) => (
+            <option key={r} value={r}>
+              {ROLE_LABEL[r]}
+            </option>
+          ))}
         </select>
       </div>
       <fieldset>
@@ -164,7 +177,21 @@ function Toggle({ on, label, disabled, onChange }: { on: boolean; label: string;
   );
 }
 
-function StaffRow({ s, meId, onSaved, notes, overview }: { s: StaffRecord; meId: string; onSaved: (s: StaffRecord) => void; notes?: string[]; overview?: StaffOverview }) {
+function StaffRow({
+  s,
+  meId,
+  viewerRole,
+  onSaved,
+  notes,
+  overview,
+}: {
+  s: StaffRecord;
+  meId: string;
+  viewerRole: Role;
+  onSaved: (s: StaffRecord) => void;
+  notes?: string[];
+  overview?: StaffOverview;
+}) {
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -187,6 +214,7 @@ function StaffRow({ s, meId, onSaved, notes, overview }: { s: StaffRecord; meId:
       <li className="py-3">
         <StaffForm
           initial={{ ...splitName(s.name), phone: prettyPhone(s.phone), role: s.role, markets: s.markets }}
+          viewerRole={viewerRole}
           submitLabel="Save"
           onCancel={() => setEditing(false)}
           onSubmit={async (v) => {
@@ -211,7 +239,7 @@ function StaffRow({ s, meId, onSaved, notes, overview }: { s: StaffRecord; meId:
               {prettyPhone(s.phone)}
             </a>
             {" · "}
-            {s.role === "admin" ? "Admin" : "Bartender"}
+            {roleLabel(s.role)}
             {!s.active && " · Inactive"}
           </p>
           <p className="text-sm text-[#6B5D52]">Markets: {marketNames(s.markets) || "None"}</p>
@@ -235,8 +263,8 @@ function StaffRow({ s, meId, onSaved, notes, overview }: { s: StaffRecord; meId:
         </div>
       </div>
       <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5">
-        {s.role === "admin" && s.active && <Toggle on={s.alerts} label="Alerts" disabled={busy} onChange={(alerts) => patch({ alerts })} />}
-        {!me && (
+        {isAdminRole(s.role) && s.active && <Toggle on={s.alerts} label="Alerts" disabled={busy} onChange={(alerts) => patch({ alerts })} />}
+        {!me && !(s.role === "admin" && !isFullAdmin(viewerRole)) && (
           <button type="button" disabled={busy} onClick={() => patch({ active: !s.active })} className="text-sm text-[#6B5D52] underline disabled:opacity-40">
             {s.active ? "Deactivate" : "Reactivate"}
           </button>
@@ -252,19 +280,24 @@ type Filter = "all" | "expiring" | "incomplete";
 export default function StaffManager({
   initial,
   meId,
+  viewerRole = "admin",
   notes = {},
   overview = {},
 }: {
   initial: StaffRecord[];
   meId: string;
+  viewerRole?: Role;
   notes?: Record<string, string[]>;
   overview?: Record<string, StaffOverview>;
 }) {
   const [staff, setStaff] = useState(initial);
   const [adding, setAdding] = useState(false);
   const [filter, setFilter] = useState<Filter>("all");
+  const [roleFilter, setRoleFilter] = useState<Role | "">("");
   const upsert = (s: StaffRecord) => setStaff((list) => (list.some((x) => x.id === s.id) ? list.map((x) => (x.id === s.id ? s : x)) : [s, ...list]));
-  const shown = staff.filter((s) => filter === "all" || (filter === "expiring" ? overview[s.id]?.expiringSoon : overview[s.id] && overview[s.id].done < overview[s.id].total));
+  const shown = staff
+    .filter((s) => !roleFilter || s.role === roleFilter)
+    .filter((s) => filter === "all" || (filter === "expiring" ? overview[s.id]?.expiringSoon : overview[s.id] && overview[s.id].done < overview[s.id].total));
   const active = shown.filter((s) => s.active);
   const inactive = shown.filter((s) => !s.active);
   const counts = {
@@ -280,6 +313,7 @@ export default function StaffManager({
             <h2 className="font-heading text-base font-bold text-[#2C2420] mb-2">Add a staff member</h2>
             <StaffForm
               initial={{ first: "", last: "", phone: "", role: "bartender", markets: [] }}
+              viewerRole={viewerRole}
               submitLabel="Add"
               onCancel={() => setAdding(false)}
               onSubmit={async (v) => {
@@ -315,12 +349,23 @@ export default function StaffManager({
           </button>
         ))}
       </div>
+      <label className="flex items-center gap-2 px-1 text-sm text-[#6B5D52]">
+        Role
+        <select value={roleFilter} onChange={(e) => setRoleFilter(e.target.value as Role | "")} className="rounded-lg border border-[#DDD5CC] bg-white px-2 py-1.5 text-[15px] text-[#2C2420]" aria-label="Filter by role">
+          <option value="">All roles</option>
+          {ROLES.map((r) => (
+            <option key={r} value={r}>
+              {ROLE_LABEL[r]} ({staff.filter((x) => x.role === r).length})
+            </option>
+          ))}
+        </select>
+      </label>
       <section className={card}>
         <h2 className="font-heading text-base font-bold text-[#2C2420]">Active ({active.length})</h2>
         {active.length === 0 && filter !== "all" && <p className="text-sm text-[#6B5D52] py-2">Nobody matches.</p>}
         <ul className="divide-y divide-[#DDD5CC]">
           {active.map((s) => (
-            <StaffRow key={s.id} s={s} meId={meId} onSaved={upsert} notes={notes[s.id]} overview={overview[s.id]} />
+            <StaffRow key={s.id} s={s} meId={meId} viewerRole={viewerRole} onSaved={upsert} notes={notes[s.id]} overview={overview[s.id]} />
           ))}
         </ul>
       </section>
@@ -329,7 +374,7 @@ export default function StaffManager({
           <h2 className="font-heading text-base font-bold text-[#2C2420]">Inactive ({inactive.length})</h2>
           <ul className="divide-y divide-[#DDD5CC]">
             {inactive.map((s) => (
-              <StaffRow key={s.id} s={s} meId={meId} onSaved={upsert} notes={notes[s.id]} overview={overview[s.id]} />
+              <StaffRow key={s.id} s={s} meId={meId} viewerRole={viewerRole} onSaved={upsert} notes={notes[s.id]} overview={overview[s.id]} />
             ))}
           </ul>
         </section>

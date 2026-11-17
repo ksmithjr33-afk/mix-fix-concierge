@@ -3,13 +3,14 @@ import { getCurrentStaff } from "@/lib/team/auth";
 import { getSubmittedSession } from "@/lib/team/events";
 import { firstName } from "@/lib/team/event-view";
 import { applySheetAction } from "@/lib/order-sheet-db";
+import { isAdminRole } from "@/lib/team/roles";
 
 // Order sheet edits, admins only. Bartenders (and admins in Bartender view)
 // get 403, signed out gets 401. { sessionId, action, ... } returns the sheet as it now stands.
 export async function POST(request: Request) {
   const staff = await getCurrentStaff();
   if (!staff) return NextResponse.json({ error: "Sign in again." }, { status: 401 });
-  if (staff.role !== "admin") return NextResponse.json({ error: "Admins only." }, { status: 403 });
+  if (!isAdminRole(staff.role)) return NextResponse.json({ error: "Admins only." }, { status: 403 });
   try {
     const body = await request.json().catch(() => ({}));
     if (typeof body.sessionId !== "string") return NextResponse.json({ error: "Bad request" }, { status: 400 });

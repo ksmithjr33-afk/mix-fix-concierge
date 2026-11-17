@@ -4,6 +4,7 @@ import { audienceLabel } from "@/lib/team/announcements";
 import { marketLabel } from "@/lib/team/markets";
 import TeamHeader from "../../team-header";
 import AttachmentView from "../../attachment-view";
+import { isAdminRole } from "@/lib/team/roles";
 
 export const dynamic = "force-dynamic";
 
@@ -15,7 +16,7 @@ function at(iso: string): string {
 export default async function AnnouncementPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const staff = await requireStaff(`/team/announcements/${encodeURIComponent(id)}`);
-  const admin = staff.role === "admin";
+  const admin = isAdminRole(staff.role);
   const back = { href: "/team/announcements", label: "Announcements" };
   const detail = await openAnnouncement(id, staff);
   if (!detail) {

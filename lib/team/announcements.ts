@@ -7,6 +7,7 @@
 
 import { cleanMarkets, marketTz, staffMarketsOf, type Market } from "@/lib/team/markets";
 import { inQuietHours, sendableAt } from "@/lib/team/shifts";
+import { isFieldRole } from "@/lib/team/roles";
 
 export const TITLE_MAX = 120;
 export const BODY_MAX = 2000;
@@ -46,7 +47,7 @@ export interface StaffLike {
 export function audienceOf<T extends StaffLike>(staff: T[], a: Pick<AnnouncementInput, "markets" | "bartendersOnly">, senderId: string): T[] {
   return staff.filter((s) => {
     if (!s.active || s.id === senderId) return false;
-    if (a.bartendersOnly && s.role !== "bartender") return false;
+    if (a.bartendersOnly && !isFieldRole(s.role)) return false; // everyone who works events, not admins or managers
     if (a.markets.length === 0) return true;
     return staffMarketsOf(s).some((m) => a.markets.includes(m));
   });

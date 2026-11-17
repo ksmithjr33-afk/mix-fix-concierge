@@ -39,7 +39,8 @@ export type HistoryStatus = "upcoming" | "past" | "details pending" | "hidden";
 
 export interface HistoryEntry {
   id: string;
-  title: string; // event name, else event type
+  title: string; // "Justin Reyes · Birthday", the admin title
+  subtitle: string; // the client's own event name, a second line
   day: string | null; // YYYY-MM-DD
   dateText: string; // what to show when the date cannot be read
   pkg: string;
@@ -90,7 +91,8 @@ export function historyStatus(r: ClientRow, hidden: Set<string>, today: string):
 function entry(r: ClientRow, matchedBy: "email" | "phone", hidden: Set<string>, today: string): HistoryEntry {
   return {
     id: r.id,
-    title: clean(r.ed_name) || clean(r.ed_type) || clean(r.event_name) || "Event",
+    title: [clean(r.ed_client) || clean(r.name), clean(r.ed_type)].filter(Boolean).join(" · ") || clean(r.ed_name) || clean(r.event_name) || "Event",
+    subtitle: clean(r.ed_type) || clean(r.ed_client) || clean(r.name) ? clean(r.ed_name) || clean(r.event_name) : "",
     day: rowDay(r),
     dateText: clean(r.ed_date) || clean(r.event_date) || "No date yet",
     pkg: clean(r.ed_package) || clean(r.package_type),

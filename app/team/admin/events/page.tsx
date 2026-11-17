@@ -87,7 +87,7 @@ async function AdminEventsPage({
   if (view === "hidden") {
     const hiddenItems = allSessions
       .filter((s) => hidden.has(s.id))
-      .map((s) => eventListItem(s))
+      .map((s) => eventListItem(s, undefined, { admin: true }))
       .sort((a, b) => (a.day ?? "9999").localeCompare(b.day ?? "9999"));
     return (
       <>
@@ -134,7 +134,7 @@ async function AdminEventsPage({
   const cover = new Set(postErr ? [] : ((postRows as { session_id: string; kind: string }[]) ?? []).filter((p) => p.kind === "cover").map((p) => p.session_id));
   const items = sessions.map((s) => {
     const c = counts.get(s.id)!;
-    const item = eventListItem(s, undefined, { showMarket: true });
+    const item = eventListItem(s, undefined, { showMarket: true, admin: true });
     const tone: "ok" | "warn" | "muted" = c.needed === null ? "muted" : c.stillNeeded > 0 || cover.has(s.id) ? "warn" : "ok";
     const text = [
       c.stillNeeded > 0 ? `${staffingLabel(c)} · ${c.stillNeeded} needed` : staffingLabel(c),

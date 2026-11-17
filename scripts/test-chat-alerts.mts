@@ -61,7 +61,7 @@ await post(admin, "s2", "Bring the big cooler");
 check("A bartender on an event (offered) is notified for it", (await count(b2, "s2")) === 1 && (await inbox(b2)).chats.length === 1);
 check("Counts are per person: the poster has none for their own", (await count(admin, "s2")) === 0 && (await count(admin2, "s2")) === 1);
 const a2 = await inbox(admin2);
-check("The chat list is newest first with the event name, sender's first name, the start and the time", a2.chats.map((c) => c.sessionId).join() === "s2,s1" && a2.chats[0].title === "Office Party" && a2.chats[0].latest.from === "Kenneth" && a2.chats[0].latest.text === "Bring the big cooler" && !!a2.chats[0].latest.at);
+check("The chat list is newest first with the event name, sender's first name, the start and the time", a2.chats.map((c) => c.sessionId).join() === "s2,s1" && a2.chats[0].title === "Justin Reyes · Birthday" && a2.chats[0].latest.from === "Kenneth" && a2.chats[0].latest.text === "Bring the big cooler" && !!a2.chats[0].latest.at);
 check("Admin links open the manager Chat tab; bartender links their event's Chat tab", a2.chats[0].href === "/team/admin/e/s2?tab=chat" && (await inbox(b2)).chats[0].href === "/team/e/s2?tab=chat");
 check("The total adds every chat", a2.total === 3);
 check("Only counts and the newest message per chat come back", JSON.stringify(Object.keys(a2.chats[0]).sort()) === JSON.stringify(["href", "latest", "sessionId", "title", "unread"]) && JSON.stringify(Object.keys(a2.chats[0].latest).sort()) === JSON.stringify(["at", "from", "id", "text"]));
@@ -96,7 +96,7 @@ check("A muted chat leaves that admin's icon and pop ups", (await count(admin2, 
 check("Other admins are still notified", (await count(admin, "s1")) === 1);
 check("A bartender cannot mute", !(await chatDb.setChatMuted("s1", b1, true)).ok && db.event_chat_mutes.length === 1);
 const muteRoute = src("app/api/team/chat/mute/route.ts");
-check("The mute route is admin only on the server", muteRoute.includes("getCurrentStaff()") && muteRoute.includes('if (staff.role !== "admin")'));
+check("The mute route is admin only on the server", muteRoute.includes("getCurrentStaff()") && muteRoute.includes('if (!isAdminRole(staff.role))'));
 // A muted admin who posted is not texted either.
 await post(admin2, "s1", "I'm on it");
 texts.length = 0;

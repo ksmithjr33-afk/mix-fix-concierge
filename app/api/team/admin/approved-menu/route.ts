@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCurrentStaff } from "@/lib/team/auth";
 import { finishMenuUpload, setApprovedOn, startMenuUpload } from "@/lib/team/approved-menu-db";
+import { isAdminRole } from "@/lib/team/roles";
 
 // The approved menu, admins only. POST { action }:
 //   "start"  { sessionId, type, size, name }: returns a one time upload link
@@ -9,7 +10,7 @@ import { finishMenuUpload, setApprovedOn, startMenuUpload } from "@/lib/team/app
 export async function POST(request: Request) {
   const staff = await getCurrentStaff();
   if (!staff) return NextResponse.json({ error: "Sign in again." }, { status: 401 });
-  if (staff.role !== "admin") return NextResponse.json({ error: "Admins only." }, { status: 403 });
+  if (!isAdminRole(staff.role)) return NextResponse.json({ error: "Admins only." }, { status: 403 });
   try {
     const b = (await request.json().catch(() => ({}))) as Record<string, unknown>;
     if (b.action === "start") {

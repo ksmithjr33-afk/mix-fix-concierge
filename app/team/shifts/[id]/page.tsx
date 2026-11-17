@@ -7,6 +7,7 @@ import RequestButton from "./request-button";
 import { certNoticeForPost } from "@/lib/team/certs-db";
 import { myEstimateForPost } from "@/lib/team/pay-db";
 import { PAY_LABEL } from "@/lib/team/pay";
+import { isAdminRole } from "@/lib/team/roles";
 
 export const dynamic = "force-dynamic";
 
@@ -20,7 +21,7 @@ export default async function ShiftPage({ params }: { params: Promise<{ id: stri
 
   return (
     <>
-      <TeamHeader signedIn admin={staff.role === "admin"} back={back} />
+      <TeamHeader signedIn admin={isAdminRole(staff.role)} back={back} />
       <main className="max-w-md mx-auto px-4 py-6 space-y-4">
         {page.state === "gone" && <p className="text-[15px] text-[#6B5D52] text-center py-6">This shift is no longer open.</p>}
         {page.state === "got" && (

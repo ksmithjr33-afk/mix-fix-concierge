@@ -4,12 +4,13 @@
 // undoes or blocks the change that triggered it.
 
 import { supabase } from "@/lib/supabase";
+import { isFullAdmin } from "@/lib/team/roles";
 import { NEEDS_CONFIRM } from "@/lib/team/availability";
 import type { SessionRow } from "@/lib/event-updates";
 import { normalizePhone } from "@/lib/team/codes";
 import { bartendersNeeded, firstName, type StaffMember } from "@/lib/team/event-view";
 import { eventTitle } from "@/lib/team/event-list";
-import { alertAdmins, checkSnapshot, getConfirmation, getSubmittedSession } from "@/lib/team/events";
+import { alertAdmins, checkSnapshot, getConfirmation, getSubmittedSession, suppliesConfirmation } from "@/lib/team/events";
 import { sendStaffText } from "@/lib/team/sms";
 import type { Supplies } from "@/lib/team/supplies";
 import { isHidden } from "@/lib/team/hidden";
@@ -24,6 +25,7 @@ import {
   declineText,
   removalText,
   selfChangeError,
+  managerLimitError,
   staffingCounts,
   statusAfter,
   notifyAssignedStaff,
@@ -56,10 +58,12 @@ function duplicatePhone(message: string): boolean {
   return /duplicate key|unique/i.test(message);
 }
 
-/** Add a staff member. A market is required: nobody is added to a market by default. */
-export async function createStaff(raw: Record<string, unknown>): Promise<SaveResult> {
+/** Add a staff member. A market is required: nobody is added to a market by default. Only an admin can add an admin. */
+export async function createStaff(raw: Record<string, unknown>, actor?: Pick<StaffMember, "role">): Promise<SaveResult> {
   const valid = validateStaffInput(raw, normalizePhone, { requireMarkets: true });
   if (!valid.ok) return valid;
+  const limit = managerLimitError(actor?.role ?? "admin", null, { role: valid.value.role });
+  if (limit) return { ok: false, error: limit };
   const { data, error } = await supabase
     .from("staff")
     .insert({ ...valid.value, active: true, alerts: true })
@@ -86,8 +90,14 @@ export async function updateStaff(actor: StaffMember, id: string, raw: Record<st
   }
   if (Object.keys(patch).length === 0) return { ok: false, error: "Nothing to change." };
 
-  const selfError = selfChangeError(actor.id, id, patch as { active?: boolean; role?: string });
+  const selfError = selfChangeError(actor.id, id, patch as { active?: boolean; role?: string }, actor.role);
   if (selfError) return { ok: false, error: selfError };
+  // Managers: never make an admin, change an admin's role, or deactivate an admin.
+  if (!isFullAdmin(actor.role)) {
+    const { data: target } = await supabase.from("staff").select("role").eq("id", id).maybeSingle();
+    const limit = managerLimitError(actor.role, (target as { role?: string } | null)?.role ?? null, patch as { active?: boolean; role?: string });
+    if (limit) return { ok: false, error: limit };
+  }
 
   const { data, error } = await supabase.from("staff").update(patch).eq("id", id).select(STAFF_COLUMNS).maybeSingle();
   if (error) return { ok: false, error: duplicatePhone(error.message) ? "Someone on the team already has that phone number." : "Could not save. Try again." };
@@ -288,13 +298,15 @@ export async function staffingByEvent(sessions: SessionRow[]): Promise<Map<strin
 export interface AssigneeProgress {
   staffId: string;
   name: string;
+  role: string; // "bar_back"; shown next to the name for everyone but bartenders
   phone: string;
   status: AssignmentStatus;
   assignedAt: string;
   respondedAt: string | null;
   checklist: { checked: number; total: number };
   shopping: { checked: number; total: number };
-  confirmedAt: string | null;
+  confirmedAt: string | null; // step 1, Tools
+  suppliesConfirmedAt: string | null; // step 2, Supplies
   barReadyAt: string | null;
   clockIn: string | null;
   clockOut: string | null;
@@ -323,10 +335,11 @@ export async function assigneeProgress(session: SessionRow, supplies?: Supplies)
     rows.map(async (r) => {
       const s = staff.get(r.staff_id);
       const member = s ?? { id: r.staff_id, name: "", phone: "", role: "bartender" as const, active: false, alerts: false };
-      const [snap, confirmedAt] = await Promise.all([checkSnapshot(session, member, supplies), getConfirmation(r.staff_id, session.id)]);
+      const [snap, confirmedAt, suppliesConfirmedAt] = await Promise.all([checkSnapshot(session, member, supplies), getConfirmation(r.staff_id, session.id), suppliesConfirmation(r.staff_id, session.id)]);
       return {
         staffId: r.staff_id,
         name: s?.name || "Removed staff member",
+        role: s?.role ?? "bartender",
         phone: s?.phone ?? "",
         status: r.status,
         assignedAt: r.assigned_at,
@@ -334,6 +347,7 @@ export async function assigneeProgress(session: SessionRow, supplies?: Supplies)
         checklist: { checked: snap.checklistChecked, total: snap.checklistTotal },
         shopping: { checked: snap.shoppingChecked, total: snap.shoppingTotal },
         confirmedAt: snap.checklistChecked === snap.checklistTotal ? confirmedAt : null,
+        suppliesConfirmedAt,
         barReadyAt: firstBar.get(r.staff_id) ?? null,
         ...(() => {
           const mine = punches.filter((p) => p.staff_id === r.staff_id);

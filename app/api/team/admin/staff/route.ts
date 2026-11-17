@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
 import { getCurrentStaff } from "@/lib/team/auth";
 import { createStaff, updateStaff } from "@/lib/team/assignments-db";
+import { isAdminRole } from "@/lib/team/roles";
 
 async function admin() {
   const staff = await getCurrentStaff();
   if (!staff) return { error: NextResponse.json({ error: "Sign in again." }, { status: 401 }) };
-  if (staff.role !== "admin") return { error: NextResponse.json({ error: "Admins only." }, { status: 403 }) };
+  if (!isAdminRole(staff.role)) return { error: NextResponse.json({ error: "Admins only." }, { status: 403 }) };
   return { staff };
 }
 
@@ -15,7 +16,7 @@ export async function POST(request: Request) {
   if (a.error) return a.error;
   try {
     const body = await request.json().catch(() => ({}));
-    const result = await createStaff(body);
+    const result = await createStaff(body, a.staff);
     if (!result.ok) return NextResponse.json({ error: result.error }, { status: 400 });
     return NextResponse.json({ ok: true, staff: result.staff });
   } catch (err) {

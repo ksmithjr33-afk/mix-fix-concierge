@@ -5,7 +5,7 @@
 import { supabase } from "@/lib/supabase";
 import type { SessionRow } from "@/lib/event-updates";
 import { firstName, type StaffMember } from "@/lib/team/event-view";
-import { eventTitle } from "@/lib/team/event-list";
+import { eventTitle, adminEventTitle } from "@/lib/team/event-list";
 import { alertAdmins, checkSnapshot, hasMissingReports } from "@/lib/team/events";
 import { sendStaffText } from "@/lib/team/sms";
 import {
@@ -153,7 +153,7 @@ export async function submitBarReady(opts: {
   const totals = snapshotTotals(snap);
   const message = barReadyText({
     firstName: firstName(staff.name),
-    eventTitle: eventTitle(session.event_data ?? {}),
+    eventTitle: adminEventTitle(session.event_data ?? {}),
     checked: totals.checked,
     total: totals.total,
     missingReported: missing,

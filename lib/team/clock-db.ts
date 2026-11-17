@@ -9,7 +9,7 @@
 import { supabase } from "@/lib/supabase";
 import type { SessionRow } from "@/lib/event-updates";
 import { firstName, type StaffMember } from "@/lib/team/event-view";
-import { eventTitle } from "@/lib/team/event-list";
+import { eventTitle, adminEventTitle } from "@/lib/team/event-list";
 import { alertAdmins } from "@/lib/team/events";
 import { hiddenEventIds } from "@/lib/team/hidden";
 import { geocodeAddress } from "@/lib/team/geocode";
@@ -251,7 +251,7 @@ export async function sendLateSetupAlerts(now: Date = new Date()): Promise<numbe
     const ed = eventData(s);
     if (!lateSetupDue(ed, now, { hasStaff: true, hasBarReady: hasReady.has(s.id) })) continue;
     if (!(await claimNotice(noticeKey.lateSetup(s.id), "late_setup"))) continue;
-    const message = lateSetupText({ title: eventTitle(ed), startTime: serviceStartLabel(ed), link: `${siteOrigin()}/team/admin/e/${s.id}` });
+    const message = lateSetupText({ title: adminEventTitle(ed), startTime: serviceStartLabel(ed), link: `${siteOrigin()}/team/admin/e/${s.id}` });
     const admins = await alertAdmins();
     const results = await Promise.all(admins.map((a) => sendStaffText(a.phone, a.name, message)));
     if (results.some(Boolean)) sent++;

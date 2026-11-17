@@ -22,6 +22,7 @@ import {
   releaseFirstList,
   type Actor,
 } from "@/lib/client-list-db";
+import { isAdminRole } from "@/lib/team/roles";
 
 export type HoldResult = { ok: true; message: string } | { ok: false; error: string; status: number };
 
@@ -38,7 +39,7 @@ async function pendingHold(holdId: unknown, sessionId: unknown, kind: "change" |
 
 /** Approve: apply the request (no six day cutoff, the engine's price), send the list with reason "approved", and tell GHL. */
 export async function approveHold(admin: StaffMember, sessionId: unknown, holdId: unknown, origin: string): Promise<HoldResult> {
-  if (admin.role !== "admin") return { ok: false, error: "Admins only.", status: 403 };
+  if (!isAdminRole(admin.role)) return { ok: false, error: "Admins only.", status: 403 };
   const hold = await pendingHold(holdId, sessionId, "change");
   if (!hold) return { ok: false, error: "We could not find that held change.", status: 404 };
   if (hold.status !== "pending") return { ok: false, error: "That change was already decided.", status: 409 };
@@ -69,7 +70,7 @@ export async function approveHold(admin: StaffMember, sessionId: unknown, holdId
 
 /** Decline: the event stays as it is, and GHL gets change_request_declined (and list_change_declined) so it can text the client. */
 export async function declineHold(admin: StaffMember, sessionId: unknown, holdId: unknown): Promise<HoldResult> {
-  if (admin.role !== "admin") return { ok: false, error: "Admins only.", status: 403 };
+  if (!isAdminRole(admin.role)) return { ok: false, error: "Admins only.", status: 403 };
   const hold = await pendingHold(holdId, sessionId, "change");
   if (!hold) return { ok: false, error: "We could not find that held change.", status: 404 };
   const by = actor(admin);
@@ -86,7 +87,7 @@ export async function declineHold(admin: StaffMember, sessionId: unknown, holdId
 
 /** Review and send: the first list of an event with a custom recipe, after an admin checked it. */
 export async function reviewAndSend(admin: StaffMember, sessionId: unknown, holdId: unknown): Promise<HoldResult> {
-  if (admin.role !== "admin") return { ok: false, error: "Admins only.", status: 403 };
+  if (!isAdminRole(admin.role)) return { ok: false, error: "Admins only.", status: 403 };
   const hold = await pendingHold(holdId, sessionId, "custom_recipe");
   if (!hold) return { ok: false, error: "We could not find that held list.", status: 404 };
   const by = actor(admin);

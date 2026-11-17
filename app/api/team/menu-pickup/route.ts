@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCurrentStaff } from "@/lib/team/auth";
 import { markPickedUp, savePickup, undoPickedUp } from "@/lib/team/menu-pickup-db";
+import { isAdminRole } from "@/lib/team/roles";
 
 // The cocktail menu pickup. POST { sessionId, action }:
 //   "save" (admins): store, store_other, location_note, order_number, assignee_id, not_needed
@@ -20,7 +21,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true, line: r.line });
     }
     if (body.action !== "save" && body.action !== "undo") return NextResponse.json({ error: "Bad request" }, { status: 400 });
-    if (staff.role !== "admin") return NextResponse.json({ error: "Admins only." }, { status: 403 });
+    if (!isAdminRole(staff.role)) return NextResponse.json({ error: "Admins only." }, { status: 403 });
     const r = body.action === "undo" ? await undoPickedUp(sessionId, staff) : await savePickup(sessionId, staff, body);
     if (!r.ok) return NextResponse.json({ error: r.error }, { status: r.status });
     return NextResponse.json({ ok: true, view: r.view });

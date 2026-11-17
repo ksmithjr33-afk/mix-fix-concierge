@@ -3,6 +3,7 @@ import { handoffForTeammate } from "@/lib/team/shifts-db";
 import TeamHeader from "../../team-header";
 import ShiftCard from "../../shifts/shift-card";
 import Answer from "./answer";
+import { isAdminRole } from "@/lib/team/roles";
 
 export const dynamic = "force-dynamic";
 
@@ -13,7 +14,7 @@ export default async function HandoffPage({ params }: { params: Promise<{ id: st
   const h = await handoffForTeammate(id, staff);
   return (
     <>
-      <TeamHeader signedIn admin={staff.role === "admin"} back={{ href: "/team/events", label: "Your events" }} />
+      <TeamHeader signedIn admin={isAdminRole(staff.role)} back={{ href: "/team/events", label: "Your events" }} />
       <main className="max-w-md mx-auto px-4 py-6 space-y-4">
         {!h ? (
           <p className="text-[15px] text-[#6B5D52] text-center py-6">We could not find that request.</p>

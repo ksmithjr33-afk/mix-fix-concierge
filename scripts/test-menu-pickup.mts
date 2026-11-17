@@ -39,6 +39,8 @@ function reset() {
 }
 const row = (id = "s1") => db.event_menu_pickups.find((r) => r.session_id === id) as Record<string, unknown> | undefined;
 const noClient = (s: string) => !/Reyes|justin@example|972\D*555\D*0199/.test(s);
+// Admin alerts carry the client's full name (admins see it everywhere), never their email or phone.
+const noContact = (s: string) => !/justin@example|972\D*555\D*0199/.test(s);
 const FORM = { store: "walgreens", location_note: "Lemmon Ave, photo counter", order_number: "88231", assignee_id: "b1" };
 
 // ----- 1. Assignment -----
@@ -92,7 +94,7 @@ check("An admin can mark it picked up for the person", (await mpDb.markPickedUp(
 reset();
 check("Nothing to mark when nobody is assigned", !(await mpDb.markPickedUp("s1", admin, noon)).ok);
 const route = src("app/api/team/menu-pickup/route.ts");
-check("The route needs a sign in, and save and undo are admin only on the server", route.includes("getCurrentStaff()") && route.includes('if (staff.role !== "admin") return NextResponse.json({ error: "Admins only." }, { status: 403 });'));
+check("The route needs a sign in, and save and undo are admin only on the server", route.includes("getCurrentStaff()") && route.includes('if (!isAdminRole(staff.role)) return NextResponse.json({ error: "Admins only." }, { status: 403 });'));
 
 // ----- 3. The assigned person's own card -----
 reset();
@@ -152,7 +154,7 @@ reset();
 await mpDb.sendMenuPickupNotices(at("2026-12-04", 10)); // 30 hours out
 check("No admin alert more than 24 hours out", texts.length === 0);
 await mpDb.sendMenuPickupNotices(at("2026-12-04", 16, 30)); // 23.5 hours out
-check("Nobody assigned 24 hours out: one alert to each admin", textsTo(admin).length === 1 && textsTo(admin2).length === 1 && /Nobody is assigned/.test(textsTo(admin)[0].message) && noClient(textsTo(admin)[0].message));
+check("Nobody assigned 24 hours out: one alert to each admin", textsTo(admin).length === 1 && textsTo(admin2).length === 1 && /Nobody is assigned/.test(textsTo(admin)[0].message) && noContact(textsTo(admin)[0].message));
 await mpDb.sendMenuPickupNotices(at("2026-12-04", 16, 35));
 check("The admin alert goes once", textsTo(admin).length === 1);
 check("Bartenders get no admin alert", textsTo(taylor).length === 0 && textsTo(sam).length === 0);

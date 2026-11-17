@@ -64,7 +64,7 @@ check("A bartender lands on the bartender view exactly as before", tabs.eventLan
 
 const eventPage = src("app/team/e/[id]/page.tsx");
 check("The event page sends admins on before loading any event data", eventPage.indexOf("redirect(landing)") > 0 && eventPage.indexOf("redirect(landing)") < eventPage.indexOf("openEvent("));
-check("The bartender view offers admins Back to manager view", src("app/team/e/[id]/event-tabs.tsx").includes("Back to manager view") && eventPage.includes('managerHref={staff.role === "admin"'));
+check("The bartender view offers admins Back to manager view", src("app/team/e/[id]/event-tabs.tsx").includes("Back to manager view") && eventPage.includes('managerHref={isAdminRole(staff.role)'));
 check("Manage staff for this event is gone", !src("app/team/e/[id]/event-tabs.tsx").includes("Manage staff for this event"));
 check("Admin event lists open the manager view", src("lib/team/my-events.ts").includes("href: `/team/admin/e/${r.id}`") && src("app/team/admin/events/page.tsx").includes("href: `/team/admin/e/${s.id}`"));
 
@@ -89,7 +89,7 @@ check("Shopping list: the full order sheet inside the tab", has("order", "<Order
 check("Client list: list, auto send, held changes, Review and send, the log", has("client", "<ClientListPanel", "holds=", "log=", "autoSend=", "listText="));
 check("Day of: bar setup photos, each bartender's lists, missing reports, wrap ups, time punches", has("dayof", "<BarReadyCard", "<BartenderLists", "<MissingReports", "<Closeouts", "<TimePunches"));
 check("Chat: the event team chat with Message team", has("chat", "<ManagerChat") && src("app/team/admin/e/[id]/manager-chat.tsx").includes("Message team"));
-check("The header: name, date and times, market, guests, package, and Bartender view of this event", page.includes("eventTitle(ed)") && page.includes("v.serviceStart") && page.includes("v.market") && page.includes("v.guestCount") && page.includes("v.package") && page.includes("?as=bartender`} ") && page.includes("Bartender view of this event"));
+check("The header: name, date and times, market, guests, package, and Bartender view of this event", page.includes("adminEventTitle(ed)") && page.includes("v.serviceStart") && page.includes("v.market") && page.includes("v.guestCount") && page.includes("v.package") && page.includes("?as=bartender`} ") && page.includes("Bartender view of this event"));
 check("No staffing page wording on the event page", !/Staffing/.test(page) && !/staffing page/i.test(page));
 check("Assign panel features stay: progress moves to Day of, not removed", src("app/team/admin/e/[id]/assign-panel.tsx").includes("showProgress") && src("app/team/admin/e/[id]/day-of.tsx").includes("<Bar label={title}"));
 
@@ -120,7 +120,7 @@ const walk = (dir: string) => {
   }
 };
 walk("app/api/team/admin");
-check("Every admin route checks for an admin on the server", routes.length >= 15 && routes.every((r) => /role !== "admin"/.test(src(r))), routes.filter((r) => !/role !== "admin"/.test(src(r))).join(", "));
+check("Every admin route checks for an admin on the server", routes.length >= 15 && routes.every((r) => /isAdminRole\(/.test(src(r))), routes.filter((r) => !/isAdminRole\(/.test(src(r))).join(", "));
 const tabRoutes = ["assign", "shifts", "handoff", "market", "hide", "event-edit", "client-list", "order-sheet", "stores"];
 check("The routes behind the tabs are all admin routes", tabRoutes.every((r) => existsSync(new URL(`../app/api/team/admin/${r}/route.ts`, import.meta.url))));
 check("Admin pages are all behind requireAdmin", ["app/team/admin/e/[id]/page.tsx", "app/team/admin/e/[id]/order/page.tsx", "app/team/admin/stores/page.tsx"].every((p) => src(p).includes("await requireAdmin(")));

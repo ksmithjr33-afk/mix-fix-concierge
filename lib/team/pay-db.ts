@@ -9,6 +9,7 @@ import type { StaffMember } from "@/lib/team/event-view";
 import { eventData } from "@/lib/team/markets";
 import { timesheetRows } from "@/lib/team/timesheet-db";
 import { estimatedPayCents, money, payCents, scheduledMinutes, validateRate, type PayRow } from "@/lib/team/pay";
+import { isAdminRole } from "@/lib/team/roles";
 
 type Result<T = object> = ({ ok: true } & T) | { ok: false; error: string; status: number };
 
@@ -29,7 +30,7 @@ export async function rateFor(staffId: string): Promise<number | null> {
 
 /** Everyone's rates, for admin pages and the admin CSV only. */
 export async function ratesFor(admin: StaffMember, staffIds: string[]): Promise<Map<string, number>> {
-  if (admin.role !== "admin" || staffIds.length === 0) return new Map();
+  if (!isAdminRole(admin.role) || staffIds.length === 0) return new Map();
   const { data, error } = await supabase.from("staff_pay_rates").select("staff_id, hourly_rate_cents").in("staff_id", [...new Set(staffIds)]);
   if (error || !data) return new Map();
   return new Map((data as { staff_id: string; hourly_rate_cents: number }[]).filter((r) => r.hourly_rate_cents > 0).map((r) => [r.staff_id, r.hourly_rate_cents]));
@@ -37,7 +38,7 @@ export async function ratesFor(admin: StaffMember, staffIds: string[]): Promise<
 
 /** Set or clear a rate. Admins only. */
 export async function setRate(admin: StaffMember, staffId: string, raw: unknown, now: Date = new Date()): Promise<Result<{ cents: number | null }>> {
-  if (admin.role !== "admin") return { ok: false, error: "Admins only.", status: 403 };
+  if (!isAdminRole(admin.role)) return { ok: false, error: "Admins only.", status: 403 };
   const v = validateRate(raw);
   if (!v.ok) return { ok: false, error: v.error, status: 400 };
   const { data: p } = await supabase.from("staff").select("id").eq("id", staffId).maybeSingle();

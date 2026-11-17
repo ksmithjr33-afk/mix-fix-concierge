@@ -13,6 +13,7 @@ import { siteOrigin } from "@/lib/team/clock-db";
 import { inQuietHours } from "@/lib/team/shifts";
 import { attach, attachmentKind, attachmentViews, claimAttachment, type AttachmentView } from "@/lib/team/media-db";
 import { announcementSendAfter, announcementText, audienceOf, recipientTz, validateAnnouncement, type StaffLike } from "@/lib/team/announcements";
+import { isAdminRole } from "@/lib/team/roles";
 
 interface AnnouncementRow {
   id: string;
@@ -51,7 +52,7 @@ export async function createAnnouncement(
   raw: Record<string, unknown>,
   now: Date = new Date()
 ): Promise<Result<{ id: string; recipients: number; texted: number; held: number }>> {
-  if (admin.role !== "admin") return { ok: false, error: "Admins only.", status: 403 };
+  if (!isAdminRole(admin.role)) return { ok: false, error: "Admins only.", status: 403 };
   const v = validateAnnouncement(raw);
   if (!v.ok) return { ok: false, error: v.error, status: 400 };
   const a = v.value;
@@ -147,7 +148,7 @@ export async function announcementsFor(staff: StaffMember): Promise<Announcement
   if (error) return []; // before the tables exist
   const myRows = new Map(((mine as RecipientRow[]) ?? []).map((r) => [r.announcement_id, r]));
   let rows: AnnouncementRow[];
-  if (staff.role === "admin") {
+  if (isAdminRole(staff.role)) {
     const { data } = await supabase.from("announcements").select("*").order("created_at", { ascending: false });
     rows = (data as AnnouncementRow[]) ?? [];
   } else {
@@ -156,7 +157,7 @@ export async function announcementsFor(staff: StaffMember): Promise<Announcement
     rows = (data as AnnouncementRow[]) ?? [];
   }
   let stats = new Map<string, { opened: number; total: number }>();
-  if (staff.role === "admin" && rows.length) {
+  if (isAdminRole(staff.role) && rows.length) {
     const { data } = await supabase.from("announcement_recipients").select("announcement_id, opened_at").in("announcement_id", rows.map((r) => r.id));
     stats = new Map();
     for (const r of (data as Pick<RecipientRow, "announcement_id" | "opened_at">[]) ?? []) {
@@ -175,7 +176,7 @@ export async function announcementsFor(staff: StaffMember): Promise<Announcement
       createdAt: a.created_at,
       unread: !!myRows.get(a.id) && !myRows.get(a.id)!.opened_at,
       audience: { markets: a.markets ?? [], bartenders_only: a.bartenders_only },
-      ...(staff.role === "admin" ? { opened: stats.get(a.id)?.opened ?? 0, recipients: stats.get(a.id)?.total ?? 0 } : {}),
+      ...(isAdminRole(staff.role) ? { opened: stats.get(a.id)?.opened ?? 0, recipients: stats.get(a.id)?.total ?? 0 } : {}),
     }));
 }
 
@@ -192,12 +193,12 @@ export async function openAnnouncement(id: string, staff: StaffMember, now: Date
   const row = a as AnnouncementRow;
   const { data: mine } = await supabase.from("announcement_recipients").select("*").eq("announcement_id", id).eq("staff_id", staff.id).maybeSingle();
   const me = (mine as RecipientRow | null) ?? null;
-  if (!me && staff.role !== "admin") return null;
+  if (!me && !isAdminRole(staff.role)) return null;
   if (me && !me.opened_at) {
     await supabase.from("announcement_recipients").update({ opened_at: now.toISOString() }).eq("id", me.id).is("opened_at", null);
   }
   let opens: AnnouncementDetail["opens"] = null;
-  if (staff.role === "admin") {
+  if (isAdminRole(staff.role)) {
     const { data: rs } = await supabase.from("announcement_recipients").select("*").eq("announcement_id", id);
     const recips = (rs as RecipientRow[]) ?? [];
     const { data: ss } = recips.length ? await supabase.from("staff").select("id, name").in("id", recips.map((r) => r.staff_id)) : { data: [] };

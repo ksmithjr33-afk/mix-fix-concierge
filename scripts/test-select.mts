@@ -103,7 +103,7 @@ check("The admin is not texted", textsTo(admin).length === 0);
 check("Result counts texts", r.ok && r.texted === 4 && r.held === 0, JSON.stringify(r));
 const msg = r.ok ? shifts.selectedMessage(r) : "";
 check("Result line: posted, texts, skipped with why", msg.startsWith("Posted 3 shifts. 4 texts sent, one per bartender per market. Skipped 6:") && msg.includes("Full One (fully staffed)") && msg.includes("Far One (no market)"), msg);
-check("Result line never names the client", !/Reyes|justin@example/.test(msg));
+check("Result line never carries client contact details (admins see the client's full name)", !/justin@example|972\D*555/.test(msg) && msg.includes("Justin Reyes · Birthday, Full One (fully staffed)"));
 check("Posting the same selection again posts nothing", await (async () => { const again = await shiftsDb.postSelected(admin, ["au1", "da1"], NOON); return again.ok && again.posted === 0 && again.skipped.every((s) => s.reason === "already posted") && texts.length === 4; })());
 
 // ----- Quiet hours -----
@@ -122,7 +122,7 @@ check("An empty selection is refused", !(await shiftsDb.postSelected(admin, [], 
 check("A selection over the limit is refused", !(await shiftsDb.postSelected(admin, Array.from({ length: shifts.SELECT_MAX + 1 }, (_, i) => `x${i}`), NOON)).ok);
 check("A non-list selection is refused", !(await shiftsDb.postSelected(admin, "au1", NOON)).ok);
 const route = src("app/api/team/admin/shifts/route.ts");
-check("The route is admin only and has post_selected", route.includes('body.action === "post_selected"') && route.includes('role !== "admin"'));
+check("The route is admin only and has post_selected", route.includes('body.action === "post_selected"') && route.includes('isAdminRole('));
 check("Post all unstaffed still works", (await shiftsDb.postAllUnstaffed(admin, null, NOON)).posted === 3);
 
 done("select");

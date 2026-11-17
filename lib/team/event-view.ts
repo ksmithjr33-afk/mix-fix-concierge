@@ -12,12 +12,13 @@ import { isBottleRequest } from "@/lib/shopping-list";
 import { recapLines, type FieldChange } from "@/lib/event-diff";
 import { chicagoStamp, eventDayStart, eventSchedule, formatClock, longDate } from "@/lib/team/time";
 import { eventData, marketLabel, sessionMarket } from "@/lib/team/markets";
+import { isAdminRole, type Role } from "@/lib/team/roles";
 
 export const MIX_FIX_LINE = "469 754 8512";
 export const PHONE_HIDDEN_NOTE = "Contact number appears 48 hours before the event.";
 const PHONE_LEAD_MS = 48 * 60 * 60 * 1000;
 
-export type StaffRole = "bartender" | "admin";
+export type StaffRole = Role;
 
 export interface StaffMember {
   id: string;
@@ -34,7 +35,7 @@ export interface AssignmentLike {
 /** Admins open every event. Bartenders open only events they are assigned to and have not declined. */
 export function canOpenEvent(staff: StaffMember | null, assignment: AssignmentLike | null): boolean {
   if (!staff || !staff.active) return false;
-  if (staff.role === "admin") return true;
+  if (isAdminRole(staff.role)) return true;
   return !!assignment && assignment.status !== "declined";
 }
 

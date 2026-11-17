@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
 import { getCurrentStaff } from "@/lib/team/auth";
 import { previewAdminEdit, saveAdminEdit } from "@/lib/team/admin-edit-db";
+import { isAdminRole } from "@/lib/team/roles";
 
 async function admin() {
   const staff = await getCurrentStaff();
   if (!staff) return { error: NextResponse.json({ error: "Sign in again." }, { status: 401 }) };
-  if (staff.role !== "admin") return { error: NextResponse.json({ error: "Admins only." }, { status: 403 }) };
+  if (!isAdminRole(staff.role)) return { error: NextResponse.json({ error: "Admins only." }, { status: 403 }) };
   return { staff };
 }
 

@@ -32,6 +32,7 @@ import {
   type ProfileRow,
   type ProfileView,
 } from "@/lib/team/profile";
+import { roleLabel, isAdminRole } from "@/lib/team/roles";
 
 type Result<T = object> = ({ ok: true } & T) | { ok: false; error: string; status: number };
 
@@ -152,7 +153,7 @@ export interface StaffOverview {
 
 /** Admins only: per person, what the Staff page shows at a glance. */
 export async function staffOverview(viewer: StaffMember, staff: Person[], now: Date = new Date()): Promise<Record<string, StaffOverview>> {
-  if (viewer.role !== "admin") return {};
+  if (!isAdminRole(viewer.role)) return {};
   const ids = staff.map((s) => s.id);
   const [profiles, certs] = await Promise.all([profilesFor(ids), certRows(ids)]);
   const out: Record<string, StaffOverview> = {};
@@ -186,7 +187,7 @@ function prettyPhone(p: string): string {
 
 /** Admins only: every staff profile as CSV. Null for anyone else. */
 export async function staffCsv(viewer: StaffMember, now: Date = new Date()): Promise<string | null> {
-  if (viewer.role !== "admin" || !viewer.active) return null;
+  if (!isAdminRole(viewer.role) || !viewer.active) return null;
   const { data } = await supabase.from("staff").select("*").order("name");
   const staff = (data as Person[]) ?? [];
   const [profiles, overview] = await Promise.all([profilesFor(staff.map((s) => s.id)), staffOverview(viewer, staff, now)]);
@@ -196,7 +197,7 @@ export async function staffCsv(viewer: StaffMember, now: Date = new Date()): Pro
     const o = overview[s.id];
     return [
       s.name,
-      s.role === "admin" ? "Admin" : "Bartender",
+      roleLabel(s.role),
       s.active ? "Yes" : "No",
       prettyPhone(s.phone),
       p?.email ?? "",

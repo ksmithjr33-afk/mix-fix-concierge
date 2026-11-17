@@ -4,6 +4,7 @@
 import { staffChange, type StaffMember } from "@/lib/team/event-view";
 import { eventDay, shortDate } from "@/lib/team/time";
 import { cleanMarkets, DEFAULT_MARKET, type Market } from "@/lib/team/markets";
+import { isFullAdmin, isRole, type Role, isAdminRole } from "@/lib/team/roles";
 
 export type AssignmentStatus = "offered" | "accepted" | "declined";
 export type Response = "accept" | "decline";
@@ -16,7 +17,7 @@ export interface StaffRecord extends StaffMember {
 
 /** Admin alert texts (declines, missing items, bar ready) go only to active admins with alerts on. */
 export function alertRecipients<T extends { role: string; active: boolean; alerts?: boolean | null }>(staff: T[]): T[] {
-  return staff.filter((s) => s.role === "admin" && s.active && s.alerts !== false);
+  return staff.filter((s) => isAdminRole(s.role) && s.active && s.alerts !== false);
 }
 
 /** Offered staff can accept or decline. Accepted staff can still decline. Declined is final until an admin assigns again. */
@@ -74,7 +75,7 @@ export const ROLES = ["bartender", "admin"] as const;
 export interface StaffInput {
   name: string;
   phone: string;
-  role: "bartender" | "admin";
+  role: Role;
   markets: Market[];
 }
 
@@ -92,7 +93,7 @@ export function validateStaffInput(
   if (!first || !last) return { ok: false, error: "Enter a first and last name." };
   const phone = normalizePhone(raw.phone);
   if (!phone) return { ok: false, error: "Enter a 10 digit phone number." };
-  const role = raw.role === "admin" ? "admin" : raw.role === "bartender" || raw.role === undefined ? "bartender" : null;
+  const role: Role | null = raw.role === undefined ? "bartender" : isRole(raw.role) ? raw.role : null;
   if (!role) return { ok: false, error: "Pick a role." };
   // Markets: at least one. Adding someone always needs one picked; an edit from
   // a form that predates markets counts as Dallas.
@@ -101,11 +102,27 @@ export function validateStaffInput(
   return { ok: true, value: { name: `${first} ${last}`, phone, role, markets } };
 }
 
-/** Admins cannot deactivate themselves or drop their own admin role, so nobody locks the team out by accident. */
-export function selfChangeError(actorId: string, targetId: string, patch: { active?: boolean; role?: string }): string | null {
+/** Admins and managers cannot deactivate themselves or change their own role, so nobody locks the team out by accident. */
+export function selfChangeError(actorId: string, targetId: string, patch: { active?: boolean; role?: string }, actorRole: string = "admin"): string | null {
   if (actorId !== targetId) return null;
   if (patch.active === false) return "You cannot deactivate yourself.";
-  if (patch.role !== undefined && patch.role !== "admin") return "You cannot remove your own admin role.";
+  if (patch.role !== undefined && patch.role !== actorRole) return actorRole === "manager" ? "You cannot change your own role." : "You cannot remove your own admin role.";
+  return null;
+}
+
+/**
+ * What a manager may not do, checked on the server: make someone an admin,
+ * change an admin's role, or deactivate an admin. Admins may do all of it.
+ * targetRole is null when adding someone new.
+ */
+export function managerLimitError(actorRole: string, targetRole: string | null, patch: { active?: boolean; role?: string }): string | null {
+  if (isFullAdmin(actorRole)) return null;
+  if (targetRole === "admin") {
+    if (patch.active === false) return "Only an admin can deactivate an admin.";
+    if (patch.role !== undefined && patch.role !== "admin") return "Only an admin can change an admin's role.";
+  } else if (patch.role === "admin") {
+    return "Only an admin can make someone an admin.";
+  }
   return null;
 }
 

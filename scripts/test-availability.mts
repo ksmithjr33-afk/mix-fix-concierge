@@ -58,7 +58,7 @@ function reset() {
 reset();
 const add = await avDb.addUnavailable(signedIn(b1), { start: day10, end: day12, note: "Family trip" }, NOON);
 check("A bartender can mark a range unavailable", add.ok && db.staff_unavailability.length === 1 && db.staff_unavailability[0].start_day === day10 && db.staff_unavailability[0].note === "Family trip");
-check("Marking a day with an accepted event warns them to give it up", add.ok && add.warnings.length === 1 && add.warnings[0].includes("Austin Two") && add.warnings[0].includes('"Give up this shift"'), add.ok ? add.warnings.join() : "");
+check("Marking a day with an accepted event warns them to give it up", add.ok && add.warnings.length === 1 && add.warnings[0].includes("Justin · Birthday") && add.warnings[0].includes('"Give up this shift"'), add.ok ? add.warnings.join() : "");
 check("They keep the event they accepted", db.event_assignments.find((a) => a.id === "acc")?.status === "accepted");
 check("No warning for days with no accepted event", await (async () => { const r = await avDb.addUnavailable(signedIn(b2), { start: day10 }, NOON); return r.ok && r.warnings.length === 0; })());
 check("Past dates cannot be added through the database path", !(await avDb.addUnavailable(signedIn(b3), { start: addDays(today, -1) }, NOON)).ok);

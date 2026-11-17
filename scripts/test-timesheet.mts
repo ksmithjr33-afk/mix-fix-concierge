@@ -204,7 +204,7 @@ const rpcCalls: Record<string, unknown>[] = [];
 rpcs.reopen_timesheet_row = (args) => {
   rpcCalls.push(args);
   const by = db.staff.find((x) => x.id === args.p_reopened_by);
-  if (!by || by.role !== "admin" || !by.active) return { data: null, error: { message: "only an admin can reopen a timesheet row" } };
+  if (!by || !["admin", "manager"].includes(by.role) || !by.active) return { data: null, error: { message: "only an admin or manager can reopen a timesheet row" } };
   const ap = db.time_approvals.find((x) => x.assignment_id === args.p_assignment_id);
   if (!ap) return { data: null, error: { message: `timesheet row ${args.p_assignment_id} is not approved` } };
   if (ap.staff_id === args.p_reopened_by) return { data: null, error: { message: 'new row for relation "time_reopens" violates check constraint "time_reopens_not_own"' } };

@@ -16,6 +16,7 @@ import { unavailableBetween } from "@/lib/team/availability-db";
 import { MARKETS, MARKET_INFO } from "@/lib/team/markets";
 import { addDays, unavailableDays } from "@/lib/team/calendar";
 import type { SessionRow } from "@/lib/event-updates";
+import { isAdminRole } from "@/lib/team/roles";
 
 export async function assignedEventItems(staffId: string): Promise<EventListItem[]> {
   const [{ data, error }, hidden] = await Promise.all([
@@ -40,7 +41,7 @@ export async function assignedEventItems(staffId: string): Promise<EventListItem
  * unread chat count. Hidden events are left out.
  */
 export async function eventsForViewer(staff: StaffMember): Promise<EventListItem[]> {
-  if (staff.role === "admin") {
+  if (isAdminRole(staff.role)) {
     const [{ data }, { data: mine }, hidden] = await Promise.all([
       supabase.from("sessions").select("*").eq("status", "submitted"),
       supabase.from("event_assignments").select("session_id, status").eq("staff_id", staff.id),
@@ -54,7 +55,7 @@ export async function eventsForViewer(staff: StaffMember): Promise<EventListItem
       const c = counts.get(r.id);
       const menu = menus.get(r.id);
       return {
-        ...eventListItem(r, own.get(r.id)),
+        ...eventListItem(r, own.get(r.id), { admin: true }),
         href: `/team/admin/e/${r.id}`,
         chat: { href: `/team/admin/e/${r.id}?tab=chat`, unread: unread.get(r.id) ?? 0 },
         ...(c ? { staffing: staffingTone(c) } : {}),

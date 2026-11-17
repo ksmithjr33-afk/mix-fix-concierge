@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
 import { getCurrentStaff } from "@/lib/team/auth";
 import { setEventMarket } from "@/lib/team/markets-db";
+import { isAdminRole } from "@/lib/team/roles";
 
 // An admin sets an event's market: { sessionId, market }.
 export async function POST(request: Request) {
   const staff = await getCurrentStaff();
   if (!staff) return NextResponse.json({ error: "Sign in again." }, { status: 401 });
-  if (staff.role !== "admin") return NextResponse.json({ error: "Admins only." }, { status: 403 });
+  if (!isAdminRole(staff.role)) return NextResponse.json({ error: "Admins only." }, { status: 403 });
   try {
     const { sessionId, market } = await request.json().catch(() => ({}));
     if (typeof sessionId !== "string") return NextResponse.json({ error: "Bad request" }, { status: 400 });

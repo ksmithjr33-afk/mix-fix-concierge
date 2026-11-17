@@ -158,6 +158,6 @@ check("The events list and calendar show the marker", src("app/team/admin/events
 
 // ----- 6. Routes refuse bartenders -----
 const route = src("app/api/team/admin/approved-menu/route.ts");
-check("The upload route is admins only", route.includes('staff.role !== "admin"') && route.includes("status: 403"));
+check("The upload route is admins only", route.includes('!isAdminRole(staff.role)') && route.includes("status: 403"));
 
 done("approved menu");

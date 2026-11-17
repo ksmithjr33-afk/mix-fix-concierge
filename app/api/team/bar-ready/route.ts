@@ -4,6 +4,7 @@ import { getAssignment, openEvent } from "@/lib/team/events";
 import { BarPhotoError, barReadyEntries, removeBarPhoto, submitBarReady } from "@/lib/team/bar-ready-db";
 import { canSubmitBarReady, validateBarReady } from "@/lib/team/bar-ready";
 import { eventData } from "@/lib/team/markets";
+import { isAdminRole } from "@/lib/team/roles";
 
 // Bar setup photos: up to 4 per person, each with an optional note. Retake
 // (action "retake" with photoId) and remove (action "remove") until the event
@@ -18,7 +19,7 @@ export async function POST(request: Request) {
 
     const access = await openEvent(sessionId, staff);
     if (!access.ok) return NextResponse.json({ error: "You are not assigned to this event." }, { status: 403 });
-    const assignment = staff.role === "admin" ? null : await getAssignment(sessionId, staff.id);
+    const assignment = isAdminRole(staff.role) ? null : await getAssignment(sessionId, staff.id);
     if (!canSubmitBarReady(staff, assignment, eventData(access.session))) {
       return NextResponse.json({ error: "Bar setup photos open at arrival time on the event day and close when the event ends." }, { status: 403 });
     }

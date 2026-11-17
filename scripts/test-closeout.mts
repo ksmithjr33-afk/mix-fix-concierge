@@ -100,8 +100,8 @@ const second = await submit(b2, { rating: "had_problems", equipment: broken("Cra
 check("A second bartender sends one", second.ok && db.event_closeouts.length === 2);
 check("Only the first closeout for the event sends the webhook", hooks.filter((h) => h.url === GHL).length === 1);
 check("Had problems with broken gear texts admins with alerts on, right away", textsTo(admin).length === 1 && textsTo(quiet).length === 0, JSON.stringify(texts));
-check("The alert names the bartender, event, problem and gear", (textsTo(admin)[0]?.message ?? "").includes("Sam") && textsTo(admin)[0].message.includes("Justin's 30th") && textsTo(admin)[0].message.includes("had problems") && textsTo(admin)[0].message.includes(gear[0]) && textsTo(admin)[0].message.includes("/team/admin/e/e1"));
-check("Staff alerts carry no client contact details", texts.every((t) => !/justin@example|9725550199|Reyes/.test(t.message)));
+check("The alert names the bartender, event, problem and gear", (textsTo(admin)[0]?.message ?? "").includes("Sam") && textsTo(admin)[0].message.includes("Justin Reyes · Birthday") && textsTo(admin)[0].message.includes("had problems") && textsTo(admin)[0].message.includes(gear[0]) && textsTo(admin)[0].message.includes("/team/admin/e/e1"));
+check("Staff alerts carry no client contact details", texts.every((t) => !/justin@example|9725550199/.test(t.message)) && texts.filter((t) => t.phone !== admin.phone).every((t) => !/Reyes/.test(t.message)));
 await submit(b2, { rating: "had_problems", equipment: broken("Cracked, and the jigger") }, at(22 * 60 + 10));
 check("Editing does not text admins again", textsTo(admin).length === 1);
 

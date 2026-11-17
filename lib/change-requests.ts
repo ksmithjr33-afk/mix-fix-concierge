@@ -17,7 +17,7 @@ import { sendStaffText } from "@/lib/team/sms";
 import { inQuietHours, sendableAt } from "@/lib/team/shifts";
 import { eventDayStart, eventSchedule, shortDate } from "@/lib/team/time";
 import { eventData } from "@/lib/team/markets";
-import { eventTitle } from "@/lib/team/event-list";
+import { adminEventTitle } from "@/lib/team/event-list";
 import { siteOrigin } from "@/lib/team/clock-db";
 import { managerHref } from "@/lib/team/manager-tabs";
 
@@ -60,7 +60,7 @@ async function textAdmins(hold: HoldRow, now: Date): Promise<number> {
   if (!session) return 0;
   const ed = eventData(session);
   const message = requestText({
-    title: eventTitle(ed),
+    title: adminEventTitle(ed),
     date: shortDate(eventSchedule(ed).day),
     asked: requestSummary(hold.changes),
     link: `${siteOrigin()}${managerHref(hold.session_id, "client")}`,

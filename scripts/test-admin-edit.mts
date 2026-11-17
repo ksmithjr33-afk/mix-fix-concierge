@@ -228,7 +228,7 @@ check("Package must be from the list or the current one", !edit.cleanAdminEdit({
 
 // ----- Admin only -----
 const route = readFileSync(new URL("../app/api/team/admin/event-edit/route.ts", import.meta.url), "utf8");
-check("/api/team/admin/event-edit is admin only", route.includes("getCurrentStaff()") && route.includes('role !== "admin"') && route.includes("status: 403") && route.indexOf("await admin()") < route.indexOf("saveAdminEdit("));
+check("/api/team/admin/event-edit is admin only", route.includes("getCurrentStaff()") && route.includes('isAdminRole(') && route.includes("status: 403") && route.indexOf("await admin()") < route.indexOf("saveAdminEdit("));
 const page = readFileSync(new URL("../app/team/admin/e/[id]/page.tsx", import.meta.url), "utf8");
 check("The edit form is on an admin only page", page.includes("await requireAdmin(") && page.includes("<EditEvent"));
 const editDbSrc = readFileSync(new URL("../lib/team/admin-edit-db.ts", import.meta.url), "utf8");
