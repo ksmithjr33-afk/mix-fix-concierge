@@ -2,9 +2,9 @@
 // menu text the concierge uses (DRINK_MENU_RULES), with the same package rules
 // (DRINK_SOURCING_RULES):
 //   Dive Bar: the set menu of five, no picks.
-//   Essentials Bar and The Big Day Bar: the specialty (craft) menu only, no mocktails.
-//   Full Bar and Premium Bar (and legacy Bartender Only, Tailored Bar): the
-//   craft menu plus the CLASSICS, and mocktails.
+//   Essentials Bar (legacy): the specialty (craft) menu only, no mocktails.
+//   Full Bar, Premium Bar and The Big Day Bar (and legacy Bartender Only,
+//   Tailored Bar): the craft menu plus the CLASSICS on request, and mocktails.
 //   Beer and Wine: no signature drinks.
 // On every package a custom drink is allowed with its exact recipe (is_custom).
 // Pure, no database.
@@ -65,11 +65,11 @@ export function menuPool(pkg: unknown): MenuPool {
   const p = String(pkg ?? "").toLowerCase();
   if (isDiveBarPackage(p)) return "set";
   if (packageDrinkCount(p) === 0) return "none";
-  if (p.includes("essentials") || p.includes("big day") || p.includes("wedding bar")) return "craft";
+  if (p.includes("essentials")) return "craft";
   return "craft_classics";
 }
 
-/** Mocktails only on Full Bar and Premium Bar, and the legacy Bartender Only and Tailored Bar. */
+/** Mocktails on Full Bar, Premium Bar, The Big Day Bar, and the legacy Bartender Only and Tailored Bar. Never Essentials or Dive Bar. */
 export function allowsMocktails(pkg: unknown): boolean {
   return menuPool(pkg) === "craft_classics";
 }

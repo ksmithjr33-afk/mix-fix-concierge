@@ -27,7 +27,7 @@ export function allowedMenus(pkg: unknown, diveMenuRequested?: unknown): MenuKey
   const p = String(pkg ?? "").toLowerCase();
   // Dive Bar has its set menu, so no menu pictures. diveMenuRequested is kept for older callers.
   if (p.includes("dive")) return [];
-  if (p.includes("essentials") || p.includes("big day") || p.includes("wedding bar")) return ["specialty"];
+  if (p.includes("essentials")) return ["specialty"]; // The Big Day Bar shows both: classics on request, like Full
   const legacyOrUpgraded = ["bartender", "tailored", "full", "premium"].some((k) => p.includes(k));
   if (p.includes("beer") && p.includes("wine") && !legacyOrUpgraded) return [];
   return ["specialty", "classics"];

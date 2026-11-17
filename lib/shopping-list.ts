@@ -56,8 +56,8 @@ function isDiveBar(pkg: string | undefined | null): boolean {
 }
 
 /**
- * The Big Day Bar is the wedding package: the Essentials flow with two signature
- * cocktails, extra sodas and bottled water for kids and non drinkers, and a barback
+ * The Big Day Bar is the wedding package: two specialty cocktails or mocktails,
+ * classics on request (alcohol sized per drink, the same as Full), extra sodas and bottled water for kids and non drinkers, and a barback
  * for setup and cocktail hour. Alcohol only shopping list. No coffee station, that is
  * an add on on every package.
  */

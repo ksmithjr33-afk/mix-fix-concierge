@@ -5,7 +5,7 @@ import { getSubmittedSession, managerEventView, missingReports, teamLists } from
 import { assigneeProgress, listStaff } from "@/lib/team/assignments-db";
 import { staffingCounts, staffingLabel } from "@/lib/team/assignments";
 import { bartendersNeeded } from "@/lib/team/event-view";
-import { eventTitle } from "@/lib/team/event-list";
+import { adminEventTitle, eventSubtitle } from "@/lib/team/event-list";
 import TeamHeader from "../../../team-header";
 import { markThreadRead, mutedChats, threadMessages, unreadByEvent } from "@/lib/team/chat-db";
 import { adminPickupView } from "@/lib/team/menu-pickup-db";
@@ -37,10 +37,14 @@ import { getSheetView, syncOrderSheet } from "@/lib/order-sheet-db";
 import { barReadyEntries } from "@/lib/team/bar-ready-db";
 import { isManagerTab, type ManagerTab } from "@/lib/team/manager-tabs";
 import { Details } from "../../../e/[id]/event-details";
+import PackageCard from "../../../package-card";
 import { AssignPanel, BarReadyCard, ClientListPanel, Closeouts, ManagerChat, OrderSheet, ShiftPanel } from "./lazy-panels";
 import ManagerTabs from "./manager-tabs";
 import { BartenderLists, ClockStatus, MissingReports, TimePunches } from "./day-of";
 import ClientLinksCard from "./client-links-card";
+import CalendarOnlyCard from "./calendar-only-card";
+import AgreementCard from "./agreement-card";
+import { agreementsFor } from "@/lib/team/agreements-db";
 import { clientLinks, clientStatusLine } from "@/lib/client-links";
 import { changeBlocks, type FieldChange } from "@/lib/event-diff";
 import { giphyEnabled } from "@/lib/team/media";
@@ -151,7 +155,7 @@ async function AdminEventPage({
           new Set<string>() as Awaited<ReturnType<typeof unavailableOn>>,
         ];
   // Details, Client list and Chat only.
-  const [links, autoSend, listEntries, messages, muted, history, eventNumber] = await Promise.all([
+  const [links, autoSend, listEntries, messages, muted, history, eventNumber, agreements] = await Promise.all([
     on("details") ? clientLinks(session, me) : null, // admins only: null for anyone else
     on("client") ? autoSendOn() : false,
     on("client") ? listLog(id) : [],
@@ -165,6 +169,8 @@ async function AdminEventPage({
         })
       : null,
     eventNumberFor(session, me).catch(() => null),
+    // Agreements have pricing: admins and managers only (null for anyone else).
+    on("details") ? agreementsFor(id, me, eventSchedule(session.event_data ?? {}).tz).catch(() => null) : null,
   ]);
   const repeat = repeatLabel(eventNumber);
   if (tab === "chat") await markThreadRead(id, me.id);
@@ -198,7 +204,8 @@ async function AdminEventPage({
   const header = (
     <div className="px-1 flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
       <div className="min-w-0">
-        <h1 className="font-heading text-2xl font-bold text-[#2C2420] break-words">{eventTitle(ed)}</h1>
+        <h1 className="font-heading text-2xl font-bold text-[#2C2420] break-words">{adminEventTitle(ed)}</h1>
+        {eventSubtitle(ed) && <p className="text-[17px] text-[#2C2420] break-words">{eventSubtitle(ed)}</p>}
         <p className="text-[15px] text-[#6B5D52]">
           {[v.date, v.arrival ? `arrive ${v.arrival}` : "", v.serviceStart && v.serviceEnd ? `service ${v.serviceStart} to ${v.serviceEnd}` : ""].filter(Boolean).join(", ")}
         </p>
@@ -251,10 +258,13 @@ async function AdminEventPage({
           {links && (
             <ClientLinksCard conciergeUrl={links.conciergeUrl} eventUrl={links.eventUrl} openConcierge={links.openConcierge} openEvent={links.openEvent} status={clientStatusLine(links, v.timeZone)} />
           )}
+          {agreements && <AgreementCard sessionId={id} initial={agreements} />}
           {history && <ClientHistoryCard history={history} clientKey={history.matchedOn} />}
           <Details v={v} />
+          <PackageCard packageName={v.package} />
           {!hidden && <EditEvent sessionId={id} version={session.version} initial={editValues} packages={packages} />}
           <HideAction sessionId={id} hidden={hidden} />
+          {session.calendar_only && <CalendarOnlyCard sessionId={id} />}
         </>
       );
     },

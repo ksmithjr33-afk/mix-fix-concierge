@@ -102,7 +102,7 @@ check("Admin in Bartender view: the route refuses", (await post(form())).status 
 stub.stubCookies.delete("mf_team_view");
 const viaRoute = await post(form());
 check("Admin: the route saves", viaRoute.status === 200 && (db.sessions ?? []).length === 1);
-check("The Add event page is behind requireAdmin", src("app/team/admin/events/new/page.tsx").includes('await requireAdmin("/team/admin/events/new")'));
+check("The Add event page is behind requireAdmin", src("app/team/admin/events/new/page.tsx").includes("await requireAdmin(`/team/admin/events/new${date ?"));
 check("The admin events page has an Add event button", src("app/team/admin/events/page.tsx").includes('href="/team/admin/events/new"') && src("app/team/admin/events/page.tsx").includes("Add event"));
 
 // ----- Save as a confirmed event -----
@@ -123,7 +123,7 @@ check("Menu drinks carry the menu recipe with oz amounts", drinks[0].name === "F
 check("A custom drink keeps its ingredients and is marked custom", drinks[2].name === "Dana's Punch" && drinks[2].is_custom === true && (drinks[2].ingredients as string[]).length === 3);
 check("It gets its market from the address", s.team_market === "dallas" && s.team_market_source === "auto");
 const item = eventList.eventListItem(s as never, undefined, { showMarket: true });
-check("It appears on the events list", item.title === "Dana's 50th" && item.day === DAY);
+check("It appears on the events list", item.title === "Dana · Birthday" && item.subtitle === "Dana's 50th" && item.day === DAY);
 check("The typed arrival time is used", item.arrival === "4:30 PM");
 check("It appears on the calendar", calendar.calendarGrid("week", DAY, today, [item]).days.find((d) => d.ymd === DAY)?.events[0]?.id === id);
 const sup = await supplies.staffSupplies(s as never);
@@ -208,7 +208,7 @@ check("Beer and Wine: no signature drinks", bad({ package: "Beer and Wine", drin
 check("The Big Day Bar: at most 2 plus 3 more", bad({ package: "The Big Day Bar", event_type: "Wedding", drinks: Array(6).fill({ key: "craft:French Martini" }) }).includes("at most 5"));
 const dive = manual.cleanManualEvent(form({ package: "Dive Bar", drinks: [{ key: "craft:French Martini" }] }), today2);
 check("Dive Bar gets its set menu of five, whatever was picked", dive.ok && (dive.value.eventData.signature_drinks as { name: string }[]).map((d) => d.name).join() === "Margarita,Old Fashioned,Cosmopolitan,Lemon Drop,Moscow Mule" && dive.value.eventData.dive_set_menu === true);
-check("The pools match the concierge's sourcing rules", catalog.menuPool("Essentials Bar") === "craft" && catalog.menuPool("The Big Day Bar") === "craft" && catalog.menuPool("Full Bar") === "craft_classics" && catalog.menuPool("Premium Bar") === "craft_classics" && catalog.menuPool("Dive Bar") === "set" && catalog.menuPool("Beer and Wine") === "none");
+check("The pools match the concierge's sourcing rules", catalog.menuPool("Essentials Bar") === "craft" && catalog.menuPool("The Big Day Bar") === "craft_classics" && catalog.menuPool("Full Bar") === "craft_classics" && catalog.menuPool("Premium Bar") === "craft_classics" && catalog.menuPool("Dive Bar") === "set" && catalog.menuPool("Beer and Wine") === "none");
 check("The craft menu is read from the concierge's menu text", catalog.craftDrinks().some((d) => d.name === "Tequila Mucho" && d.ingredients[0] === "2 oz tequila reposado"));
 
 done("hand added event");
