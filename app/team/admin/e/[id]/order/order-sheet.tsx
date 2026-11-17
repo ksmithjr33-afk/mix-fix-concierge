@@ -3,12 +3,14 @@
 import { useEffect, useRef, useState } from "react";
 import { PALETTE, RECIPE_EDIT_NOTE, SECTIONS, lineText, paletteName, textOn, type SectionId, type Store, type StoreInfo } from "@/lib/order-sheet-shared";
 import type { FieldName, Fields, SheetLine, SheetRecipe } from "@/lib/order-sheet";
+import { ingredientText, type SyrupView } from "@/lib/syrups";
+import { SyrupBody, SYRUP_TITLE } from "../../../../syrup-recipes";
 import type { SheetView } from "@/lib/order-sheet-db";
 import { timeLabel } from "@/lib/team/clock-label";
 
 // The order sheet as Isabel's Word docs read: a plain white page, Arial, a
 // bulleted list under each heading, one line per item, store highlights, the
-// legend, then the cocktail recipes. Nothing on a line at rest but its text,
+// legend, then the cocktail recipes and the syrup recipes. Nothing on a line at rest but its text,
 // the Ordered box where the bullet is, and a store swatch at the end. Tapping
 // the text opens a small editor; tapping the swatch opens the store list.
 // The progress, the Sheet and By store toggle, and Print stay in a slim bar
@@ -739,6 +741,122 @@ function Recipes({ view, call, onSaved }: { view: SheetView; call: Call; onSaved
   );
 }
 
+/** Edit one syrup recipe for this event only. The Syrup recipes library is not changed. */
+function SyrupEditor({ s, call, onClose }: { s: SyrupView; call: Call; onClose: (saved: boolean) => void }) {
+  const e = s.edit!;
+  const [ingredients, setIngredients] = useState(e.ingredients.map((i) => ingredientText(i)).join("\n"));
+  const [ratio, setRatio] = useState(e.ratio);
+  const [method, setMethod] = useState(e.method);
+  const [yieldAmount, setYieldAmount] = useState(e.yieldAmount === null ? "" : String(e.yieldAmount));
+  const [yieldUnit, setYieldUnit] = useState(e.yieldUnit);
+  const [shelfLife, setShelfLife] = useState(e.shelfLife);
+  const [busy, setBusy] = useState(false);
+  const save = async (body: Record<string, unknown>) => {
+    setBusy(true);
+    const ok = await call({ action: "syrup", key: s.key, ...body });
+    setBusy(false);
+    if (ok) onClose(true);
+  };
+  const input = "mt-0.5 block w-full rounded-md border border-[#BBB] px-2 py-1.5 font-sans text-[15px]";
+  return (
+    <div className="my-2 rounded-lg border border-[#C9C9C9] bg-[#FAFAFA] p-3 font-sans text-[14px] space-y-2 print:hidden">
+      <p className="rounded-md bg-[#FFF8EC] border border-[#E3C9A0] px-2 py-1.5 text-[13px] text-[#8A4B12]">This event only. The Syrup recipes library stays as it is.</p>
+      <label className="block">
+        Ingredients, one per line (like 1 cup sugar)
+        <textarea value={ingredients} onChange={(ev) => setIngredients(ev.target.value)} rows={Math.max(3, ingredients.split("\n").length + 1)} className={input} />
+      </label>
+      <div className="grid gap-2 sm:grid-cols-[1fr_6rem_8rem]">
+        <label className="block">
+          Ratio
+          <input value={ratio} onChange={(ev) => setRatio(ev.target.value)} className={input} />
+        </label>
+        <label className="block">
+          Yield
+          <input value={yieldAmount} onChange={(ev) => setYieldAmount(ev.target.value)} inputMode="decimal" className={input} />
+        </label>
+        <label className="block">
+          Yield unit
+          <input value={yieldUnit} onChange={(ev) => setYieldUnit(ev.target.value)} list="syrup-units" className={input} />
+        </label>
+      </div>
+      <label className="block">
+        Method
+        <textarea value={method} onChange={(ev) => setMethod(ev.target.value)} rows={3} className={input} />
+      </label>
+      <label className="block">
+        Shelf life
+        <input value={shelfLife} onChange={(ev) => setShelfLife(ev.target.value)} className={input} />
+      </label>
+      <datalist id="syrup-units">
+        <option value="cups" />
+        <option value="oz" />
+        <option value="ml" />
+        <option value="liters" />
+        <option value="quarts" />
+      </datalist>
+      <div className="flex flex-wrap items-center gap-3">
+        <button type="button" disabled={busy} onClick={() => save({ ingredients, ratio, method, yieldAmount, yieldUnit, shelfLife })} className="rounded-md bg-black px-3 py-1.5 text-white disabled:opacity-40">
+          Save for this event
+        </button>
+        <button type="button" disabled={busy} onClick={() => onClose(false)} className="underline">
+          Cancel
+        </button>
+        {s.edited && (
+          <button type="button" disabled={busy} onClick={() => save({ reset: true })} className="ml-auto underline">
+            Reset to library
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** Directly after the cocktail recipes, and on the printed page. */
+function SyrupRecipes({ view, call, onSaved }: { view: SheetView; call: Call; onSaved: () => void }) {
+  const [editing, setEditing] = useState<string | null>(null);
+  if (view.syrups.length === 0) return null;
+  return (
+    <section className="mt-4" aria-label={SYRUP_TITLE}>
+      <h2 className="font-bold">
+        SYRUP RECIPES
+        <a href="/team/admin/syrups" className="ml-2 font-sans text-[12px] font-normal text-[#777] hover:text-black hover:underline print:hidden">
+          Manage syrup recipes
+        </a>
+      </h2>
+      {view.syrups.map((s) => (
+        <div key={s.key} className="mt-3">
+          <p>
+            <b>{s.name}</b>
+            {s.drinks.length > 0 && <span className="text-[#555]"> - for {s.drinks.join(", ")}</span>}
+            {s.edited && (
+              <span className="ml-2 align-middle font-sans text-[11px] font-bold uppercase tracking-wide text-[#8A4B12] print:hidden" title={s.editedBy ? `Edited by ${s.editedBy}` : undefined}>
+                edited for this event
+              </span>
+            )}
+            {s.status === "recipe" && editing !== s.key && (
+              <button type="button" onClick={() => setEditing(s.key)} className="ml-2 font-sans text-[12px] text-[#777] hover:text-black hover:underline print:hidden">
+                Edit for this event
+              </button>
+            )}
+          </p>
+          {editing === s.key ? (
+            <SyrupEditor
+              s={s}
+              call={call}
+              onClose={(saved) => {
+                setEditing(null);
+                if (saved) onSaved();
+              }}
+            />
+          ) : (
+            <SyrupBody s={s} variant="sheet" isAdmin />
+          )}
+        </div>
+      ))}
+    </section>
+  );
+}
+
 const page = "doc-page mx-auto w-full max-w-[8.5in] px-4 py-6 sm:px-[0.9in] sm:py-[0.8in] shadow-[0_1px_4px_rgba(0,0,0,0.18)] print:max-w-none print:p-0 print:shadow-none";
 
 export default function OrderSheet({ initial, timeZone }: { initial: SheetView; timeZone: string; title?: string }) {
@@ -921,6 +1039,7 @@ export default function OrderSheet({ initial, timeZone }: { initial: SheetView; 
         <Legend view={view} call={call} open={open} setOpen={setOpen} />
         {view.meta.note && <p className="mt-3 whitespace-pre-wrap">Note: {view.meta.note}</p>}
         <Recipes view={view} call={call} onSaved={() => flash(`Recipe saved. ${RECIPE_EDIT_NOTE}`, 6000)} />
+        <SyrupRecipes view={view} call={call} onSaved={() => flash("Syrup recipe saved for this event.")} />
       </article>
 
       {mode === "store" && (

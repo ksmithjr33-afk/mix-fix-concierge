@@ -254,7 +254,21 @@ function Row({ row, meId, onRows, rate }: { row: TimesheetRow; meId: string; onR
   );
 }
 
-export default function TimesheetWeek({ initial, meId, from, to, rates = {} }: { initial: TimesheetRow[]; meId: string; from: string; to: string; rates?: Record<string, number> }) {
+export default function TimesheetWeek({
+  initial,
+  meId,
+  from,
+  to,
+  rates = {},
+  scope = "week",
+}: {
+  initial: TimesheetRow[];
+  meId: string;
+  from: string;
+  to: string;
+  rates?: Record<string, number>;
+  scope?: "week" | "event"; // "event": opened from a manager view's Time clock card, only that event's rows
+}) {
   const [rows, setRows] = useState(initial);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
@@ -272,7 +286,7 @@ export default function TimesheetWeek({ initial, meId, from, to, rates = {} }: {
     <div className="space-y-3">
       {totals.length > 0 && (
         <section className={card}>
-          <h2 className="font-heading text-base font-bold text-[#2C2420] mb-1">Hours this week</h2>
+          <h2 className="font-heading text-base font-bold text-[#2C2420] mb-1">{scope === "event" ? "Hours on this event" : "Hours this week"}</h2>
           <ul className="divide-y divide-[#DDD5CC]">
             {totals.map((t) => (
               <li key={t.staffId} className="flex justify-between py-1.5 text-[15px] text-[#2C2420]">
@@ -308,7 +322,7 @@ export default function TimesheetWeek({ initial, meId, from, to, rates = {} }: {
             }}
             className="rounded-lg bg-[#8B9E7E] text-white px-3 py-1.5 text-sm font-medium disabled:opacity-40"
           >
-            {busy ? "Approving..." : `Approve week (${plan.approve.length})`}
+            {busy ? "Approving..." : `Approve ${scope === "event" ? "event" : "week"} (${plan.approve.length})`}
           </button>
         </div>
         {ownWaiting > 0 && (
@@ -318,7 +332,7 @@ export default function TimesheetWeek({ initial, meId, from, to, rates = {} }: {
         )}
         {message && <p className="text-sm text-[#2C2420] mt-2">{message}</p>}
         {rows.length === 0 ? (
-          <p className="text-[15px] text-[#6B5D52] py-2">No staffed events this week.</p>
+          <p className="text-[15px] text-[#6B5D52] py-2">{scope === "event" ? "No timesheet rows for this event yet." : "No staffed events this week."}</p>
         ) : (
           <ul className="divide-y divide-[#DDD5CC]">
             {rows.map((r) => (

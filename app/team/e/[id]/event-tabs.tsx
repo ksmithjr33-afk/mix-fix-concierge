@@ -4,6 +4,8 @@ import { useCallback, useState } from "react";
 import type { StaffEventView } from "@/lib/team/event-view";
 import { CHECKLIST_INTRO, CHECKLIST_TITLE, CONFIRM_LABEL, type ResolvedGroup } from "@/lib/team/checklist-config";
 import type { ShopItem, ShoppingGroup } from "@/lib/team/shopping";
+import type { SyrupView } from "@/lib/syrups";
+import { SyrupCard } from "../../syrup-recipes";
 import { SUPPLIES_INTRO, SUPPLIES_TAB, SUPPLIES_TITLE, UPDATED_TITLE } from "@/lib/team/supplies";
 import { WRAP_UP_TAB } from "@/lib/team/wrapup";
 import { prepSteps, SUPPLIES_CONFIRM_LABEL, SUPPLIES_LOCKED, SUPPLIES_LOCKED_NOTE, TOOLS_TAB } from "@/lib/team/prep";
@@ -380,6 +382,7 @@ function Supplies({
   shopping,
   initial,
   updates,
+  syrups,
   confirmedAt,
   onConfirmed,
   timeZone,
@@ -388,6 +391,7 @@ function Supplies({
   shopping: ShoppingLayout;
   initial: Record<string, CheckState>;
   updates: string[];
+  syrups: SyrupView[];
   confirmedAt: string | null;
   onConfirmed: (at: string) => void;
   timeZone: string;
@@ -445,6 +449,7 @@ function Supplies({
           )}
         </section>
       ))}
+      <SyrupCard syrups={syrups} />
       <button
         type="button"
         onClick={() => setMissingOpen(true)}
@@ -498,6 +503,7 @@ export default function EventTabs({
   shopping,
   shoppingState,
   supplyUpdates = [],
+  syrups = [],
   barReady,
   photoReminder = null,
   closeout = null,
@@ -533,6 +539,7 @@ export default function EventTabs({
   shopping: ShoppingLayout;
   shoppingState: Record<string, CheckState>;
   supplyUpdates?: string[]; // the Updated note on the Supplies tab
+  syrups?: SyrupView[]; // Syrup recipes, after the drinks on the Supplies tab
   barReady: Omit<BarReadyProps, "sessionId"> & { show: boolean };
   photoReminder?: string | null; // no bar setup photo yet after service started
   closeout?: Omit<CloseoutProps, "sessionId"> | null; // the Wrap up tab, once bar service has started
@@ -645,6 +652,7 @@ export default function EventTabs({
             shopping={shopping}
             initial={shoppingState}
             updates={supplyUpdates}
+            syrups={syrups}
             confirmedAt={suppliesAt}
             onConfirmed={setSuppliesAt}
             timeZone={view.timeZone}

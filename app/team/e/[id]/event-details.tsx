@@ -6,7 +6,7 @@ import type { StaffEventView } from "@/lib/team/event-view";
 
 export const card = "bg-[#F5F0EB] rounded-2xl border border-[#DDD5CC] px-4 py-3 sm:px-5 sm:py-4";
 
-function Row({ label, value, children }: { label: string; value?: string; children?: React.ReactNode }) {
+export function Row({ label, value, children }: { label: string; value?: string; children?: React.ReactNode }) {
   if (!value && !children) return null;
   return (
     <div className="py-2.5 border-b border-[#DDD5CC] last:border-0">
@@ -25,25 +25,14 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-function telHref(phone: string): string {
+export function telHref(phone: string): string {
   return `tel:${phone.replace(/[^\d+]/g, "")}`;
 }
 
 export function Details({ v }: { v: StaffEventView }) {
   return (
     <div className="space-y-3">
-      {v.whatChanged.length > 0 && (
-        <section className="bg-[#FFF8EC] rounded-2xl border border-[#E3C9A0] px-4 py-3 sm:px-5 sm:py-4">
-          <h3 className="font-heading text-base font-bold text-[#2C2420] mb-1">What changed</h3>
-          <ul className="space-y-1">
-            {v.whatChanged.map((line, i) => (
-              <li key={i} className="text-[15px] text-[#2C2420] break-words">
-                {line}
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
+      <WhatChanged v={v} />
 
       <Section title="Event">
         <Row label="Event" value={[v.eventName, v.eventType].filter(Boolean).join(", ")} />
@@ -104,6 +93,37 @@ export function Details({ v }: { v: StaffEventView }) {
         <Row label="Client note on bottles" value={v.bottleNote} />
       </Section>
 
+      <DrinkSections v={v} />
+
+      {v.lastUpdated && <p className="text-xs text-[#A39585] px-1">Last updated {v.lastUpdated}</p>}
+    </div>
+  );
+}
+
+/** The latest update's changes staff may see. */
+export function WhatChanged({ v }: { v: StaffEventView }) {
+  return (
+    <>
+      {v.whatChanged.length > 0 && (
+        <section className="bg-[#FFF8EC] rounded-2xl border border-[#E3C9A0] px-4 py-3 sm:px-5 sm:py-4">
+          <h3 className="font-heading text-base font-bold text-[#2C2420] mb-1">What changed</h3>
+          <ul className="space-y-1">
+            {v.whatChanged.map((line, i) => (
+              <li key={i} className="text-[15px] text-[#2C2420] break-words">
+                {line}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+    </>
+  );
+}
+
+/** Signature drinks (or the Dive Bar set menu) and the classics. Read only on both views. */
+export function DrinkSections({ v }: { v: StaffEventView }) {
+  return (
+    <>
       {v.drinks.length > 0 && (
         <section className={card}>
           <h3 className="font-heading text-base font-bold text-[#2C2420] mb-2">{v.setMenu ? "Dive Bar set menu" : "Signature drinks"}</h3>
@@ -148,8 +168,6 @@ export function Details({ v }: { v: StaffEventView }) {
           </div>
         </section>
       )}
-
-      {v.lastUpdated && <p className="text-xs text-[#A39585] px-1">Last updated {v.lastUpdated}</p>}
-    </div>
+    </>
   );
 }

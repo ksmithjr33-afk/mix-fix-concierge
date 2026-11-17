@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { editInput, ListFieldset, priceChosen, PriceFieldset, type Mode, type Preview } from "./edit-price";
 
 export interface EditValues {
   event_date: string; // YYYY-MM-DD
@@ -20,21 +21,8 @@ export interface EditValues {
 type Field = keyof EditValues;
 const PRICED: Field[] = ["bar_service_start", "bar_service_end", "guest_count", "bartenders", "package"];
 
-interface Preview {
-  priced: boolean;
-  bookedTotal: number | null;
-  engineAmount: number | null;
-  engineNewTotal: number | null;
-  engineText: string;
-  listChanges: string;
-  autoSend: boolean;
-}
-
-const input =
-  "w-full rounded-xl border border-[#DDD5CC] bg-white px-3 py-2.5 text-[16px] text-[#2C2420] placeholder:text-[#A39585] focus:outline-none focus:ring-2 focus:ring-[#B5845A]/30";
+const input = editInput;
 const label = "block text-xs text-[#A39585] uppercase tracking-wide mb-1";
-
-const money = (n: number | null) => (n === null ? "unknown" : `$${n.toLocaleString("en-US", { maximumFractionDigits: 2 })}`);
 
 export default function EditEvent({
   sessionId,
@@ -50,7 +38,7 @@ export default function EditEvent({
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [v, setV] = useState(initial);
-  const [mode, setMode] = useState<"" | "keep" | "engine" | "manual">("");
+  const [mode, setMode] = useState<Mode>("");
   const [manual, setManual] = useState("");
   const [preview, setPreview] = useState<Preview | null>(null);
   const [previewError, setPreviewError] = useState("");
@@ -110,7 +98,7 @@ export default function EditEvent({
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error ?? "Could not save.");
-      setSaved(`Saved as version ${data.version}. The team got the GHL note, and assigned staff were texted if they need to know.`);
+      setSaved(`Saved as version ${data.version}. The team got the GHL note, and assigned staff were texted if they need to know.${data.pricePending ? " The price is pending." : ""}`);
       setOpen(false);
       setMode("");
       setManual("");
@@ -123,24 +111,26 @@ export default function EditEvent({
     }
   };
 
-  const canSave =
-    changedFields.length > 0 && !busy && (!pricedChange || (mode !== "" && (mode !== "manual" || manual.trim() !== "") && (mode !== "engine" || preview?.engineNewTotal !== null)));
+  const canSave = changedFields.length > 0 && !busy && (!pricedChange || priceChosen(mode, manual, preview));
 
   if (!open) {
+    // Bulk changes only: each field has its own Edit on the cards above.
     return (
       <section className="space-y-2">
         {saved && <p className="rounded-2xl bg-[#E4EBDF] text-[#55684A] px-4 py-3 text-sm">{saved}</p>}
-        <button
-          type="button"
-          onClick={() => {
-            setV(initial);
-            setSaved("");
-            setOpen(true);
-          }}
-          className="w-full rounded-xl border-2 border-[#B5845A] text-[#9A7049] py-2.5 font-medium hover:bg-[#F5F0EB]"
-        >
-          Edit event details
-        </button>
+        <p className="px-1 text-center">
+          <button
+            type="button"
+            onClick={() => {
+              setV(initial);
+              setSaved("");
+              setOpen(true);
+            }}
+            className="inline-flex min-h-[44px] items-center px-2 text-sm text-[#9A7049] underline"
+          >
+            Edit everything
+          </button>
+        </p>
       </section>
     );
   }
@@ -148,7 +138,7 @@ export default function EditEvent({
   return (
     <section className="bg-[#F5F0EB] rounded-2xl border border-[#DDD5CC] px-4 py-3 sm:px-5 sm:py-4 space-y-3">
       <div className="flex items-center justify-between">
-        <h2 className="font-heading text-base font-bold text-[#2C2420]">Edit event details</h2>
+        <h2 className="font-heading text-base font-bold text-[#2C2420]">Edit everything</h2>
         <button type="button" onClick={() => setOpen(false)} disabled={busy} className="text-sm text-[#6B5D52] underline">
           Cancel
         </button>
@@ -212,64 +202,9 @@ export default function EditEvent({
         <textarea id="ed-req" rows={3} className={`${input} resize-none`} value={v.special_requests} onChange={set("special_requests")} />
       </div>
 
-      {pricedChange && (
-        <fieldset className="rounded-xl border border-[#E3C9A0] bg-[#FFF8EC] px-3 py-3 space-y-2">
-          <legend className="px-1 text-sm font-bold text-[#2C2420]">Price</legend>
-          <label className="flex items-start gap-2 text-[15px] text-[#2C2420]">
-            <input type="radio" name="price" className="mt-1" checked={mode === "keep"} onChange={() => setMode("keep")} />
-            <span>
-              Keep the booked total as is
-              <span className="block text-sm text-[#6B5D52]">Booked total {money(preview?.bookedTotal ?? null)}</span>
-            </span>
-          </label>
-          <label className="flex items-start gap-2 text-[15px] text-[#2C2420]">
-            <input type="radio" name="price" className="mt-1" checked={mode === "engine"} onChange={() => setMode("engine")} disabled={preview?.engineNewTotal === null} />
-            <span>
-              Apply the pricing engine&apos;s difference
-              <span className="block text-sm text-[#6B5D52]">
-                {previewError
-                  ? previewError
-                  : !preview
-                    ? "Pricing..."
-                    : preview.engineNewTotal === null
-                      ? "The engine cannot price this change. Keep the total or enter one by hand."
-                      : `${preview.engineAmount !== null && preview.engineAmount >= 0 ? "+" : "-"}${money(Math.abs(preview.engineAmount ?? 0))}, new total ${money(preview.engineNewTotal)}`}
-              </span>
-            </span>
-          </label>
-          <label className="flex items-start gap-2 text-[15px] text-[#2C2420]">
-            <input type="radio" name="price" className="mt-1" checked={mode === "manual"} onChange={() => setMode("manual")} />
-            <span className="flex-1">
-              Enter a new total by hand
-              {mode === "manual" && (
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  placeholder="New total, like 1850"
-                  value={manual}
-                  onChange={(e) => setManual(e.target.value)}
-                  className={`${input} mt-1`}
-                  autoFocus
-                />
-              )}
-            </span>
-          </label>
-        </fieldset>
-      )}
+      {pricedChange && <PriceFieldset mode={mode} setMode={setMode} manual={manual} setManual={setManual} preview={preview} previewError={previewError} />}
 
-      {changedFields.length > 0 && preview?.listChanges && (
-        <fieldset className="rounded-xl border border-[#DDD5CC] bg-white px-3 py-3 space-y-2">
-          <legend className="px-1 text-sm font-bold text-[#2C2420]">Client shopping list</legend>
-          <p className="text-sm text-[#6B5D52] whitespace-pre-line">This edit changes the client&apos;s list:{"\n"}{preview.listChanges}</p>
-          <label className="flex items-start gap-2 text-[15px] text-[#2C2420]">
-            <input type="checkbox" className="mt-1 h-5 w-5 accent-[#B5845A]" checked={sendList} onChange={(e) => setSendList(e.target.checked)} />
-            <span>
-              Send updated list to client
-              {!preview.autoSend && <span className="block text-sm text-[#6B5D52]">Auto send client shopping list is off, so nothing goes to the client either way.</span>}
-            </span>
-          </label>
-        </fieldset>
-      )}
+      {changedFields.length > 0 && preview?.listChanges && <ListFieldset preview={preview} sendList={sendList} setSendList={setSendList} />}
 
       {error && <p className="text-sm text-[#A0412D]">{error}</p>}
       <button type="button" onClick={save} disabled={!canSave} className="w-full rounded-xl bg-[#B5845A] text-white py-3 font-medium disabled:opacity-40 hover:bg-[#9A7049] transition-colors">

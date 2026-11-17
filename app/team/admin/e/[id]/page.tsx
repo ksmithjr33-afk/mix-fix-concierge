@@ -16,8 +16,8 @@ import { adminMenuView } from "@/lib/team/approved-menu-db";
 import { distancesToEvent } from "@/lib/team/profile-db";
 import HideAction from "./hide-action";
 import EditEvent, { type EditValues } from "./edit-event";
-import { PACKAGE_CHOICES } from "@/lib/team/admin-edit";
-import { eventDay, eventSchedule, parseClock, todayIn } from "@/lib/team/time";
+import { formValue, PACKAGE_CHOICES } from "@/lib/team/admin-edit";
+import { eventSchedule, todayIn } from "@/lib/team/time";
 import { isHidden } from "@/lib/team/hidden";
 import { ensureMarket } from "@/lib/team/markets-db";
 import { handoffPanel, postPanel } from "@/lib/team/shifts-db";
@@ -36,7 +36,9 @@ import { clientList, clientListText } from "@/lib/client-list";
 import { getSheetView, syncOrderSheet } from "@/lib/order-sheet-db";
 import { barReadyEntries } from "@/lib/team/bar-ready-db";
 import { isManagerTab, type ManagerTab } from "@/lib/team/manager-tabs";
-import { Details } from "../../../e/[id]/event-details";
+import { Details, DrinkSections, WhatChanged } from "../../../e/[id]/event-details";
+import EditableDetails from "./editable-details";
+import { editCards } from "@/lib/team/edit-cards";
 import PackageCard from "../../../package-card";
 import { AssignPanel, BarReadyCard, ClientListPanel, Closeouts, ManagerChat, OrderSheet, ShiftPanel } from "./lazy-panels";
 import ManagerTabs from "./manager-tabs";
@@ -53,6 +55,8 @@ import { repeatLabel } from "@/lib/client-history";
 import ClientHistoryCard from "./client-history-card";
 import PriceNeededCard from "./price-needed-card";
 import { pendingBlocks, pendingSummary } from "@/lib/price-pending";
+import { eventTimesheetRows } from "@/lib/team/timesheet-db";
+import { timePageHref } from "@/lib/team/clock-card";
 
 export const dynamic = "force-dynamic";
 
@@ -60,15 +64,6 @@ export const dynamic = "force-dynamic";
 // event under tabs (Details, Team, Shopping list, Client list, Day of, Chat).
 // requireAdmin runs first, so bartenders (and admins in Bartender view) never
 // get past it, and every route behind each tab checks admin again on the server.
-function hhmm(v: unknown): string {
-  const m = parseClock(v);
-  if (m === null) return "";
-  const n = m % 1440;
-  return `${String(Math.floor(n / 60)).padStart(2, "0")}:${String(n % 60).padStart(2, "0")}`;
-}
-
-const str = (v: unknown) => (v === null || v === undefined ? "" : String(v));
-
 async function AdminEventPage({
   params,
   searchParams,
@@ -155,7 +150,7 @@ async function AdminEventPage({
           new Set<string>() as Awaited<ReturnType<typeof unavailableOn>>,
         ];
   // Details, Client list and Chat only.
-  const [links, autoSend, listEntries, messages, muted, history, eventNumber, agreements] = await Promise.all([
+  const [links, autoSend, listEntries, messages, muted, history, eventNumber, agreements, clockRows] = await Promise.all([
     on("details") ? clientLinks(session, me) : null, // admins only: null for anyone else
     on("client") ? autoSendOn() : false,
     on("client") ? listLog(id) : [],
@@ -171,6 +166,13 @@ async function AdminEventPage({
     eventNumberFor(session, me).catch(() => null),
     // Agreements have pricing: admins and managers only (null for anyone else).
     on("details") ? agreementsFor(id, me, eventSchedule(session.event_data ?? {}).tz).catch(() => null) : null,
+    // The Time clock card: the same rows the Time page and the payroll CSV build.
+    on("details")
+      ? eventTimesheetRows(id).catch((err) => {
+          console.error("[time clock] could not load:", err);
+          return [];
+        })
+      : [],
   ]);
   const repeat = repeatLabel(eventNumber);
   if (tab === "chat") await markThreadRead(id, me.id);
@@ -221,18 +223,20 @@ async function AdminEventPage({
 
   const panels: Record<ManagerTab, () => React.ReactNode> = {
     details: () => {
+      const bart = bartendersNeeded(session);
+      const fv = (f: keyof EditValues) => formValue(f, ed, session, bart);
       const editValues: EditValues = {
-        event_date: eventDay(ed.event_date ?? session.event_date) ?? "",
-        bar_service_start: hhmm(ed.bar_service_start),
-        bar_service_end: hhmm(ed.bar_service_end),
-        guest_count: str(ed.guest_count ?? session.guest_count),
-        bartenders: str(bartendersNeeded(session) ?? ""),
-        package: str(ed.package ?? session.package_type),
-        event_address: str(ed.event_address),
-        parking_info: str(ed.parking_info),
-        day_of_contact_name: str(ed.day_of_contact_name),
-        day_of_contact_phone: str(ed.day_of_contact_phone),
-        special_requests: str(ed.special_requests),
+        event_date: fv("event_date"),
+        bar_service_start: fv("bar_service_start"),
+        bar_service_end: fv("bar_service_end"),
+        guest_count: fv("guest_count"),
+        bartenders: fv("bartenders"),
+        package: fv("package"),
+        event_address: fv("event_address"),
+        parking_info: fv("parking_info"),
+        day_of_contact_name: fv("day_of_contact_name"),
+        day_of_contact_phone: fv("day_of_contact_phone"),
+        special_requests: fv("special_requests"),
       };
       const packages = PACKAGE_CHOICES.includes(editValues.package) || !editValues.package ? PACKAGE_CHOICES : [editValues.package, ...PACKAGE_CHOICES];
       return (
@@ -240,7 +244,13 @@ async function AdminEventPage({
           {session.price_pending && (
             <PriceNeededCard sessionId={id} summary={pendingSummary(session.price_pending_info)} blocks={pendingBlocks(session.price_pending_info)} />
           )}
-          <ClockStatus people={people} timeZone={v.timeZone} />
+          <ClockStatus
+            people={people}
+            rows={clockRows}
+            timeZone={v.timeZone}
+            title={[adminEventTitle(ed), v.date].filter(Boolean).join(", ")}
+            timeHref={timePageHref(id, eventSchedule(ed).day)}
+          />
           {addedBy && (
             <p className="px-1 text-sm text-[#6B5D52]">Added by {addedBy}</p>
           )}
@@ -260,7 +270,17 @@ async function AdminEventPage({
           )}
           {agreements && <AgreementCard sessionId={id} initial={agreements} />}
           {history && <ClientHistoryCard history={history} clientKey={history.matchedOn} />}
-          <Details v={v} />
+          {hidden ? (
+            // Hidden events are not edited: the cards are read only until it is unhidden.
+            <Details v={v} />
+          ) : (
+            <div className="space-y-3">
+              <WhatChanged v={v} />
+              <EditableDetails sessionId={id} version={session.version} cards={editCards(v, ed, session)} packages={packages} />
+              <DrinkSections v={v} />
+              {v.lastUpdated && <p className="text-xs text-[#A39585] px-1">Last updated {v.lastUpdated}</p>}
+            </div>
+          )}
           <PackageCard packageName={v.package} />
           {!hidden && <EditEvent sessionId={id} version={session.version} initial={editValues} packages={packages} />}
           <HideAction sessionId={id} hidden={hidden} />

@@ -113,6 +113,7 @@ async function TeamEventPage({
         shopping={shoppingGroups(data.view.package, data.shopping)}
         shoppingState={data.shoppingState}
         supplyUpdates={data.supplyUpdates}
+        syrups={data.syrups}
         barReady={{
           show: onEvent,
           canSubmit: open,

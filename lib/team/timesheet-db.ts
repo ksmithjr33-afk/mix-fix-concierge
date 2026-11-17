@@ -72,11 +72,20 @@ function edOf(s: SessionLite): Record<string, unknown> {
 }
 
 /** Rows for the given assignments, or for every event dated from..to (YYYY-MM-DD, inclusive). */
-async function buildRows(filter: { from: string; to: string } | { assignmentIds: string[] }): Promise<TimesheetRow[]> {
+async function buildRows(filter: { from: string; to: string } | { assignmentIds: string[] } | { sessionId: string }): Promise<TimesheetRow[]> {
   let assignments: { id: string; session_id: string; staff_id: string; status: string }[] = [];
   let sessions: SessionLite[] = [];
 
-  if ("assignmentIds" in filter) {
+  if ("sessionId" in filter) {
+    const [{ data: s, error }, { data, error: aErr }] = await Promise.all([
+      supabase.from("sessions").select("*").eq("id", filter.sessionId),
+      supabase.from("event_assignments").select("id, session_id, staff_id, status").eq("session_id", filter.sessionId),
+    ]);
+    if (error) throw new Error(`sessions lookup failed: ${error.message}`);
+    if (aErr) throw new Error(`event_assignments lookup failed: ${aErr.message}`);
+    sessions = (s as SessionLite[]) ?? [];
+    assignments = (data as typeof assignments) ?? [];
+  } else if ("assignmentIds" in filter) {
     if (filter.assignmentIds.length === 0) return [];
     const { data, error } = await supabase.from("event_assignments").select("id, session_id, staff_id, status").in("id", filter.assignmentIds);
     if (error) throw new Error(`event_assignments lookup failed: ${error.message}`);
@@ -181,6 +190,11 @@ async function buildRows(filter: { from: string; to: string } | { assignmentIds:
 
 export function timesheetRows(from: string, to: string): Promise<TimesheetRow[]> {
   return buildRows({ from, to });
+}
+
+/** One event's rows, built exactly as the Time page and the CSV build them. For the manager view's Time clock card. */
+export function eventTimesheetRows(sessionId: string): Promise<TimesheetRow[]> {
+  return buildRows({ sessionId });
 }
 
 export type ActionResult = { ok: true; rows: TimesheetRow[]; message?: string } | { ok: false; error: string; status: number };

@@ -83,7 +83,7 @@ const has = (tab: string, ...parts: string[]) => {
   const body = page.slice(at, next < 0 ? undefined : at + 1 + next);
   return at > 0 && parts.every((p) => body.includes(p));
 };
-check("Details: the event details and the admin edit form", has("details", "<Details v={v} />", "<EditEvent", "<HideAction"));
+check("Details: the event details with an Edit on each field, Edit everything, and hide", has("details", "<EditableDetails", "<Details v={v} />", "<EditEvent", "<HideAction"));
 check("Team: bartenders, assign someone, open shifts, requests, handoffs, market", has("team", "<AssignPanel", "<ShiftPanel"));
 check("Shopping list: the full order sheet inside the tab", has("order", "<OrderSheet initial={sheet}"));
 check("Client list: list, auto send, held changes, Review and send, the log", has("client", "<ClientListPanel", "holds=", "log=", "autoSend=", "listText="));

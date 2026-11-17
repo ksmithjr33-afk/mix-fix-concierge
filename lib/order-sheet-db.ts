@@ -36,6 +36,8 @@ import {
 import { addStore, listStores, rememberLegendName } from "@/lib/order-sheet-stores";
 import { seenItems, suppliesFromSheet, supplyChanges, inNoticeWindow, type SeenItem } from "@/lib/team/supplies";
 import { eventSchedule } from "@/lib/team/time";
+import { listSyrups } from "@/lib/syrups-db";
+import { cleanSyrupEdit, sameSyrup, syrupViews, type SyrupRecipe, type SyrupView } from "@/lib/syrups";
 
 type EventData = Record<string, unknown>;
 
@@ -64,6 +66,7 @@ export interface SheetView {
   sessionId: string;
   header: SheetHeader;
   recipes: SheetRecipe[]; // with this event's recipe edits on top
+  syrups: SyrupView[]; // the house made syrups those recipes use: recipe, Store bought, or Recipe needed
   sheet: Sheet;
   byStore: ReturnType<typeof byStore>;
   meta: SheetMeta;
@@ -90,6 +93,7 @@ interface MetaRow {
   delivery_day_of?: boolean | null;
   legend_names?: Record<string, unknown> | null;
   recipe_edits?: Record<string, unknown> | null;
+  syrup_edits?: Record<string, unknown> | null; // a syrup recipe changed for this event only
   staff_list_sent?: SeenItem[] | null; // the bartenders' list before a burst of edits, until the text goes
   staff_list_pending_at?: string | null;
 }
@@ -153,13 +157,26 @@ async function build(session: SessionLike): Promise<Built> {
   return { calc, saved, sheet, suggestions, stores, meta: m };
 }
 
+/** The syrups for the sheet's recipes, matched to the library and to the sheet's lines. */
+function sheetSyrups(sheet: Sheet, list: SheetRecipe[], library: SyrupRecipe[], stores: StoreInfo[], m: MetaRow): SyrupView[] {
+  return syrupViews({
+    drinks: list,
+    library,
+    lines: sheet.sections.flatMap((s) => s.lines).map((l) => ({ name: l.fields.name, quantity: l.fields.quantity, size: l.fields.size, text: l.text, store: l.store })),
+    storeName: (id) => stores.find((s) => s.id === id)?.name ?? "a store",
+    edits: m.syrup_edits,
+  });
+}
+
 export async function getSheetView(session: SessionLike): Promise<SheetView> {
   const ed = eventDataOf(session);
-  const { sheet, suggestions, stores, meta: m } = await build(session);
+  const [{ sheet, suggestions, stores, meta: m }, library] = await Promise.all([build(session), listSyrups()]);
+  const list = withRecipeEdits(recipes(ed), m.recipe_edits);
   return {
     sessionId: session.id,
     header: sheetHeader(ed),
-    recipes: withRecipeEdits(recipes(ed), m.recipe_edits),
+    recipes: list,
+    syrups: sheetSyrups(sheet, list, library, stores, m),
     sheet,
     byStore: byStore(sheet, stores),
     meta: meta(m, stores),
@@ -173,10 +190,12 @@ export async function getSheetView(session: SessionLike): Promise<SheetView> {
  * suggestions or store list needed, plus this event's recipe edits. For the
  * bartender Supplies tab, the Something is missing sheet, and the wrap up.
  */
-export async function staffSheet(session: SessionLike): Promise<{ sheet: Sheet; recipes: SheetRecipe[] }> {
+export async function staffSheet(session: SessionLike): Promise<{ sheet: Sheet; recipes: SheetRecipe[]; syrups: SyrupView[] }> {
   const ed = eventDataOf(session);
-  const [saved, m] = await Promise.all([savedRows(session.id), metaRow(session.id)]);
-  return { sheet: buildSheet(calculatedLines(ed), saved), recipes: withRecipeEdits(recipes(ed), m.recipe_edits) };
+  const [saved, m, library, stores] = await Promise.all([savedRows(session.id), metaRow(session.id), listSyrups(), listStores()]);
+  const sheet = buildSheet(calculatedLines(ed), saved);
+  const list = withRecipeEdits(recipes(ed), m.recipe_edits);
+  return { sheet, recipes: list, syrups: sheetSyrups(sheet, list, library, stores, m) };
 }
 
 /**
@@ -496,6 +515,27 @@ export async function applySheetAction(session: SessionLike, editor: Editor, bod
         else edits[keys[i]] = { ...r.value, by: who.name, at: now };
       }
       const { error } = await supabase.from("order_sheet_meta").upsert({ session_id: session.id, recipe_edits: edits, updated_at: now }, { onConflict: "session_id" });
+      if (error) return bad("Could not save. Try again.", 500);
+      break;
+    }
+    case "syrup": {
+      // A syrup recipe for this event only: the library is never changed here.
+      const view = await getSheetView(session);
+      const syrup = view.syrups.find((x) => x.key === String(body.key ?? ""));
+      if (!syrup) return bad("That syrup is no longer on this event's drinks. Reload the page.", 404);
+      const lib = syrup.libraryId ? (await listSyrups()).find((r) => r.id === syrup.libraryId) : null;
+      if (!lib) return bad("Add this syrup to the Syrup recipes library first.", 404);
+      if (lib.bought && body.reset !== true) return bad(`${lib.name} is marked bought, never made, so it has no recipe to edit.`, 409);
+      const edits = { ...(m.syrup_edits && typeof m.syrup_edits === "object" ? m.syrup_edits : {}) };
+      if (body.reset === true) {
+        delete edits[syrup.key];
+      } else {
+        const r = cleanSyrupEdit(body);
+        if (!r.ok) return bad(r.error);
+        if (sameSyrup(r.value, lib)) delete edits[syrup.key];
+        else edits[syrup.key] = { ...r.value, by: who.name, at: now };
+      }
+      const { error } = await supabase.from("order_sheet_meta").upsert({ session_id: session.id, syrup_edits: edits, updated_at: now }, { onConflict: "session_id" });
       if (error) return bad("Could not save. Try again.", 500);
       break;
     }

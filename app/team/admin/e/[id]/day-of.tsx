@@ -4,7 +4,10 @@ import type { MissingReport } from "@/lib/team/events";
 import type { ListDetail } from "@/lib/team/supplies";
 import { SUPPLIES_PROGRESS } from "@/lib/team/supplies";
 import { prepSteps, TOOLS_TAB } from "@/lib/team/prep";
-import { clockStatus, timeLabel } from "@/lib/team/clock-label";
+import { timeLabel } from "@/lib/team/clock-label";
+import { clockCopyText, clockPeople, dateTimeLabel, hoursLabel, totalText } from "@/lib/team/clock-card";
+import type { TimesheetRow } from "@/lib/team/timesheet";
+import CopyButton from "../../copy-button";
 import { FLAG_LABELS, formatWorked, type PunchFlag } from "@/lib/team/clock";
 
 // The manager view's Day of tab, read only: for each person, what is not
@@ -176,28 +179,71 @@ export function MissingReports({ reports, timeZone }: { reports: MissingReport[]
   );
 }
 
-/** Top of the Details tab: who is clocked in right now, one line per person on the event. The full punch list stays on Day of. */
-export function ClockStatus({ people, timeZone }: { people: AssigneeProgress[]; timeZone: string }) {
-  const on = people.filter((p) => p.status !== "declined");
+/**
+ * Top of the Details tab: the Time clock card. Every person on the event with
+ * their role and state, each clock in and out with its date (event time
+ * zone), who edited or approved it, and hours to the minute and as a decimal.
+ * The numbers are the Time page's and the payroll CSV's (lib/team/clock-card.ts).
+ */
+export function ClockStatus({ people, rows, timeZone, title, timeHref }: { people: AssigneeProgress[]; rows: TimesheetRow[]; timeZone: string; title: string; timeHref: string }) {
+  const list = clockPeople(people, rows, timeZone);
   return (
-    <section className={card} aria-label="Clock status">
-      <h2 className="font-heading text-base font-bold text-[#2C2420] mb-1">Clocked in</h2>
-      {on.length === 0 ? (
+    <section className={card} aria-label="Time clock">
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
+        <h2 className="font-heading text-base font-bold text-[#2C2420]">Time clock</h2>
+        <div className="flex items-center gap-3">
+          <Link href={timeHref} className="inline-flex min-h-[44px] items-center text-sm text-[#B5845A] underline">
+            Open on Time
+          </Link>
+          {list.length > 0 && <CopyButton text={clockCopyText(title, list, timeZone)} label="Copy times" />}
+        </div>
+      </div>
+      {list.length === 0 ? (
         <p className="text-[15px] text-[#6B5D52]">Nobody on this event yet.</p>
       ) : (
         <ul className="divide-y divide-[#DDD5CC]">
-          {on.map((p) => {
-            const line = clockStatus(p, timeZone);
+          {list.map((p) => {
+            const total = totalText(p);
             return (
-              <li key={p.staffId} className="py-1.5 flex flex-wrap items-baseline justify-between gap-x-3 text-[15px]">
-                <span className="font-medium text-[#2C2420]">{p.name}</span>
-                <span className={`text-sm ${p.clockIn && !p.clockOut ? "text-[#55684A] font-medium" : "text-[#6B5D52]"}`}>{line}</span>
+              <li key={p.staffId} className="py-2 space-y-0.5">
+                <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+                  <span className="text-[15px]">
+                    <span className="font-medium text-[#2C2420]">{p.name}</span> <span className="text-sm text-[#6B5D52]">{p.role}</span>
+                  </span>
+                  <span className={`text-sm ${p.state === "in" ? "text-[#55684A] font-medium" : p.state === "out" ? "text-[#2C2420]" : "text-[#6B5D52]"}`}>{p.stateText}</span>
+                </div>
+                {p.pairs.length > 0 && (
+                  <ul className="text-sm text-[#2C2420] space-y-0.5">
+                    {p.pairs.map((x, i) => (
+                      <li key={x.assignmentId} className="break-words">
+                        {p.pairs.length > 1 && <span className="text-[#6B5D52]">{i + 1}. </span>}
+                        <PunchSpan label="In" at={x.inAt} by={x.inEditedBy} timeZone={timeZone} />
+                        {" · "}
+                        {x.inAt && !x.outAt ? <span className="text-[#55684A]">Still clocked in</span> : <PunchSpan label="Out" at={x.outAt} by={x.outEditedBy} timeZone={timeZone} />}
+                        {x.minutes !== null && <span className="tabular-nums"> · {hoursLabel(x.minutes)}</span>}
+                        {x.approvedBy && <span className="text-xs text-[#55684A]"> · approved by {x.approvedBy}</span>}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {total && p.pairs.length > 1 && <p className="text-sm font-medium text-[#2C2420] tabular-nums">{total}</p>}
               </li>
             );
           })}
         </ul>
       )}
+      {timeZone !== "America/Chicago" && <p className="text-xs text-[#A39585] mt-1">Times are Pacific time.</p>}
     </section>
+  );
+}
+
+function PunchSpan({ label, at, by, timeZone }: { label: string; at: string | null; by: string | null; timeZone: string }) {
+  if (!at) return <span className="text-[#A0412D]">{label} missing</span>;
+  return (
+    <span>
+      {label} {dateTimeLabel(at, timeZone)}
+      {by && <span className="text-xs text-[#9A7049]"> edited by {by}</span>}
+    </span>
   );
 }
 

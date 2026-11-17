@@ -16,6 +16,8 @@ import { withHoursBooked } from "@/lib/price-change";
 import { autoSendOn, listWouldChange } from "@/lib/client-list-db";
 import { firstName, type StaffMember } from "@/lib/team/event-view";
 import { adminPrice, cleanAdminEdit, cleanPriceChoice } from "@/lib/team/admin-edit";
+import { unpriced } from "@/lib/price-pending";
+import { textPricePending } from "@/lib/price-pending-db";
 
 export interface AdminPreview {
   priced: boolean; // a priced field changes, so the price choice matters
@@ -43,7 +45,8 @@ export async function previewAdminEdit(sessionId: string, rawChanges: unknown): 
     ok: true,
     preview: {
       priced: !!quote?.changes.some((c) => isPricedField(c.field)),
-      bookedTotal: p?.booked_total ?? null,
+      // The booked total even when nothing priced changes, so a date change can show it on its confirm.
+      bookedTotal: p?.booked_total ?? (typeof session.booked_price?.total === "number" ? session.booked_price.total : null),
       engineAmount: p?.amount ?? null,
       engineNewTotal: p?.new_total ?? null,
       engineText: p?.price_text ?? "",
@@ -53,7 +56,7 @@ export async function previewAdminEdit(sessionId: string, rawChanges: unknown): 
   };
 }
 
-export type SaveEditResult = { ok: true; version: number; changed: number } | { ok: false; error: string; status: number };
+export type SaveEditResult = { ok: true; version: number; changed: number; pricePending: boolean } | { ok: false; error: string; status: number };
 
 export async function saveAdminEdit(opts: {
   sessionId: string;
@@ -73,12 +76,19 @@ export async function saveAdminEdit(opts: {
   const expectedVersion = typeof opts.expectedVersion === "number" ? opts.expectedVersion : undefined;
   const editor = { name: firstName(opts.admin.name), staffId: opts.admin.id };
 
+  // "Leave the price pending" is only for a change the engine cannot price:
+  // then it saves like a client change would, and the event is price pending.
+  if (choice.mode === "pending") {
+    const quote = await quoteEventUpdate(opts.sessionId, clean.partial, undefined, { ignoreCutoff: true });
+    if (!unpriced(quote?.price)) return { ok: false, error: "The pricing engine can price this change. Keep the total, apply the engine's difference, or enter one by hand.", status: 400 };
+  }
+
   let result;
   try {
     result = await applyEventUpdate(opts.sessionId, clean.partial, {
       source: "manager",
       ignoreCutoff: true,
-      priceOverride: (engine) => adminPrice(engine, choice.mode, choice.total, editor.name),
+      priceOverride: choice.mode === "pending" ? undefined : (engine) => adminPrice(engine, choice.mode, choice.total, editor.name),
       customTotal: choice.mode === "manual",
       editor,
       expectedVersion,
@@ -96,5 +106,7 @@ export async function saveAdminEdit(opts: {
     staffOrigin: opts.origin,
     clientList: { mode: "admin", send: opts.sendList !== false, by: { id: opts.admin.id, name: editor.name } },
   });
-  return { ok: true, version: result.version, changed: result.rows.reduce((n, r) => n + r.changes.length, 0) };
+  // Price pending rule: the admins get one text when a change is saved without a price.
+  if (result.pricePending?.fresh) await textPricePending(session, result.pricePending.info);
+  return { ok: true, version: result.version, changed: result.rows.reduce((n, r) => n + r.changes.length, 0), pricePending: !!result.pricePending?.fresh };
 }

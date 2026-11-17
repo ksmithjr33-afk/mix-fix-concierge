@@ -18,8 +18,11 @@ export default async function TimesheetsPage({
   const params = await searchParams;
   const asked = typeof params.week === "string" && isYmd(params.week) ? params.week : chicagoToday();
   const week = weekRange(asked);
-  const me = await requireAdmin(`/team/admin/timesheets?week=${week.from}`);
-  const rows = await timesheetRows(week.from, week.to);
+  const me = await requireAdmin(`/team/admin/timesheets?week=${week.from}${typeof params.event === "string" ? `&event=${encodeURIComponent(params.event)}` : ""}`);
+  const eventId = typeof params.event === "string" && params.event ? params.event : null;
+  const all = await timesheetRows(week.from, week.to);
+  // From the manager view's Time clock card: just that event, with the same rows the week shows.
+  const rows = eventId ? all.filter((r) => r.sessionId === eventId) : all;
   const rates = Object.fromEntries(await ratesFor(me, rows.map((r) => r.staffId)));
 
   return (
@@ -38,7 +41,15 @@ export default async function TimesheetsPage({
             </Link>
           </div>
         </div>
-        <TimesheetWeek key={week.from} initial={rows} meId={me.id} from={week.from} to={week.to} rates={rates} />
+        {eventId && (
+          <p className="px-1 text-[15px] text-[#2C2420]">
+            Showing {rows[0]?.eventTitle ? <span className="font-medium">{rows[0].eventTitle}</span> : "one event"} only.{" "}
+            <Link href={`/team/admin/timesheets?week=${week.from}`} className="text-[#B5845A] underline">
+              Show the whole week
+            </Link>
+          </p>
+        )}
+        <TimesheetWeek key={`${week.from}:${eventId ?? ""}`} initial={rows} meId={me.id} from={week.from} to={week.to} rates={rates} scope={eventId ? "event" : "week"} />
       </main>
     </>
   );

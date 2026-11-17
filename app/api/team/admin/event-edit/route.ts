@@ -34,7 +34,7 @@ export async function POST(request: Request) {
       sendList: body.sendList,
     });
     if (!r.ok) return NextResponse.json({ error: r.error }, { status: r.status });
-    return NextResponse.json({ ok: true, version: r.version });
+    return NextResponse.json({ ok: true, version: r.version, pricePending: r.pricePending });
   } catch (err) {
     console.error("[team] event edit error:", err);
     return NextResponse.json({ error: "Could not save. Try again." }, { status: 500 });

@@ -9,6 +9,7 @@ import { supabase } from "@/lib/supabase";
 import type { SessionRow } from "@/lib/event-updates";
 import { settledStaffListChanges, staffSheet } from "@/lib/order-sheet-db";
 import type { SheetRecipe } from "@/lib/order-sheet";
+import type { SyrupView } from "@/lib/syrups";
 import { updateText } from "@/lib/team/assignments";
 import { sendStaffText } from "@/lib/team/sms";
 import { eventDay, shortDate } from "@/lib/team/time";
@@ -17,9 +18,9 @@ import { seenItems, suppliesFromSheet, supplyChanges, suppliesTextLine, type See
 
 type SessionLike = Pick<SessionRow, "id" | "event_date" | "event_data">;
 
-export async function staffSupplies(session: SessionLike): Promise<{ list: Supplies; recipes: SheetRecipe[] }> {
-  const { sheet, recipes } = await staffSheet(session);
-  return { list: suppliesFromSheet(sheet), recipes };
+export async function staffSupplies(session: SessionLike): Promise<{ list: Supplies; recipes: SheetRecipe[]; syrups: SyrupView[] }> {
+  const { sheet, recipes, syrups } = await staffSheet(session);
+  return { list: suppliesFromSheet(sheet), recipes, syrups };
 }
 
 async function seenRow(staffId: string, sessionId: string): Promise<SeenItem[] | null> {

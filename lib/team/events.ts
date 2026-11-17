@@ -1,6 +1,7 @@
 // Database side of the staff event page: access, the staff view, and checkbox
 // state. Server only.
 
+import type { SyrupView } from "@/lib/syrups";
 import { supabase } from "@/lib/supabase";
 import type { EventUpdateRow, SessionRow } from "@/lib/event-updates";
 import {
@@ -99,6 +100,7 @@ export interface EventPageData {
   shoppingState: Record<string, CheckState>;
   supplyUpdates: string[]; // what changed on the list since this person last looked
   recipes: SheetRecipe[];
+  syrups: SyrupView[]; // the Syrup recipes section on the Supplies tab
 }
 
 export function checklistState(pkg: unknown, rows: CheckRow[]): Record<string, CheckState> {
@@ -156,6 +158,7 @@ export async function eventPageData(session: SessionRow, staff: StaffMember): Pr
     shoppingState: supplyState(supplies.list, shopRows),
     supplyUpdates: updates,
     recipes: supplies.recipes,
+    syrups: supplies.syrups,
   };
 }
 

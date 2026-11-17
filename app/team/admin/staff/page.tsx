@@ -77,6 +77,15 @@ async function AdminStaffPage() {
           title="Ice rule"
           help="Shown under Recommended location on every ice card and in the ice pickup text. Leave it empty to put back: No gas stations. No grocery stores."
         />
+        <section className="bg-[#F5F0EB] rounded-2xl border border-[#DDD5CC] px-4 py-3 flex flex-wrap items-center justify-between gap-2">
+          <div className="min-w-0">
+            <h2 className="font-heading text-base font-bold text-[#2C2420]">Syrup recipes</h2>
+            <p className="text-sm text-[#6B5D52]">House made syrups for the Shopping list and the bartenders&apos; Supplies tab.</p>
+          </div>
+          <a href="/team/admin/syrups" className="inline-flex min-h-[44px] items-center rounded-lg border border-[#2C2420] px-4 text-sm font-medium text-[#2C2420]">
+            Manage
+          </a>
+        </section>
         <div className="px-1">
           <a href="/api/team/admin/staff/export" className="inline-block rounded-lg border border-[#2C2420] text-[#2C2420] px-4 py-2 text-sm font-medium">
             Download CSV

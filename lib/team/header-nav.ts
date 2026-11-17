@@ -57,7 +57,7 @@ export function headerLinks(showAdmin: boolean, counts: NavCounts): NavLink[] {
   if (showAdmin) {
     return [
       { href: "/team/admin/events", label: "Staffing", badge: 0, match: ["/team/admin/events", "/team/admin/e", "/team/admin/preview", "/team/admin/stores", "/team/admin/leftovers"], inline: true },
-      { href: "/team/admin/staff", label: "Staff", badge: 0, match: ["/team/admin/staff"], inline: true },
+      { href: "/team/admin/staff", label: "Staff", badge: 0, match: ["/team/admin/staff", "/team/admin/syrups"], inline: true },
       { href: "/team/admin/clients", label: "Clients", badge: 0, match: ["/team/admin/clients"], inline: true },
       { href: "/team/admin/timesheets", label: "Time", badge: 0, match: ["/team/admin/timesheets"], inline: true },
       news,

@@ -228,7 +228,11 @@ check("Admin edit with the box on (the default): the updated list is sent", last
 await editDb.saveAdminEdit({ sessionId: "s1", admin, changes: { guest_count: "200" }, price: { mode: "keep" }, expectedVersion: 2, origin, sendList: false });
 check("Admin edit with the box unchecked: nothing is sent", lastHook()?.client_shopping_list_send === false && logRows().some((l) => l.action === "not_sent" && String(l.detail).includes("unchecked")));
 const editPage = src("app/team/admin/e/[id]/edit-event.tsx");
-check("The admin edit form shows Send updated list to client, on by default", editPage.includes("Send updated list to client") && editPage.includes("useState(true)"));
+const fieldPage = src("app/team/admin/e/[id]/editable-details.tsx");
+check(
+  "The admin edit forms (Edit everything and one field at a time) show Send updated list to client, on by default",
+  src("app/team/admin/e/[id]/edit-price.tsx").includes("Send updated list to client") && [editPage, fieldPage].every((p) => p.includes("<ListFieldset") && p.includes("useState(true)"))
+);
 reset({ date: NEAR });
 await cldb.completionFields("s1");
 const nearEdit = await editDb.saveAdminEdit({ sessionId: "s1", admin, changes: { guest_count: "150" }, price: { mode: "keep" }, expectedVersion: 1, origin });
