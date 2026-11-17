@@ -120,7 +120,7 @@ const walk = (dir: string) => {
   }
 };
 walk("app/api/team/admin");
-check("Every admin route checks for an admin on the server", routes.length >= 15 && routes.every((r) => /isAdminRole\(/.test(src(r))), routes.filter((r) => !/isAdminRole\(/.test(src(r))).join(", "));
+check("Every admin route checks for an admin on the server", routes.length >= 15 && routes.every((r) => /isAdminRole\(|isFullAdmin\(/.test(src(r))), routes.filter((r) => !/isAdminRole\(|isFullAdmin\(/.test(src(r))).join(", "));
 const tabRoutes = ["assign", "shifts", "handoff", "market", "hide", "event-edit", "client-list", "order-sheet", "stores"];
 check("The routes behind the tabs are all admin routes", tabRoutes.every((r) => existsSync(new URL(`../app/api/team/admin/${r}/route.ts`, import.meta.url))));
 check("Admin pages are all behind requireAdmin", ["app/team/admin/e/[id]/page.tsx", "app/team/admin/e/[id]/order/page.tsx", "app/team/admin/stores/page.tsx"].every((p) => src(p).includes("await requireAdmin(")));

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-/** The hourly rate, set by admins. Blank clears it, and no rate means no pay is shown. */
+/** The hourly rate, set by admins. Blank clears it, and pay is figured at the $30 default. */
 export default function RateForm({ staffId, initial }: { staffId: string; initial: string }) {
   const [value, setValue] = useState(initial);
   const [busy, setBusy] = useState(false);
@@ -34,7 +34,7 @@ export default function RateForm({ staffId, initial }: { staffId: string; initia
           inputMode="decimal"
           value={value}
           onChange={(e) => setValue(e.target.value)}
-          placeholder="No rate"
+          placeholder="30.00 (default)"
           aria-label="Hourly rate in dollars"
           className="w-28 rounded-xl border border-[#DDD5CC] bg-white px-3 py-2 text-[16px] text-[#2C2420]"
         />

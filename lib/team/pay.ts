@@ -1,7 +1,10 @@
 // Pay: estimates from an hourly rate. Pure, no database.
 //
-// Estimated pay = hourly rate × (arrival to service end + 1 hour of breakdown).
-// Visible only to admins and to the staff member it belongs to. No rate, no pay.
+// Estimated hours = setup (arrival: 2 hours before service, 3 for weddings) +
+// service + 1 hour of breakdown, from scheduledMinutes below: the one place
+// hours are figured. Estimated pay = hours × the person's rate ($30 when no
+// rate is on file) + mileage + their share of the gratuity. Visible only to
+// admins, managers on the payout sheet, and the staff member it belongs to.
 // Payroll is the final record; everything here is labeled as an estimate.
 
 import { BREAKDOWN_MIN } from "@/lib/team/clock";
@@ -10,6 +13,16 @@ import { eventSchedule } from "@/lib/team/time";
 export const PAY_LABEL = "Estimated pay, before taxes and tips";
 export const PAY_NOTE = "These are estimates, before taxes and tips. Payroll is the final record.";
 export const MAX_RATE_CENTS = 200_00;
+/** The hourly rate for anyone with no rate on file. */
+export const DEFAULT_RATE_CENTS = 30_00;
+export const ESTIMATE_NOTE = "Estimate only. Final pay is based on your actual clock in and clock out, before taxes.";
+export const NO_ADDRESS_TEXT = "Add your home address to see mileage";
+export const PROFILE_HREF = "/team/me/profile";
+
+/** The rate pay is figured at: the one on file, else the default. */
+export function effectiveRate(cents: number | null | undefined): number {
+  return cents && cents > 0 ? cents : DEFAULT_RATE_CENTS;
+}
 
 /** Arrival to service end plus an hour of breakdown, in minutes. Null without the times. */
 export function scheduledMinutes(ed: Record<string, unknown>): number | null {
@@ -89,4 +102,153 @@ export function payTotals(rows: PayRow[]): { weeks: { week: string; cents: numbe
     weeks: [...weeks].sort((a, b) => a[0].localeCompare(b[0])).map(([week, t]) => ({ week, ...t })),
     months: [...months].sort((a, b) => a[0].localeCompare(b[0])).map(([month, t]) => ({ month, ...t })),
   };
+}
+
+// ----- Mileage -----
+
+export interface MileageSettings {
+  thresholdMiles: number; // one way: at or under this, no mileage
+  deductionMiles: number; // taken off the round trip once
+  rateCents: number; // per paid mile
+  caRateCents: number; // per paid mile for events in the Los Angeles market
+}
+
+export const MILEAGE_DEFAULTS: MileageSettings = { thresholdMiles: 20, deductionMiles: 20, rateCents: 30, caRateCents: 40 };
+
+export type MilesSource = "straight_line" | "driving" | "override";
+export const MILES_SOURCE_LABEL: Record<MilesSource, string> = { straight_line: "straight line", driving: "driving", override: "adjusted" };
+
+/** One way miles to a tenth. */
+export const roundMiles = (m: number) => Math.round(m * 10) / 10;
+
+/**
+ * Paid miles and pay for one person on one event. 20 one way or less: nothing.
+ * Over that: the round trip less the deduction, taken once. 50 one way is 100
+ * round trip, 80 paid, $24.00 ($32.00 in California).
+ */
+export function mileagePay(oneWayMiles: number, s: MileageSettings, california: boolean): { paidMiles: number; cents: number } {
+  const one = roundMiles(Math.max(0, oneWayMiles));
+  if (one <= s.thresholdMiles) return { paidMiles: 0, cents: 0 };
+  const paidMiles = roundMiles(Math.max(0, one * 2 - s.deductionMiles));
+  return { paidMiles, cents: Math.round(paidMiles * (california ? s.caRateCents : s.rateCents)) };
+}
+
+/** What the mileage line says, for one person on one event. */
+export type MileageLine =
+  | { state: "paid"; oneWayMiles: number; paidMiles: number; cents: number; source: MilesSource; california: boolean; locked: boolean; adjustedBy: string | null; note: string | null }
+  | { state: "no_address" } // no home address on file
+  | { state: "not_found" } // an address, but it could not be found on the map
+  | { state: "no_event_location" };
+
+/** A stored or live distance, with any admin adjustment applied. */
+export interface MilesInput {
+  oneWayMiles: number | null; // null: no home address (or no event location, see reason)
+  reason?: "no_address" | "not_found" | "no_event_location";
+  source: MilesSource;
+  locked: boolean; // stored when the person accepted
+  overrideMiles?: number | null; // one way miles an admin or manager set
+  overrideCents?: number | null; // a mileage amount an admin or manager set
+  overrideNote?: string | null;
+  overrideByName?: string | null;
+}
+
+export function mileageLine(m: MilesInput, s: MileageSettings, california: boolean): MileageLine {
+  const adjusted = (m.overrideMiles ?? null) !== null || (m.overrideCents ?? null) !== null;
+  const miles = m.overrideMiles ?? m.oneWayMiles;
+  if (miles === null || miles === undefined) {
+    if (m.overrideCents !== null && m.overrideCents !== undefined) {
+      return { state: "paid", oneWayMiles: 0, paidMiles: 0, cents: m.overrideCents, source: "override", california, locked: m.locked, adjustedBy: m.overrideByName ?? null, note: m.overrideNote ?? null };
+    }
+    return { state: m.reason ?? "no_address" };
+  }
+  const p = mileagePay(miles, s, california);
+  return {
+    state: "paid",
+    oneWayMiles: roundMiles(miles),
+    paidMiles: p.paidMiles,
+    cents: m.overrideCents ?? p.cents,
+    source: adjusted ? "override" : m.source,
+    california,
+    locked: m.locked,
+    adjustedBy: adjusted ? (m.overrideByName ?? null) : null,
+    note: adjusted ? (m.overrideNote ?? null) : null,
+  };
+}
+
+/** "80 paid miles (50 one way, straight line)" */
+export function mileageText(l: MileageLine): string {
+  if (l.state === "no_address") return NO_ADDRESS_TEXT;
+  if (l.state === "not_found") return "We could not find your home address on the map. Check it on your profile.";
+  if (l.state === "no_event_location") return "Mileage not available yet";
+  const paid = `${l.paidMiles} paid ${l.paidMiles === 1 ? "mile" : "miles"}`;
+  const parts = [`${l.oneWayMiles} one way`, MILES_SOURCE_LABEL[l.source]];
+  return `${paid} (${parts.join(", ")})${l.adjustedBy ? `, adjusted by ${l.adjustedBy}` : ""}`;
+}
+
+// ----- Tips -----
+
+export type TipsLine = { state: "on_file"; cents: number; bartenders: number } | { state: "not_on_file" } | { state: "not_bartender" };
+
+/** The booking's gratuity (dollars) split evenly among the bartenders. Null gratuity: not on file. */
+export function tipsShare(gratuityDollars: number | null | undefined, bartenders: number, isBartender: boolean): TipsLine {
+  if (gratuityDollars === null || gratuityDollars === undefined || !Number.isFinite(Number(gratuityDollars))) return { state: "not_on_file" };
+  if (!isBartender) return { state: "not_bartender" };
+  const n = Math.max(1, Math.floor(bartenders));
+  return { state: "on_file", cents: Math.round((Number(gratuityDollars) * 100) / n), bartenders: n };
+}
+
+export function tipsText(t: TipsLine): string {
+  if (t.state === "not_on_file") return "Tips: not on file yet";
+  if (t.state === "not_bartender") return "Tips are split among the bartenders";
+  return `${money(t.cents)}, split ${t.bartenders} ${t.bartenders === 1 ? "way" : "ways"}`;
+}
+
+// ----- One person's estimate -----
+
+export interface StaffEstimate {
+  rateCents: number;
+  rateIsDefault: boolean;
+  minutes: number | null;
+  hourlyCents: number | null;
+  mileage: MileageLine;
+  tips: TipsLine;
+  totalCents: number; // hourly + mileage + tips, leaving out what is not on file
+}
+
+export function staffEstimate(o: { rateOnFile: number | null; minutes: number | null; mileage: MileageLine; tips: TipsLine }): StaffEstimate {
+  const rateCents = effectiveRate(o.rateOnFile);
+  const hourlyCents = payCents(rateCents, o.minutes);
+  const mileageCents = o.mileage.state === "paid" ? o.mileage.cents : 0;
+  const tipsCents = o.tips.state === "on_file" ? o.tips.cents : 0;
+  return {
+    rateCents,
+    rateIsDefault: !(o.rateOnFile && o.rateOnFile > 0),
+    minutes: o.minutes,
+    hourlyCents,
+    mileage: o.mileage,
+    tips: o.tips,
+    totalCents: (hourlyCents ?? 0) + mileageCents + tipsCents,
+  };
+}
+
+/** A typed override: one way miles and/or a mileage amount in dollars, and a note. */
+export function validateMileageOverride(raw: { miles?: unknown; amount?: unknown; note?: unknown }):
+  | { ok: true; miles: number | null; cents: number | null; note: string | null; clear: boolean }
+  | { ok: false; error: string } {
+  const milesS = String(raw.miles ?? "").trim();
+  const amountS = String(raw.amount ?? "").trim().replace(/^\$/, "");
+  const note = String(raw.note ?? "").replace(/\s+/g, " ").trim().slice(0, 300);
+  if (!milesS && !amountS) return { ok: true, miles: null, cents: null, note: null, clear: true };
+  let miles: number | null = null;
+  let cents: number | null = null;
+  if (milesS) {
+    if (!/^\d{1,4}(\.\d)?$/.test(milesS)) return { ok: false, error: "Enter one way miles, like 34 or 34.5." };
+    miles = Number(milesS);
+  }
+  if (amountS) {
+    if (!/^\d{1,4}(\.\d{1,2})?$/.test(amountS)) return { ok: false, error: "Enter the mileage amount in dollars, like 24 or 24.50." };
+    cents = Math.round(Number(amountS) * 100);
+  }
+  if (note.length < 3) return { ok: false, error: "Add a note saying why." };
+  return { ok: true, miles, cents, note, clear: false };
 }

@@ -27,6 +27,8 @@ import type { StaffMenuSection } from "@/lib/team/approved-menu-db";
 import MenuSection from "./menu-section";
 import { card, Details } from "./event-details";
 import PackageCard from "../../package-card";
+import PayEstimateCard from "../../pay-estimate-card";
+import { money, type StaffEstimate } from "@/lib/team/pay";
 
 export { Details };
 
@@ -544,7 +546,7 @@ export default function EventTabs({
   photoReminder?: string | null; // no bar setup photo yet after service started
   closeout?: Omit<CloseoutProps, "sessionId"> | null; // the Wrap up tab, once bar service has started
   wrapUpDone?: boolean;
-  pay?: string | null; // the viewer's own estimated pay
+  pay?: StaffEstimate | null; // the viewer's own estimate: hourly, mileage, tips
 }) {
   const [tab, setTab] = useState<Tab>(initialTab);
   const chatUnread = useLiveUnread(chat.sessionId, initialTab === "chat" ? 0 : chat.unread, tab === "chat");
@@ -572,7 +574,7 @@ export default function EventTabs({
         </p>
         {pay && (
           <p className="text-sm text-[#55684A]">
-            <span className="font-semibold">{pay}</span> estimated pay, before taxes and tips
+            <span className="font-semibold">{money(pay.totalCents)}</span> estimated pay, before taxes. See the Details tab.
           </p>
         )}
         {managerHref && (
@@ -626,6 +628,7 @@ export default function EventTabs({
         {ice && <IcePickupCard initial={ice} />}
         {menuSection && <MenuSection menu={menuSection} />}
         <Details v={view} />
+        {pay && <PayEstimateCard estimate={pay} />}
         <PackageCard packageName={view.package} />
         {giveUp && !giveUp.handoff && giveUp.canStart && (
           <div className="mt-4">

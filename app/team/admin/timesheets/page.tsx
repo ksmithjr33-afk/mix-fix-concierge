@@ -5,7 +5,7 @@ import { isYmd, weekLabel, weekRange } from "@/lib/team/timesheet";
 import { chicagoToday } from "@/lib/team/time";
 import TeamHeader from "../../team-header";
 import TimesheetWeek from "./timesheet-week";
-import { ratesFor } from "@/lib/team/pay-db";
+import { payRates } from "@/lib/team/pay-db";
 
 export const dynamic = "force-dynamic";
 
@@ -23,7 +23,7 @@ export default async function TimesheetsPage({
   const all = await timesheetRows(week.from, week.to);
   // From the manager view's Time clock card: just that event, with the same rows the week shows.
   const rows = eventId ? all.filter((r) => r.sessionId === eventId) : all;
-  const rates = Object.fromEntries(await ratesFor(me, rows.map((r) => r.staffId)));
+  const rates = Object.fromEntries(await payRates(me, rows.map((r) => r.staffId)));
 
   return (
     <>

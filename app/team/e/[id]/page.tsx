@@ -9,7 +9,7 @@ import { barPhotoMissing, barPhotosOpen, barReadyOpensAt } from "@/lib/team/bar-
 import { timeLabel } from "@/lib/team/clock-label";
 import { closeoutState } from "@/lib/team/closeout-db";
 import { companyGear } from "@/lib/team/closeout";
-import { myEstimate } from "@/lib/team/pay-db";
+import { myPayEstimate } from "@/lib/team/pay-db";
 import { shoppingGroups } from "@/lib/team/shopping";
 import { assignmentRef, clockView, punchesFor } from "@/lib/team/clock-db";
 import { eventData } from "@/lib/team/markets";
@@ -81,7 +81,7 @@ async function TeamEventPage({
     staffMenuSection(access.session, staff),
     assignmentP.then((a) => (a ? punchesFor(a.id) : [])),
     // Only the viewer's own estimate, and only on an event they are on.
-    assignmentP.then((a) => (a && a.status !== "declined" ? myEstimate(staff.id, access.session) : null)),
+    assignmentP.then((a) => (a && a.status !== "declined" ? myPayEstimate(staff.id, access.session) : null)),
     assignmentP.then((a) => (a?.status === "accepted" ? Promise.all([myHandoff(id, staff.id), teammateChoices(access.session, staff.id)]) : ([null, []] as [null, never[]]))),
     // The ice pickup card: everyone on the event sees who is picking up and each status.
     staffIceView(access.session, staff),

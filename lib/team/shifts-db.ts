@@ -5,6 +5,7 @@
 // shift in one of their markets, built by shiftSummary() from an allowlist.
 
 import { supabase } from "@/lib/supabase";
+import { lockMileage } from "@/lib/team/pay-db";
 import type { SessionRow } from "@/lib/event-updates";
 import { bartendersNeeded, firstName, type StaffMember } from "@/lib/team/event-view";
 import { eventTitle, adminEventTitle, eventSubtitle } from "@/lib/team/event-list";
@@ -754,6 +755,7 @@ export async function approveRequest(admin: StaffMember, postId: string, staffId
     .upsert({ session_id: session.id, staff_id: staffId, status: "accepted", assigned_at: now, responded_at: now, assigned_by: admin.id }, { onConflict: "session_id,staff_id" });
   if (error) throw new Error(`assign failed: ${error.message}`);
   await supabase.from("shift_requests").update({ status: "approved", updated_at: now }).eq("post_id", postId).eq("staff_id", staffId);
+  await lockMileage(session.id, staffId);
   await sendStaffText(person.phone, person.name, gotShiftText({ date: facts(session).date, link: eventLink(session.id) }));
   if ((await spotsOpen(session)) <= 0) await closePost(post, session, "filled", admin.id, "filled");
   return { ok: true };
@@ -984,6 +986,7 @@ async function completeHandoff(h: HandoffRow, replacementId: string, admin: Staf
   await supabase.from("staff_supplies_confirmations").delete().eq("session_id", session.id).eq("staff_id", replacementId);
 
   await supabase.from("shift_handoffs").update({ status: "approved", to_staff_id: replacementId, decided_by: admin.id, decided_at: now }).eq("id", h.id);
+  await lockMileage(session.id, replacementId);
   const post = await coverPostFor(h.id);
   if (post && post.status === "posted") {
     await supabase.from("shift_requests").update({ status: "approved", updated_at: now }).eq("post_id", post.id).eq("staff_id", replacementId);

@@ -4,6 +4,7 @@
 // undoes or blocks the change that triggered it.
 
 import { supabase } from "@/lib/supabase";
+import { lockMileage } from "@/lib/team/pay-db";
 import { isFullAdmin } from "@/lib/team/roles";
 import { NEEDS_CONFIRM } from "@/lib/team/availability";
 import type { SessionRow } from "@/lib/event-updates";
@@ -236,6 +237,7 @@ export async function respondToAssignment(sessionId: string, staff: StaffMember,
     .eq("session_id", sessionId)
     .eq("staff_id", staff.id);
   if (error) throw new Error(`respond failed: ${error.message}`);
+  if (response === "accept") await lockMileage(sessionId, staff.id);
   if (response === "decline" && status === "accepted") {
     // A late drop, for the reliability record. Separate, so it never blocks the decline.
     const { error: dropErr } = await supabase.from("event_assignments").update({ dropped_at: new Date().toISOString() }).eq("session_id", sessionId).eq("staff_id", staff.id);

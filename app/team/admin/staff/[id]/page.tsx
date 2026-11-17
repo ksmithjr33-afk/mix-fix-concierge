@@ -15,7 +15,7 @@ import { longDate } from "@/lib/team/time";
 import CertUpload from "../../../certifications/cert-upload";
 import CertReview from "./cert-review";
 import RateForm from "./rate-form";
-import { rateFor } from "@/lib/team/pay-db";
+import { rateOnFile } from "@/lib/team/pay-db";
 import { PAY_LABEL } from "@/lib/team/pay";
 import { viewProfile } from "@/lib/team/profile-db";
 import ProfileForm from "../../../me/profile/profile-form";
@@ -43,7 +43,7 @@ export default async function StaffDetailPage({ params }: { params: Promise<{ id
   const today = await todayFor(id);
   const [away, record, certs, standings, onboard] = await Promise.all([upcomingUnavailable(id, today), staffRecord(id), certRows([id]), myStandings(id), onboardingDone(id)]);
   const needed = [...new Set(standings.map((s) => s.standing.certType))];
-  const rate = await rateFor(id); // admins only: this page is behind requireAdmin
+  const rate = await rateOnFile(id); // admins only: this page is behind requireAdmin
   const profile = await viewProfile(me, id);
   return (
     <>

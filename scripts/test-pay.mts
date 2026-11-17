@@ -21,7 +21,8 @@ check("Weddings arrive earlier, so more hours", pay.scheduledMinutes(wedding) ==
 check("Service past midnight", pay.scheduledMinutes({ ...party, bar_service_end: "1:00am" }) === 10 * 60);
 check("No times, no estimate", pay.scheduledMinutes({ event_date: today }) === null);
 check("Rate times hours", pay.estimatedPayCents(2500, party) === 17500 && pay.money(17500) === "$175.00");
-check("No rate, no pay", pay.estimatedPayCents(null, party) === null && pay.estimatedPayCents(0, party) === null);
+check("estimatedPayCents itself still needs a rate", pay.estimatedPayCents(null, party) === null && pay.estimatedPayCents(0, party) === null);
+check("No rate on file is figured at $30", pay.effectiveRate(null) === 3000 && pay.effectiveRate(0) === 3000 && pay.effectiveRate(2500) === 2500);
 check("Cents round", pay.payCents(2750, 25) === 1146);
 check("Money reads well", pay.money(123450) === "$1,234.50" && pay.rateText(2500) === "$25.00/hr");
 check("The label is exact", pay.PAY_LABEL === "Estimated pay, before taxes and tips");
@@ -68,19 +69,19 @@ function reset() {
   db.team_hidden_events = [];
 }
 reset();
-check("A person's own rate", (await payDb.rateFor("b1")) === 2500 && (await payDb.rateFor("a1")) === null);
+check("A person's own rate", (await payDb.rateFor("b1")) === 2500 && (await payDb.rateOnFile("a1")) === null && (await payDb.rateFor("a1")) === 3000);
 check("Admins can list rates", (await payDb.ratesFor(admin, ["b1", "b2"])).get("b2") === 3000);
 check("A bartender gets no one's rates from the admin list", (await payDb.ratesFor(b1, ["b1", "b2"])).size === 0);
 check("Only admins set rates", !(await payDb.setRate(b1, "b1", "99")).ok && db.staff_pay_rates.find((r) => r.staff_id === "b1")?.hourly_rate_cents === 2500);
 check("An admin sets a rate", (await payDb.setRate(admin, "b1", "27.50")).ok && db.staff_pay_rates.find((r) => r.staff_id === "b1")?.hourly_rate_cents === 2750);
 check("An admin clears a rate", (await payDb.setRate(admin, "b2", "")).ok && !db.staff_pay_rates.some((r) => r.staff_id === "b2"));
-check("No rate, no estimate", JSON.stringify(await payDb.myEstimates("b2", ["p1", "f1"])) === "{}" && (await payDb.myEstimate("b2", db.sessions[0] as never)) === null);
+check("No rate on file: the $30 default", JSON.stringify(await payDb.myEstimates("b2", ["p1", "f1"])) === JSON.stringify({ p1: "$210.00", f1: "$210.00" }) && (await payDb.myEstimate("b2", db.sessions[0] as never)) === "$210.00");
 reset();
 const est = await payDb.myEstimates("b1", ["p1", "f1"]);
 check("Estimates use only the viewer's own rate", est.f1 === "$175.00" && est.p1 === "$175.00", JSON.stringify(est));
 check("Another bartender's estimate uses their own rate", (await payDb.myEstimate("b2", db.sessions[1] as never)) === "$210.00");
 db.shift_posts = [{ id: "post1", session_id: "f1", market: "dallas", kind: "open", status: "posted" }];
-check("Open shift details show the viewer's estimate", (await payDb.myEstimateForPost("b2", "post1")) === "$210.00" && (await payDb.myEstimateForPost("a1", "post1")) === null);
+check("Open shift details show the viewer's estimate", (await payDb.myEstimateForPost("b2", "post1")) === "$210.00" && (await payDb.myEstimateForPost("a1", "post1")) === "$210.00");
 const mine = await payDb.myPayRows("b1", addDays(today, -30), addDays(today, 30));
 check("My pay lists only my events", mine.rows.length === 2 && mine.rows.every((r) => ["p1", "f1"].includes(r.sessionId)));
 const p1 = mine.rows.find((r) => r.sessionId === "p1")!;
@@ -112,7 +113,7 @@ const tsx = [...files("app"), ...files("lib")].filter((f) => /\.(ts|tsx)$/.test(
 const staffSide = tsx.filter((f) => f.startsWith("app/team/") && !f.startsWith("app/team/admin/"));
 const ownOnly = staffSide.every((f) => {
   const s = src(f);
-  const calls = [...s.matchAll(/\b(rateFor|myEstimate|myEstimates|myEstimateForPost|myPayRows)\(([^,)]*)/g)];
+  const calls = [...s.matchAll(/\b(rateFor|rateOnFile|myEstimate|myEstimates|myEstimateForPost|myPayRows|myPayEstimate|myPayEstimateForPost)\(([^,)]*)/g)];
   return calls.every((c) => c[2].trim() === "staff.id");
 });
 check("Staff pages only ever ask for the signed in person's own pay", ownOnly);
@@ -124,7 +125,7 @@ check("The CSV with rates is admin only", src("app/api/team/admin/timesheets/exp
 check("Shift summaries carry no pay", !/pay|rate/i.test(src("lib/team/shifts.ts").match(/export interface ShiftSummary \{[\s\S]*?\n\}/)?.[0] ?? "x"));
 check("Staff lists carry no rate", !/rate/i.test(src("lib/team/assignments-db.ts").match(/STAFF_COLUMNS = [^\n]*/)?.[0] ?? "x"));
 check("The event list only adds pay on the viewer's own events", src("app/team/events/page.tsx").includes("myEstimates(staff.id"));
-check("Pay shows with the label", src("app/team/shifts/[id]/page.tsx").includes("PAY_LABEL") && src("app/team/e/[id]/event-tabs.tsx").includes("estimated pay, before taxes and tips") && src("app/team/events/event-list.tsx").includes("estimated pay, before taxes and tips"));
+check("Pay shows with the estimate card and label", src("app/team/shifts/[id]/page.tsx").includes("<PayEstimateCard") && src("app/team/e/[id]/event-tabs.tsx").includes("<PayEstimateCard") && src("app/team/events/event-list.tsx").includes("estimated pay, before taxes and tips"));
 check("My pay says payroll is the final record", pay.PAY_NOTE.includes("Payroll is the final record") && src("app/team/pay/page.tsx").includes("PAY_NOTE"));
 check("My pay is linked from Me", src("app/team/me/page.tsx").includes('"/team/pay"'));
 

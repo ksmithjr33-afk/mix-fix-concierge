@@ -175,9 +175,10 @@ export interface DistanceNote {
   text: string; // "about 23 mi" or "about 41 mi, over their 30 mi max"
 }
 
-export function distanceNote(home: LatLng | null, event: LatLng | null, maxMiles: number | null): DistanceNote | null {
-  if (!home || !event) return null;
-  const miles = Math.round(straightMiles(home, event));
+/** The assign panel note for one way miles (from homeMiles, which uses straightMiles). */
+export function distanceNote(oneWayMiles: number | null, maxMiles: number | null): DistanceNote | null {
+  if (oneWayMiles === null) return null;
+  const miles = Math.round(oneWayMiles);
   const over = maxMiles != null && miles > maxMiles;
   return { miles, maxMiles, over, text: `about ${miles} mi away${over ? `, over their ${maxMiles} mi max` : ""}` };
 }

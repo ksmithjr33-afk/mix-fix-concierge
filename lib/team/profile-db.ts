@@ -26,6 +26,7 @@ import {
   needsPrompt,
   profileFor,
   shownExpiry,
+  straightMiles,
   toCsv,
   type DistanceNote,
   type ExpiryTone,
@@ -213,7 +214,30 @@ export async function staffCsv(viewer: StaffMember, now: Date = new Date()): Pro
   return toCsv(header, rows);
 }
 
-// ----- Distance on the assign panel -----
+// ----- Distance on the assign panel, and for mileage -----
+
+/**
+ * One way miles from each person's home to the event, to a tenth. Straight
+ * line today (no driving distance service is connected): the source says so.
+ * A person with no home address, or one that was not found on the map, comes
+ * back with miles null and the reason. Server only: pay code calls this.
+ */
+export async function homeMiles(
+  session: SessionRow,
+  staffIds: string[]
+): Promise<{ event: boolean; byStaff: Map<string, { miles: number | null; reason?: "no_address" | "not_found"; maxMiles: number | null }> }> {
+  const byStaff = new Map<string, { miles: number | null; reason?: "no_address" | "not_found"; maxMiles: number | null }>();
+  if (staffIds.length === 0) return { event: false, byStaff };
+  const [event, profiles] = await Promise.all([eventLocation(session).catch(() => null), profilesFor(staffIds)]);
+  for (const id of staffIds) {
+    const p = profiles.get(id);
+    const maxMiles = p?.max_miles ?? null;
+    if (!p?.home_address) byStaff.set(id, { miles: null, reason: "no_address", maxMiles });
+    else if (p.home_lat == null || p.home_lng == null) byStaff.set(id, { miles: null, reason: "not_found", maxMiles });
+    else if (event) byStaff.set(id, { miles: Math.round(straightMiles({ lat: p.home_lat, lng: p.home_lng }, event) * 10) / 10, maxMiles });
+  }
+  return { event: !!event, byStaff };
+}
 
 /**
  * Straight line miles from each person's home to the event, and whether it is
@@ -222,12 +246,9 @@ export async function staffCsv(viewer: StaffMember, now: Date = new Date()): Pro
  */
 export async function distancesToEvent(session: SessionRow, staffIds: string[]): Promise<Map<string, DistanceNote>> {
   const out = new Map<string, DistanceNote>();
-  if (staffIds.length === 0) return out;
-  const [event, profiles] = await Promise.all([eventLocation(session).catch(() => null), profilesFor(staffIds)]);
-  if (!event) return out;
-  for (const id of staffIds) {
-    const p = profiles.get(id);
-    const note = distanceNote(p?.home_lat != null && p?.home_lng != null ? { lat: p.home_lat, lng: p.home_lng } : null, event, p?.max_miles ?? null);
+  const { byStaff } = await homeMiles(session, staffIds);
+  for (const [id, h] of byStaff) {
+    const note = h.miles === null ? null : distanceNote(h.miles, h.maxMiles);
     if (note) out.set(id, note);
   }
   return out;
