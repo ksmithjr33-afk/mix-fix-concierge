@@ -36,7 +36,8 @@ export interface CleanManual {
   booking: Booking;
   eventData: Record<string, unknown>; // what the concierge would have submitted
   priceFields: Record<string, unknown>; // for the booked price, like /api/create-session
-  sendList: boolean; // "Send the client their list"
+  sendList: boolean; // "Send the client their list"; always false for calendar only
+  calendarOnly: boolean; // "Already confirmed, add to our calendar only": nothing to GHL or the client
 }
 
 export type ManualResult = { ok: true; value: CleanManual } | { ok: false; error: string };
@@ -97,7 +98,7 @@ export function cleanDrinks(raw: unknown, pkg: string): { ok: true; drinks: Reco
     const ingredients = ingredientList(d.ingredients);
     if (!name) return { ok: false, error: "Give each custom drink a name." };
     if (ingredients.length === 0) return { ok: false, error: `Add the ingredients for ${name}.` };
-    if (d.is_mocktail && !allowsMocktails(pkg)) return { ok: false, error: `Mocktails are only on Full Bar and Premium Bar, not ${pkg}.` };
+    if (d.is_mocktail && !allowsMocktails(pkg)) return { ok: false, error: `Mocktails are only on Full Bar, Premium Bar and The Big Day Bar, not ${pkg}.` };
     const base = d.is_mocktail ? "" : (ingredients[0] ?? "").replace(/^[\d.]+\s*oz\s*/i, "").toLowerCase();
     out.push({ name, base_spirit: base, ingredients, garnish: "", is_mocktail: d.is_mocktail === true, is_custom: true });
   }
@@ -117,6 +118,9 @@ function serviceHours(start: number, end: number): number {
 export function cleanManualEvent(raw: unknown, today: string): ManualResult {
   if (!raw || typeof raw !== "object") return { ok: false, error: "Fill in the form." };
   const f = raw as Record<string, unknown>;
+  const calendarOnly = f.calendar_only === true;
+  // Calendar only never sends the client a link.
+  if (calendarOnly && f.mode === "link") return { ok: false, error: "A calendar only event never sends the client a link. Save it as a confirmed event." };
   const mode: SaveMode = f.mode === "link" ? "link" : "confirmed";
   const confirmed = mode === "confirmed";
 
@@ -240,7 +244,8 @@ export function cleanManualEvent(raw: unknown, today: string): ManualResult {
         discount_amount: f.discount_amount,
         bartenders: bartenders ?? undefined,
       },
-      sendList: f.send_list === true,
+      sendList: !calendarOnly && f.send_list === true,
+      calendarOnly,
     },
   };
 }

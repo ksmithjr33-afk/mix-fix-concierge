@@ -7,6 +7,8 @@ import { supabase } from "@/lib/supabase";
 import type { SessionRow } from "@/lib/event-updates";
 import { siteOrigin } from "@/lib/team/clock-db";
 import { chicagoStamp } from "@/lib/team/time";
+import { isAdminRole } from "@/lib/team/roles";
+import { isCalendarOnly } from "@/lib/calendar-only";
 
 export interface ClientLinks {
   conciergeUrl: string; // /s?id=<id>: the concierge chat, update mode once they finished
@@ -48,7 +50,8 @@ export function clientStatusLine(l: Pick<ClientLinks, "finished" | "finishedAt" 
 
 /** The client links card data. Null unless the viewer is an admin. */
 export async function clientLinks(session: SessionRow, viewer: { role: string }): Promise<ClientLinks | null> {
-  if (viewer.role !== "admin") return null;
+  if (!isAdminRole(viewer.role)) return null;
+  if (isCalendarOnly(session)) return null; // calendar only: no concierge link to copy or send
   const s = session as SessionRow & { created_by?: string | null; client_opened_at?: string | null };
   const addedByHand = s.created_by === "admin";
   // The client's own updates: concierge rows after the first submission.

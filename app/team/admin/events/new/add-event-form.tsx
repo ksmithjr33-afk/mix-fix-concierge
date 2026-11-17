@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import CopyButton from "../../copy-button";
+import { CALENDAR_ONLY_SKIPPED } from "@/lib/calendar-only";
 
 export interface PackageMenu {
   pool: "none" | "set" | "craft" | "craft_classics";
@@ -37,9 +38,23 @@ function Field({ label, children, hint }: { label: string; children: React.React
 const blankDrink = (): DrinkRow => ({ kind: "menu", key: "", name: "", ingredients: "", is_mocktail: false });
 
 /** The Add event form: client, event, drinks, optional prices, and the two ways to save. */
-export default function AddEventForm({ packages, menus, diveSetMenu }: { packages: string[]; menus: Record<string, PackageMenu>; diveSetMenu: string[] }) {
+export default function AddEventForm({
+  packages,
+  menus,
+  diveSetMenu,
+  initialDate = "",
+  today = "",
+}: {
+  packages: string[];
+  menus: Record<string, PackageMenu>;
+  diveSetMenu: string[];
+  initialDate?: string; // YYYY-MM-DD, from a tap on the calendar
+  today?: string; // YYYY-MM-DD: past dates stay refused (the server checks too)
+}) {
   const router = useRouter();
-  const [v, setV] = useState<Record<string, string>>({ package: "" });
+  const [v, setV] = useState<Record<string, string>>({ package: "", ...(initialDate ? { event_date: initialDate } : {}) });
+  // "New booking" (today's behavior) or "Already confirmed, add to our calendar only".
+  const [calendarOnly, setCalendarOnly] = useState(false);
   const [flags, setFlags] = useState({ beer: false, wine: false, client_providing_beer_wine: false, send_list: false });
   const [drinks, setDrinks] = useState<DrinkRow[]>([]);
   const [busy, setBusy] = useState(false);
@@ -67,6 +82,7 @@ export default function AddEventForm({ packages, menus, diveSetMenu }: { package
         body: JSON.stringify({
           ...v,
           ...flags,
+          ...(calendarOnly ? { send_list: false, calendar_only: true } : {}),
           mode,
           confirm_duplicate: confirmDuplicate,
           drinks: drinks.map((d) => (d.kind === "menu" ? { key: d.key } : { name: d.name, ingredients: d.ingredients, is_mocktail: d.is_mocktail })),
@@ -106,6 +122,23 @@ export default function AddEventForm({ packages, menus, diveSetMenu }: { package
 
   return (
     <form className="space-y-4" onSubmit={(e) => e.preventDefault()}>
+      <fieldset className={card}>
+        <legend className="sr-only">What kind of event</legend>
+        {(
+          [
+            [false, "New booking", "The client gets the normal booking messages from GHL."],
+            [true, "Already confirmed, add to our calendar only", "Nothing is sent to GHL or the client. The team side works as normal."],
+          ] as [boolean, string, string][]
+        ).map(([on, label, hint]) => (
+          <label key={label} className={`flex items-start gap-3 rounded-xl border px-3 py-2.5 ${calendarOnly === on ? "border-[#B5845A] bg-white" : "border-[#DDD5CC]"}`}>
+            <input type="radio" name="kind" className="mt-1 h-4 w-4 accent-[#B5845A]" checked={calendarOnly === on} onChange={() => setCalendarOnly(on)} />
+            <span>
+              <span className="block text-[15px] font-medium text-[#2C2420]">{label}</span>
+              <span className="block text-sm text-[#6B5D52]">{hint}</span>
+            </span>
+          </label>
+        ))}
+      </fieldset>
       <section className={card}>
         <h2 className="font-heading text-base font-bold text-[#2C2420]">Client</h2>
         <div className="grid gap-3 sm:grid-cols-2">
@@ -134,7 +167,7 @@ export default function AddEventForm({ packages, menus, diveSetMenu }: { package
             <input className={input} value={v.event_name ?? ""} onChange={set("event_name")} />
           </Field>
           <Field label="Date">
-            <input className={input} type="date" value={v.event_date ?? ""} onChange={set("event_date")} />
+            <input className={input} type="date" min={today || undefined} value={v.event_date ?? ""} onChange={set("event_date")} />
           </Field>
           <Field label="Guest count">
             <input className={input} inputMode="numeric" value={v.guest_count ?? ""} onChange={set("guest_count")} />
@@ -275,13 +308,15 @@ export default function AddEventForm({ packages, menus, diveSetMenu }: { package
       </section>
 
       <section className={card}>
-        <label className="flex items-start gap-2 text-[15px] text-[#2C2420]">
-          <input type="checkbox" className="mt-1 h-4 w-4 accent-[#B5845A]" checked={flags.send_list} onChange={(e) => setFlags((f) => ({ ...f, send_list: e.target.checked }))} />
-          <span>
-            Send the client their list
-            <span className="block text-xs text-[#A39585]">Off: the client is not sent their shopping list. Nothing else is ever sent to the client from here.</span>
-          </span>
-        </label>
+        {!calendarOnly && (
+          <label className="flex items-start gap-2 text-[15px] text-[#2C2420]">
+            <input type="checkbox" className="mt-1 h-4 w-4 accent-[#B5845A]" checked={flags.send_list} onChange={(e) => setFlags((f) => ({ ...f, send_list: e.target.checked }))} />
+            <span>
+              Send the client their list
+              <span className="block text-xs text-[#A39585]">Off: the client is not sent their shopping list. Nothing else is ever sent to the client from here.</span>
+            </span>
+          </label>
+        )}
         {duplicate && (
           <div className="rounded-xl border border-[#E3C9A0] bg-[#FFF8EC] px-3 py-3 space-y-2">
             <p className="text-[15px] text-[#2C2420]">{duplicate.message}</p>
@@ -307,11 +342,25 @@ export default function AddEventForm({ packages, menus, diveSetMenu }: { package
           <button type="button" disabled={busy || !!duplicate} onClick={() => save("confirmed")} className="rounded-lg bg-[#B5845A] text-white px-4 py-2.5 text-[15px] font-medium disabled:opacity-40">
             {busy ? "Saving..." : "Save as a confirmed event"}
           </button>
-          <button type="button" disabled={busy || !!duplicate} onClick={() => save("link")} className="rounded-lg border-2 border-[#B5845A] text-[#9A7049] px-4 py-2.5 text-[15px] font-medium disabled:opacity-40">
-            Save and send the client the concierge link
-          </button>
+          {!calendarOnly && (
+            <button type="button" disabled={busy || !!duplicate} onClick={() => save("link")} className="rounded-lg border-2 border-[#B5845A] text-[#9A7049] px-4 py-2.5 text-[15px] font-medium disabled:opacity-40">
+              Save and send the client the concierge link
+            </button>
+          )}
         </div>
-        <p className="text-xs text-[#A39585]">A confirmed event gets its lists, checklist, recipes and market right away. The link option saves the booking, and the client fills in the rest themselves.</p>
+        {calendarOnly ? (
+          <div className="rounded-xl border border-[#E3C9A0] bg-[#FFF8EC] px-3 py-3 space-y-1.5" data-calendar-only-note>
+            <p className="text-[15px] font-medium text-[#2C2420]">Calendar only. For this client:</p>
+            <ul className="list-disc pl-5 text-sm text-[#2C2420] space-y-0.5">
+              {CALENDAR_ONLY_SKIPPED.map((s) => (
+                <li key={s.key}>{s.label}</li>
+              ))}
+            </ul>
+            <p className="text-sm text-[#6B5D52]">The team side works as normal: staffing, texts to staff, Tools, Supplies, ice, menu pickup, chat, clock and wrap up. You can turn on client messages later from the event.</p>
+          </div>
+        ) : (
+          <p className="text-xs text-[#A39585]">A confirmed event gets its lists, Tools, recipes and market right away. The link option saves the booking, and the client fills in the rest themselves.</p>
+        )}
       </section>
     </form>
   );

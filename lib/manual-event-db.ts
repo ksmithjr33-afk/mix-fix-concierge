@@ -33,6 +33,8 @@ import { managerHref } from "@/lib/team/manager-tabs";
 import { firstName, type StaffMember } from "@/lib/team/event-view";
 import { eventDay, todayIn, TZ } from "@/lib/team/time";
 import { cleanManualEvent, type CleanManual } from "@/lib/manual-event";
+import { isAdminRole } from "@/lib/team/roles";
+import { isCalendarOnly } from "@/lib/calendar-only";
 
 export type AddResult =
   | { ok: true; id: string; mode: "confirmed"; managerUrl: string }
@@ -105,6 +107,7 @@ async function saveEventRow(eventData: Record<string, unknown>): Promise<void> {
 
 /** The intake payload GHL gets when a client finishes the concierge, marked as added by an admin. */
 async function postIntake(session: SessionRow): Promise<void> {
+  if (isCalendarOnly(session)) return; // calendar only: nothing to GHL, ever
   const eventData = session.event_data ?? {};
   const { cleanEventData, fields } = quietly(() => buildEventFields(eventData));
   const listFields = await completionFields(session.id).catch((err) => {
@@ -146,7 +149,7 @@ async function postIntake(session: SessionRow): Promise<void> {
 
 /** Add an event by hand. Admins only, checked here as well as in the route. */
 export async function addManualEvent(admin: StaffMember, raw: unknown, now: Date = new Date()): Promise<AddResult> {
-  if (admin.role !== "admin") return { ok: false, error: "Admins only.", status: 403 };
+  if (!isAdminRole(admin.role)) return { ok: false, error: "Admins only.", status: 403 };
   const clean = cleanManualEvent(raw, todayIn(TZ, now));
   if (!clean.ok) return { ok: false, error: clean.error, status: 400 };
   const v: CleanManual = clean.value;
@@ -169,6 +172,7 @@ export async function addManualEvent(admin: StaffMember, raw: unknown, now: Date
     created_by_name: byName,
     created_by_staff_id: admin.id,
     send_client_list: v.sendList,
+    ...(v.calendarOnly ? { calendar_only: true } : {}),
   });
   if (error) {
     console.error("[manual-event] session insert failed:", error.message);
@@ -184,8 +188,31 @@ export async function addManualEvent(admin: StaffMember, raw: unknown, now: Date
   const session = await getSession(id);
   if (!session) return { ok: false, error: "Could not save. Try again.", status: 500 };
   await saveEventRow(session.event_data ?? v.eventData);
-  await postIntake(session);
+  // Calendar only: nothing to GHL (no intake webhook, no contact note), so nothing reaches the client.
+  if (!isCalendarOnly(session)) await postIntake(session);
   await ensureMarket(session).catch(() => null);
   await syncOrderSheet(session).catch((err) => console.error("[manual-event] shopping list sync failed:", err));
   return { ok: true, id, mode: "confirmed", managerUrl: managerHref(id) };
+}
+
+export type TurnOnResult = { ok: true; sent: boolean } | { ok: false; error: string; status: number };
+
+/**
+ * "Turn on client messages" on a calendar only event: clears calendar_only and
+ * sends the normal intake payload once. A second tap (or two admins at once)
+ * finds it already on and sends nothing. Admins and managers only.
+ */
+export async function turnOnClientMessages(admin: StaffMember, sessionId: string, now: Date = new Date()): Promise<TurnOnResult> {
+  if (!isAdminRole(admin.role)) return { ok: false, error: "Admins only.", status: 403 };
+  const { data, error } = await supabase
+    .from("sessions")
+    .update({ calendar_only: false, client_messages_on_at: now.toISOString(), client_messages_on_by: firstName(admin.name) || admin.name || "Admin" })
+    .eq("id", sessionId)
+    .eq("calendar_only", true)
+    .select("id");
+  if (error) return { ok: false, error: "Could not save. Try again.", status: 500 };
+  if (((data as unknown[]) ?? []).length === 0) return { ok: true, sent: false }; // already on
+  const session = await getSession(sessionId);
+  if (session && session.status === "submitted") await postIntake(session);
+  return { ok: true, sent: true };
 }

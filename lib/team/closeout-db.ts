@@ -10,7 +10,7 @@
 import { supabase } from "@/lib/supabase";
 import type { SessionRow } from "@/lib/event-updates";
 import { firstName, type StaffMember } from "@/lib/team/event-view";
-import { eventTitle } from "@/lib/team/event-list";
+import { eventTitle, adminEventTitle, clientEventTitle } from "@/lib/team/event-list";
 import { alertAdmins, getSubmittedSession } from "@/lib/team/events";
 import { assignmentRef, claimNotice, punchesFor, siteOrigin } from "@/lib/team/clock-db";
 import { sendStaffText } from "@/lib/team/sms";
@@ -37,6 +37,8 @@ import { clientProvidesAll } from "@/lib/team/shopping";
 import { staffSupplies } from "@/lib/team/supplies-db";
 import type { SupplyItem } from "@/lib/team/supplies";
 import { inQuietHours } from "@/lib/team/shifts";
+import { isAdminRole } from "@/lib/team/roles";
+import { isCalendarOnly } from "@/lib/calendar-only";
 
 export interface CloseoutRow {
   id: string;
@@ -172,7 +174,7 @@ async function clockedOutOn(sessionId: string, staffId: string): Promise<boolean
 
 /** The wrap up for one bartender. Call after the event access check. */
 export async function closeoutState(session: SessionRow, staff: StaffMember, now: Date = new Date()): Promise<CloseoutState> {
-  const a = staff.role === "admin" ? null : await assignmentRef(session.id, staff.id);
+  const a = isAdminRole(staff.role) ? null : await assignmentRef(session.id, staff.id);
   const accepted = a?.status === "accepted";
   const [clockedOut, row] = accepted ? await Promise.all([clockedOutOn(session.id, staff.id), closeoutRow(session.id, staff.id)]) : [false, null];
   const open = accepted && closeoutOpen(eventData(session), { clockedOut, now });
@@ -213,6 +215,7 @@ export async function closeoutsFor(sessionId: string): Promise<CloseoutView[]> {
 
 /** Send GHL the follow up webhook for the event, once, on the first closeout. Never throws. */
 export async function sendCloseoutWebhook(session: SessionRow, rating: Rating, closeouts: number): Promise<"sent" | "skipped" | "failed"> {
+  if (isCalendarOnly(session)) return "skipped"; // calendar only: no post event follow up
   const url = process.env.GHL_EVENT_CLOSEOUT_WEBHOOK;
   if (!url) {
     console.log("[team] GHL_EVENT_CLOSEOUT_WEBHOOK is not set, skipping the closeout webhook");
@@ -223,7 +226,7 @@ export async function sendCloseoutWebhook(session: SessionRow, rating: Rating, c
   const payload = closeoutWebhookPayload({
     clientEmail: ed.client_email ?? (session as { email?: string | null }).email,
     eventDate: eventDay(ed.event_date ?? session.event_date),
-    eventTitle: eventTitle(ed),
+    eventTitle: clientEventTitle(ed), // to GHL: the title the client side has always used
     rating,
     closeouts,
   });
@@ -360,7 +363,7 @@ export async function submitCloseout(opts: {
 async function afterSave(session: SessionRow, staff: StaffMember, row: CloseoutRow, c: CloseoutInput, first: boolean): Promise<void> {
   try {
     if (needsAlert(c) && (await claimNotice(`closeout_alert:${row.id}`, "closeout_alert"))) {
-      const message = closeoutAlertText({ firstName: firstName(staff.name), title: eventTitle(eventData(session)), c, link: `${siteOrigin()}/team/admin/e/${session.id}` });
+      const message = closeoutAlertText({ firstName: firstName(staff.name), title: adminEventTitle(eventData(session)), c, link: `${siteOrigin()}/team/admin/e/${session.id}` });
       const admins = await alertAdmins();
       await Promise.all(admins.map((ad) => sendStaffText(ad.phone, ad.name, message)));
     }

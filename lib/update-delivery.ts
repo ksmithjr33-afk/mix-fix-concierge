@@ -16,6 +16,7 @@ import { notifyStaffOfUpdate } from "@/lib/team/assignments-db";
 import { deliveryFields, type DeliveryListOptions } from "@/lib/client-list-db";
 import { computeDeadlines } from "@/lib/event-diff";
 import { syncOrderSheet } from "@/lib/order-sheet-db";
+import { isCalendarOnly, CALENDAR_ONLY_SKIP } from "@/lib/calendar-only";
 
 export interface DeliveryResult {
   id: string;
@@ -65,6 +66,7 @@ export function listOnlyPayload(session: SessionRow, extra: Record<string, unkno
 }
 
 export async function postListOnly(session: SessionRow, extra: Record<string, unknown>): Promise<string | null> {
+  if (isCalendarOnly(session)) return "This event is calendar only, so nothing is sent to the client. Turn on client messages first.";
   const url = process.env.GHL_UPDATE_WEBHOOK_URL;
   if (!url) return "GHL_UPDATE_WEBHOOK_URL is not set in this environment, payload NOT sent";
   return postWebhook(url, listOnlyPayload(session, extra));
@@ -77,6 +79,13 @@ async function deliverRow(
 ): Promise<DeliveryResult> {
   const tag = `[update-webhook] session ${session.id} update ${row.id} v${row.version}`;
   const errors: string[] = [];
+
+  // Calendar only: no note and no webhook, recorded so a retry never sends it later.
+  if (isCalendarOnly(session)) {
+    await supabase.from("event_updates").update({ webhook_sent: false, webhook_error: CALENDAR_ONLY_SKIP }).eq("id", row.id);
+    console.log(`${tag} calendar only, not sent to GHL`);
+    return { id: row.id, version: row.version, note_created: false, webhook_sent: false, error: null };
+  }
 
   // Note first. Skipped on retry if it already went through, so retries do not duplicate it.
   let noteCreated = row.note_created === true;
@@ -164,7 +173,8 @@ export async function deliverEventUpdates(
   await syncOrderSheet(session).catch((err) => console.error(`[update-webhook] session ${sessionId} order sheet sync failed:`, err));
 
   const locked = computeDeadlines(session.event_data.event_date ?? session.event_date, new Date(), eventTimeZone(session)).withinSixDays;
-  const listFields = await deliveryFields(session, rows, opts.clientList ?? { mode: "client" }, locked).catch((err) => {
+  // Calendar only: no client list decision, since nothing goes to the client.
+  const listFields = isCalendarOnly(session) ? new Map<string, Record<string, unknown>>() : await deliveryFields(session, rows, opts.clientList ?? { mode: "client" }, locked).catch((err) => {
     console.error(`[update-webhook] session ${sessionId} client list decision failed:`, err);
     return new Map<string, Record<string, unknown>>();
   });
@@ -204,5 +214,6 @@ export async function getUndeliveredUpdates(sessionId: string, updateIds?: strin
 
   const { data, error } = await query;
   if (error) throw new Error(`event_updates lookup failed: ${error.message}`);
-  return (data as EventUpdateRow[]) ?? [];
+  // Rows skipped while the event was calendar only stay unsent, even after client messages are turned on.
+  return ((data as (EventUpdateRow & { webhook_error?: string | null })[]) ?? []).filter((r) => r.webhook_error !== CALENDAR_ONLY_SKIP);
 }

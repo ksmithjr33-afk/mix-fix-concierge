@@ -60,6 +60,8 @@ export interface SessionRow {
   // Set while a saved change could not be priced (supabase/migrations/20261203_price_pending.sql).
   price_pending?: boolean | null;
   price_pending_info?: PricePendingInfo | null;
+  // "Already confirmed, add to our calendar only": nothing to GHL or the client (supabase/migrations/20261207_calendar_only.sql).
+  calendar_only?: boolean | null;
 }
 
 export interface EventUpdateRow {

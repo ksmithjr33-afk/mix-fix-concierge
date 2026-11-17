@@ -79,7 +79,7 @@ function Chip({ e, big, select, marketLabel }: { e: EventListItem; big: boolean;
   const on = !!select?.selected.has(e.id);
   const unread = e.chat?.unread ?? 0;
   const market = marketLabel(e.market);
-  const title = [e.arrival || "Time TBD", e.title, market, tone.label, e.menu?.text, e.request ? "Change request waiting" : "", e.noMenu ? "No approved menu" : "", e.noIce ? "Ice not assigned" : "", e.repeat ?? "", unread ? `${unread} unread messages` : ""].filter(Boolean).join(" · ");
+  const title = [e.arrival || "Time TBD", e.title, e.subtitle, market, tone.label, e.menu?.text, e.request ? "Change request waiting" : "", e.noMenu ? "No approved menu" : "", e.noIce ? "Ice not assigned" : "", e.calendarOnly ? "Calendar only" : "", e.repeat ?? "", unread ? `${unread} unread messages` : ""].filter(Boolean).join(" · ");
   return (
     <div className={`relative rounded-lg border border-l-4 ${tone.chip} ${on ? "ring-2 ring-[#B5845A]" : ""} hover:brightness-[0.97] transition`}>
       {select && <Pick e={e} select={select} />}
@@ -90,10 +90,12 @@ function Chip({ e, big, select, marketLabel }: { e: EventListItem; big: boolean;
           {e.kind === "shift" && <span className="shrink-0 font-semibold text-[#9A7049]">· Open shift</span>}
         </span>
         <span className={`block font-heading font-bold text-[#2C2420] ${big ? "text-base break-words" : "text-[13px] leading-snug truncate"}`}>{e.title}</span>
+        {e.subtitle && <span className={`block text-[#6B5D52] ${big ? "text-sm break-words" : "text-[11px] truncate"}`}>{e.subtitle}</span>}
         {e.menu && <span className={`block ${big ? "text-sm" : "text-[11px] truncate"} ${MENU_TEXT[e.menu.state]}`}>{e.menu.text}</span>}
         {e.request && <span className={`block font-semibold text-[#9A5B12] ${big ? "text-sm" : "text-[11px] truncate"}`}>Change request</span>}
         {e.noMenu && <span className={`block font-semibold text-[#A0412D] ${big ? "text-sm" : "text-[11px] truncate"}`}>No approved menu</span>}
         {e.noIce && <span className={`block font-semibold text-[#A0412D] ${big ? "text-sm" : "text-[11px] truncate"}`}>Ice not assigned</span>}
+        {e.calendarOnly && <span className={`block font-semibold text-[#3F5468] ${big ? "text-sm" : "text-[11px] truncate"}`}>Calendar only</span>}
         {e.repeat && <span className={`block font-semibold text-[#5B3F7A] ${big ? "text-sm" : "text-[11px] truncate"}`}>{e.repeat}</span>}
         {big && e.badge && <span className="block text-sm text-[#6B5D52] break-words">{e.badge.text}</span>}
       </Link>
@@ -108,7 +110,22 @@ function Unavailable({ big }: { big?: boolean }) {
 }
 
 /** All of one day's events, opened from "+2 more" or a day on the phone month. */
-function DayPanel({ day, unavailable, onClose, children }: { day: CalDay; unavailable: boolean; onClose: () => void; children: React.ReactNode }) {
+/** Admins: the Add event form with this day filled in. Today or later only; past dates stay refused. */
+export const addEventHref = (ymd: string) => `/team/admin/events/new?date=${ymd}`;
+
+function AddDay({ ymd, label, big = false, fill = false }: { ymd: string; label: string; big?: boolean; fill?: boolean }) {
+  return (
+    <Link
+      href={addEventHref(ymd)}
+      aria-label={`Add event on ${label}`}
+      className={`block rounded-md px-2 text-left font-medium text-[#9A7049] hover:bg-[#EFE7DF] focus:bg-[#EFE7DF] ${big ? "py-2 text-[15px]" : "py-0.5 text-xs"} ${fill ? "min-h-[3rem]" : ""}`}
+    >
+      + Add event
+    </Link>
+  );
+}
+
+function DayPanel({ day, unavailable, onClose, children, canAdd = false }: { day: CalDay; unavailable: boolean; onClose: () => void; children: React.ReactNode; canAdd?: boolean }) {
   useEffect(() => {
     const k = (ev: KeyboardEvent) => ev.key === "Escape" && onClose();
     window.addEventListener("keydown", k);
@@ -130,6 +147,11 @@ function DayPanel({ day, unavailable, onClose, children }: { day: CalDay; unavai
           {unavailable && <p className="text-[15px] text-[#6B5D52]">You marked this day unavailable.</p>}
           {day.events.length === 0 && !unavailable && <p className="text-[15px] text-[#6B5D52]">Nothing on this day.</p>}
           {children}
+          {canAdd && (
+            <Link href={addEventHref(day.ymd)} className="block w-full rounded-xl border-2 border-[#B5845A] bg-white py-2.5 text-center text-[15px] font-medium text-[#9A7049]">
+              + Add event on this day
+            </Link>
+          )}
         </div>
       </div>
     </div>
@@ -199,6 +221,8 @@ export default function CalendarView({
   const openDay = open ? days.find((d) => d.ymd === open) : undefined;
   const chip = (e: EventListItem, big: boolean) => <Chip key={`${e.kind ?? "e"}-${e.id}`} e={e} big={big} select={select} marketLabel={marketLabel} />;
   const past = (d: CalDay) => d.ymd < today;
+  // Admins and managers add an event from a day: Month and Week, today or later.
+  const canAdd = (d: CalDay) => audience === "admin" && !past(d);
   const btn = "rounded-lg border border-[#DDD5CC] bg-[#F5F0EB] px-3 py-1.5 text-[15px] text-[#2C2420] hover:bg-[#EFE7DF]";
   const viewCls = (on: boolean) => `px-3 py-1.5 rounded-md text-[15px] font-medium ${on ? "bg-[#F5F0EB] text-[#2C2420] shadow-sm" : "text-[#6B5D52]"}`;
 
@@ -298,6 +322,7 @@ export default function CalendarView({
                       +{extra} more
                     </button>
                   )}
+                  {canAdd(d) && <AddDay ymd={d.ymd} label={d.label} fill={d.events.length === 0} />}
                 </li>
               );
             })}
@@ -343,6 +368,7 @@ export default function CalendarView({
                 <span className="lg:hidden text-sm text-[#A39585]">{d.events.length ? `${d.events.length} ${d.events.length === 1 ? "event" : "events"}` : "No events"}</span>
               </div>
               {d.events.map((e) => chip(e, true))}
+              {canAdd(d) && <AddDay ymd={d.ymd} label={d.label} big fill={d.events.length === 0} />}
             </li>
           ))}
         </ol>
@@ -370,7 +396,7 @@ export default function CalendarView({
       {grid && visibleEvents.length === 0 && <p className="text-[15px] text-[#6B5D52] px-1">{empty}</p>}
 
       {openDay && (
-        <DayPanel day={openDay} unavailable={away.has(openDay.ymd)} onClose={() => setOpen(null)}>
+        <DayPanel day={openDay} unavailable={away.has(openDay.ymd)} onClose={() => setOpen(null)} canAdd={canAdd(openDay)}>
           {openDay.events.map((e) => chip(e, true))}
         </DayPanel>
       )}
