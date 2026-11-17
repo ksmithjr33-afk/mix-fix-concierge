@@ -22,7 +22,7 @@ import {
   SESSION_DAYS,
   type CodeRow,
 } from "@/lib/team/codes";
-import { isAdminRole } from "@/lib/team/roles";
+import { isAdminRole, isFullAdmin } from "@/lib/team/roles";
 
 const STAFF_COLUMNS = "id, name, phone, role, active";
 
@@ -191,6 +191,16 @@ export async function requireStaff(path: string): Promise<ViewedStaff> {
 export async function saveStaffName(staffId: string, name: string): Promise<void> {
   const { error } = await supabase.from("staff").update({ name }).eq("id", staffId);
   if (error) throw new Error(`staff name save failed: ${error.message}`);
+}
+
+/**
+ * For Business pages: role admin only. Managers go to the admin events list
+ * before anything loads; bartenders go to their own events.
+ */
+export async function requireFullAdmin(path: string): Promise<ViewedStaff> {
+  const staff = await requireAdmin(path);
+  if (!isFullAdmin(staff.role)) redirect("/team/admin/events");
+  return staff;
 }
 
 /** For admin pages: signed in, named, and an admin. Bartenders go to their own events. */

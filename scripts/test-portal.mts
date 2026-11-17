@@ -105,7 +105,7 @@ check("Only a real admin can turn Bartender view on", viewRoute.includes('form?.
 const header = src("app/team/team-header.tsx");
 const headerNavSrc = src("app/team/header-nav.tsx");
 check("The header has the switch, the banner, and the way back", headerNavSrc.includes("Bartender view") && header.includes("Switch back") && headerNavSrc.includes('mode === "bartender"') && header.includes('value="admin"') && headerNavSrc.includes("Back to manager view"));
-check("In Bartender view the admin links are gone", header.includes("const showAdmin = admin && !bartenderView && isAdminRole(viewed?.role);") && header.includes("headerLinks(showAdmin, { unreadNews: unread, training })"));
+check("In Bartender view the admin links are gone", header.includes("const showAdmin = admin && !bartenderView && isAdminRole(viewed?.role);") && header.includes("headerLinks(showAdmin, { unreadNews: unread, training }, showBusiness)"));
 check("Signing out ends Bartender view too", src("app/api/team/logout/route.ts").includes("res.cookies.delete(VIEW_COOKIE)"));
 for (const p of ["app/api/team/admin/shifts/route.ts", "app/api/team/admin/assign/route.ts", "app/api/team/admin/timesheets/route.ts", "app/api/team/admin/announcements/route.ts"]) {
   check(`Admin route refuses Bartender view: ${p}`, src(p).includes("getCurrentStaff()") && src(p).includes('isAdminRole('));

@@ -4,7 +4,7 @@ import { trainingUnreadFor } from "@/lib/team/certs-db";
 import { firstName } from "@/lib/team/event-view";
 import { headerLinks } from "@/lib/team/header-nav";
 import HeaderNav from "./header-nav";
-import { isAdminRole } from "@/lib/team/roles";
+import { isAdminRole, isFullAdmin } from "@/lib/team/roles";
 
 /**
  * Header shared by the team pages: logo, admin links for admins, the
@@ -32,7 +32,9 @@ export default async function TeamHeader({
   const canSwitch = isAdminRole(real?.role) && !bartenderView;
   const canSwitchBack = isAdminRole(real?.role) && bartenderView;
   const [unread, training] = viewed ? await Promise.all([unreadAnnouncements(viewed.id).catch(() => 0), trainingUnreadFor(viewed.id).catch(() => 0)]) : [0, 0];
-  const links = headerLinks(showAdmin, { unreadNews: unread, training });
+  // Business: admins only, never managers.
+  const showBusiness = showAdmin && isFullAdmin(viewed?.role);
+  const links = headerLinks(showAdmin, { unreadNews: unread, training }, showBusiness);
   const name = real?.name ?? viewed?.name ?? "";
   return (
     <>

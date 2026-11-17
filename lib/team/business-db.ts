@@ -29,6 +29,7 @@ export interface EventBusinessView {
   supplies: SupplyCost | null; // the catalog estimate, line by line
   bookedDepositCents: number | null;
   pricePending: boolean;
+  payrollCents: number; // estimated pay + mileage + tips for the crew, for the cash view
 }
 
 const toCents = (d: unknown): number | null => (d === null || d === undefined || !Number.isFinite(Number(d)) ? null : Math.round(Number(d) * 100));
@@ -81,6 +82,7 @@ export async function eventBusinessFor(viewer: StaffMember, session: SessionRow,
     supplies,
     bookedDepositCents: toCents(bp?.deposit_paid),
     pricePending: !!session.price_pending,
+    payrollCents: payout?.rows.reduce((n, r) => n + (r.estPayCents ?? 0) + r.mileageCents + (r.tipsCents ?? 0), 0) ?? 0,
   };
 }
 

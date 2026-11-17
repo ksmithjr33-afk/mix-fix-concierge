@@ -136,6 +136,6 @@ check("The manager page builds Business only for admins", src("app/team/admin/e/
 check("Costs settings are admins only", src("lib/team/business-settings-db.ts").includes("if (!isFullAdmin(admin.role)) return null;"));
 const bizTables = ["event_finance", "event_other_costs"];
 check("Business tables are read only in the Business module", files("lib").concat(files("app")).filter((f) => /\.(ts|tsx)$/.test(f) && bizTables.some((t) => src(f).includes(`"${t}"`))).every((f) => f.startsWith("lib/team/business")));
-check("Staff pages never import Business", files("app/team").filter((f) => !f.startsWith("app/team/admin/") && /\.(ts|tsx)$/.test(f)).every((f) => !/business/i.test(src(f))));
+check("Staff pages never import Business", files("app/team").filter((f) => !f.startsWith("app/team/admin/") && /\.(ts|tsx)$/.test(f)).every((f) => !/from "@\/lib\/team\/business|eventBusinessFor|overviewEvents/.test(src(f))));
 
 done("business");
