@@ -190,6 +190,16 @@ export default async function BusinessPage({ searchParams }: { searchParams: Pro
           )}
         </section>
 
+        <section className={card} aria-label="Supply costs">
+          <h2 className={h2}>Supply costs</h2>
+          <p className="text-[15px] text-[#2C2420]">
+            <Link href="/team/admin/business/supplies" className="text-[#B5845A] underline">
+              Open the cost catalog
+            </Link>{" "}
+            to set what each product costs and import a CSV. Shopping list lines we buy are matched by name or alias.
+          </p>
+        </section>
+
         <SettingsForm mileage={mileage} costs={costs!} />
       </main>
     </>

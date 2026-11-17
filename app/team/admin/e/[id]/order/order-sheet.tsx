@@ -393,7 +393,9 @@ function Line({
   onAddStore,
   onCopied,
   sectionLabel,
+  costs = null,
 }: {
+  costs?: SheetCosts["byRef"] | null;
   line: SheetLine;
   stores: StoreInfo[];
   open: Open;
@@ -448,6 +450,11 @@ function Line({
           </span>
         )}
         {line.clientBuys && <span className="ml-2 whitespace-nowrap text-[12px] text-[#666] print:hidden">client buys</span>}
+        {costs && !line.clientBuys && (
+          <span className={`ml-2 whitespace-nowrap text-[12px] tabular-nums print:hidden ${costs[line.ref] ? "text-[#2C5E2E]" : "text-[#9A7049]"}`}>
+            {costs[line.ref] ? `$${(costs[line.ref]!.cents / 100).toFixed(2)}` : "No cost yet"}
+          </span>
+        )}
         {sectionLabel && <span className="ml-2 whitespace-nowrap text-[11px] uppercase tracking-wide text-[#888] print:hidden">{sectionLabel}</span>}
       </button>
       {/* The store swatch: its color, or an empty outline. Tapping it opens the store list directly. */}
@@ -859,7 +866,10 @@ function SyrupRecipes({ view, call, onSaved }: { view: SheetView; call: Call; on
 
 const page = "doc-page mx-auto w-full max-w-[8.5in] px-4 py-6 sm:px-[0.9in] sm:py-[0.8in] shadow-[0_1px_4px_rgba(0,0,0,0.18)] print:max-w-none print:p-0 print:shadow-none";
 
-export default function OrderSheet({ initial, timeZone }: { initial: SheetView; timeZone: string; title?: string }) {
+/** Supply costs on the Shopping list: admins only. The server sends null to managers. */
+export type SheetCosts = { cents: number; unmatched: number; byRef: Record<string, { cents: number; unitCents: number } | null> };
+
+export default function OrderSheet({ initial, timeZone, costs = null }: { initial: SheetView; timeZone: string; title?: string; costs?: SheetCosts | null }) {
   const [view, setView] = useState(initial);
   const [mode, setMode] = useState<"sheet" | "store">("sheet");
   const [error, setError] = useState("");
@@ -907,7 +917,7 @@ export default function OrderSheet({ initial, timeZone }: { initial: SheetView; 
   const sectionTitle = (id: SectionId) => SECTIONS.find((s) => s.id === id)?.title ?? "";
   const flagged = view.sheet.sections.flatMap((s) => s.lines).filter((l) => l.conflict || l.gone).length;
   const deliveryInUse = view.sheet.sections.some((s) => s.lines.some((l) => l.store === "delivery"));
-  const lineProps = { stores: view.stores, open, setOpen, call, tz: timeZone, onAddStore: setAddFor, onCopied: copied };
+  const lineProps = { stores: view.stores, open, setOpen, call, tz: timeZone, onAddStore: setAddFor, onCopied: copied, costs: costs?.byRef ?? null };
 
   return (
     <div className="space-y-3">
@@ -915,6 +925,12 @@ export default function OrderSheet({ initial, timeZone }: { initial: SheetView; 
       <div className="sticky top-0 z-20 -mx-4 px-4 py-2 bg-[#E8DDD5]/95 backdrop-blur border-b border-[#DDD5CC] print:hidden">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[14px] text-[#2C2420]">
           <span className="font-medium">{progress.total === 0 ? "The client buys everything on this list" : `${progress.ordered} of ${progress.total} ordered`}</span>
+          {costs && (
+            <span className="tabular-nums" title="Admins only: from the supply cost catalog">
+              Est. supplies ${(costs.cents / 100).toFixed(2)}
+              {costs.unmatched > 0 && <span className="text-[#9A7049]"> · {costs.unmatched} no cost yet</span>}
+            </span>
+          )}
           {progress.total > 0 && (
             <span className="h-1.5 w-20 rounded-full bg-white overflow-hidden" aria-hidden>
               <span className="block h-full bg-[#55684A]" style={{ width: `${pct}%` }} />

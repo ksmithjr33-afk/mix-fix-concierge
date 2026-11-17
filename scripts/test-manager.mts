@@ -79,13 +79,13 @@ check("The tab bar has the bartender view's look and scrolls sideways on a phone
 check("Tabs show a count when something needs attention", bar.includes("counts[key]") && page.includes("client: pendingHolds.length") && page.includes("counts.stillNeeded + handoffs.length") && page.includes("dayof: dayofCount") && page.includes("missingReports: missing.length"));
 const has = (tab: string, ...parts: string[]) => {
   const at = page.indexOf(`    ${tab}: `);
-  const next = page.slice(at + 1).search(/\n    (details|team|order|client|dayof|chat): /);
+  const next = page.slice(at + 1).search(/\n    (details|team|order|client|dayof|business|chat): /);
   const body = page.slice(at, next < 0 ? undefined : at + 1 + next);
   return at > 0 && parts.every((p) => body.includes(p));
 };
 check("Details: the event details with an Edit on each field, Edit everything, and hide", has("details", "<EditableDetails", "<Details v={v} />", "<EditEvent", "<HideAction"));
 check("Team: bartenders, assign someone, open shifts, requests, handoffs, market", has("team", "<AssignPanel", "<ShiftPanel"));
-check("Shopping list: the full order sheet inside the tab", has("order", "<OrderSheet initial={sheet}"));
+check("Shopping list: the full order sheet inside the tab", has("order", "<OrderSheet", "initial={sheet}"));
 check("Client list: list, auto send, held changes, Review and send, the log", has("client", "<ClientListPanel", "holds=", "log=", "autoSend=", "listText="));
 check("Day of: bar setup photos, each bartender's lists, missing reports, wrap ups, time punches", has("dayof", "<BarReadyCard", "<BartenderLists", "<MissingReports", "<Closeouts", "<TimePunches"));
 check("Chat: the event team chat with Message team", has("chat", "<ManagerChat") && src("app/team/admin/e/[id]/manager-chat.tsx").includes("Message team"));

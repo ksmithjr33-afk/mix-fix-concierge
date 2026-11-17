@@ -37,6 +37,7 @@ import { getSheetView, syncOrderSheet } from "@/lib/order-sheet-db";
 import { barReadyEntries } from "@/lib/team/bar-ready-db";
 import { allowedTab, isManagerTab, managerTabsFor, type ManagerTab } from "@/lib/team/manager-tabs";
 import { eventBusinessFor } from "@/lib/team/business-db";
+import { supplyCostFor } from "@/lib/team/supply-costs-db";
 import BusinessTab from "./business-tab";
 import { Details, DrinkSections, WhatChanged } from "../../../e/[id]/event-details";
 import EditableDetails from "./editable-details";
@@ -156,7 +157,7 @@ async function AdminEventPage({
           new Set<string>() as Awaited<ReturnType<typeof unavailableOn>>,
         ];
   // Details, Client list and Chat only.
-  const [links, autoSend, listEntries, messages, muted, history, eventNumber, agreements, clockRows, payout, business] = await Promise.all([
+  const [links, autoSend, listEntries, messages, muted, history, eventNumber, agreements, clockRows, payout, business, supplyCosts] = await Promise.all([
     on("details") ? clientLinks(session, me) : null, // admins only: null for anyone else
     on("client") ? autoSendOn() : false,
     on("client") ? listLog(id) : [],
@@ -188,6 +189,8 @@ async function AdminEventPage({
       : null,
     // The Business tab: admins only (null for anyone else, managers included).
     on("business") ? eventBusinessFor(me, session) : null,
+    // Costs on the Shopping list: admins only (null for managers).
+    on("order") ? sheetP.then((s) => supplyCostFor(me, session, s)) : null,
   ]);
   const repeat = repeatLabel(eventNumber);
   if (tab === "chat") await markThreadRead(id, me.id);
@@ -326,7 +329,13 @@ async function AdminEventPage({
         </>
       );
     },
-    order: () => <OrderSheet initial={sheet} timeZone={v.timeZone} />,
+    order: () => (
+      <OrderSheet
+        initial={sheet}
+        timeZone={v.timeZone}
+        costs={supplyCosts ? { cents: supplyCosts.cents, unmatched: supplyCosts.unmatched.length, byRef: Object.fromEntries(Object.entries(supplyCosts.byRef).map(([k, c]) => [k, c ? { cents: c.cents, unitCents: c.unitCents } : null])) } : null}
+      />
+    ),
     client: () => (
       <ClientListPanel
         sessionId={id}
