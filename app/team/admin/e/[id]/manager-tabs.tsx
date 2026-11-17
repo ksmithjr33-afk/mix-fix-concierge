@@ -27,7 +27,9 @@ export default function ManagerTabs({
   counts,
   panel,
   header,
+  tabs = MANAGER_TABS,
 }: {
+  tabs?: readonly (readonly [ManagerTab, string])[]; // Business is added for admins only
   sessionId: string;
   initialTab: ManagerTab; // the tab the server built `panel` for
   counts: Partial<Record<ManagerTab, number>>; // something needs attention
@@ -61,8 +63,8 @@ export default function ManagerTabs({
     <main className={`${tab === "order" ? "max-w-[52rem]" : "max-w-2xl"} mx-auto px-4 py-4 sm:py-6 space-y-4 print:max-w-none print:p-0`}>
       <div className="print:hidden">{header}</div>
       <nav className="-mx-4 px-4 overflow-x-auto print:hidden" aria-label="Manager view">
-        <div className="flex sm:grid sm:grid-cols-6 gap-1 bg-[#DDD5CC] p-1 rounded-xl min-w-max sm:min-w-0" role="tablist">
-          {MANAGER_TABS.map(([key, label]) => {
+        <div className={`flex sm:grid ${tabs.length > 6 ? "sm:grid-cols-7" : "sm:grid-cols-6"} gap-1 bg-[#DDD5CC] p-1 rounded-xl min-w-max sm:min-w-0`} role="tablist">
+          {tabs.map(([key, label]) => {
             const n = key === "chat" ? chatUnread : (counts[key] ?? 0);
             return (
               <button
@@ -87,7 +89,7 @@ export default function ManagerTabs({
         </div>
       </nav>
       <ActiveTab.Provider value={tab}>
-        {MANAGER_TABS.map(([key]) => (
+        {tabs.map(([key]) => (
           <div key={key} role="tabpanel" hidden={tab !== key} className="space-y-4">
             {panels[key] ?? (tab === key && <p className="px-1 py-6 text-center text-[15px] text-[#6B5D52]" role="status">Loading…</p>)}
           </div>

@@ -35,7 +35,9 @@ import { autoSendOn, holdsFor, listLog } from "@/lib/client-list-db";
 import { clientList, clientListText } from "@/lib/client-list";
 import { getSheetView, syncOrderSheet } from "@/lib/order-sheet-db";
 import { barReadyEntries } from "@/lib/team/bar-ready-db";
-import { isManagerTab, type ManagerTab } from "@/lib/team/manager-tabs";
+import { allowedTab, isManagerTab, managerTabsFor, type ManagerTab } from "@/lib/team/manager-tabs";
+import { eventBusinessFor } from "@/lib/team/business-db";
+import BusinessTab from "./business-tab";
 import { Details, DrinkSections, WhatChanged } from "../../../e/[id]/event-details";
 import EditableDetails from "./editable-details";
 import { editCards } from "@/lib/team/edit-cards";
@@ -75,8 +77,10 @@ async function AdminEventPage({
 }) {
   const { id } = await params;
   const asked = (await searchParams).tab;
-  const tab: ManagerTab = isManagerTab(asked) ? asked : "details";
-  const me = await requireAdmin(`/team/admin/e/${encodeURIComponent(id)}${tab !== "details" ? `?tab=${tab}` : ""}`);
+  const askedTab: ManagerTab = isManagerTab(asked) ? asked : "details";
+  const me = await requireAdmin(`/team/admin/e/${encodeURIComponent(id)}${askedTab !== "details" ? `?tab=${askedTab}` : ""}`);
+  // Business is admins only: a manager asking for it gets Details, and its data never loads.
+  const tab: ManagerTab = allowedTab(me.role, asked);
   const back = { href: "/team/admin/events", label: "All events" };
   const session = await getSubmittedSession(id);
   if (!session) {
@@ -152,7 +156,7 @@ async function AdminEventPage({
           new Set<string>() as Awaited<ReturnType<typeof unavailableOn>>,
         ];
   // Details, Client list and Chat only.
-  const [links, autoSend, listEntries, messages, muted, history, eventNumber, agreements, clockRows, payout] = await Promise.all([
+  const [links, autoSend, listEntries, messages, muted, history, eventNumber, agreements, clockRows, payout, business] = await Promise.all([
     on("details") ? clientLinks(session, me) : null, // admins only: null for anyone else
     on("client") ? autoSendOn() : false,
     on("client") ? listLog(id) : [],
@@ -182,6 +186,8 @@ async function AdminEventPage({
           return null;
         })
       : null,
+    // The Business tab: admins only (null for anyone else, managers included).
+    on("business") ? eventBusinessFor(me, session) : null,
   ]);
   const repeat = repeatLabel(eventNumber);
   if (tab === "chat") await markThreadRead(id, me.id);
@@ -362,6 +368,7 @@ async function AdminEventPage({
         {payout && <PayoutCard sessionId={id} title={[adminEventTitle(ed), v.date].filter(Boolean).join(", ")} rows={payout.rows} totals={payout.totals} />}
       </>
     ),
+    business: () => (business ? <BusinessTab view={business} /> : null),
     chat: () => <ManagerChat sessionId={id} initial={messages} unread={chatUnread} timeZone={v.timeZone} muted={muted.has(id)} isAdmin gifSearch={giphyEnabled()} />,
   };
 
@@ -369,6 +376,7 @@ async function AdminEventPage({
     <>
       <TeamHeader signedIn admin back={back} />
       <ManagerTabs
+        tabs={managerTabsFor(me.role)}
         initialTab={tab}
         sessionId={id}
         header={header}
