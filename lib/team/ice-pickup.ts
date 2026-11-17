@@ -182,8 +182,10 @@ export function shoppingIceBags(sections: { id: string; lines: { fields: { name:
 const bagsPhrase = (n: number | null) => (n === null ? "Bag count: ask the office" : `${n} ${n === 1 ? "bag" : "bags"}`);
 
 /** The assignment text, and the update when the bag count or location changed. No client details. */
-export function iceText(o: { firstName: string; title: string; date: string; bags: number | null; location: string; update: boolean; link: string }): string {
+export function iceText(o: { firstName: string; title: string; date: string; bags: number | null; location: string; update: boolean; link: string; rule?: string }): string {
   const hi = o.firstName ? `${o.firstName}, ` : "";
   const lead = o.update ? `Ice pickup update: ${hi}your ice pickup for ${o.title} on ${o.date} changed.` : `Ice pickup: ${hi}you are picking up ice for ${o.title} on ${o.date}.`;
-  return `${lead} ${bagsPhrase(o.bags)}. Where: ${o.location || "ask the office"}. Mark it picked up here: ${o.link}`;
+  // The ice rule (a team setting, "No gas stations. No grocery stores.") right after where to go.
+  const rule = o.rule?.trim() ? ` ${o.rule.trim().replace(/([^.!?])$/, "$1.")}` : "";
+  return `${lead} ${bagsPhrase(o.bags)}. Where: ${o.location || "ask the office"}.${rule} Mark it picked up here: ${o.link}`;
 }

@@ -28,6 +28,7 @@ import {
   type UpdateMode,
 } from "@/lib/client-list";
 import type { PriceChange } from "@/lib/price-change";
+import { isAdminRole } from "@/lib/team/roles";
 
 type EventData = Record<string, unknown>;
 
@@ -63,7 +64,7 @@ export async function teamSetting(key: string): Promise<boolean> {
 }
 
 export async function setTeamSetting(admin: { id: string; role: string }, key: string, on: boolean): Promise<{ ok: true } | { ok: false; error: string; status: number }> {
-  if (admin.role !== "admin") return { ok: false, error: "Admins only.", status: 403 };
+  if (!isAdminRole(admin.role)) return { ok: false, error: "Admins only.", status: 403 };
   if (!(key in SETTING_DEFAULTS)) return { ok: false, error: "Unknown setting.", status: 400 };
   const { error } = await supabase
     .from("team_settings")
@@ -73,6 +74,33 @@ export async function setTeamSetting(admin: { id: string; role: string }, key: s
 }
 
 export const autoSendOn = () => teamSetting(AUTO_SEND_KEY);
+
+// ----- Text settings: a line of wording an admin can edit -----
+
+export const ICE_RULE_KEY = "ice_rule";
+export const TEXT_SETTING_DEFAULTS: Record<string, string> = { [ICE_RULE_KEY]: "No gas stations. No grocery stores." };
+export const TEXT_SETTING_MAX = 200;
+
+/** The saved wording, or the default when nothing is saved (or before the table exists). */
+export async function teamText(key: string): Promise<string> {
+  const fallback = TEXT_SETTING_DEFAULTS[key] ?? "";
+  const { data, error } = await supabase.from("team_settings").select("value").eq("key", key).maybeSingle();
+  if (error || !data) return fallback;
+  const v = (data as { value: unknown }).value;
+  return typeof v === "string" && v.trim() ? v : fallback;
+}
+
+/** Admins and managers. Empty puts the default back. One line, 200 characters. */
+export async function setTeamText(admin: { id: string; role: string }, key: string, raw: unknown): Promise<{ ok: true; value: string } | { ok: false; error: string; status: number }> {
+  if (!isAdminRole(admin.role)) return { ok: false, error: "Admins only.", status: 403 };
+  if (!(key in TEXT_SETTING_DEFAULTS)) return { ok: false, error: "Unknown setting.", status: 400 };
+  const text = String(raw ?? "").replace(/\s+/g, " ").trim();
+  if (text.length > TEXT_SETTING_MAX) return { ok: false, error: `Keep it under ${TEXT_SETTING_MAX} characters.`, status: 400 };
+  const value = text || TEXT_SETTING_DEFAULTS[key];
+  const { error } = await supabase.from("team_settings").upsert({ key, value, updated_by: admin.id, updated_at: new Date().toISOString() }, { onConflict: "key" });
+  if (error) return { ok: false, error: "Could not save. Try again.", status: 500 };
+  return { ok: true, value };
+}
 
 // ----- Links -----
 

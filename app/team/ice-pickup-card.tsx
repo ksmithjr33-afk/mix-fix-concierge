@@ -143,8 +143,13 @@ export default function IcePickupCard({ initial, showEvent = false }: { initial:
       </div>
       <dl className="text-[15px] text-[#2C2420] space-y-0.5">
         <div>
-          <dt className="inline text-[#6B5D52]">Where: </dt>
+          <dt className="inline text-[#6B5D52]">Recommended location: </dt>
           <dd className="inline font-medium">{view.location || "Ask the office"}</dd>
+          {view.rule && (
+            <p className="text-sm font-medium text-[#8A4B12]" data-ice-rule>
+              {view.rule}
+            </p>
+          )}
         </div>
         {view.totalBags !== null && (
           <div>

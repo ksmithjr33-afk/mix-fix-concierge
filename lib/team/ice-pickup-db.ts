@@ -46,6 +46,8 @@ import {
   type IceRow,
   type IceState,
 } from "@/lib/team/ice-pickup";
+import { isAdminRole } from "@/lib/team/roles";
+import { ICE_RULE_KEY, teamText } from "@/lib/client-list-db";
 
 type Result<T = object> = ({ ok: true } & T) | { ok: false; error: string; status: number };
 
@@ -68,6 +70,7 @@ export interface IceView {
   locationName: string;
   locationAddress: string;
   location: string; // "Kroger, 123 Main St"
+  rule: string; // the ice rule team setting, shown right under the location on both cards
   totalBags: number | null; // the saved total, else the Shopping list's
   savedTotal: number | null;
   listBags: number | null; // the Shopping list's ice, when it is calculated
@@ -146,7 +149,7 @@ export function sheetIceBags(session: SessionRow, sections: Parameters<typeof sh
 
 /** Accepted on the event, or an admin. Who may use "I picked up the ice instead". */
 async function onEvent(sessionId: string, staff: StaffMember): Promise<boolean> {
-  if (staff.role === "admin") return true;
+  if (isAdminRole(staff.role)) return true;
   const a = await getAssignment(sessionId, staff.id);
   return a?.status === "accepted";
 }
@@ -162,7 +165,7 @@ export async function iceView(
   opts: { now?: Date; listBags?: number | null; eventHref?: string | null } = {}
 ): Promise<IceView> {
   const now = opts.now ?? new Date();
-  const [row, people] = await Promise.all([getIce(session.id), icePeople(session.id)]);
+  const [row, people, rule] = await Promise.all([getIce(session.id), icePeople(session.id), teamText(ICE_RULE_KEY)]);
   const listBags = opts.listBags !== undefined ? opts.listBags : row?.total_bags !== null && row?.total_bags !== undefined ? null : await listIceBags(session);
   const ed = eventData(session);
   const tz = eventSchedule(ed).tz;
@@ -177,6 +180,7 @@ export async function iceView(
     locationName: row?.location_name ?? "",
     locationAddress: row?.location_address ?? "",
     location: locationText(row),
+    rule,
     totalBags: total,
     savedTotal: row?.total_bags ?? null,
     listBags,
@@ -196,7 +200,7 @@ export async function iceView(
     bagLine: summary.line,
     bagWarning: summary.warning,
     outstanding: iceOutstanding(people, ed, now),
-    canEdit: viewer.role === "admin",
+    canEdit: isAdminRole(viewer.role),
     canInstead: !mine && (await onEvent(session.id, viewer)),
     eventHref: opts.eventHref ?? null,
   };
@@ -247,7 +251,8 @@ async function textPerson(session: SessionRow, p: IcePersonRow, bags: number | n
     .update({ notify_after: null, notified_at: now.toISOString(), notified_bags: bags, notified_location: location })
     .eq("id", p.id);
   const ed = eventData(session);
-  return sendStaffText(who.phone, who.name, iceText({ firstName: firstName(who.name), title: eventTitle(ed), date: shortDate(eventSchedule(ed).day), bags, location, update, link: link() }));
+  const rule = await teamText(ICE_RULE_KEY);
+  return sendStaffText(who.phone, who.name, iceText({ firstName: firstName(who.name), title: eventTitle(ed), date: shortDate(eventSchedule(ed).day), bags, location, update, link: link(), rule }));
 }
 
 /**
@@ -276,7 +281,7 @@ async function notifyPeople(session: SessionRow, now: Date, listBags?: number | 
 }
 
 async function adminOnly(sessionId: string, admin: StaffMember): Promise<Result<{ session: SessionRow }>> {
-  if (admin.role !== "admin") return { ok: false, error: "Admins only.", status: 403 };
+  if (!isAdminRole(admin.role)) return { ok: false, error: "Admins only.", status: 403 };
   const session = await getSubmittedSession(sessionId);
   if (!session) return { ok: false, error: "We could not find that event.", status: 404 };
   return { ok: true, session };
@@ -354,7 +359,7 @@ export async function markIce(sessionId: string, staff: StaffMember, raw: Record
   const session = await getSubmittedSession(sessionId);
   if (!session) return { ok: false, error: "We could not find that event.", status: 404 };
   const target = typeof raw.staffId === "string" && raw.staffId ? raw.staffId : staff.id;
-  if (target !== staff.id && staff.role !== "admin") return { ok: false, error: "Only that person or an admin can mark this.", status: 403 };
+  if (target !== staff.id && !isAdminRole(staff.role)) return { ok: false, error: "Only that person or an admin can mark this.", status: 403 };
   const clean = cleanPickedUp(raw);
   if (!clean.ok) return { ok: false, error: clean.error, status: 400 };
   const row = (await icePeople(sessionId)).find((p) => p.staff_id === target);
@@ -470,7 +475,7 @@ export async function iceUnassignedIds(sessions: SessionRow[], now: Date = new D
 
 /** The ice card on the bartender event page, for people on the event. */
 export async function staffIceView(session: SessionRow, staff: StaffMember, now: Date = new Date()): Promise<IceView | null> {
-  if (staff.role !== "admin") {
+  if (!isAdminRole(staff.role)) {
     const a = await getAssignment(session.id, staff.id);
     const assigned = (await icePeople(session.id)).some((p) => p.staff_id === staff.id);
     if (!assigned && (!a || a.status === "declined")) return null;
@@ -492,8 +497,8 @@ export async function myIcePickups(staff: StaffMember, now: Date = new Date()): 
     if (!session) continue;
     const s = eventSchedule(eventData(session));
     if (!s.day || s.day < todayIn(s.tz, now)) continue;
-    const a = staff.role === "admin" ? null : await getAssignment(r.session_id, staff.id);
-    const href = staff.role === "admin" ? `/team/admin/e/${encodeURIComponent(r.session_id)}` : a && a.status !== "declined" ? `/team/e/${encodeURIComponent(r.session_id)}` : null;
+    const a = isAdminRole(staff.role) ? null : await getAssignment(r.session_id, staff.id);
+    const href = isAdminRole(staff.role) ? `/team/admin/e/${encodeURIComponent(r.session_id)}` : a && a.status !== "declined" ? `/team/e/${encodeURIComponent(r.session_id)}` : null;
     out.push({ view: await iceView(session, staff, { now, eventHref: href }), day: s.day });
   }
   return out.sort((a, b) => a.day.localeCompare(b.day)).map((o) => o.view);

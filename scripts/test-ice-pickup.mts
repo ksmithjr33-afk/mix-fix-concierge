@@ -55,7 +55,7 @@ check("An admin saves the location, address, total and notes", s1.ok && s1.view.
 const a1 = await iceDb.assignIce("s1", admin, "b1", "", noon);
 check("One person assigned, no bag count: they carry the total", a1.ok && a1.view.people.length === 1 && a1.view.people[0].bags === 8 && a1.view.state === "assigned");
 const t1 = textsTo(taylor);
-check("They get one text with the event, date, bags and location", t1.length === 1 && /Justin's 30th/.test(t1[0].message) && /Sat, Dec 5/.test(t1[0].message) && /8 bags/.test(t1[0].message) && /Kroger on Lemmon, 4142 Lemmon Ave/.test(t1[0].message) && /plan\.test\/team\/events/.test(t1[0].message), t1[0]?.message);
+check("They get one text with the event, date, bags and location", t1.length === 1 && /Justin · Birthday/.test(t1[0].message) && /Sat, Dec 5/.test(t1[0].message) && /8 bags/.test(t1[0].message) && /Kroger on Lemmon, 4142 Lemmon Ave/.test(t1[0].message) && /plan\.test\/team\/events/.test(t1[0].message), t1[0]?.message);
 check("The text carries no client contact details", noClient(t1[0].message));
 await iceDb.assignIce("s1", admin, "b1", "", noon);
 await iceDb.saveIce("s1", admin, { location_name: "Kroger on Lemmon", location_address: "4142 Lemmon Ave", total_bags: "8", notes: "Changed the note only" }, noon);
@@ -161,7 +161,7 @@ check("Their home screen shows the ice card, with no link to an event they are n
 await iceDb.markIce("s1", riley, { bags: "3" }, noon);
 check("They can mark it from there, and the home card goes away", !!personRow("b3")!.picked_up_at && (await iceDb.myIcePickups(riley, noon)).length === 0);
 const route = src("app/api/team/ice-pickup/route.ts");
-check("The route needs a sign in, and changes are admin only on the server", route.includes("getCurrentStaff()") && route.includes('if (ADMIN_ACTIONS.has(action) && staff.role !== "admin") return NextResponse.json({ error: "Admins only." }, { status: 403 });'));
+check("The route needs a sign in, and changes are admin only on the server", route.includes("getCurrentStaff()") && route.includes('if (ADMIN_ACTIONS.has(action) && !isAdminRole(staff.role)) return NextResponse.json({ error: "Admins only." }, { status: 403 });'));
 
 // ----- 7. Quiet hours -----
 reset();
@@ -219,5 +219,32 @@ check("No bag line without a total or counts", h.ok && h.view.bagLine === "" && 
 const sql = src("supabase/migrations/20261204_ice_pickups.sql");
 check("The migration is safe to run twice", !/create table (?!if not exists)/i.test(sql) && !/create index (?!if not exists)/i.test(sql) && /unique \(session_id, staff_id\)/.test(sql));
 check("The tables are server only, like the menu pickup tables", /revoke all on public\.event_ice_pickups, public\.event_ice_pickup_people, public\.event_ice_pickup_log from anon, authenticated/.test(sql));
+
+// ----- The ice rule: a team setting, under Recommended location and in the text -----
+const cldb = await import("../lib/client-list-db.ts");
+reset();
+db.team_settings = [];
+await iceDb.saveIce("s1", admin, { location_name: "Ice House on Elm", total_bags: "8" }, noon);
+const r1 = await iceDb.assignIce("s1", admin, "b1", "", noon);
+check("The ice rule defaults to No gas stations. No grocery stores.", r1.ok && r1.view.rule === "No gas stations. No grocery stores.");
+check("The assignment text has the rule right after where to go", (textsTo(taylor)[0]?.message ?? "").includes("Where: Ice House on Elm. No gas stations. No grocery stores. Mark it picked up"), textsTo(taylor)[0]?.message);
+const asTaylor = await iceDb.staffIceView(session(), taylor, noon);
+check("The bartender's card gets the rule too", asTaylor?.rule === "No gas stations. No grocery stores.");
+const rulePanel = src("app/team/admin/e/[id]/ice-pickup-panel.tsx");
+const ruleCard = src("app/team/ice-pickup-card.tsx");
+check("Admin card: the rule is directly under Recommended location", rulePanel.indexOf("Recommended location") < rulePanel.indexOf("{view.rule && <span") && rulePanel.indexOf("{view.rule && <span") < rulePanel.indexOf("value={name}"));
+check("Staff card: the rule is directly under Recommended location", ruleCard.indexOf("Recommended location: </dt>") < ruleCard.indexOf("{view.rule && (") && ruleCard.indexOf("{view.rule && (") < ruleCard.indexOf("Total: </dt>"));
+check("The admin example is no longer a grocery store", !/Kroger/.test(rulePanel));
+check("A bartender cannot change the rule", !(await cldb.setTeamText(taylor, cldb.ICE_RULE_KEY, "Anywhere")).ok);
+const ruleMgr = { id: "m1", name: "Alex Rivera", phone: "+12145550101", role: "manager" as const, active: true };
+const saved = await cldb.setTeamText(ruleMgr, cldb.ICE_RULE_KEY, "  Ice houses   only. ");
+check("An admin or manager edits the wording", saved.ok && saved.value === "Ice houses only." && (await cldb.teamText(cldb.ICE_RULE_KEY)) === "Ice houses only.");
+check("Too long is refused, unknown keys are refused", !(await cldb.setTeamText(admin, cldb.ICE_RULE_KEY, "x".repeat(201))).ok && !(await cldb.setTeamText(admin, "nope", "x")).ok);
+check("The cards and the next text use the new wording", (await iceDb.iceView(session(), admin, { now: noon })).rule === "Ice houses only.");
+await iceDb.assignIce("s1", admin, "b2", "", noon);
+check("The next text says the new wording", (textsTo(sam)[0]?.message ?? "").includes("Ice houses only. Mark it"), textsTo(sam)[0]?.message);
+check("Empty puts the default back", (await cldb.setTeamText(admin, cldb.ICE_RULE_KEY, "  ")).ok && (await cldb.teamText(cldb.ICE_RULE_KEY)) === "No gas stations. No grocery stores.");
+check("The editor is on the Staff page with the other team settings", src("app/team/admin/staff/page.tsx").includes("settingKey={ICE_RULE_KEY}") && src("app/api/team/admin/settings/route.ts").includes("setTeamText(staff, body.key, body.text)"));
+check("The text keeps no client details", noClient(textsTo(taylor)[0]?.message ?? ""));
 
 done("ice pickup");

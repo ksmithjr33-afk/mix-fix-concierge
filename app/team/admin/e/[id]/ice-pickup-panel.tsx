@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { IceView, Place } from "@/lib/team/ice-pickup-db";
 import { field, IceStateBadge, PersonStatus, PickedUpForm, postIce } from "../../../ice-pickup-card";
+import { roleSuffix } from "@/lib/team/roles";
 
 const card = "bg-[#F5F0EB] rounded-2xl border border-[#DDD5CC] px-4 py-3 sm:px-5 sm:py-4";
 const small = "w-20 rounded-lg border border-[#DDD5CC] bg-white px-2 py-1.5 text-[16px] text-[#2C2420] focus:outline-none focus:ring-2 focus:ring-[#B5845A]/30 focus:border-[#B5845A]";
@@ -63,7 +64,8 @@ export default function IcePickupPanel({ initial, people, places }: { initial: I
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="block text-xs text-[#A39585] uppercase tracking-wide">
           Recommended location
-          <input value={name} onChange={(e) => setName(e.target.value)} maxLength={120} className={`${field} mt-1`} placeholder="e.g. Kroger on Lemmon Ave" />
+          {view.rule && <span className="block normal-case tracking-normal text-sm font-medium text-[#8A4B12]" data-ice-rule>{view.rule}</span>}
+          <input value={name} onChange={(e) => setName(e.target.value)} maxLength={120} className={`${field} mt-1`} placeholder="e.g. Liquor store or ice house" />
         </label>
         <label className="block text-xs text-[#A39585] uppercase tracking-wide">
           Address (optional)
@@ -199,7 +201,7 @@ export default function IcePickupPanel({ initial, people, places }: { initial: I
               {choices.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.name}
-                  {p.role === "admin" ? " (admin)" : ""}
+                  {roleSuffix(p.role)}
                 </option>
               ))}
             </select>
