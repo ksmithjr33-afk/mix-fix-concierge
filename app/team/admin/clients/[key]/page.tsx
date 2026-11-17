@@ -4,6 +4,7 @@ import { requireAdmin } from "@/lib/team/auth";
 import { clientPage } from "@/lib/client-history-db";
 import TeamHeader from "../../../team-header";
 import ClientHistoryCard from "../../e/[id]/client-history-card";
+import { clientAgreements } from "@/lib/team/agreements-db";
 
 export const dynamic = "force-dynamic";
 
@@ -30,6 +31,8 @@ async function ClientPage({ params }: { params: Promise<{ key: string }> }) {
     );
   }
   const { client } = page;
+  // Agreements across all their events (admins and managers only).
+  const agreements = (await clientAgreements(page.rows.map((r) => r.id), admin).catch(() => null)) ?? [];
   return (
     <>
       <TeamHeader signedIn admin back={back} />
@@ -42,6 +45,31 @@ async function ClientPage({ params }: { params: Promise<{ key: string }> }) {
           </p>
         </div>
         <ClientHistoryCard history={{ matchedOn: client.key, rows: page.rows }} clientKey="" title="Events" />
+        <section className="rounded-2xl border border-[#DDD5CC] bg-[#F5F0EB] px-4 py-3 sm:px-5 sm:py-4 space-y-2" aria-label="Agreements">
+          <h2 className="font-heading text-lg font-bold text-[#2C2420]">Agreements</h2>
+          {agreements.length === 0 ? (
+            <p className="text-[15px] text-[#6B5D52]">No agreements uploaded for this client yet. Upload them on each event&apos;s Details tab.</p>
+          ) : (
+            <ul className="divide-y divide-[#DDD5CC]">
+              {agreements.map((a) => (
+                <li key={a.id} className="py-2 space-y-0.5">
+                  <p className="text-[15px] text-[#2C2420]">
+                    <a href={a.viewHref} target="_blank" rel="noreferrer" className="font-medium text-[#B5845A] underline">
+                      {a.label || a.fileName || "Agreement"}
+                    </a>{" "}
+                    <span className="text-[#6B5D52]">({a.typeLabel})</span>
+                  </p>
+                  <p className="text-sm text-[#6B5D52] break-words">
+                    <Link href={a.eventHref} className="underline">
+                      {a.eventTitle}
+                    </Link>{" "}
+                    · Uploaded by {a.uploadedBy}, {a.uploadedAt}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
         <div className="px-1">
           <Link href="/team/admin/clients" className="text-sm text-[#B5845A] underline">
             Back to clients
