@@ -5,11 +5,12 @@ import TeamHeader from "../../team-header";
 import StaffManager from "./staff-manager";
 import { upcomingUnavailableByStaff } from "@/lib/team/availability-db";
 import { compactLines } from "@/lib/team/reliability-db";
-import { certsEnforced, onboardingProgress } from "@/lib/team/certs-db";
-import { ONBOARDING } from "@/lib/team/cert-config";
+import { certsEnforced, trainingProgressFor } from "@/lib/team/certs-db";
+import { progressLine } from "@/lib/team/training";
 import EnforceToggle from "./enforce-toggle";
 import SettingToggle from "./setting-toggle";
-import { AUTO_SEND_KEY, SUGGEST_STORES_KEY, teamSetting } from "@/lib/client-list-db";
+import SettingText from "./setting-text";
+import { AUTO_SEND_KEY, ICE_RULE_KEY, SUGGEST_STORES_KEY, teamSetting, teamText } from "@/lib/client-list-db";
 import { ratesFor } from "@/lib/team/pay-db";
 import { rateText } from "@/lib/team/pay";
 import { rangeLabel } from "@/lib/team/availability";
@@ -23,23 +24,24 @@ async function AdminStaffPage() {
   // The staff list first; everything about each person is then read together, with the settings alongside.
   const staffP = listStaff();
   const ids = staffP.then((staff) => staff.map((s) => s.id));
-  const [staff, away, records, onboard, enforced, autoSend, suggestStores, rates, overview] = await Promise.all([
+  const [staff, away, records, onboard, enforced, autoSend, suggestStores, rates, overview, iceRule] = await Promise.all([
     staffP,
     upcomingUnavailableByStaff(chicagoToday()),
     ids.then(compactLines),
-    ids.then(onboardingProgress),
+    ids.then(trainingProgressFor),
     certsEnforced(),
     teamSetting(AUTO_SEND_KEY),
     teamSetting(SUGGEST_STORES_KEY),
     ids.then((list) => ratesFor(me, list)),
     staffP.then((list) => staffOverview(me, list)),
+    teamText(ICE_RULE_KEY),
   ]);
   // One line per person per topic, shown under their name.
   const notes: Record<string, string[]> = {};
   const add = (id: string, line: string) => (notes[id] = [...(notes[id] ?? []), line]);
   for (const s of staff) {
     add(s.id, `Record: ${records[s.id]}`);
-    if (s.role !== "admin") add(s.id, `Onboarding: ${onboard.get(s.id) ?? 0} of ${ONBOARDING.length}`);
+    add(s.id, `Training: ${progressLine(onboard.get(s.id) ?? [])}`);
     add(s.id, `Rate: ${rates.get(s.id) ? rateText(rates.get(s.id)!) : "not set"}`);
   }
   for (const [id, rows] of away) {
@@ -69,12 +71,18 @@ async function AdminStaffPage() {
           onText="On: a line with no store shows the store that item was last given on another event, marked as a suggestion. It is never set by itself."
           offText="Off: lines with no store show no suggestion."
         />
+        <SettingText
+          settingKey={ICE_RULE_KEY}
+          initial={iceRule}
+          title="Ice rule"
+          help="Shown under Recommended location on every ice card and in the ice pickup text. Leave it empty to put back: No gas stations. No grocery stores."
+        />
         <div className="px-1">
           <a href="/api/team/admin/staff/export" className="inline-block rounded-lg border border-[#2C2420] text-[#2C2420] px-4 py-2 text-sm font-medium">
             Download CSV
           </a>
         </div>
-        <StaffManager initial={staff} meId={me.id} notes={notes} overview={overview} />
+        <StaffManager initial={staff} meId={me.id} viewerRole={me.role} notes={notes} overview={overview} />
       </main>
     </>
   );

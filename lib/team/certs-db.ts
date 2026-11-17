@@ -15,6 +15,7 @@ import { staffMarkets } from "@/lib/team/markets-db";
 import { todayIn } from "@/lib/team/time";
 import { inQuietHours } from "@/lib/team/shifts";
 import { CERT_TYPES, ONBOARDING, onboardingItem } from "@/lib/team/cert-config";
+import { isTrainingAck, trainingProgress, trainingUnread, type SectionProgress } from "@/lib/team/training";
 import {
   adminCertReminderText,
   adminProblemText,
@@ -35,6 +36,7 @@ import {
   type CertRow,
   type CertStanding,
 } from "@/lib/team/certs";
+import { isAdminRole } from "@/lib/team/roles";
 
 export const CERT_BUCKET = "staff-documents";
 const FILE_LINK_SECONDS = 10 * 60;
@@ -51,7 +53,7 @@ export async function certsEnforced(): Promise<boolean> {
 }
 
 export async function setCertsEnforced(admin: StaffMember, on: boolean): Promise<Result> {
-  if (admin.role !== "admin") return { ok: false, error: "Admins only.", status: 403 };
+  if (!isAdminRole(admin.role)) return { ok: false, error: "Admins only.", status: 403 };
   const { error } = await supabase
     .from("team_settings")
     .upsert({ key: "enforce_certifications", value: on, updated_by: admin.id, updated_at: new Date().toISOString() }, { onConflict: "key" });
@@ -108,7 +110,7 @@ export async function certLinesByStaff(staff: { id: string; markets?: unknown; r
   const rows = await certRows(staff.map((s) => s.id));
   const out: Record<string, string> = {};
   for (const s of staff) {
-    if (s.role === "admin") continue;
+    if (isAdminRole(s.role)) continue;
     const types = new Map<string, Market>();
     for (const m of staffMarketsOf(s)) {
       const t = requiredCert(m);
@@ -160,7 +162,7 @@ export async function uploadCert(opts: {
   const now = opts.now ?? new Date();
   const { actor } = opts;
   const forOther = opts.staffId !== actor.id;
-  if (forOther && actor.role !== "admin") return { ok: false, error: "You can only upload your own certification.", status: 403 };
+  if (forOther && !isAdminRole(actor.role)) return { ok: false, error: "You can only upload your own certification.", status: 403 };
   const { data: p } = await supabase.from("staff").select("id, name, phone, role, active").eq("id", opts.staffId).maybeSingle();
   const person = p as { id: string; name: string; phone: string } | null;
   if (!person) return { ok: false, error: "We could not find that person.", status: 404 };
@@ -210,7 +212,7 @@ export async function uploadCert(opts: {
 
 /** Approve or reject a pending certification. A rejection needs a note. Nobody reviews their own. */
 export async function reviewCert(admin: StaffMember, id: string, decision: "approve" | "reject", rawNote: unknown, now: Date = new Date()): Promise<Result> {
-  if (admin.role !== "admin") return { ok: false, error: "Admins only.", status: 403 };
+  if (!isAdminRole(admin.role)) return { ok: false, error: "Admins only.", status: 403 };
   const note = String(rawNote ?? "").trim().replace(/\s+/g, " ").slice(0, NOTE_MAX);
   if (decision === "reject" && note.length < 3) return { ok: false, error: "Add a note saying why.", status: 400 };
   const { data } = await supabase.from("staff_certifications").select("*").eq("id", id).maybeSingle();
@@ -238,7 +240,7 @@ export async function reviewCert(admin: StaffMember, id: string, decision: "appr
 export async function certFileLink(viewer: StaffMember, id: string): Promise<string | null> {
   const { data } = await supabase.from("staff_certifications").select("staff_id, file_path").eq("id", id).maybeSingle();
   const row = data as { staff_id: string; file_path: string } | null;
-  if (!row || (viewer.role !== "admin" && viewer.id !== row.staff_id)) return null;
+  if (!row || (!isAdminRole(viewer.role) && viewer.id !== row.staff_id)) return null;
   const { data: s, error } = await supabase.storage.from(CERT_BUCKET).createSignedUrl(row.file_path, FILE_LINK_SECONDS);
   if (error || !s) return null;
   return s.signedUrl;
@@ -294,6 +296,31 @@ export async function acknowledgeItem(staff: StaffMember, itemId: string, now: D
     .upsert({ staff_id: staff.id, item_id: itemId, acknowledged_at: now.toISOString() }, { onConflict: "staff_id,item_id" });
   if (error) return { ok: false, error: "Could not save. Try again.", status: 500 };
   return { ok: true };
+}
+
+/** Training: mark a package (or any Training item) as read. Same table as the onboarding steps. */
+export async function acknowledgeTraining(staff: StaffMember, ackId: string, now: Date = new Date()): Promise<Result> {
+  if (!isTrainingAck(ackId)) return { ok: false, error: "We could not find that.", status: 404 };
+  const { error } = await supabase
+    .from("staff_onboarding")
+    .upsert({ staff_id: staff.id, item_id: ackId, acknowledged_at: now.toISOString() }, { onConflict: "staff_id,item_id" });
+  if (error) return { ok: false, error: "Could not save. Try again.", status: 500 };
+  return { ok: true };
+}
+
+/** Each person's Training progress, both sections, for the staff list and profile. */
+export async function trainingProgressFor(staffIds: string[]): Promise<Map<string, SectionProgress[]>> {
+  const acked = new Map(staffIds.map((id) => [id, new Set<string>()]));
+  if (staffIds.length) {
+    const { data, error } = await supabase.from("staff_onboarding").select("staff_id, item_id").in("staff_id", staffIds);
+    if (!error && data) for (const r of data as { staff_id: string; item_id: string }[]) acked.get(r.staff_id)?.add(r.item_id);
+  }
+  return new Map([...acked].map(([id, set]) => [id, trainingProgress(set)]));
+}
+
+/** The header badge: anything not yet read or acknowledged. */
+export async function trainingUnreadFor(staffId: string): Promise<number> {
+  return trainingUnread(await onboardingDone(staffId));
 }
 
 /** Steps done per person, for the staff page. Only steps still in the config count. */

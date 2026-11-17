@@ -9,7 +9,8 @@ import RecordCard from "../../../record-card";
 import { staffRecord } from "@/lib/team/reliability-db";
 import { certRows, myStandings, onboardingDone } from "@/lib/team/certs-db";
 import { STATE_LABELS } from "@/lib/team/certs";
-import { FOOD_HANDLER, ONBOARDING } from "@/lib/team/cert-config";
+import { FOOD_HANDLER } from "@/lib/team/cert-config";
+import { TRAINING_SECTIONS, trainingProgress } from "@/lib/team/training";
 import { longDate } from "@/lib/team/time";
 import CertUpload from "../../../certifications/cert-upload";
 import CertReview from "./cert-review";
@@ -18,6 +19,7 @@ import { rateFor } from "@/lib/team/pay-db";
 import { PAY_LABEL } from "@/lib/team/pay";
 import { viewProfile } from "@/lib/team/profile-db";
 import ProfileForm from "../../../me/profile/profile-form";
+import { roleLabel } from "@/lib/team/roles";
 
 export const dynamic = "force-dynamic";
 
@@ -50,7 +52,7 @@ export default async function StaffDetailPage({ params }: { params: Promise<{ id
         <div className="px-1">
           <h1 className="font-heading text-2xl font-bold text-[#2C2420] break-words">{person.name || "No name yet"}</h1>
           <p className="text-[15px] text-[#6B5D52]">
-            {[person.role === "admin" ? "Admin" : "Bartender", staffMarketsOf(person).map((m) => marketLabel(m)).join(", "), person.active ? "" : "Inactive"].filter(Boolean).join(" · ")}
+            {[roleLabel(person.role), staffMarketsOf(person).map((m) => marketLabel(m)).join(", "), person.active ? "" : "Inactive"].filter(Boolean).join(" · ")}
           </p>
           <Link href={`/team/admin/preview/${id}`} className="text-sm text-[#B5845A] underline">
             Preview as
@@ -117,17 +119,28 @@ export default async function StaffDetailPage({ params }: { params: Promise<{ id
           )}
         </section>
 
-        <section className={card} aria-label="Onboarding">
-          <h2 className="font-heading text-base font-bold text-[#2C2420] mb-1">
-            Onboarding: {ONBOARDING.filter((i) => onboard.has(i.id)).length} of {ONBOARDING.length}
-          </h2>
-          <ul className="text-[15px] space-y-0.5">
-            {ONBOARDING.map((i) => (
-              <li key={i.id} className={onboard.has(i.id) ? "text-[#2C2420]" : "text-[#A39585]"}>
-                {onboard.has(i.id) ? "✓" : "○"} {i.title}
-              </li>
-            ))}
-          </ul>
+        <section className={card} aria-label="Training">
+          <h2 className="font-heading text-base font-bold text-[#2C2420] mb-1">Training</h2>
+          <div className="space-y-3">
+            {TRAINING_SECTIONS.map((s) => {
+              const p = trainingProgress(onboard).find((x) => x.id === s.id)!;
+              return (
+                <div key={s.id}>
+                  <h3 className="text-sm font-medium text-[#2C2420]" data-training={s.id}>
+                    {s.title}: {p.text}
+                  </h3>
+                  <ul className="text-[15px] space-y-0.5">
+                    {s.items.map((i) => (
+                      <li key={i.ackId} className={onboard.has(i.ackId) ? "text-[#2C2420]" : "text-[#A39585]"}>
+                        {onboard.has(i.ackId) ? "✓" : "○"} {i.title}
+                        {i.group ? <span className="text-xs text-[#A39585]"> (legacy)</span> : null}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              );
+            })}
+          </div>
         </section>
 
         <section className={card} aria-label="Availability">

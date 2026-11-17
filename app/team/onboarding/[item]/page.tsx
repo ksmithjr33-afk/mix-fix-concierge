@@ -4,6 +4,7 @@ import { onboardingDone } from "@/lib/team/certs-db";
 import { onboardingItem } from "@/lib/team/cert-config";
 import TeamHeader from "../../team-header";
 import AckButton from "./ack-button";
+import { isAdminRole } from "@/lib/team/roles";
 
 export const dynamic = "force-dynamic";
 
@@ -12,11 +13,11 @@ export default async function OnboardingItemPage({ params }: { params: Promise<{
   const { item: id } = await params;
   const staff = await requireStaff(`/team/onboarding/${encodeURIComponent(id)}`);
   const item = onboardingItem(id);
-  const back = { href: "/team/onboarding", label: "Getting started" };
+  const back = { href: "/team/training", label: "Training" };
   if (!item) {
     return (
       <>
-        <TeamHeader signedIn admin={staff.role === "admin"} back={back} />
+        <TeamHeader signedIn admin={isAdminRole(staff.role)} back={back} />
         <main className="max-w-md mx-auto px-4 py-10 text-center text-[15px] text-[#6B5D52]">We could not find that step.</main>
       </>
     );
@@ -24,7 +25,7 @@ export default async function OnboardingItemPage({ params }: { params: Promise<{
   const done = (await onboardingDone(staff.id)).has(item.id);
   return (
     <>
-      <TeamHeader signedIn admin={staff.role === "admin"} back={back} />
+      <TeamHeader signedIn admin={isAdminRole(staff.role)} back={back} />
       <main className="max-w-2xl mx-auto px-4 py-6 space-y-4">
         <h1 className="font-heading text-2xl font-bold text-[#2C2420] px-1">{item.title}</h1>
         <section className="bg-[#F5F0EB] rounded-2xl border border-[#DDD5CC] px-4 py-4 space-y-3">

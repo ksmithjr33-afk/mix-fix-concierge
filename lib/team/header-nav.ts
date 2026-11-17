@@ -3,8 +3,9 @@
 // can check it. The header (app/team/team-header.tsx) reads the counts and the
 // links render in app/team/header-nav.tsx.
 //
-// Admins: Staffing, Staff, Clients, Time, News, Me.
-// Bartenders, and admins in Bartender view: Events, News, Me.
+// Admins and managers: Staffing, Staff, Clients, Time, News, Training, Me.
+// Everyone else, and admins in Bartender view: Events, Training, News, Me.
+// Training has a badge for anything not yet read or acknowledged.
 // On phones every link is a row in the Menu panel; on wider screens all but Me
 // are inline and Me sits in the dropdown under the person's first name.
 
@@ -20,6 +21,7 @@ export interface NavLink {
 
 export interface NavCounts {
   unreadNews: number;
+  training?: number; // Training items not yet read or acknowledged
 }
 
 const prefixMatch = (pathname: string, prefix: string) => pathname === prefix || pathname.startsWith(`${prefix}/`);
@@ -40,8 +42,17 @@ export function headerLinks(showAdmin: boolean, counts: NavCounts): NavLink[] {
     label: "Me",
     badge: 0,
     // The pages reached from Me (their back link says "Me").
-    match: ["/team/me", "/team/pay", "/team/record", "/team/availability", "/team/certifications", "/team/onboarding"],
+    match: ["/team/me", "/team/pay", "/team/record", "/team/availability", "/team/certifications"],
     inline: false,
+  };
+  const trainingCount = Math.max(0, (counts.training ?? 0) | 0);
+  const training: NavLink = {
+    href: "/team/training",
+    label: "Training",
+    badge: trainingCount,
+    badgeLabel: trainingCount > 0 ? `${trainingCount} to read` : undefined,
+    match: ["/team/training", "/team/onboarding"],
+    inline: true,
   };
   if (showAdmin) {
     return [
@@ -50,10 +61,11 @@ export function headerLinks(showAdmin: boolean, counts: NavCounts): NavLink[] {
       { href: "/team/admin/clients", label: "Clients", badge: 0, match: ["/team/admin/clients"], inline: true },
       { href: "/team/admin/timesheets", label: "Time", badge: 0, match: ["/team/admin/timesheets"], inline: true },
       news,
+      training,
       me,
     ];
   }
-  return [{ href: "/team/events", label: "Events", badge: 0, match: ["/team/events", "/team/e", "/team/shifts", "/team/handoff"], inline: true }, news, me];
+  return [{ href: "/team/events", label: "Events", badge: 0, match: ["/team/events", "/team/e", "/team/shifts", "/team/handoff"], inline: true }, training, news, me];
 }
 
 /** The link for the page being viewed: the longest matching prefix wins. Null when none matches. */

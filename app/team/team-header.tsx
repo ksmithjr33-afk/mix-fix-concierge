@@ -1,8 +1,10 @@
 import { getCurrentStaff, getSignedInStaff } from "@/lib/team/auth";
 import { unreadAnnouncements } from "@/lib/team/announcements-db";
+import { trainingUnreadFor } from "@/lib/team/certs-db";
 import { firstName } from "@/lib/team/event-view";
 import { headerLinks } from "@/lib/team/header-nav";
 import HeaderNav from "./header-nav";
+import { isAdminRole } from "@/lib/team/roles";
 
 /**
  * Header shared by the team pages: logo, admin links for admins, the
@@ -26,11 +28,11 @@ export default async function TeamHeader({
 }) {
   const [viewed, real] = signedIn ? await Promise.all([getCurrentStaff().catch(() => null), getSignedInStaff().catch(() => null)]) : [null, null];
   const bartenderView = !!viewed?.bartenderView;
-  const showAdmin = admin && !bartenderView && viewed?.role === "admin";
-  const canSwitch = real?.role === "admin" && !bartenderView;
-  const canSwitchBack = real?.role === "admin" && bartenderView;
-  const unread = viewed ? await unreadAnnouncements(viewed.id).catch(() => 0) : 0;
-  const links = headerLinks(showAdmin, { unreadNews: unread });
+  const showAdmin = admin && !bartenderView && isAdminRole(viewed?.role);
+  const canSwitch = isAdminRole(real?.role) && !bartenderView;
+  const canSwitchBack = isAdminRole(real?.role) && bartenderView;
+  const [unread, training] = viewed ? await Promise.all([unreadAnnouncements(viewed.id).catch(() => 0), trainingUnreadFor(viewed.id).catch(() => 0)]) : [0, 0];
+  const links = headerLinks(showAdmin, { unreadNews: unread, training });
   const name = real?.name ?? viewed?.name ?? "";
   return (
     <>

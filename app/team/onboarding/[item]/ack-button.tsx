@@ -22,7 +22,7 @@ export default function AckButton({ itemId, label, done: initial }: { itemId: st
             const d = await res.json().catch(() => ({}));
             if (!res.ok) throw new Error(d.error ?? "Could not save.");
             setDone(true);
-            router.push("/team/onboarding");
+            router.push("/team/training");
           } catch (err) {
             setError(err instanceof Error ? err.message : "Could not save.");
           } finally {

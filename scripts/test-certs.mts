@@ -172,8 +172,8 @@ check("Onboarding blocks nothing", !/onboarding/i.test(src("lib/team/shifts-db.t
 // Wiring
 check("The cron sends certification reminders", src("app/api/cron/team/route.ts").includes("sendCertReminders(now)"));
 check("The staff page has the enforce setting", src("app/team/admin/staff/page.tsx").includes("<EnforceToggle"));
-check("Staff detail shows certifications and onboarding", src("app/team/admin/staff/[id]/page.tsx").includes("<CertReview") && src("app/team/admin/staff/[id]/page.tsx").includes("Onboarding:"));
-check("Me links certifications and onboarding", src("app/team/me/page.tsx").includes('"/team/certifications"') && src("app/team/me/page.tsx").includes('"/team/onboarding"'));
+check("Staff detail shows certifications and Training (Getting started is a section of it)", src("app/team/admin/staff/[id]/page.tsx").includes("<CertReview") && src("app/team/admin/staff/[id]/page.tsx").includes('aria-label="Training"'));
+check("Me links certifications and Training (Getting started moved there)", src("app/team/me/page.tsx").includes('"/team/certifications"') && src("app/team/me/page.tsx").includes('"/team/training"'));
 check("Files are opened through the access check", src("app/api/team/certs/file/route.ts").includes("certFileLink(staff"));
 check("Certification texts go through sendStaffText", !/fetch\(/.test(src("lib/team/certs-db.ts")) && src("lib/team/certs-db.ts").includes("sendStaffText("));
 

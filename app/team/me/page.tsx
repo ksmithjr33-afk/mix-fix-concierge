@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { requireStaff } from "@/lib/team/auth";
 import TeamHeader from "../team-header";
+import { isAdminRole } from "@/lib/team/roles";
 
 export const dynamic = "force-dynamic";
 
@@ -8,7 +9,7 @@ export const dynamic = "force-dynamic";
 const PAGES: { href: string; title: string; detail: string }[] = [
   { href: "/team/me/profile", title: "My profile", detail: "Email, home address, drop off time, and how far you will drive." },
   { href: "/team/availability", title: "Availability", detail: "Mark the days you cannot work." },
-  { href: "/team/onboarding", title: "Getting started", detail: "Five short steps for new bartenders." },
+  { href: "/team/training", title: "Training", detail: "Getting started, and a guide to every package." },
   { href: "/team/certifications", title: "My certifications", detail: "Upload your TABC (or California RBS) and food handler certificates and see when they expire." },
   { href: "/team/pay", title: "My pay", detail: "Estimated pay by event, week, and month." },
   { href: "/team/record", title: "My record", detail: "Events worked, on time, bar ready, closeouts, and handoffs." },
@@ -18,7 +19,7 @@ export default async function MePage() {
   const staff = await requireStaff("/team/me");
   return (
     <>
-      <TeamHeader signedIn admin={staff.role === "admin"} back={{ href: "/team/events", label: "Events" }} />
+      <TeamHeader signedIn admin={isAdminRole(staff.role)} back={{ href: "/team/events", label: "Events" }} />
       <main className="max-w-2xl mx-auto px-4 py-6 space-y-4">
         <div className="px-1">
           <h1 className="font-heading text-2xl font-bold text-[#2C2420]">{staff.name || "Me"}</h1>
