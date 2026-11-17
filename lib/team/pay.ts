@@ -175,13 +175,17 @@ export function mileageLine(m: MilesInput, s: MileageSettings, california: boole
   };
 }
 
-/** "80 paid miles (50 one way, straight line)" */
+/** Miles worked out live (an open shift, an offer): straight line, not yet driving miles. */
+export const APPROXIMATE = "approximate";
+
+/** "80 paid miles (50 one way, driving)", "(50 one way, straight line, approximate)" before accepting. */
 export function mileageText(l: MileageLine): string {
   if (l.state === "no_address") return NO_ADDRESS_TEXT;
   if (l.state === "not_found") return "We could not find your home address on the map. Check it on your profile.";
   if (l.state === "no_event_location") return "Mileage not available yet";
   const paid = `${l.paidMiles} paid ${l.paidMiles === 1 ? "mile" : "miles"}`;
   const parts = [`${l.oneWayMiles} one way`, MILES_SOURCE_LABEL[l.source]];
+  if (!l.locked && l.source === "straight_line") parts.push(APPROXIMATE); // not on the event yet: no driving call made
   return `${paid} (${parts.join(", ")})${l.adjustedBy ? `, adjusted by ${l.adjustedBy}` : ""}`;
 }
 

@@ -236,7 +236,7 @@ export default function AssignPanel({
             </button>
           </div>
         )}
-        <p className="text-xs text-[#A39585] mt-2">They get a text with a link to accept or decline. Miles are a straight line from their home address, a rough estimate of the drive.</p>
+        <p className="text-xs text-[#A39585] mt-2">They get a text with a link to accept or decline. Miles here are a straight line from their home address, a rough estimate. Driving miles are worked out when they accept.</p>
         {error && <p className="text-sm text-[#A0412D] mt-2">{error}</p>}
       </section>
     </div>

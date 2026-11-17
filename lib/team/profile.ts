@@ -15,6 +15,7 @@ export interface ProfileRow {
   home_lat: number | null;
   home_lng: number | null;
   home_geocoded_at?: string | null;
+  home_geo_source?: "google" | "openstreetmap" | "none" | null; // which service found the home on the map
   dropoff_time: string | null;
   max_miles: number | null;
   prompted_at?: string | null;

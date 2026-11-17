@@ -30,6 +30,7 @@ import {
   toCsv,
   type DistanceNote,
   type ExpiryTone,
+  type LatLng,
   type ProfileRow,
   type ProfileView,
 } from "@/lib/team/profile";
@@ -108,8 +109,13 @@ export async function saveProfile(actor: StaffMember, staffId: string, raw: Reco
   const v = clean.value;
   const patch: Record<string, unknown> = { staff_id: staffId, ...v, updated_by: actor.id, updated_at: now.toISOString() };
   if ((v.home_address ?? "") !== (before?.home_address ?? "")) {
-    const loc = v.home_address ? (await geocodeAddress(v.home_address)).location : null;
-    Object.assign(patch, { home_lat: loc?.lat ?? null, home_lng: loc?.lng ?? null, home_geocoded_at: v.home_address ? now.toISOString() : null });
+    const geo = v.home_address ? await geocodeAddress(v.home_address) : null;
+    Object.assign(patch, {
+      home_lat: geo?.location?.lat ?? null,
+      home_lng: geo?.location?.lng ?? null,
+      home_geocoded_at: v.home_address ? now.toISOString() : null,
+      home_geo_source: geo ? geo.source : null,
+    });
   }
   const { error } = await supabase.from("staff_profiles").upsert(patch, { onConflict: "staff_id" });
   if (error) return { ok: false, error: "Could not save. Try again.", status: 500 };
@@ -214,29 +220,70 @@ export async function staffCsv(viewer: StaffMember, now: Date = new Date()): Pro
   return toCsv(header, rows);
 }
 
-// ----- Distance on the assign panel, and for mileage -----
+// ----- One time: look up again homes that were never found on the map -----
+
+export interface HomeLookupLine {
+  staffId: string;
+  address: string;
+  found: boolean | null; // null: dry run
+  note: string;
+}
 
 /**
- * One way miles from each person's home to the event, to a tenth. Straight
- * line today (no driving distance service is connected): the source says so.
- * A person with no home address, or one that was not found on the map, comes
- * back with miles null and the reason. Server only: pay code calls this.
+ * Home addresses on file with no map location. Dry run lists them and makes
+ * no lookups. Apply looks each one up with Google only (OpenStreetMap already
+ * missed them) and saves the location and source. Not found: left as it was,
+ * marked "none". Waits gapMs between lookups. Never texts anyone.
  */
-export async function homeMiles(
-  session: SessionRow,
-  staffIds: string[]
-): Promise<{ event: boolean; byStaff: Map<string, { miles: number | null; reason?: "no_address" | "not_found"; maxMiles: number | null }> }> {
-  const byStaff = new Map<string, { miles: number | null; reason?: "no_address" | "not_found"; maxMiles: number | null }>();
-  if (staffIds.length === 0) return { event: false, byStaff };
+export async function relookupHomes(opts: { apply: boolean; gapMs?: number; now?: Date }): Promise<HomeLookupLine[]> {
+  const now = opts.now ?? new Date();
+  const { data, error } = await supabase.from("staff_profiles").select("*");
+  if (error || !data) return [];
+  const todo = (data as ProfileRow[]).filter((p) => (p.home_address ?? "").trim() && (p.home_lat == null || p.home_lng == null));
+  const out: HomeLookupLine[] = [];
+  for (const [i, p] of todo.entries()) {
+    const line: HomeLookupLine = { staffId: p.staff_id, address: String(p.home_address), found: null, note: "would look up" };
+    if (opts.apply) {
+      if (i > 0 && opts.gapMs) await new Promise((r) => setTimeout(r, opts.gapMs));
+      const geo = await geocodeAddress(String(p.home_address), { googleOnly: true });
+      const patch = geo.location
+        ? { home_lat: geo.location.lat, home_lng: geo.location.lng, home_geo_source: geo.source, home_geocoded_at: now.toISOString() }
+        : { home_geo_source: "none", home_geocoded_at: now.toISOString() };
+      const { error: upErr } = await supabase.from("staff_profiles").update(patch).eq("staff_id", p.staff_id);
+      line.found = upErr ? false : !!geo.location;
+      line.note = upErr ? `could not save: ${upErr.message}` : geo.location ? "found by Google" : "Google could not find it either";
+    }
+    out.push(line);
+  }
+  return out;
+}
+
+// ----- Distance on the assign panel, and for mileage -----
+
+export type HomeMiles = { miles: number | null; reason?: "no_address" | "not_found"; maxMiles: number | null; home?: LatLng };
+
+/**
+ * One way straight line miles from each person's home to the event, to a
+ * tenth, with the home and event coordinates (for a driving distance call,
+ * made only when someone is put on the event). A person with no home address,
+ * or one that was not found on the map, comes back with miles null and the
+ * reason. Never calls a paid routing service. Server only: pay code calls this.
+ */
+export async function homeMiles(session: SessionRow, staffIds: string[]): Promise<{ event: boolean; eventAt: LatLng | null; byStaff: Map<string, HomeMiles> }> {
+  const byStaff = new Map<string, HomeMiles>();
+  if (staffIds.length === 0) return { event: false, eventAt: null, byStaff };
   const [event, profiles] = await Promise.all([eventLocation(session).catch(() => null), profilesFor(staffIds)]);
   for (const id of staffIds) {
     const p = profiles.get(id);
     const maxMiles = p?.max_miles ?? null;
     if (!p?.home_address) byStaff.set(id, { miles: null, reason: "no_address", maxMiles });
     else if (p.home_lat == null || p.home_lng == null) byStaff.set(id, { miles: null, reason: "not_found", maxMiles });
-    else if (event) byStaff.set(id, { miles: Math.round(straightMiles({ lat: p.home_lat, lng: p.home_lng }, event) * 10) / 10, maxMiles });
+    else if (event) {
+      const home = { lat: Number(p.home_lat), lng: Number(p.home_lng) };
+      byStaff.set(id, { miles: Math.round(straightMiles(home, event) * 10) / 10, maxMiles, home });
+    }
   }
-  return { event: !!event, byStaff };
+  return { event: !!event, eventAt: event, byStaff };
 }
 
 /**

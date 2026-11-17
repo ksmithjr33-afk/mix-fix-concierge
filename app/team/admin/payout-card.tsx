@@ -50,7 +50,7 @@ export default function PayoutCard({ sessionId, title, rows, totals }: { session
           )}
         </>
       )}
-      <p className="text-xs text-[#A39585] mt-1">Mileage uses straight line miles from home to the event until driving miles are connected.</p>
+      <p className="text-xs text-[#A39585] mt-1">Mileage is driving miles from home to the event, stored when each person accepted. &ldquo;Straight line&rdquo; means driving miles could not be worked out then: use Recalculate miles.</p>
     </section>
   );
 }
@@ -102,11 +102,45 @@ function PayoutLine({ sessionId, r }: { sessionId: string; r: PayoutRow }) {
         <dt className="text-[#6B5D52]">Tips</dt>
         <dd>{r.tipsCents === null ? "not on file yet" : money(r.tipsCents)}</dd>
       </dl>
-      <button type="button" onClick={() => setOpen((o) => !o)} className="min-h-[44px] text-sm text-[#B5845A] underline">
-        {open ? "Close" : "Adjust mileage"}
-      </button>
+      <div className="flex flex-wrap items-center gap-x-4">
+        <button type="button" onClick={() => setOpen((o) => !o)} className="min-h-[44px] text-sm text-[#B5845A] underline">
+          {open ? "Close" : "Adjust mileage"}
+        </button>
+        <RecalculateMiles sessionId={sessionId} staffId={r.staffId} />
+      </div>
       {open && <AdjustMileage sessionId={sessionId} staffId={r.staffId} done={() => setOpen(false)} />}
     </li>
+  );
+}
+
+function RecalculateMiles({ sessionId, staffId }: { sessionId: string; staffId: string }) {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  const run = async () => {
+    setBusy(true);
+    setMsg("");
+    const res = await fetch("/api/team/admin/mileage/recalculate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sessionId, staffId }),
+    }).catch(() => null);
+    const data = ((await res?.json().catch(() => ({}))) ?? {}) as { error?: string; miles?: number | null; source?: string };
+    setBusy(false);
+    if (!res?.ok) {
+      setMsg(data.error ?? "Could not recalculate. Try again.");
+      return;
+    }
+    setMsg(data.miles == null ? "No home address on the map." : `${data.miles} mi one way, ${data.source === "driving" ? "driving" : "straight line"}.`);
+    router.refresh();
+  };
+  return (
+    <span className="text-sm">
+      <button type="button" disabled={busy} onClick={run} className="min-h-[44px] text-[#B5845A] underline disabled:opacity-50">
+        {busy ? "Recalculating…" : "Recalculate miles"}
+      </button>
+      {msg && <span className="ml-2 text-xs text-[#6B5D52]" role="status">{msg}</span>}
+    </span>
   );
 }
 

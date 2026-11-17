@@ -145,7 +145,7 @@ export function eventBusiness(i: BusinessInputs): EventBusiness {
   }
   costs.push({ key: "labor", label: COST_LABEL.labor, cents: labor, note: i.done ? "actual clocked pay" : "estimate" });
   costs.push({ key: "burden", label: COST_LABEL.burden, cents: labor === null ? null : Math.round((labor * i.settings.burdenPct) / 100), note: `${i.settings.burdenPct}% of labor` });
-  costs.push({ key: "mileage", label: COST_LABEL.mileage, cents: p ? p.mileageCents : null, note: "straight line miles" });
+  costs.push({ key: "mileage", label: COST_LABEL.mileage, cents: p ? p.mileageCents : null, note: "stored miles, driving where available" });
   costs.push({ key: "tips", label: COST_LABEL.tips, cents: i.gratuityCents, note: "the gratuity, all of it to the bartenders" });
 
   const manual = f?.supplies_cents ?? null;

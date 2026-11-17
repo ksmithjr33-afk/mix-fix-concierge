@@ -19,6 +19,7 @@ import {
   tipsShare,
   validateMileageOverride,
   validateRate,
+  MILES_SOURCE_LABEL,
   type MilesInput,
   type PayRow,
   type StaffEstimate,
@@ -26,6 +27,7 @@ import {
 import { isAdminRole } from "@/lib/team/roles";
 import { sessionMarket } from "@/lib/team/markets";
 import { homeMiles } from "@/lib/team/profile-db";
+import { drivingMiles } from "@/lib/team/routes";
 import { mileageSettings } from "@/lib/team/business-settings-db";
 import type { SessionRow } from "@/lib/event-updates";
 
@@ -188,37 +190,142 @@ async function mileageInputs(session: SessionRow, staffIds: string[]): Promise<M
   return new Map(staffIds.map((id) => [id, toInput(stored.get(id), live.byStaff.get(id), live.event)]));
 }
 
+type StoredMiles = { one_way_miles: number | null; miles_reason: MileageRow["miles_reason"]; miles_source: MileageRow["miles_source"] };
+
+/**
+ * Work out one person's miles to store: driving miles from the Routes API
+ * when their home and the event are both on the map, else straight line
+ * (the call failed, or no key). The only place the paid call is made.
+ */
+async function milesToStore(session: SessionRow, staffId: string): Promise<StoredMiles> {
+  const live = await homeMiles(session, [staffId]);
+  const h = live.byStaff.get(staffId);
+  if (!h) return { one_way_miles: null, miles_reason: live.event ? "no_address" : "no_event_location", miles_source: "straight_line" };
+  if (h.miles === null || !h.home || !live.eventAt) return { one_way_miles: null, miles_reason: h.reason ?? null, miles_source: "straight_line" };
+  const driving = await drivingMiles(h.home, live.eventAt);
+  return driving === null
+    ? { one_way_miles: h.miles, miles_reason: null, miles_source: "straight_line" }
+    : { one_way_miles: driving, miles_reason: null, miles_source: "driving" };
+}
+
+async function acceptedAssignment(sessionId: string, staffId: string): Promise<{ id: string } | null> {
+  const { data: a } = await supabase.from("event_assignments").select("id, status").eq("session_id", sessionId).eq("staff_id", staffId).maybeSingle();
+  const asg = a as { id: string; status: string } | null;
+  return asg && asg.status === "accepted" ? { id: asg.id } : null;
+}
+
 /**
  * Store one person's miles on their assignment when they accept. Runs after
  * every accept path (accepting an offer, an approved shift request, a handoff).
- * Keeps the first stored number. Never throws, never blocks the accept.
+ * One Routes API call, here and never on a page view. Keeps the first stored
+ * number. Never throws, never blocks the accept.
  */
 export async function lockMileage(sessionId: string, staffId: string, now: Date = new Date()): Promise<void> {
   try {
-    const { data: a } = await supabase.from("event_assignments").select("id, status").eq("session_id", sessionId).eq("staff_id", staffId).maybeSingle();
-    const asg = a as { id: string; status: string } | null;
-    if (!asg || asg.status !== "accepted") return;
+    const asg = await acceptedAssignment(sessionId, staffId);
+    if (!asg) return;
     const { data: existing } = await supabase.from("assignment_mileage").select("assignment_id, locked_at").eq("assignment_id", asg.id).maybeSingle();
     if ((existing as { locked_at: string | null } | null)?.locked_at) return;
     const { data: s } = await supabase.from("sessions").select("*").eq("id", sessionId).maybeSingle();
     if (!s) return;
-    const live = await homeMiles(s as SessionRow, [staffId]);
-    const h = live.byStaff.get(staffId);
-    await supabase.from("assignment_mileage").upsert(
-      {
-        assignment_id: asg.id,
-        session_id: sessionId,
-        staff_id: staffId,
-        one_way_miles: h?.miles ?? null,
-        miles_reason: h ? (h.reason ?? null) : live.event ? "no_address" : "no_event_location",
-        miles_source: "straight_line",
-        locked_at: now.toISOString(),
-      },
-      { onConflict: "assignment_id" }
-    );
+    const miles = await milesToStore(s as SessionRow, staffId);
+    await supabase.from("assignment_mileage").upsert({ assignment_id: asg.id, session_id: sessionId, staff_id: staffId, ...miles, locked_at: now.toISOString() }, { onConflict: "assignment_id" });
   } catch (err) {
     console.error("[team] storing mileage failed:", err instanceof Error ? err.message : String(err));
   }
+}
+
+/**
+ * Work one person's stored miles out again (their home or the event moved,
+ * or they were stored as straight line). Admins and managers, from the Payout
+ * card. Leaves any adjustment as it is. Driving miles already stored are not
+ * replaced by straight line if the call fails.
+ */
+export async function recalculateMileage(
+  actor: StaffMember,
+  sessionId: string,
+  staffId: string,
+  now: Date = new Date()
+): Promise<Result<{ miles: number | null; source: MileageRow["miles_source"]; changed: boolean }>> {
+  if (!isAdminRole(actor.role)) return { ok: false, error: "Admins and managers only.", status: 403 };
+  const asg = await acceptedAssignment(sessionId, staffId);
+  if (!asg) return { ok: false, error: "That person is not on this event.", status: 404 };
+  const { data: s } = await supabase.from("sessions").select("*").eq("id", sessionId).maybeSingle();
+  if (!s) return { ok: false, error: "We could not find that event.", status: 404 };
+  return storeRecalculated(asg.id, s as SessionRow, staffId, now);
+}
+
+async function storeRecalculated(
+  assignmentId: string,
+  session: SessionRow,
+  staffId: string,
+  now: Date
+): Promise<Result<{ miles: number | null; source: MileageRow["miles_source"]; changed: boolean }>> {
+  const { data: ex } = await supabase.from("assignment_mileage").select("*").eq("assignment_id", assignmentId).maybeSingle();
+  const existing = ex as MileageRow | null;
+  const next = await milesToStore(session, staffId);
+  if (existing?.miles_source === "driving" && next.miles_source !== "driving") {
+    return { ok: false, error: "Could not get driving miles right now. The stored driving miles are unchanged.", status: 502 };
+  }
+  const changed = !existing?.locked_at || Number(existing.one_way_miles) !== Number(next.one_way_miles) || existing.miles_source !== next.miles_source || existing.miles_reason !== next.miles_reason;
+  const { error } = await supabase
+    .from("assignment_mileage")
+    .upsert({ assignment_id: assignmentId, session_id: session.id, staff_id: staffId, ...next, locked_at: existing?.locked_at ?? now.toISOString() }, { onConflict: "assignment_id" });
+  if (error) return { ok: false, error: "Could not save. Try again.", status: 500 };
+  return { ok: true, miles: next.one_way_miles, source: next.miles_source, changed };
+}
+
+export interface UpgradeLine {
+  sessionId: string;
+  eventDate: string;
+  staffId: string;
+  assignmentId: string;
+  before: { miles: number | null; source: string };
+  after: { miles: number | null; source: string } | null; // null: dry run, or not upgraded
+  note: string;
+}
+
+/**
+ * One time: accepted assignments on events from today on whose stored miles
+ * are not driving miles (straight line, or never stored). Dry run lists what
+ * would be called; apply makes one Routes API call each and stores driving
+ * miles. Adjustments are kept. A call that fails leaves the row as it was.
+ */
+export async function upgradeToDriving(opts: { fromDay: string; apply: boolean; now?: Date }): Promise<UpgradeLine[]> {
+  const now = opts.now ?? new Date();
+  const { data: sess } = await supabase.from("sessions").select("*").gte("event_date", opts.fromDay);
+  const sessions = new Map(((sess as SessionRow[]) ?? []).map((x) => [x.id, x]));
+  if (sessions.size === 0) return [];
+  const { data: asgs } = await supabase.from("event_assignments").select("id, session_id, staff_id, status").in("session_id", [...sessions.keys()]).eq("status", "accepted");
+  const rows = (asgs as { id: string; session_id: string; staff_id: string }[]) ?? [];
+  if (rows.length === 0) return [];
+  const { data: ms } = await supabase.from("assignment_mileage").select("*").in("assignment_id", rows.map((r) => r.id));
+  const stored = new Map(((ms as MileageRow[]) ?? []).map((m) => [m.assignment_id, m]));
+  const out: UpgradeLine[] = [];
+  for (const r of rows) {
+    const m = stored.get(r.id);
+    if (m?.locked_at && m.miles_source === "driving") continue;
+    const session = sessions.get(r.session_id)!;
+    const line: UpgradeLine = {
+      sessionId: r.session_id,
+      eventDate: String((session as { event_date?: string }).event_date ?? ""),
+      staffId: r.staff_id,
+      assignmentId: r.id,
+      before: { miles: m?.one_way_miles == null ? null : Number(m.one_way_miles), source: m?.locked_at ? MILES_SOURCE_LABEL[m.miles_source] : "not stored" },
+      after: null,
+      note: opts.apply ? "" : "would call",
+    };
+    if (opts.apply) {
+      const res = await storeRecalculated(r.id, session, r.staff_id, now);
+      if (!res.ok) line.note = res.error;
+      else {
+        line.after = { miles: res.miles, source: MILES_SOURCE_LABEL[res.source] };
+        line.note = res.source === "driving" ? "upgraded" : "kept straight line (no driving miles)";
+      }
+    }
+    out.push(line);
+  }
+  return out.sort((a, b) => a.eventDate.localeCompare(b.eventDate));
 }
 
 /** Bartenders accepted on the event, for splitting the gratuity. */
