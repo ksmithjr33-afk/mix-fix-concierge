@@ -66,9 +66,9 @@ export const ONBOARDING: OnboardingItem[] = [
     id: "who_brings_what",
     title: 'Read "Who brings what"',
     body: [
-      "The Mix Fix brings the bar station: tables, tablecloths, coolers, signage, and prep supplies. Those items are on the event checklist under From The Mix Fix. Return them after the event, and report anything broken or missing on the wrap up.",
+      "The Mix Fix brings the bar station: tables, tablecloths, coolers, signage, and prep supplies. Those items are on the event's Tools list under From The Mix Fix. Return them after the event, and report anything broken or missing on the wrap up.",
       "You bring your own tools to every event: shaker tins, jiggers, strainers, a stirring spoon, a muddler, an ice scoop, a wine key, a bar knife, and two bar towels.",
-      "The client buys the alcohol, mixers, and ice on the supplies list on the event page unless the package says otherwise. Check off the checklist before you leave, and the supplies list when you get to the event.",
+      "The client buys the alcohol, mixers, and ice on the supplies list on the event page unless the package says otherwise. Check off your Tools before you leave, then go through the Supplies list when you get to the event.",
     ],
     ack: "I have read it",
   },

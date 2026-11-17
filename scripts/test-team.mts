@@ -326,8 +326,8 @@ check("Title is first name and event type", li.title === "Justin · Wedding", li
 check("Detail line has times, guests, package, city", li.detail === "6:00 PM to 11:00 PM · 150 guests · Premium Bar · Fort Worth", li.detail);
 check("Arrival is on the row (3 hours early for a wedding)", li.arrival === "3:00 PM", li.arrival);
 const ln = list.eventListItem(named);
-check("A client event name is the title", ln.title === "Reyes Fall Gala");
-check("First name and type move to the detail line", ln.detail.startsWith("Justin · Corporate · "), ln.detail);
+check("A client event name is never the title: first name and type are", ln.title === "Justin · Corporate", ln.title);
+check("The client's event name is a smaller second line", ln.subtitle === "Reyes Fall Gala" && !ln.detail.includes("Justin"), `${ln.subtitle} / ${ln.detail}`);
 check("City from a plain address", list.cityFrom("123 Elm St, Dallas, TX 75201") === "Dallas" && list.cityFrom("12 Oak Ln, Plano, Texas 75024, USA") === "Plano");
 check("No city from a one part address", list.cityFrom("The Adolphus") === "");
 check("List rows never include the last name", !JSON.stringify(li).includes("Reyes"));
@@ -399,7 +399,7 @@ const eventsLib = readFileSync(new URL("../lib/team/events.ts", import.meta.url)
 check("alertAdmins filters by the alerts setting", /export async function alertAdmins[\s\S]*?alertRecipients\(/.test(eventsLib) && !eventsLib.includes("activeAdmins"));
 const missingSrc = readFileSync(new URL("../app/api/team/missing/route.ts", import.meta.url), "utf8");
 const asgDb = readFileSync(new URL("../lib/team/assignments-db.ts", import.meta.url), "utf8");
-check("Missing items text uses alertAdmins", missingSrc.includes("await alertAdmins()"));
+check("Missing items text uses alertAdmins", missingSrc.includes("await reportMissing(") && readFileSync(new URL("../lib/team/missing-db.ts", import.meta.url), "utf8").includes("await alertAdmins()"));
 check("Bar ready text uses alertAdmins", barDb.includes("await alertAdmins()"));
 check("Decline text uses alertAdmins", /response === "decline"[\s\S]*?await alertAdmins\(\)/.test(asgDb));
 const migration = readdirSync(new URL("../supabase/migrations/", import.meta.url)).map((f) => readFileSync(new URL(`../supabase/migrations/${f}`, import.meta.url), "utf8")).join("\n");
@@ -442,13 +442,13 @@ check("Deactivating signs the person out", asgDb.includes('if (patch.active === 
 // ----- Phase 2: admin routes and pages are admin only -----
 for (const route of ["admin/staff", "admin/assign"]) {
   const src = readFileSync(new URL(`../app/api/team/${route}/route.ts`, import.meta.url), "utf8");
-  check(`/api/team/${route} is admin only`, src.includes("getCurrentStaff()") && src.includes('role !== "admin"') && src.includes("status: 403"));
+  check(`/api/team/${route} is admin only`, src.includes("getCurrentStaff()") && src.includes('isAdminRole(') && src.includes("status: 403"));
 }
 for (const page of ["admin/events/page.tsx", "admin/e/[id]/page.tsx", "admin/staff/page.tsx"]) {
   const src = readFileSync(new URL(`../app/team/${page}`, import.meta.url), "utf8");
   check(`/team/${page.replace("/page.tsx", "")} requires an admin`, src.includes("await requireAdmin("));
 }
-check("requireAdmin sends bartenders away", authSrc.includes('if (staff.role !== "admin") redirect("/team/events")'));
+check("requireAdmin sends bartenders away", authSrc.includes('if (!isAdminRole(staff.role)) redirect("/team/events")'));
 const respondSrc = readFileSync(new URL("../app/api/team/respond/route.ts", import.meta.url), "utf8");
 check("/api/team/respond needs a signed in staff member", respondSrc.includes("getCurrentStaff()") && respondSrc.includes("status: 401"));
 check("Responding needs an assignment", /if \(!status\) return \{ ok: false, error: "You are not assigned to this event.", status: 403 \}/.test(asgDb));
@@ -499,7 +499,7 @@ check("Hiding refuses when staff are assigned", hiddenSrc.indexOf("hideError(") 
 check("Hiding never deletes or edits the session", !/from\("sessions"\)/.test(hiddenSrc) && !/from\("event_assignments"\)\s*\.(delete|update)/.test(hiddenSrc));
 check("Unhiding only deletes the hidden row", /unhideEvent[\s\S]*from\("team_hidden_events"\)\.delete\(\)/.test(hiddenSrc));
 const hideRoute = readFileSync(new URL("../app/api/team/admin/hide/route.ts", import.meta.url), "utf8");
-check("/api/team/admin/hide is admin only", hideRoute.includes("getCurrentStaff()") && hideRoute.includes('role !== "admin"') && hideRoute.includes("status: 403"));
+check("/api/team/admin/hide is admin only", hideRoute.includes("getCurrentStaff()") && hideRoute.includes('isAdminRole(') && hideRoute.includes("status: 403"));
 check("Hidden events cannot be assigned", /assignStaff[\s\S]*?if \(await isHidden\(session\.id\)\) return \{ ok: false/.test(asgDb));
 const staffEventsSrc = readFileSync(new URL("../app/team/events/page.tsx", import.meta.url), "utf8");
 const myEventsSrc = readFileSync(new URL("../lib/team/my-events.ts", import.meta.url), "utf8");

@@ -1,13 +1,11 @@
 import { NextResponse } from "next/server";
 import { getCurrentStaff } from "@/lib/team/auth";
-import { alertAdmins, openEvent, recordMissing } from "@/lib/team/events";
+import { openEvent } from "@/lib/team/events";
 import { allSupplies } from "@/lib/team/supplies";
 import { staffSupplies } from "@/lib/team/supplies-db";
-import { firstName, scrub } from "@/lib/team/event-view";
-import { eventDay, shortDate } from "@/lib/team/time";
-import { sendStaffText } from "@/lib/team/sms";
+import { reportMissing } from "@/lib/team/missing-db";
 
-// "Something is missing": texts every admin the event date and the items.
+// "Something is missing": texts every admin and manager the event date and the items.
 export async function POST(request: Request) {
   const staff = await getCurrentStaff();
   if (!staff) return NextResponse.json({ error: "Sign in again." }, { status: 401 });
@@ -20,21 +18,8 @@ export async function POST(request: Request) {
     const access = await openEvent(sessionId, staff);
     if (!access.ok) return NextResponse.json({ error: "You are not assigned to this event." }, { status: 403 });
 
-    const ed = access.session.event_data ?? {};
     const items = allSupplies((await staffSupplies(access.session)).list).filter((i) => keys.includes(i.key));
-    const date = shortDate(eventDay(ed.event_date ?? access.session.event_date));
-    const name = scrub(ed.event_name) || scrub(ed.event_type) || "event";
-    const lines = [
-      `Missing items for the ${date} ${name}, reported by ${firstName(staff.name) || "a bartender"}:`,
-      ...items.map((i) => `${i.item} (${i.quantity})`),
-      noteText ? `Note: ${noteText}` : "",
-      `${new URL(`/team/e/${sessionId}`, request.url).toString()}`,
-    ].filter(Boolean);
-
-    await recordMissing(sessionId, staff.id, items.map((i) => i.item), noteText);
-    const admins = await alertAdmins();
-    const sent = await Promise.all(admins.map((a) => sendStaffText(a.phone, a.name, lines.join("\n"))));
-    console.log(`[team] missing items for ${sessionId} from ${staff.id}: ${items.length} items, ${sent.filter(Boolean).length}/${admins.length} texts sent`);
+    await reportMissing(access.session, staff, items, noteText, new URL(`/team/e/${sessionId}`, request.url).toString());
     return NextResponse.json({ ok: true });
   } catch (err) {
     console.error("[team] missing error:", err);

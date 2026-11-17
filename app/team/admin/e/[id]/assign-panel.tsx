@@ -5,6 +5,9 @@ import { useRouter } from "next/navigation";
 import type { AssigneeProgress } from "@/lib/team/assignments-db";
 import { timeLabel } from "@/lib/team/clock-label";
 import { FLAG_LABELS, formatWorked, type PunchFlag } from "@/lib/team/clock";
+import { roleSuffix, ROLES, ROLE_LABEL } from "@/lib/team/roles";
+import { TOOLS_TAB } from "@/lib/team/prep";
+import { PrepStatusLine } from "./day-of";
 
 const card = "bg-[#F5F0EB] rounded-2xl border border-[#DDD5CC] px-4 py-3 sm:px-5 sm:py-4";
 
@@ -61,6 +64,8 @@ export default function AssignPanel({
 }) {
   const router = useRouter();
   const [pick, setPick] = useState("");
+  const [roleFilter, setRoleFilter] = useState("");
+  const pickable = roleFilter ? available.filter((s) => s.role === roleFilter) : available;
   const [busy, setBusy] = useState("");
   const [removing, setRemoving] = useState("");
   const [error, setError] = useState("");
@@ -108,7 +113,10 @@ export default function AssignPanel({
               <li key={p.staffId} className="py-3 space-y-2">
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
-                    <p className="font-medium text-[#2C2420]">{p.name}</p>
+                    <p className="font-medium text-[#2C2420]">
+                      {p.name}
+                      {roleSuffix(p.role) && <span className="font-normal text-[#6B5D52]">{roleSuffix(p.role)}</span>}
+                    </p>
                     <p className="text-xs text-[#6B5D52]">
                       Assigned {timeLabel(p.assignedAt, undefined, timeZone)}
                       {p.respondedAt ? `, replied ${timeLabel(p.respondedAt, undefined, timeZone)}` : ""}
@@ -118,12 +126,10 @@ export default function AssignPanel({
                 </div>
                 {showProgress && p.status !== "declined" && (
                   <>
-                    <Bar label="Checklist" checked={p.checklist.checked} total={p.checklist.total} />
-                    <Bar label="Shopping list" checked={p.shopping.checked} total={p.shopping.total} />
-                    <p className="text-xs text-[#6B5D52]">
-                      {p.confirmedAt ? `Has everything, confirmed ${timeLabel(p.confirmedAt, undefined, timeZone)}` : "Has not confirmed the checklist"}
-                      {p.barReadyAt ? ` · Bar ready ${timeLabel(p.barReadyAt, undefined, timeZone)}` : ""}
-                    </p>
+                    <Bar label={TOOLS_TAB} checked={p.checklist.checked} total={p.checklist.total} />
+                    <Bar label="Supplies" checked={p.shopping.checked} total={p.shopping.total} />
+                    <PrepStatusLine person={p} timeZone={timeZone} />
+                    {p.barReadyAt && <p className="text-xs text-[#6B5D52]">Bar ready {timeLabel(p.barReadyAt, undefined, timeZone)}</p>}
                     {(p.clockIn || p.clockOut) && (
                       <p className="text-xs text-[#2C2420]">
                         {p.clockIn ? `In ${timeLabel(p.clockIn, undefined, timeZone)}` : "Not clocked in"}
@@ -162,7 +168,23 @@ export default function AssignPanel({
         {available.length === 0 ? (
           <p className="text-[15px] text-[#6B5D52]">Everyone active is already on this event. Add people on the Staff page.</p>
         ) : (
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
+            <select
+              value={roleFilter}
+              onChange={(e) => {
+                setRoleFilter(e.target.value);
+                setPick("");
+              }}
+              aria-label="Filter by role"
+              className="rounded-xl border border-[#DDD5CC] bg-white px-3 py-2.5 text-[16px] text-[#2C2420]"
+            >
+              <option value="">All roles</option>
+              {ROLES.filter((r) => available.some((s) => s.role === r)).map((r) => (
+                <option key={r} value={r}>
+                  {ROLE_LABEL[r]}
+                </option>
+              ))}
+            </select>
             <select
               value={pick}
               onChange={(e) => setPick(e.target.value)}
@@ -170,10 +192,10 @@ export default function AssignPanel({
               className="flex-1 min-w-0 rounded-xl border border-[#DDD5CC] bg-white px-3 py-2.5 text-[16px] text-[#2C2420]"
             >
               <option value="">Choose a person</option>
-              {available.map((s) => (
+              {pickable.map((s) => (
                 <option key={s.id} value={s.id}>
                   {s.name}
-                  {s.role === "admin" ? " (admin)" : ""}
+                  {roleSuffix(s.role)}
                   {s.declined ? " (declined before)" : ""}
                   {market && !s.markets.includes(market) ? " (other market)" : ""}
                   {s.unavailable ? " (Unavailable)" : ""}

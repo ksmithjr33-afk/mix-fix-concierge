@@ -3,7 +3,7 @@ import type { AssigneeProgress } from "@/lib/team/assignments-db";
 import type { MissingReport } from "@/lib/team/events";
 import type { ListDetail } from "@/lib/team/supplies";
 import { SUPPLIES_PROGRESS } from "@/lib/team/supplies";
-import { CHECKLIST_TITLE } from "@/lib/team/checklist-config";
+import { prepSteps, TOOLS_TAB } from "@/lib/team/prep";
 import { clockStatus, timeLabel } from "@/lib/team/clock-label";
 import { FLAG_LABELS, formatWorked, type PunchFlag } from "@/lib/team/clock";
 
@@ -80,6 +80,20 @@ function ListBlock({ title, list, timeZone }: { title: string; list: ListDetail;
   );
 }
 
+/** "1 Tools: Done 3:40 PM · 2 Supplies: To do", the same two steps the bartender sees. */
+export function PrepStatusLine({ person, timeZone }: { person: Pick<AssigneeProgress, "confirmedAt" | "suppliesConfirmedAt">; timeZone: string }) {
+  const at = [person.confirmedAt, person.suppliesConfirmedAt];
+  return (
+    <p className="flex flex-wrap gap-x-3 gap-y-1 text-sm" aria-label="Tools and Supplies">
+      {prepSteps({ tools: !!at[0], supplies: !!at[1] }).map((s, i) => (
+        <span key={s.n} className={s.done ? "text-[#55684A]" : "text-[#8A4B12] font-medium"}>
+          {s.n} {s.label}: {s.done ? `Done ${timeLabel(at[i]!, undefined, timeZone)}` : "To do"}
+        </span>
+      ))}
+    </p>
+  );
+}
+
 /** Each person on the event: their missing item reports in red, then the checklist and the supplies list, unchecked items by name. */
 export function BartenderLists({
   people,
@@ -109,6 +123,7 @@ export function BartenderLists({
                   {p.name}
                   {p.status === "offered" && <span className="ml-2 text-xs font-normal text-[#9A7049]">waiting for reply</span>}
                 </p>
+                <PrepStatusLine person={p} timeZone={timeZone} />
                 {mine.length > 0 && (
                   <ul className="rounded-xl border border-[#E8B4A8] bg-[#FBEDE9] px-3 py-2 space-y-1.5">
                     {mine.map((r) => (
@@ -122,13 +137,12 @@ export function BartenderLists({
                 )}
                 {l && (
                   <div className="grid gap-4 sm:grid-cols-2">
-                    <ListBlock title={CHECKLIST_TITLE} list={l.checklist} timeZone={timeZone} />
+                    <ListBlock title={TOOLS_TAB} list={l.checklist} timeZone={timeZone} />
                     <ListBlock title={SUPPLIES_PROGRESS} list={l.supplies} timeZone={timeZone} />
                   </div>
                 )}
                 <p className="text-xs text-[#6B5D52]">
-                  {p.confirmedAt ? `Has everything, confirmed ${timeLabel(p.confirmedAt, undefined, timeZone)}` : "Has not confirmed the checklist"}
-                  {p.barReadyAt ? ` · Bar photo ${timeLabel(p.barReadyAt, undefined, timeZone)}` : ""}
+                  {p.barReadyAt ? `Bar photo ${timeLabel(p.barReadyAt, undefined, timeZone)}` : "No bar photo yet"}
                 </p>
               </li>
             );

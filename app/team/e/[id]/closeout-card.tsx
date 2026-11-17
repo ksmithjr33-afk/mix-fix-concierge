@@ -272,7 +272,7 @@ function Form({ sessionId, gear, items, clientAlcohol, initial, onDone, onCancel
             Mark all returned
           </button>
         </div>
-        <p className="text-sm text-[#6B5D52] mb-2">The From The Mix Fix items on your checklist.</p>
+        <p className="text-sm text-[#6B5D52] mb-2">The From The Mix Fix items on your Tools list.</p>
         <ul className="divide-y divide-[#DDD5CC]">
           {gear.map((g) => {
             const a = v.equipment[g] ?? { state: "", note: "" };

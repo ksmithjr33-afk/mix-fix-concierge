@@ -21,6 +21,7 @@ import { staffMenuSection } from "@/lib/team/approved-menu-db";
 import { giphyEnabled } from "@/lib/team/media";
 import TeamHeader from "../../team-header";
 import EventTabs, { type Tab } from "./event-tabs";
+import { isAdminRole } from "@/lib/team/roles";
 
 export const dynamic = "force-dynamic";
 
@@ -50,13 +51,13 @@ async function TeamEventPage({
   // Bartender view comes back as a bartender here, so they stay on this page.
   const landing = eventLanding(staff, id, query);
   if (landing) redirect(landing);
-  const back = { href: "/team/events", label: staff.role === "admin" ? "All events" : "Your events" };
+  const back = { href: "/team/events", label: isAdminRole(staff.role) ? "All events" : "Your events" };
 
   const access = await openEvent(id, staff);
   if (!access.ok) {
     return (
       <>
-        <TeamHeader signedIn admin={staff.role === "admin"} back={back} />
+        <TeamHeader signedIn admin={isAdminRole(staff.role)} back={back} />
         <main className="max-w-md mx-auto px-4 py-10 text-center">
           <p className="text-[15px] text-[#6B5D52]">
             {access.reason === "not_found" ? "We could not find that event." : "You are not assigned to this event."}
@@ -90,31 +91,32 @@ async function TeamEventPage({
   const renderedAt = serverNow();
   const open = barPhotosOpen(ed);
   const photoCount = entries.reduce((n, e) => n + e.photos.length, 0);
-  const onEvent = staff.role === "admin" || (!!assignment && assignment.status !== "declined");
+  const onEvent = isAdminRole(staff.role) || (!!assignment && assignment.status !== "declined");
   const opensAt = barReadyOpensAt(ed);
   return (
     <>
-      <TeamHeader signedIn admin={staff.role === "admin"} back={back} />
+      <TeamHeader signedIn admin={isAdminRole(staff.role)} back={back} />
       <EventTabs
         initialTab={askedTab === "wrapup" && !closeout.open ? "details" : askedTab}
-        chat={{ sessionId: id, initial: messages, unread: unread.get(id) ?? 0, timeZone: data.view.timeZone, isAdmin: staff.role === "admin", gifSearch: giphyEnabled() }}
+        chat={{ sessionId: id, initial: messages, unread: unread.get(id) ?? 0, timeZone: data.view.timeZone, isAdmin: isAdminRole(staff.role), gifSearch: giphyEnabled() }}
         offered={assignment?.status === "offered"}
         giveUp={accepted ? { sessionId: id, handoff, teammates, canStart: punches.length === 0 } : null}
         clock={clockView(assignment, ed, punches)}
         renderedAt={renderedAt}
-        managerHref={staff.role === "admin" ? `/team/admin/e/${encodeURIComponent(id)}` : null}
+        managerHref={isAdminRole(staff.role) ? `/team/admin/e/${encodeURIComponent(id)}` : null}
         view={data.view}
         checklist={data.checklist}
         checklistState={data.checklistState}
         checklistFooter={CHECKLIST_FOOTER}
         confirmedAt={data.confirmedAt}
+        suppliesConfirmedAt={data.suppliesConfirmedAt}
         shopping={shoppingGroups(data.view.package, data.shopping)}
         shoppingState={data.shoppingState}
         supplyUpdates={data.supplyUpdates}
         barReady={{
           show: onEvent,
           canSubmit: open,
-          isAdmin: staff.role === "admin",
+          isAdmin: isAdminRole(staff.role),
           entries,
           timeZone: data.view.timeZone,
           opensNote: opensAt && renderedAt < opensAt.getTime() ? `You can add photos from arrival time, ${timeLabel(opensAt.toISOString(), undefined, data.view.timeZone)}.` : "",
@@ -126,7 +128,7 @@ async function TeamEventPage({
         }
         pay={pay}
         closeout={
-          closeout.open && staff.role !== "admin"
+          closeout.open && !isAdminRole(staff.role)
             ? { canSubmit: closeout.canSubmit, mine: closeout.mine, gear: companyGear(), items: closeout.items, clientAlcohol: closeout.clientAlcohol, timeZone: data.view.timeZone }
             : null
         }

@@ -256,7 +256,7 @@ await coDb.markReviewed("e1", String(db.event_closeouts[0].id), admin);
 check("Locked once an admin marks it reviewed", !(await coDb.submitCloseout({ sessionId: "e1", staff: b1, raw: wrapRaw, photo: null, photoType: "", now: at(today, 23 * 60 + 30) })).ok);
 check("Clocking out without a wrap up prompts for it", src("app/team/e/[id]/clock-card.tsx").includes("Please do your wrap up") && tabsSrc.includes('wrapUp={closeout && !wrapped ? () => setTab("wrapup") : undefined}'));
 check("The reminder is in the 5 minute cron, once, 30 minutes after clock out, inside quiet hours", src("lib/team/closeout-db.ts").includes("CLOSEOUT_REMINDER_MIN * 60_000") && src("lib/team/closeout-db.ts").includes("inQuietHours(now") && src("lib/team/closeout-db.ts").includes("claimNotice(`wrapup_reminder:") && closeout.CLOSEOUT_REMINDER_MIN === 30);
-check("The Wrap up tab appears once bar service has started", src("app/team/e/[id]/page.tsx").includes("closeout.open && staff.role !== \"admin\"") && tabsSrc.includes('...(closeout ? ([["wrapup", WRAP_UP_TAB]]'));
+check("The Wrap up tab appears once bar service has started", src("app/team/e/[id]/page.tsx").includes("closeout.open && !isAdminRole(staff.role)") && tabsSrc.includes('...(closeout ? ([["wrapup", WRAP_UP_TAB]]'));
 
 // Leftover totals.
 const totals = wu.leftoverTotals([
@@ -288,8 +288,8 @@ check("Not started when nothing is checked", sam.supplies.lastTouched === null &
 const reports = await events.missingReports("e1");
 check("Missing item reports carry who sent them, with the item, note and time", reports[0].staffId === "b1" && reports[0].items[0] === "Lime juice" && reports[0].note === "None in the cooler" && !!reports[0].createdAt);
 const dayOf = src("app/team/admin/e/[id]/day-of.tsx");
-check("Reports show at the top of each bartender's lists, in red", dayOf.indexOf("Reported missing") > 0 && dayOf.indexOf("Reported missing") < dayOf.indexOf("<ListBlock title={CHECKLIST_TITLE}") && dayOf.includes("text-[#A0412D]"));
-check("Two lists per bartender: Do you have everything? and Supplies check, checked ones behind Show checked", dayOf.includes("<ListBlock title={CHECKLIST_TITLE}") && dayOf.includes("<ListBlock title={SUPPLIES_PROGRESS}") && dayOf.includes("Show checked (") && dayOf.includes('"not started"') && dayOf.includes("last checked "));
+check("Reports show at the top of each bartender's lists, in red", dayOf.indexOf("Reported missing") > 0 && dayOf.indexOf("Reported missing") < dayOf.indexOf("<ListBlock title={TOOLS_TAB}") && dayOf.includes("text-[#A0412D]"));
+check("Two lists per bartender: Tools and Supplies check, checked ones behind Show checked", dayOf.includes("<ListBlock title={TOOLS_TAB}") && dayOf.includes("<ListBlock title={SUPPLIES_PROGRESS}") && dayOf.includes("Show checked (") && dayOf.includes('"not started"') && dayOf.includes("last checked "));
 check("Bartenders see nothing new from this: the Day of tab is admin only", src("app/team/admin/e/[id]/page.tsx").indexOf("await requireAdmin(") < src("app/team/admin/e/[id]/page.tsx").indexOf("teamLists("));
 
 // ===== The Day of tab count =====

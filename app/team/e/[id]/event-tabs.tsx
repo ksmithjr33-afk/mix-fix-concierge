@@ -6,6 +6,7 @@ import { CHECKLIST_INTRO, CHECKLIST_TITLE, CONFIRM_LABEL, type ResolvedGroup } f
 import type { ShopItem, ShoppingGroup } from "@/lib/team/shopping";
 import { SUPPLIES_INTRO, SUPPLIES_TAB, SUPPLIES_TITLE, UPDATED_TITLE } from "@/lib/team/supplies";
 import { WRAP_UP_TAB } from "@/lib/team/wrapup";
+import { prepSteps, SUPPLIES_CONFIRM_LABEL, SUPPLIES_LOCKED, SUPPLIES_LOCKED_NOTE, TOOLS_TAB } from "@/lib/team/prep";
 import { canConfirm, type CheckState, type ListName } from "@/lib/team/checks";
 import { timeLabel } from "@/lib/team/clock-label";
 import BarReadyCard, { type BarReadyProps } from "./bar-ready";
@@ -23,6 +24,7 @@ import type { MyPickup } from "@/lib/team/menu-pickup-db";
 import type { StaffMenuSection } from "@/lib/team/approved-menu-db";
 import MenuSection from "./menu-section";
 import { card, Details } from "./event-details";
+import PackageCard from "../../package-card";
 
 export { Details };
 
@@ -128,6 +130,7 @@ function Checklist({
   footer,
   initialConfirmedAt,
   timeZone,
+  onConfirmed,
 }: {
   sessionId: string;
   groups: ResolvedGroup[];
@@ -135,8 +138,13 @@ function Checklist({
   footer: string;
   initialConfirmedAt: string | null;
   timeZone: string;
+  onConfirmed: (at: string | null) => void; // step 1 done or undone, for the strip and the Supplies lock
 }) {
-  const [confirmedAt, setConfirmedAt] = useState(initialConfirmedAt);
+  const [confirmedAt, setConfirmedAtState] = useState(initialConfirmedAt);
+  const setConfirmedAt = (at: string | null) => {
+    setConfirmedAtState(at);
+    onConfirmed(at);
+  };
   const [confirming, setConfirming] = useState(false);
   const [confirmError, setConfirmError] = useState("");
   // Unchecking any item clears the confirmation (the server clears it too).
@@ -332,10 +340,83 @@ function UpdatedNote({ sessionId, changes }: { sessionId: string; changes: strin
   );
 }
 
-function Supplies({ sessionId, shopping, initial, updates }: { sessionId: string; shopping: ShoppingLayout; initial: Record<string, CheckState>; updates: string[] }) {
+/** Step 2 is locked until Tools is done. */
+function SuppliesLocked({ onTools }: { onTools: () => void }) {
+  return (
+    <section className={`${card} text-center space-y-2`} aria-label="Supplies locked">
+      <h2 className="font-heading text-xl font-bold text-[#2C2420]">{SUPPLIES_LOCKED}</h2>
+      <p className="text-[15px] text-[#6B5D52]">{SUPPLIES_LOCKED_NOTE}</p>
+      <button type="button" onClick={onTools} className="rounded-xl bg-[#B5845A] text-white px-6 py-2.5 font-medium">
+        Go to {TOOLS_TAB}
+      </button>
+    </section>
+  );
+}
+
+/** "1 Tools, 2 Supplies", each Done or To do. Tapping a step opens its tab. */
+function PrepStrip({ tools, supplies, onOpen }: { tools: boolean; supplies: boolean; onOpen: (tab: Tab) => void }) {
+  return (
+    <ol className="grid grid-cols-2 gap-2" aria-label="Before the event">
+      {prepSteps({ tools, supplies }).map((s) => (
+        <li key={s.n}>
+          <button
+            type="button"
+            onClick={() => onOpen(s.n === 1 ? "checklist" : "shopping")}
+            className={`w-full rounded-xl border px-3 py-2 text-left ${s.done ? "border-[#8B9E7E] bg-[#EEF2EA]" : "border-[#E3C9A0] bg-[#FFF8EC]"}`}
+          >
+            <span className="block text-[15px] font-medium text-[#2C2420]">
+              {s.n} {s.label}
+            </span>
+            <span className={`block text-sm ${s.done ? "text-[#55684A]" : "text-[#8A4B12]"}`}>{s.done ? "Done" : "To do"}</span>
+          </button>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+function Supplies({
+  sessionId,
+  shopping,
+  initial,
+  updates,
+  confirmedAt,
+  onConfirmed,
+  timeZone,
+}: {
+  sessionId: string;
+  shopping: ShoppingLayout;
+  initial: Record<string, CheckState>;
+  updates: string[];
+  confirmedAt: string | null;
+  onConfirmed: (at: string) => void;
+  timeZone: string;
+}) {
   const { state, toggle, error } = useChecks(sessionId, "shopping", initial);
   const [missingOpen, setMissingOpen] = useState(false);
+  const [asking, setAsking] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [confirmError, setConfirmError] = useState("");
+  const [reported, setReported] = useState<string[]>([]);
   const all = shopping.groups.flatMap((g) => g.items);
+  const unchecked = all.filter((i) => !state[i.key]?.checked);
+
+  const confirm = async () => {
+    setSaving(true);
+    setConfirmError("");
+    try {
+      const res = await fetch("/api/team/supplies-confirm", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId }) });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error ?? "Could not save.");
+      setReported(data.missing ?? []);
+      setAsking(false);
+      onConfirmed(data.confirmedAt);
+    } catch (err) {
+      setConfirmError(err instanceof Error ? err.message : "Could not save.");
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <div className="space-y-3">
@@ -371,6 +452,37 @@ function Supplies({ sessionId, shopping, initial, updates }: { sessionId: string
       >
         Something is missing
       </button>
+      {confirmedAt ? (
+        <div className="space-y-1">
+          <p className="w-full rounded-xl bg-[#8B9E7E] text-white py-3 text-center font-medium">Went through the supplies list {timeLabel(confirmedAt, undefined, timeZone)}</p>
+          {reported.length > 0 && <p className="text-sm text-[#6B5D52] text-center">Reported missing to the team: {reported.join(", ")}</p>}
+        </div>
+      ) : asking && unchecked.length > 0 ? (
+        <div className="rounded-2xl border border-[#E3C9A0] bg-[#FFF8EC] px-4 py-3 space-y-2" role="alertdialog" aria-label="Unchecked supplies">
+          <p className="text-[15px] text-[#2C2420]">
+            {unchecked.length === 1 ? "1 item is" : `${unchecked.length} items are`} not checked off. They will be reported missing to the team:
+          </p>
+          <p className="text-sm text-[#6B5D52] break-words">{unchecked.map((i) => i.item).join(", ")}</p>
+          <div className="flex gap-2">
+            <button type="button" onClick={confirm} disabled={saving} className="flex-1 rounded-xl bg-[#B5845A] text-white py-2.5 font-medium disabled:opacity-40">
+              {saving ? "Saving..." : "Report them and confirm"}
+            </button>
+            <button type="button" onClick={() => setAsking(false)} className="rounded-xl border border-[#DDD5CC] px-4 py-2.5 text-[#6B5D52]">
+              Keep checking
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => (unchecked.length > 0 ? setAsking(true) : confirm())}
+          disabled={saving}
+          className="w-full rounded-xl bg-[#B5845A] text-white py-3 font-medium disabled:opacity-40 hover:bg-[#9A7049] transition-colors"
+        >
+          {saving ? "Saving..." : SUPPLIES_CONFIRM_LABEL}
+        </button>
+      )}
+      {confirmError && <p className="text-sm text-[#A0412D] text-center">{confirmError}</p>}
       {missingOpen && <MissingSheet sessionId={sessionId} items={all} onClose={() => setMissingOpen(false)} />}
     </div>
   );
@@ -382,6 +494,7 @@ export default function EventTabs({
   checklistState,
   checklistFooter,
   confirmedAt,
+  suppliesConfirmedAt = null,
   shopping,
   shoppingState,
   supplyUpdates = [],
@@ -416,6 +529,7 @@ export default function EventTabs({
   checklistState: Record<string, CheckState>;
   checklistFooter: string;
   confirmedAt: string | null;
+  suppliesConfirmedAt?: string | null;
   shopping: ShoppingLayout;
   shoppingState: Record<string, CheckState>;
   supplyUpdates?: string[]; // the Updated note on the Supplies tab
@@ -429,9 +543,12 @@ export default function EventTabs({
   const chatUnread = useLiveUnread(chat.sessionId, initialTab === "chat" ? 0 : chat.unread, tab === "chat");
   useOpenChat(chat.sessionId, useCallback(() => setTab("chat"), []));
   const [wrapped, setWrapped] = useState(wrapUpDone);
+  // 1 Tools, 2 Supplies. Neither blocks clock in.
+  const [toolsAt, setToolsAt] = useState(confirmedAt);
+  const [suppliesAt, setSuppliesAt] = useState(suppliesConfirmedAt);
   const tabs: [Tab, string][] = [
     ["details", "Details"],
-    ["checklist", "Checklist"],
+    ["checklist", TOOLS_TAB],
     ["shopping", SUPPLIES_TAB],
     ...(closeout ? ([["wrapup", WRAP_UP_TAB]] as [Tab, string][]) : []),
     ["chat", `Chat${chatUnread ? ` (${chatUnread})` : ""}`],
@@ -440,7 +557,9 @@ export default function EventTabs({
   return (
     <main className="max-w-2xl mx-auto px-4 py-4 sm:py-6 space-y-4">
       <div className="px-1">
-        <h1 className="font-heading text-2xl font-bold text-[#2C2420] break-words">{view.eventName || view.eventType || "Event"}</h1>
+        {/* "Justin · Birthday"; the client's own event name is a smaller second line, never the title. */}
+        <h1 className="font-heading text-2xl font-bold text-[#2C2420] break-words">{[view.clientFirstName, view.eventType].filter(Boolean).join(" · ") || view.eventName || "Event"}</h1>
+        {view.eventName && (view.clientFirstName || view.eventType) && <p className="text-[17px] text-[#2C2420] break-words">{view.eventName}</p>}
         <p className="text-[15px] text-[#6B5D52]">
           {[view.date, view.arrival ? `arrive ${view.arrival}` : ""].filter(Boolean).join(", ")}
         </p>
@@ -465,6 +584,8 @@ export default function EventTabs({
       {clock.canPunch && (
         <ClockCard sessionId={view.sessionId} initial={clock} renderedAt={renderedAt} wrapUp={closeout && !wrapped ? () => setTab("wrapup") : undefined} />
       )}
+
+      <PrepStrip tools={!!toolsAt} supplies={!!suppliesAt} onOpen={setTab} />
 
       {photoReminder && tab !== "checklist" && (
         <section className="bg-[#FFF8EC] rounded-2xl border border-[#E3C9A0] px-4 py-3 flex flex-wrap items-center justify-between gap-2">
@@ -498,6 +619,7 @@ export default function EventTabs({
         {ice && <IcePickupCard initial={ice} />}
         {menuSection && <MenuSection menu={menuSection} />}
         <Details v={view} />
+        <PackageCard packageName={view.package} />
         {giveUp && !giveUp.handoff && giveUp.canStart && (
           <div className="mt-4">
             <GiveUp {...giveUp} />
@@ -513,10 +635,23 @@ export default function EventTabs({
           footer={checklistFooter}
           initialConfirmedAt={confirmedAt}
           timeZone={view.timeZone}
+          onConfirmed={setToolsAt}
         />
       </div>
       <div hidden={tab !== "shopping"}>
-        <Supplies sessionId={view.sessionId} shopping={shopping} initial={shoppingState} updates={supplyUpdates} />
+        {toolsAt || suppliesAt ? (
+          <Supplies
+            sessionId={view.sessionId}
+            shopping={shopping}
+            initial={shoppingState}
+            updates={supplyUpdates}
+            confirmedAt={suppliesAt}
+            onConfirmed={setSuppliesAt}
+            timeZone={view.timeZone}
+          />
+        ) : (
+          <SuppliesLocked onTools={() => setTab("checklist")} />
+        )}
       </div>
       {closeout && (
         <div hidden={tab !== "wrapup"}>

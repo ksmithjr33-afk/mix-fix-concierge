@@ -7,7 +7,7 @@
 import { supabase } from "@/lib/supabase";
 import type { SessionRow } from "@/lib/event-updates";
 import { bartendersNeeded, firstName, type StaffMember } from "@/lib/team/event-view";
-import { eventTitle } from "@/lib/team/event-list";
+import { eventTitle, adminEventTitle, eventSubtitle } from "@/lib/team/event-list";
 import { alertAdmins, getSubmittedSession } from "@/lib/team/events";
 import { claimNotice, hasPunches, siteOrigin } from "@/lib/team/clock-db";
 import { hiddenEventIds, isHidden } from "@/lib/team/hidden";
@@ -54,6 +54,7 @@ import {
   type RequestStatus,
   type ShiftSummary,
 } from "@/lib/team/shifts";
+import { isAdminRole } from "@/lib/team/roles";
 
 export type Result<T = object> = ({ ok: true } & T) | { ok: false; error: string; status: number };
 
@@ -423,7 +424,7 @@ export interface SelectedResult {
  * one text per bartender per market, held in quiet hours.
  */
 export async function postSelected(admin: StaffMember, raw: unknown, now: Date = new Date()): Promise<Result<SelectedResult>> {
-  if (admin.role !== "admin") return fail("Admins only.", 403);
+  if (!isAdminRole(admin.role)) return fail("Admins only.", 403);
   const ids = Array.isArray(raw) ? [...new Set(raw.filter((x): x is string => typeof x === "string" && x.length > 0 && x.length < 200))] : [];
   if (ids.length === 0) return fail("Pick at least one event.", 400);
   if (ids.length > SELECT_MAX) return fail(`Pick at most ${SELECT_MAX} events at a time.`, 400);
@@ -438,7 +439,8 @@ export async function postSelected(admin: StaffMember, raw: unknown, now: Date =
       out.skipped.push({ id, title: "Event", reason: "not found" });
       continue;
     }
-    const title = eventTitle(eventData(s));
+    // Admins: "Justin Reyes · Birthday, Justin's 30th", so two events for one client stay apart.
+    const title = [adminEventTitle(eventData(s)), eventSubtitle(eventData(s))].filter(Boolean).join(", ");
     const isHiddenNow = hidden.has(id);
     const market = isHiddenNow ? sessionMarket(s) : await ensureMarket(s);
     const rows = await assignmentsOf(id);
@@ -979,6 +981,7 @@ async function completeHandoff(h: HandoffRow, replacementId: string, admin: Staf
   // Checklist progress never carries over: the replacement starts with a clean list.
   await supabase.from("staff_checks").delete().eq("session_id", session.id).eq("staff_id", replacementId);
   await supabase.from("staff_confirmations").delete().eq("session_id", session.id).eq("staff_id", replacementId);
+  await supabase.from("staff_supplies_confirmations").delete().eq("session_id", session.id).eq("staff_id", replacementId);
 
   await supabase.from("shift_handoffs").update({ status: "approved", to_staff_id: replacementId, decided_by: admin.id, decided_at: now }).eq("id", h.id);
   const post = await coverPostFor(h.id);
