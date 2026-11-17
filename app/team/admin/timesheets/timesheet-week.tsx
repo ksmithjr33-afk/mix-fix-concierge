@@ -261,6 +261,7 @@ export default function TimesheetWeek({
   to,
   rates = {},
   scope = "week",
+  over40 = [],
 }: {
   initial: TimesheetRow[];
   meId: string;
@@ -268,6 +269,7 @@ export default function TimesheetWeek({
   to: string;
   rates?: Record<string, number>;
   scope?: "week" | "event"; // "event": opened from a manager view's Time clock card, only that event's rows
+  over40?: string[]; // staff whose hours for the whole week reach 40 or more
 }) {
   const [rows, setRows] = useState(initial);
   const [message, setMessage] = useState("");
@@ -290,7 +292,10 @@ export default function TimesheetWeek({
           <ul className="divide-y divide-[#DDD5CC]">
             {totals.map((t) => (
               <li key={t.staffId} className="flex justify-between py-1.5 text-[15px] text-[#2C2420]">
-                <span>{t.staffName}</span>
+                <span>
+                  {t.staffName}
+                  {over40.includes(t.staffId) && <span className="ml-2 rounded-full bg-[#F6E3DC] text-[#A0412D] px-2 py-0.5 text-xs font-medium">40+ hours this week</span>}
+                </span>
                 <span className="tabular-nums">
                   {formatWorked(t.minutes)}
                   {rates[t.staffId] ? ` · ${money(payCents(rates[t.staffId], t.minutes) ?? 0)}` : ""}

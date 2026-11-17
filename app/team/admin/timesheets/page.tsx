@@ -1,11 +1,15 @@
 import Link from "next/link";
 import { requireAdmin } from "@/lib/team/auth";
 import { timesheetRows } from "@/lib/team/timesheet-db";
-import { isYmd, weekLabel, weekRange } from "@/lib/team/timesheet";
+import { isYmd, staffTotals, weekLabel, weekRange } from "@/lib/team/timesheet";
+import { overWeekLimit } from "@/lib/team/payout";
 import { chicagoToday } from "@/lib/team/time";
 import TeamHeader from "../../team-header";
 import TimesheetWeek from "./timesheet-week";
 import { payRates } from "@/lib/team/pay-db";
+import { payoutFrom } from "@/lib/team/payout-db";
+import { getSubmittedSession } from "@/lib/team/events";
+import PayoutCard from "../payout-card";
 
 export const dynamic = "force-dynamic";
 
@@ -23,7 +27,9 @@ export default async function TimesheetsPage({
   const all = await timesheetRows(week.from, week.to);
   // From the manager view's Time clock card: just that event, with the same rows the week shows.
   const rows = eventId ? all.filter((r) => r.sessionId === eventId) : all;
-  const rates = Object.fromEntries(await payRates(me, rows.map((r) => r.staffId)));
+  const [rates, session] = await Promise.all([Object.fromEntries(await payRates(me, rows.map((r) => r.staffId))), eventId ? getSubmittedSession(eventId) : null]);
+  // The Payout card for one event, from the same rows. Admins and managers.
+  const payout = session ? await payoutFrom(me, session, rows) : null;
 
   return (
     <>
@@ -49,7 +55,8 @@ export default async function TimesheetsPage({
             </Link>
           </p>
         )}
-        <TimesheetWeek key={`${week.from}:${eventId ?? ""}`} initial={rows} meId={me.id} from={week.from} to={week.to} rates={rates} scope={eventId ? "event" : "week"} />
+        {payout && session && <PayoutCard sessionId={session.id} title={[rows[0]?.eventTitle, rows[0]?.eventDay].filter(Boolean).join(", ") || "Payout"} rows={payout.rows} totals={payout.totals} />}
+        <TimesheetWeek key={`${week.from}:${eventId ?? ""}`} initial={rows} meId={me.id} from={week.from} to={week.to} rates={rates} scope={eventId ? "event" : "week"} over40={[...overWeekLimit(staffTotals(all))]} />
       </main>
     </>
   );

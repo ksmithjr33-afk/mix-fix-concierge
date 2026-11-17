@@ -232,7 +232,13 @@ export const CSV_COLUMNS = [
   "Time zone",
   "Hourly rate",
   "Pay (hours x rate)",
+  "Mileage miles",
+  "Mileage pay",
+  "Tips",
 ] as const;
+
+/** Mileage and tips for a row, from the payout sheet (lib/team/payout-db.ts), by assignment id. */
+export type CsvExtras = Map<string, { mileageMiles: number; mileageCents: number; tipsCents: number | null }>;
 
 /** One CSV cell. Quoted when needed, and text that a spreadsheet would run as a formula is made plain. */
 export function csvCell(v: unknown): string {
@@ -272,7 +278,7 @@ export const FLAG_CSV: Record<string, string> = {
 };
 
 /** Admin CSV. `rates` is hourly cents by staff id; blank columns for anyone without a rate. */
-export function timesheetCsv(rows: TimesheetRow[], rates: Map<string, number> = new Map()): string {
+export function timesheetCsv(rows: TimesheetRow[], rates: Map<string, number> = new Map(), extras: CsvExtras = new Map()): string {
   const lines = [CSV_COLUMNS.map(csvCell).join(",")];
   for (const r of rows) {
     lines.push(
@@ -292,6 +298,9 @@ export function timesheetCsv(rows: TimesheetRow[], rates: Map<string, number> = 
         zoneShort(r.timeZone || TZ),
         rates.get(r.staffId) ? (rates.get(r.staffId)! / 100).toFixed(2) : "",
         rates.get(r.staffId) && r.minutes !== null ? ((rates.get(r.staffId)! * r.minutes) / 6000).toFixed(2) : "",
+        extras.has(r.assignmentId) ? String(extras.get(r.assignmentId)!.mileageMiles) : "",
+        extras.has(r.assignmentId) ? (extras.get(r.assignmentId)!.mileageCents / 100).toFixed(2) : "",
+        extras.get(r.assignmentId)?.tipsCents != null ? (extras.get(r.assignmentId)!.tipsCents! / 100).toFixed(2) : "",
       ]
         .map(csvCell)
         .join(",")

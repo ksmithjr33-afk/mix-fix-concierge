@@ -96,11 +96,11 @@ const sheet = (await import("../lib/team/timesheet-db.ts")).timesheetRows;
 const all = await sheet(addDays(today, -30), addDays(today, 30));
 const csv = ts.timesheetCsv(all, await payDb.ratesFor(admin, all.map((r) => r.staffId)));
 const lines = csv.trim().split("\r\n");
-check("The CSV has the rate and pay columns", lines[0].endsWith("Hourly rate,Pay (hours x rate)"));
+check("The CSV has the rate, pay, mileage and tips columns", lines[0].endsWith("Hourly rate,Pay (hours x rate),Mileage miles,Mileage pay,Tips"));
 const b1Line = lines.find((l) => l.startsWith("Jordan Lee") && l.includes(d3)) ?? "";
-check("Hours times rate in the CSV", b1Line.endsWith(",25.00,187.50"), b1Line);
+check("Hours times rate in the CSV", b1Line.endsWith(",25.00,187.50,,,"), b1Line);
 const noRates = ts.timesheetCsv(all);
-check("Without rates the columns are blank", noRates.split("\r\n")[1].endsWith(",,"));
+check("Without rates the columns are blank", noRates.split("\r\n")[1].endsWith(",,,,,"));
 
 // ----- Nobody sees another person's pay -----
 function files(dir: string): string[] {

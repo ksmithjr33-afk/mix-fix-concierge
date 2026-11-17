@@ -56,6 +56,8 @@ import ClientHistoryCard from "./client-history-card";
 import PriceNeededCard from "./price-needed-card";
 import { pendingBlocks, pendingSummary } from "@/lib/price-pending";
 import { eventTimesheetRows } from "@/lib/team/timesheet-db";
+import { payoutSheet } from "@/lib/team/payout-db";
+import PayoutCard from "../../payout-card";
 import { timePageHref } from "@/lib/team/clock-card";
 
 export const dynamic = "force-dynamic";
@@ -150,7 +152,7 @@ async function AdminEventPage({
           new Set<string>() as Awaited<ReturnType<typeof unavailableOn>>,
         ];
   // Details, Client list and Chat only.
-  const [links, autoSend, listEntries, messages, muted, history, eventNumber, agreements, clockRows] = await Promise.all([
+  const [links, autoSend, listEntries, messages, muted, history, eventNumber, agreements, clockRows, payout] = await Promise.all([
     on("details") ? clientLinks(session, me) : null, // admins only: null for anyone else
     on("client") ? autoSendOn() : false,
     on("client") ? listLog(id) : [],
@@ -173,6 +175,13 @@ async function AdminEventPage({
           return [];
         })
       : [],
+    // The Payout card on Day of: admins and managers (null for anyone else).
+    on("dayof")
+      ? payoutSheet(me, session).catch((err) => {
+          console.error("[payout] could not load:", err);
+          return null;
+        })
+      : null,
   ]);
   const repeat = repeatLabel(eventNumber);
   if (tab === "chat") await markThreadRead(id, me.id);
@@ -350,6 +359,7 @@ async function AdminEventPage({
         <MissingReports reports={missing.filter((r) => !onList.has(r.staffId))} timeZone={v.timeZone} />
         <Closeouts sessionId={id} closeouts={closeouts} waiting={started ? waiting : []} timeZone={v.timeZone} />
         <TimePunches people={people} timeZone={v.timeZone} />
+        {payout && <PayoutCard sessionId={id} title={[adminEventTitle(ed), v.date].filter(Boolean).join(", ")} rows={payout.rows} totals={payout.totals} />}
       </>
     ),
     chat: () => <ManagerChat sessionId={id} initial={messages} unread={chatUnread} timeZone={v.timeZone} muted={muted.has(id)} isAdmin gifSearch={giphyEnabled()} />,

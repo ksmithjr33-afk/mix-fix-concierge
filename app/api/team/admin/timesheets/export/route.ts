@@ -3,6 +3,7 @@ import { getCurrentStaff } from "@/lib/team/auth";
 import { timesheetRows } from "@/lib/team/timesheet-db";
 import { isYmd, timesheetCsv } from "@/lib/team/timesheet";
 import { payRates } from "@/lib/team/pay-db";
+import { payoutExtras } from "@/lib/team/payout-db";
 import { isAdminRole } from "@/lib/team/roles";
 
 const MAX_DAYS = 366;
@@ -20,7 +21,8 @@ export async function GET(request: Request) {
   if (days > MAX_DAYS) return NextResponse.json({ error: "Pick a range of a year or less." }, { status: 400 });
   try {
     const rows = await timesheetRows(from, to);
-    const csv = timesheetCsv(rows, await payRates(staff, rows.map((r) => r.staffId)));
+    const [rates, extras] = await Promise.all([payRates(staff, rows.map((r) => r.staffId)), payoutExtras(staff, rows)]);
+    const csv = timesheetCsv(rows, rates, extras);
     return new NextResponse(csv, {
       headers: {
         "Content-Type": "text/csv; charset=utf-8",
