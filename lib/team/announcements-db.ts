@@ -12,7 +12,7 @@ import { sendStaffText } from "@/lib/team/sms";
 import { siteOrigin } from "@/lib/team/clock-db";
 import { inQuietHours } from "@/lib/team/shifts";
 import { attach, attachmentKind, attachmentViews, claimAttachment, type AttachmentView } from "@/lib/team/media-db";
-import { announcementSendAfter, announcementText, audienceOf, recipientTz, validateAnnouncement, type StaffLike } from "@/lib/team/announcements";
+import { announcementSendAfter, announcementText, audienceOf, recipientTz, validateAnnouncement, type AnnouncementInput, type StaffLike } from "@/lib/team/announcements";
 import { isAdminRole } from "@/lib/team/roles";
 
 interface AnnouncementRow {
@@ -55,12 +55,27 @@ export async function createAnnouncement(
   if (!isAdminRole(admin.role)) return { ok: false, error: "Admins only.", status: 403 };
   const v = validateAnnouncement(raw);
   if (!v.ok) return { ok: false, error: v.error, status: 400 };
-  const a = v.value;
+  return sendAnnouncement(admin, v.value, typeof raw.attachmentId === "string" && raw.attachmentId ? { id: raw.attachmentId } : null, now);
+}
+
+/**
+ * The one send path, for a new announcement and for a sent draft: check the
+ * audience, claim the picture, save, queue one text per person (held for
+ * quiet hours unless Send now), and send the ones due now.
+ * A draft's picture may have been uploaded by another admin (anyUploader).
+ */
+export async function sendAnnouncement(
+  admin: StaffMember,
+  a: AnnouncementInput,
+  picture: { id: string; anyUploader?: boolean } | null,
+  now: Date = new Date()
+): Promise<Result<{ id: string; recipients: number; texted: number; held: number }>> {
+  if (!isAdminRole(admin.role)) return { ok: false, error: "Admins only.", status: 403 };
   const { data: staffRows } = await supabase.from("staff").select("*").eq("active", true);
   const people = audienceOf((staffRows as StaffFull[]) ?? [], a, admin.id);
   if (people.length === 0) return { ok: false, error: "Nobody matches that audience.", status: 400 };
-  // One picture or GIF: the admin's own upload, checked again in storage.
-  const pic = typeof raw.attachmentId === "string" && raw.attachmentId ? await claimAttachment(admin, raw.attachmentId, "announcement", null) : null;
+  // One picture or GIF: an admin's own upload, checked again in storage.
+  const pic = picture ? await claimAttachment(admin, picture.id, "announcement", null, { anyAdminUploader: picture.anyUploader === true }) : null;
   if (pic && !pic.ok) return pic;
   const picRow = pic && pic.ok ? pic.row : null;
   const { data, error } = await supabase

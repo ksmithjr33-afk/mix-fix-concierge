@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { requireStaff } from "@/lib/team/auth";
 import { announcementsFor } from "@/lib/team/announcements-db";
+import { draftsFor } from "@/lib/team/announcement-drafts-db";
 import { audienceLabel } from "@/lib/team/announcements";
 import { marketLabel, MARKETS, MARKET_INFO } from "@/lib/team/markets";
 import TeamHeader from "../team-header";
@@ -15,11 +16,12 @@ function sentOn(iso: string): string {
 }
 
 // Everyone reads the announcements sent to them here, unread ones marked.
-// Admins also write new ones and see how many people opened each.
+// Admins and managers also write new ones (saved as drafts as they type),
+// see the drafts, and see how many people opened each one sent.
 export default async function AnnouncementsPage() {
   const staff = await requireStaff("/team/announcements");
   const admin = isAdminRole(staff.role);
-  const items = await announcementsFor(staff);
+  const [items, drafts] = await Promise.all([announcementsFor(staff), admin ? draftsFor(staff) : Promise.resolve([])]);
   const unread = items.filter((i) => i.unread).length;
   return (
     <>
@@ -29,7 +31,7 @@ export default async function AnnouncementsPage() {
           <h1 className="font-heading text-2xl font-bold text-[#2C2420]">Announcements</h1>
           <p className="text-[15px] text-[#6B5D52]">{unread ? `${unread} unread` : "You are all caught up."}</p>
         </div>
-        {admin && <Compose markets={MARKETS.map((m) => ({ id: m, label: MARKET_INFO[m].label }))} gifSearch={giphyEnabled()} />}
+        {admin && <Compose markets={MARKETS.map((m) => ({ id: m, label: MARKET_INFO[m].label }))} gifSearch={giphyEnabled()} drafts={drafts} me={staff.id} />}
         {items.length === 0 ? (
           <p className="text-[15px] text-[#6B5D52] bg-[#F5F0EB] rounded-2xl border border-[#DDD5CC] px-4 py-4">No announcements yet.</p>
         ) : (

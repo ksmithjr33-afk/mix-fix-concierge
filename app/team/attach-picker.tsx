@@ -82,6 +82,13 @@ export function useAttachment(scope: "chat" | "announcement", sessionId?: string
     setError("");
   }, []);
 
+  /** Put back a picture already uploaded (a saved draft's), without uploading again. */
+  const restore = useCallback((p: PendingAttachment | null) => {
+    release();
+    setPending(p);
+    setError("");
+  }, []);
+
   /** For a text box: a picture pasted from the phone keyboard's GIF picker (or copied) is attached. */
   const onPaste = useCallback(
     (e: React.ClipboardEvent) => {
@@ -93,7 +100,7 @@ export function useAttachment(scope: "chat" | "announcement", sessionId?: string
     [pickFile]
   );
 
-  return { pending, busy, error, pickFile, pickGiphy, clear, onPaste };
+  return { pending, busy, error, pickFile, pickGiphy, clear, restore, onPaste };
 }
 
 type Attachment = ReturnType<typeof useAttachment>;

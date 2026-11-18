@@ -176,10 +176,18 @@ export async function importGiphy(
  * announcement: it is this person's, for this chat (or an announcement), and
  * the stored file really is a GIF, PNG, JPG or WEBP under 8 MB.
  */
-export async function claimAttachment(staff: StaffMember, id: unknown, scope: MediaScope, sessionId: string | null): Promise<Result<{ row: AttachmentRow }>> {
+export async function claimAttachment(
+  staff: StaffMember,
+  id: unknown,
+  scope: MediaScope,
+  sessionId: string | null,
+  opts: { anyAdminUploader?: boolean } = {}
+): Promise<Result<{ row: AttachmentRow }>> {
   if (typeof id !== "string" || !id) return { ok: false, error: "Bad request", status: 400 };
   const r = await row(id);
-  if (!r || r.status !== "pending" || r.uploaded_by !== staff.id || r.scope !== scope || (scope === "chat" && r.session_id !== sessionId)) {
+  // A draft's picture may be another admin's upload: any admin can send any draft.
+  const ownerOk = r?.uploaded_by === staff.id || (opts.anyAdminUploader === true && scope === "announcement" && isAdminRole(staff.role));
+  if (!r || r.status !== "pending" || !ownerOk || r.scope !== scope || (scope === "chat" && r.session_id !== sessionId)) {
     return { ok: false, error: "That picture did not upload. Attach it again.", status: 400 };
   }
   const stored = await confirmUpload(MEDIA_BUCKET, r.file_path, { types: MEDIA_TYPES, maxBytes: MEDIA_MAX_BYTES });
@@ -204,12 +212,13 @@ export async function attach(id: string, link: { message_id?: string; announceme
 
 /**
  * Whether this person may see the attachment: a pending one only its
- * uploader; a chat one, anyone who can open that event's thread; an
+ * uploader (or, for an announcement draft, any admin); a chat one, anyone who can open that event's thread; an
  * announcement one, admins and the people it was sent to. Removed: nobody.
  */
 export async function canViewAttachment(viewer: StaffMember, r: AttachmentRow): Promise<boolean> {
   if (!viewer.active || r.status === "removed") return false;
-  if (r.status === "pending") return r.uploaded_by === viewer.id;
+  // Pending: its uploader, and for announcements any admin (it may be on a draft they can open).
+  if (r.status === "pending") return r.uploaded_by === viewer.id || (r.scope === "announcement" && isAdminRole(viewer.role));
   if (r.scope === "chat") return !!r.session_id && (await threadAccess(r.session_id, viewer)).ok;
   if (isAdminRole(viewer.role)) return true;
   if (!r.announcement_id) return false;
