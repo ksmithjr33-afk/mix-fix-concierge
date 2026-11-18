@@ -69,6 +69,63 @@ export interface ListSelect {
   selectAll: (ids: string[]) => void;
 }
 
+/** One event row: arrival, title, times, guests, package, city, badges and the Chat link. Shared by the upcoming and past lists. */
+export function EventRow({ e, offered = false, select, onResponded }: { e: EventListItem; offered?: boolean; select?: ListSelect; onResponded?: (status: "accepted" | "declined") => void }) {
+  return (
+    <li className={`relative ${select ? "flex items-stretch" : ""}`}>
+      {select && (
+        <div className="w-24 shrink-0 flex items-center justify-center border-r border-[#DDD5CC] px-1 text-center">
+          {select.reasons[e.id] ? (
+            <span className="text-[11px] italic text-[#A39585]">{select.reasons[e.id]}</span>
+          ) : (
+            <input
+              type="checkbox"
+              checked={select.selected.has(e.id)}
+              onChange={() => select.toggle(e.id)}
+              className="h-5 w-5 accent-[#B5845A]"
+              aria-label={`Select ${e.title}`}
+            />
+          )}
+        </div>
+      )}
+      {e.chat && (
+        <Link
+          href={e.chat.href}
+          className="absolute right-3 bottom-2 z-10 text-[11px] font-medium text-[#9A7049] underline"
+          aria-label={e.chat.unread ? `Message team, ${e.chat.unread} unread` : "Message team"}
+        >
+          Chat{e.chat.unread ? ` (${e.chat.unread})` : ""}
+        </Link>
+      )}
+      <Link href={e.href ?? `/team/e/${e.id}`} className={`${select ? "flex-1 min-w-0 " : ""}flex items-start gap-3 px-3 py-2.5 hover:bg-[#EFE7DF] transition-colors ${e.chat ? "pb-6" : ""}`}>
+        <span className="w-[4.5rem] shrink-0 pt-0.5 text-sm font-medium text-[#2C2420] tabular-nums">
+          {e.arrival || "TBD"}
+          <span className="block text-[10px] font-normal uppercase tracking-wide text-[#A39585]">arrive</span>
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="flex items-center gap-2">
+            <span className="truncate font-heading font-bold text-[#2C2420]">{e.title}</span>
+            {!!e.chat?.unread && <span className="shrink-0 h-2.5 w-2.5 rounded-full bg-[#A0412D]" title="Unread chat messages" aria-label="Unread chat messages" />}
+            {offered && <span className={`shrink-0 text-[11px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded ${BADGE.warn}`}>New</span>}
+            {e.badge && (
+              <span className={`shrink-0 text-[11px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded ${BADGE[e.badge.tone]}`}>{e.badge.text}</span>
+            )}
+          </span>
+          {e.subtitle && <span className="block text-sm text-[#2C2420] break-words">{e.subtitle}</span>}
+          <span className="block text-sm text-[#6B5D52] break-words">{e.detail}</span>
+          {e.calendarOnly && <span className="mt-0.5 mr-1 inline-block text-[11px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-[#E3E8EE] text-[#3F5468]">Calendar only</span>}
+          {e.repeat && <span className="mt-0.5 mr-1 inline-block text-[11px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-[#EDE3F5] text-[#5B3F7A]">{e.repeat}</span>}
+          {e.noMenu && <span className="mt-0.5 inline-block text-[11px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-[#F6E3DC] text-[#A0412D]">No approved menu</span>}
+          {e.noIce && <span className="mt-0.5 ml-1 inline-block text-[11px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-[#F6E3DC] text-[#A0412D]">Ice not assigned</span>}
+          {e.pay && <span className="block text-xs text-[#55684A]">{e.pay} estimated pay, before taxes and tips</span>}
+          {e.paid && <span className={`block text-xs ${e.paid === "Not paid yet" ? "text-[#9A7049]" : "text-[#55684A]"}`}>{e.paid}</span>}
+        </span>
+      </Link>
+      {offered && <Respond e={e} onDone={(next) => onResponded?.(next)} />}
+    </li>
+  );
+}
+
 export default function EventList({ sections, empty, respond = false, select }: { sections: ListSection[]; empty: string; respond?: boolean; select?: ListSelect }) {
   const [query, setQuery] = useState("");
   const [statuses, setStatuses] = useState<Record<string, string>>({});
@@ -116,59 +173,7 @@ export default function EventList({ sections, empty, respond = false, select }: 
               <ul className="bg-[#F5F0EB] rounded-2xl border border-[#DDD5CC] divide-y divide-[#DDD5CC] overflow-hidden">
                 {d.events.map((e) => {
                   const status = statusOf(e);
-                  const offered = respond && status === "offered";
-                  return (
-                    <li key={e.id} className={`relative ${select ? "flex items-stretch" : ""}`}>
-                      {select && (
-                        <div className="w-24 shrink-0 flex items-center justify-center border-r border-[#DDD5CC] px-1 text-center">
-                          {select.reasons[e.id] ? (
-                            <span className="text-[11px] italic text-[#A39585]">{select.reasons[e.id]}</span>
-                          ) : (
-                            <input
-                              type="checkbox"
-                              checked={select.selected.has(e.id)}
-                              onChange={() => select.toggle(e.id)}
-                              className="h-5 w-5 accent-[#B5845A]"
-                              aria-label={`Select ${e.title}`}
-                            />
-                          )}
-                        </div>
-                      )}
-                      {e.chat && (
-                        <Link
-                          href={e.chat.href}
-                          className="absolute right-3 bottom-2 z-10 text-[11px] font-medium text-[#9A7049] underline"
-                          aria-label={e.chat.unread ? `Message team, ${e.chat.unread} unread` : "Message team"}
-                        >
-                          Chat{e.chat.unread ? ` (${e.chat.unread})` : ""}
-                        </Link>
-                      )}
-                      <Link href={e.href ?? `/team/e/${e.id}`} className={`${select ? "flex-1 min-w-0 " : ""}flex items-start gap-3 px-3 py-2.5 hover:bg-[#EFE7DF] transition-colors ${e.chat ? "pb-6" : ""}`}>
-                        <span className="w-[4.5rem] shrink-0 pt-0.5 text-sm font-medium text-[#2C2420] tabular-nums">
-                          {e.arrival || "TBD"}
-                          <span className="block text-[10px] font-normal uppercase tracking-wide text-[#A39585]">arrive</span>
-                        </span>
-                        <span className="min-w-0 flex-1">
-                          <span className="flex items-center gap-2">
-                            <span className="truncate font-heading font-bold text-[#2C2420]">{e.title}</span>
-                            {!!e.chat?.unread && <span className="shrink-0 h-2.5 w-2.5 rounded-full bg-[#A0412D]" title="Unread chat messages" aria-label="Unread chat messages" />}
-                            {offered && <span className={`shrink-0 text-[11px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded ${BADGE.warn}`}>New</span>}
-                            {e.badge && (
-                              <span className={`shrink-0 text-[11px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded ${BADGE[e.badge.tone]}`}>{e.badge.text}</span>
-                            )}
-                          </span>
-                          {e.subtitle && <span className="block text-sm text-[#2C2420] break-words">{e.subtitle}</span>}
-                          <span className="block text-sm text-[#6B5D52] break-words">{e.detail}</span>
-                          {e.calendarOnly && <span className="mt-0.5 mr-1 inline-block text-[11px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-[#E3E8EE] text-[#3F5468]">Calendar only</span>}
-                          {e.repeat && <span className="mt-0.5 mr-1 inline-block text-[11px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-[#EDE3F5] text-[#5B3F7A]">{e.repeat}</span>}
-                          {e.noMenu && <span className="mt-0.5 inline-block text-[11px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-[#F6E3DC] text-[#A0412D]">No approved menu</span>}
-                          {e.noIce && <span className="mt-0.5 ml-1 inline-block text-[11px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-[#F6E3DC] text-[#A0412D]">Ice not assigned</span>}
-                          {e.pay && <span className="block text-xs text-[#55684A]">{e.pay} estimated pay, before taxes and tips</span>}
-                        </span>
-                      </Link>
-                      {offered && <Respond e={e} onDone={(next) => setStatuses((m) => ({ ...m, [e.id]: next }))} />}
-                    </li>
-                  );
+                  return <EventRow key={e.id} e={e} offered={respond && status === "offered"} select={select} onResponded={(next) => setStatuses((m) => ({ ...m, [e.id]: next }))} />;
                 })}
               </ul>
             </div>

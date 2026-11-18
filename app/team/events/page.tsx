@@ -2,7 +2,7 @@ import Link from "next/link";
 import { timed } from "@/lib/timing";
 import { requireStaff } from "@/lib/team/auth";
 import { firstName } from "@/lib/team/event-view";
-import { pastSection, upcomingSections } from "@/lib/team/event-list";
+import { upcomingSections } from "@/lib/team/event-list";
 import { chicagoToday } from "@/lib/team/time";
 import TeamHeader from "../team-header";
 import EventList from "./event-list";
@@ -20,6 +20,8 @@ import { MARKETS, MARKET_INFO } from "@/lib/team/markets";
 import CalendarView, { ListCalendarToggle } from "../calendar-view";
 import MyPickupCard from "../menu-pickup-card";
 import { isAdminRole } from "@/lib/team/roles";
+import { pastEventsFor } from "@/lib/team/past-events-db";
+import PastEvents from "./past-events";
 
 export const dynamic = "force-dynamic";
 
@@ -29,12 +31,11 @@ async function TeamEventsPage({
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }) {
   const params = await searchParams;
-  const tab = params.tab === "open" ? "open" : "mine";
-  const askedPast = tab === "mine" && params.past === "1";
-  const staff = await requireStaff(tab === "open" ? "/team/events?tab=open" : askedPast ? "/team/events?past=1" : "/team/events");
+  // The old ?past=1 link opens the Past events tab.
+  const tab = params.tab === "open" ? "open" : params.tab === "past" || params.past === "1" ? "past" : "mine";
+  const staff = await requireStaff(tab === "mine" ? "/team/events" : `/team/events?tab=${tab}`);
   const admin = isAdminRole(staff.role);
   const today = chicagoToday();
-  const past = askedPast;
   // Everything below needs only who is signed in, so it is read together.
   // List or calendar: the address bar, else what this person used last.
   const prefsP = getPrefs(staff.id).then(async (prefs) => {
@@ -43,10 +44,10 @@ async function TeamEventsPage({
     }
     return prefs;
   });
-  const calendarP = prefsP.then((prefs) => tab === "mine" && !askedPast && pickLayout(params.layout, prefs.eventsLayout) === "calendar");
+  const calendarP = prefsP.then((prefs) => tab === "mine" && pickLayout(params.layout, prefs.eventsLayout) === "calendar");
   // Admins: every event. Bartenders: only their own events. Hidden events never.
-  const visibleP = eventsForViewer(staff);
-  const [prefs, calendar, shifts, certNotes, visible, pay, pickups, unavailable, filterMarkets, icePickups] = await Promise.all([
+  const visibleP = tab === "mine" ? eventsForViewer(staff) : Promise.resolve([]);
+  const [prefs, calendar, shifts, certNotes, visible, pay, pickups, unavailable, filterMarkets, icePickups, pastPage] = await Promise.all([
     prefsP,
     calendarP,
     openShiftsFor(staff),
@@ -54,16 +55,17 @@ async function TeamEventsPage({
     visibleP,
     // The viewer's own estimated pay, only on events they are on. Never anyone else's.
     visibleP.then((v) => myEstimates(staff.id, v.filter((e) => e.status === "accepted" || e.status === "offered").map((e) => e.id))),
-    tab === "mine" && !past ? myPickups(staff) : [],
+    tab === "mine" ? myPickups(staff) : [],
     // The calendar: bartenders also see their own unavailable days, as they do today elsewhere.
     calendarP.then((c) => (c && !admin ? myUnavailableDays(staff.id, today) : [])),
     calendarP.then((c) => (c ? (admin ? [...MARKETS] : staffMarkets(staff.id)) : [])),
     // Ice this person is picking up and has not marked yet.
-    tab === "mine" && !past ? myIcePickups(staff) : [],
+    tab === "mine" ? myIcePickups(staff) : [],
+    // Past events: the first 30 this person may see, decided on the server.
+    tab === "past" ? pastEventsFor(staff, { today }) : null,
   ]);
   const events = visible.map((e) => (pay[e.id] && (e.status === "accepted" || e.status === "offered") ? { ...e, pay: pay[e.id] } : e));
-  const sections = past ? pastSection(events, today) : upcomingSections(events, today);
-  const hasPast = events.some((e) => e.day && e.day < today);
+  const sections = upcomingSections(events, today);
   // The calendar: bartenders also see open shifts in their markets.
   const calItems = calendar ? (admin ? events : [...events, ...shiftItems(shifts)]) : [];
 
@@ -74,15 +76,18 @@ async function TeamEventsPage({
         <div className="px-1">
           <h1 className="font-heading text-2xl font-bold text-[#2C2420]">Hi {firstName(staff.name) || "there"}</h1>
           <p className="text-[15px] text-[#6B5D52]">
-            {past ? "Past events" : admin ? "All upcoming events" : "Your upcoming events"}
+            {tab === "past" ? (admin ? "All past events" : "Your past events") : admin ? "All upcoming events" : "Your upcoming events"}
           </p>
         </div>
-        <nav className="grid grid-cols-2 gap-1 bg-[#DDD5CC] p-1 rounded-xl" aria-label="Events">
+        <nav className="grid grid-cols-3 gap-1 bg-[#DDD5CC] p-1 rounded-xl" aria-label="Events">
           <Link href="/team/events" aria-current={tab === "mine" ? "page" : undefined} className={`py-2 rounded-lg text-sm font-medium text-center ${tab === "mine" ? "bg-[#F5F0EB] text-[#2C2420] shadow-sm" : "text-[#6B5D52]"}`}>
             {admin ? "Events" : "My events"}
           </Link>
           <Link href="/team/events?tab=open" aria-current={tab === "open" ? "page" : undefined} className={`py-2 rounded-lg text-sm font-medium text-center ${tab === "open" ? "bg-[#F5F0EB] text-[#2C2420] shadow-sm" : "text-[#6B5D52]"}`}>
             Open shifts{shifts.length ? ` (${shifts.length})` : ""}
+          </Link>
+          <Link href="/team/events?tab=past" aria-current={tab === "past" ? "page" : undefined} className={`py-2 rounded-lg text-sm font-medium text-center ${tab === "past" ? "bg-[#F5F0EB] text-[#2C2420] shadow-sm" : "text-[#6B5D52]"}`}>
+            Past events
           </Link>
         </nav>
         {pickups.map((p) => (
@@ -101,7 +106,9 @@ async function TeamEventsPage({
             </Link>
           </div>
         )}
-        {tab === "open" ? (
+        {tab === "past" ? (
+          <PastEvents initial={pastPage?.items ?? []} initialMore={pastPage?.more ?? false} />
+        ) : tab === "open" ? (
           shifts.length === 0 ? (
             <p className="text-[15px] text-[#6B5D52] bg-[#F5F0EB] rounded-2xl border border-[#DDD5CC] px-4 py-4">No open shifts in your markets right now. We text you when one is posted.</p>
           ) : (
@@ -131,11 +138,9 @@ async function TeamEventsPage({
           )
         ) : (
           <>
-            {!past && (
-              <div className="px-1">
-                <ListCalendarToggle calendar={calendar} listHref="/team/events?layout=list" calendarHref="/team/events?layout=calendar" />
-              </div>
-            )}
+            <div className="px-1">
+              <ListCalendarToggle calendar={calendar} listHref="/team/events?layout=list" calendarHref="/team/events?layout=calendar" />
+            </div>
             {calendar ? (
               <CalendarView
                 items={calItems}
@@ -147,28 +152,16 @@ async function TeamEventsPage({
                 audience={admin ? "admin" : "staff"}
               />
             ) : (
-              <EventList sections={sections} empty={past ? "No past events." : "No upcoming events yet."} respond={!past} />
+              <EventList sections={sections} empty="No upcoming events yet." respond />
             )}
           </>
         )}
-        <div className="px-1 pt-2" hidden={tab === "open" || calendar}>
-          {past ? (
-            <Link href="/team/events?layout=list" className="text-sm text-[#B5845A] underline">
-              Back to upcoming events
-            </Link>
-          ) : (
-            hasPast && (
-              <Link href="/team/events?past=1" className="text-sm text-[#B5845A] underline">
-                Past events
-              </Link>
-            )
-          )}
-        </div>
       </main>
     </>
   );
 }
 
 export default async function Page(props: { searchParams: Promise<{ [key: string]: string | string[] | undefined }> }) {
-  return timed(`events:${(await props.searchParams).tab === "open" ? "open" : (await props.searchParams).layout ?? "default"}`, () => TeamEventsPage(props));
+  const p = await props.searchParams;
+  return timed(`events:${p.tab === "open" || p.tab === "past" ? p.tab : p.layout ?? "default"}`, () => TeamEventsPage(props));
 }

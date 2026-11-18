@@ -29,6 +29,7 @@ export interface EventListItem {
   market?: Market | null;
   chat?: { href: string; unread: number }; // admins: the event's team chat
   pay?: string; // the viewer's own estimated pay, "$187.50"
+  paid?: string; // staff, Past events tab: their own "Paid Mon, Nov 9" or "Not paid yet"
   kind?: "event" | "shift"; // "shift": an open shift in the bartender's markets (href to the shift)
   staffing?: "full" | "open" | "none"; // admins: fully staffed, spots open, nobody assigned
   menu?: { state: "unassigned" | "assigned" | "picked_up"; text: string }; // admins: the cocktail menu pickup
