@@ -76,9 +76,9 @@ function reset() {
   db.team_hidden_events = [{ session_id: "hid" }];
   const d = (n: number) => addDays(today, -n);
   db.time_punches = [
-    { staff_id: "b1", session_id: "p1", type: "in", punched_at: at(d(3), 15 * 60 + 55), flags: [] }, // arrival 4:00 PM: on time
-    { staff_id: "b1", session_id: "p2", type: "in", punched_at: at(d(10), 16 * 60 + 20), flags: ["far"] }, // late, flagged
-    { staff_id: "b1", session_id: "p3", type: "in", punched_at: at(d(40), 16 * 60), flags: ["sent_late"] }, // on the minute; not a location flag
+    { assignment_id: "x1", staff_id: "b1", session_id: "p1", type: "in", punched_at: at(d(3), 15 * 60 + 55), flags: [] }, // arrival 4:00 PM: on time
+    { assignment_id: "x2", staff_id: "b1", session_id: "p2", type: "in", punched_at: at(d(10), 16 * 60 + 20), flags: ["far"] }, // late, flagged
+    { assignment_id: "x3", staff_id: "b1", session_id: "p3", type: "in", punched_at: at(d(40), 16 * 60), flags: ["sent_late"] }, // on the minute; not a location flag
   ];
   db.bar_ready_reports = [
     { staff_id: "b1", session_id: "p1", created_at: at(d(3), 17 * 60 + 30) },

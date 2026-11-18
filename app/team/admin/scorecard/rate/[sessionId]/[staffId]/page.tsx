@@ -29,9 +29,15 @@ export default async function RatePage({ params }: { params: Promise<{ sessionId
   const f = r.form;
   const tz = f.timeZone;
   const at = (iso: string | null) => (iso ? chicagoStamp(iso, tz) : "");
+  // Clock times are the corrected ones from the Time page, the same payroll uses.
+  const fixed = (corrected: boolean) => (corrected ? " (corrected)" : "");
   const facts: { label: string; value: string; bad?: boolean }[] = [
-    { label: "Arrival", value: f.facts.arrival ? `Scheduled ${at(f.facts.arrival)}, clocked in ${f.facts.clockIn ? at(f.facts.clockIn) : "never"}: ${f.facts.arrivalText}` : f.facts.arrivalText, bad: !f.facts.clockIn || /late/.test(f.facts.arrivalText) },
-    { label: "Clock out", value: f.facts.clockOut ? at(f.facts.clockOut) : f.facts.clockIn ? "Missing clock out" : "No clock out", bad: !f.facts.clockOut },
+    {
+      label: "Arrival",
+      value: f.facts.arrival ? `Scheduled ${at(f.facts.arrival)}, clocked in ${f.facts.clockIn ? at(f.facts.clockIn) + fixed(f.facts.clockInCorrected) : "never"}: ${f.facts.arrivalText}` : f.facts.arrivalText,
+      bad: !f.facts.clockIn || /late/.test(f.facts.arrivalText),
+    },
+    { label: "Clock out", value: f.facts.clockOut ? at(f.facts.clockOut) + fixed(f.facts.clockOutCorrected) : f.facts.clockIn ? "Missing clock out" : "No clock out", bad: !f.facts.clockOut },
     { label: "Tools confirmed", value: f.facts.toolsConfirmedAt ? at(f.facts.toolsConfirmedAt) : "Not confirmed", bad: !f.facts.toolsConfirmedAt },
     { label: "Supplies confirmed", value: f.facts.suppliesConfirmedAt ? at(f.facts.suppliesConfirmedAt) : "Not confirmed", bad: !f.facts.suppliesConfirmedAt },
     { label: "Bar setup photo", value: f.facts.barPhotoAt ? `In, ${at(f.facts.barPhotoAt)}` : "Missing", bad: !f.facts.barPhotoAt },

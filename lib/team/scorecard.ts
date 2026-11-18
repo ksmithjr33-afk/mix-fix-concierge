@@ -446,6 +446,7 @@ export interface RosterRow {
   onboarding: { done: number; total: number };
   cert: string; // "TABC approved to 2027-03-01", or ""
   payrollDone: boolean;
+  manualSigned: boolean; // the Manual signed tick an admin set
 }
 
 export function rosterCsv(rows: RosterRow[]): string {

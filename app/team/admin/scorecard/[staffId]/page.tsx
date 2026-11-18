@@ -8,7 +8,7 @@ import { marketLabel } from "@/lib/team/markets";
 import TeamHeader from "../../../team-header";
 import TierBadge from "../tier-badge";
 import Reviews from "./reviews";
-import PayrollTick from "./payroll-tick";
+import SetupTick from "./setup-tick";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "Scorecard", robots: { index: false, follow: false } };
@@ -124,10 +124,11 @@ export default async function PersonScorecard({ params, searchParams }: { params
             <li>Missing closeouts: <b>{row.facts.noCloseout}</b></li>
           </ul>
           <p className="mt-2 text-sm text-[#2C2420]">
-            Onboarding {row.onboarding.done} of {row.onboarding.total} done{row.onboarding.done >= row.onboarding.total ? " (manual read)" : ""}
+            Onboarding {row.onboarding.done} of {row.onboarding.total} done
             {row.cert ? ` · ${row.cert}` : ""}
           </p>
-          <PayrollTick staffId={staffId} done={c.payroll.done} by={c.payroll.by} at={c.payroll.at ? chicagoStamp(c.payroll.at) : null} canTick={c.canTickPayroll} />
+          <SetupTick action="manual" label="Manual signed" staffId={staffId} done={c.manual.done} by={c.manual.by} at={c.manual.at ? chicagoStamp(c.manual.at) : null} canTick={c.canTick} />
+          <SetupTick action="payroll" label="Payroll setup done" staffId={staffId} done={c.payroll.done} by={c.payroll.by} at={c.payroll.at ? chicagoStamp(c.payroll.at) : null} canTick={c.canTick} />
         </section>
 
         <section className="space-y-2">

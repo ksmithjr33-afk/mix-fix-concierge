@@ -24,6 +24,7 @@ export interface RosterItem {
   onboarding: string; // "5 of 5"
   onboardingDone: boolean;
   cert: string;
+  manualSigned: boolean;
   payrollDone: boolean;
 }
 
@@ -135,7 +136,7 @@ export default function RosterTable({ rows, markets, window }: { rows: RosterIte
                 <Facts f={r.facts} />
                 <span className="block text-[11px] text-[#6B5D52]">
                   Onboarding {r.onboarding}
-                  {r.cert ? ` · ${r.cert}` : ""} · Payroll setup {r.payrollDone ? "done" : "not done"}
+                  {r.cert ? ` · ${r.cert}` : ""} · Manual {r.manualSigned ? "signed" : "not signed"} · Payroll setup {r.payrollDone ? "done" : "not done"}
                 </span>
               </Link>
             </li>

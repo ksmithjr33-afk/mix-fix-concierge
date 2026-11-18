@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCurrentStaff } from "@/lib/team/auth";
 import { isAdminRole } from "@/lib/team/roles";
-import { addReview, editReview, saveCall, saveLock, saveRating, saveTierSettings, setPayrollDone } from "@/lib/team/scorecard-db";
+import { addReview, editReview, saveCall, saveLock, saveRating, saveTierSettings, setManualSigned, setPayrollDone } from "@/lib/team/scorecard-db";
 
 // Scorecard saves: POST { action, ... }. Admins and managers only (403 for
 // anyone else), and never about the person saving (checked in scorecard-db).
@@ -11,6 +11,7 @@ import { addReview, editReview, saveCall, saveLock, saveRating, saveTierSettings
 //   call { sessionId, staffId, done, outcome, confidence, notes }
 //   lock { sessionId, locked }
 //   payroll { staffId, done }                   admins only
+//   manual { staffId, done }                    admins only (Manual signed)
 //   settings { window, aceAvg, ... }            admins only
 export async function POST(request: Request) {
   const staff = await getCurrentStaff();
@@ -25,6 +26,7 @@ export async function POST(request: Request) {
     if (body.action === "call") return reply(await saveCall(staff, body));
     if (body.action === "lock") return reply(await saveLock(staff, body));
     if (body.action === "payroll") return reply(await setPayrollDone(staff, body));
+    if (body.action === "manual") return reply(await setManualSigned(staff, body));
     if (body.action === "settings") return reply(await saveTierSettings(staff, body));
     return NextResponse.json({ error: "Bad request" }, { status: 400 });
   } catch (err) {

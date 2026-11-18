@@ -17,6 +17,7 @@ import { adminEventTitle } from "@/lib/team/event-list";
 import { listStaff } from "@/lib/team/assignments-db";
 import { hiddenEventIds } from "@/lib/team/hidden";
 import { recordFacts } from "@/lib/team/reliability-db";
+import { correctedClocks } from "@/lib/team/timesheet-db";
 import { computeRecord, since90 } from "@/lib/team/reliability";
 import { certRows, onboardingProgress } from "@/lib/team/certs-db";
 import { certStanding, requiredCert } from "@/lib/team/certs";
@@ -134,6 +135,17 @@ interface LockRow {
   locked_at: string | null;
 }
 
+interface SetupFlagRow {
+  staff_id: string;
+  payroll_done: boolean;
+  payroll_by_name: string | null;
+  payroll_at: string | null;
+  // Manual signed: missing until 20261221_manual_signed.sql runs.
+  manual_done?: boolean;
+  manual_by_name?: string | null;
+  manual_at?: string | null;
+}
+
 interface ReviewRow {
   id: string;
   staff_id: string;
@@ -229,9 +241,11 @@ export async function roster(viewer: StaffMember, now: Date = new Date()): Promi
     ratingsFor(ids),
     onboardingProgress(ids),
     certExpiry(all, now),
-    rows<{ staff_id: string; payroll_done: boolean }>(supabase.from("staff_setup_flags").select("staff_id, payroll_done").in("staff_id", ids.length ? ids : ["-"])),
+    // "*" so the roster still loads before the Manual signed columns exist (they read as not signed).
+    rows<SetupFlagRow>(supabase.from("staff_setup_flags").select("*").in("staff_id", ids.length ? ids : ["-"])),
   ]);
   const payroll = new Set(flags.rows.filter((f) => f.payroll_done).map((f) => f.staff_id));
+  const manual = new Set(flags.rows.filter((f) => f.manual_done === true).map((f) => f.staff_id));
   const from = since90(now);
   // Admins and managers are listed only when they have worked an event.
   const listed = all.filter((s) => isFieldRole(s.role) || (facts.get(s.id)?.events.length ?? 0) > 0 || rated.ratings.some((r) => r.staff_id === s.id));
@@ -256,6 +270,7 @@ export async function roster(viewer: StaffMember, now: Date = new Date()): Promi
       onboarding: { done: onboarding.get(s.id) ?? 0, total: ONBOARDING.length },
       cert: certs[s.id] ?? "",
       payrollDone: payroll.has(s.id),
+      manualSigned: manual.has(s.id),
     } satisfies RosterRow;
   });
   const ranks = ranksByMarket(base.map((r) => ({ staffId: r.staffId, name: r.name, markets: r.markets, tier: r.result.tier, lastAvg: r.result.lastAvg, rated: r.result.rated })));
@@ -364,8 +379,10 @@ export async function rateTeamCard(viewer: StaffMember, session: SessionRow, peo
 
 export interface EventFacts {
   arrival: string | null; // ISO
-  clockIn: string | null;
+  clockIn: string | null; // the corrected time, as the Time page and payroll have it
   clockOut: string | null;
+  clockInCorrected: boolean; // an admin added or changed it on the Time page
+  clockOutCorrected: boolean;
   arrivalText: string;
   missingClockOut: boolean;
   toolsConfirmedAt: string | null;
@@ -390,15 +407,15 @@ export interface RateForm {
   history: { at: string; by: string; marks: Marks; clientFeedback: string; adminNotes: string }[];
 }
 
-async function workedOn(sessionId: string, staffId: string): Promise<{ session: SessionRow; end: Date | null } | null> {
+async function workedOn(sessionId: string, staffId: string): Promise<{ session: SessionRow; end: Date | null; assignmentId: string } | null> {
   const [{ rows: s }, { rows: a }] = await Promise.all([
     rows<SessionRow>(supabase.from("sessions").select("*").eq("id", sessionId)),
-    rows<{ status: string }>(supabase.from("event_assignments").select("status").eq("session_id", sessionId).eq("staff_id", staffId)),
+    rows<{ id: string; status: string }>(supabase.from("event_assignments").select("id, status").eq("session_id", sessionId).eq("staff_id", staffId)),
   ]);
   const session = s[0];
   if (!session || session.status !== "submitted" || a[0]?.status !== "accepted") return null;
   const sch = eventSchedule(eventData(session));
-  return { session, end: sch.end ?? sch.start };
+  return { session, end: sch.end ?? sch.start, assignmentId: a[0].id };
 }
 
 /** The facts the app already has for one person on one event, the suggestions, the rating and its history. */
@@ -411,8 +428,8 @@ export async function rateForm(viewer: StaffMember, sessionId: string, staffId: 
   const ed = eventData(w.session);
   const sch = eventSchedule(ed);
   const by = (t: string, cols: string) => supabase.from(t).select(cols).eq("session_id", sessionId).eq("staff_id", staffId);
-  const [punches, tools, supplies, bars, closeouts, low, calls, rating, staff] = await Promise.all([
-    rows<{ type: string; punched_at: string }>(by("time_punches", "type, punched_at")),
+  const [clocks, tools, supplies, bars, closeouts, low, calls, rating, staff] = await Promise.all([
+    correctedClocks({ assignmentIds: [w.assignmentId] }),
     rows<{ confirmed_at: string }>(by("staff_confirmations", "confirmed_at")),
     rows<{ confirmed_at: string }>(by("staff_supplies_confirmations", "confirmed_at")),
     rows<{ created_at: string }>(by("bar_ready_reports", "created_at")),
@@ -422,14 +439,18 @@ export async function rateForm(viewer: StaffMember, sessionId: string, staffId: 
     rows<RatingRow>(by("staff_ratings", "*")),
     listStaff(),
   ]);
-  const firstIn = punches.rows.filter((p) => p.type === "in").map((p) => p.punched_at).sort()[0] ?? null;
-  const lastOut = punches.rows.filter((p) => p.type === "out").map((p) => p.punched_at).sort().at(-1) ?? null;
+  // The corrected clock in and out, the same values payroll uses.
+  const clock = clocks[0];
+  const firstIn = clock?.clockIn?.at ?? null;
+  const lastOut = clock?.clockOut?.at ?? null;
   const closeout = closeouts.rows[0] ?? null;
   const call = calls.rows[0] ?? null;
   const facts: EventFacts = {
     arrival: sch.arrival?.toISOString() ?? null,
     clockIn: firstIn,
     clockOut: lastOut,
+    clockInCorrected: !!clock?.clockIn?.corrected,
+    clockOutCorrected: !!clock?.clockOut?.corrected,
     arrivalText: arrivalText(sch.arrival, firstIn ? new Date(firstIn) : null),
     missingClockOut: !!firstIn && !lastOut,
     toolsConfirmedAt: tools.rows[0]?.confirmed_at ?? null,
@@ -666,16 +687,26 @@ export async function saveLock(viewer: StaffMember, body: Record<string, unknown
 
 // ----- Setup flags and settings (admins only) -----
 
-export async function setPayrollDone(viewer: StaffMember, body: Record<string, unknown>, now: Date = new Date()): Promise<Result> {
+/** A setup tick for one person, admins only, recording who and when. Never about yourself. */
+async function setSetupFlag(viewer: StaffMember, body: Record<string, unknown>, prefix: "payroll" | "manual", now: Date): Promise<Result> {
   const g = scoreGuard(viewer, body.staffId);
   if (!g.ok) return g;
   if (!isFullAdmin(viewer.role)) return { ok: false, error: "Admins only.", status: 403 };
   const done = body.done === true;
   const { error } = await supabase
     .from("staff_setup_flags")
-    .upsert({ staff_id: body.staffId, payroll_done: done, payroll_by: viewer.id, payroll_by_name: viewer.name, payroll_at: now.toISOString() }, { onConflict: "staff_id" });
-  if (error) return /relation|does not exist/i.test(error.message) ? NOT_READY_R : { ok: false, error: "Could not save. Try again.", status: 500 };
+    .upsert({ staff_id: body.staffId, [`${prefix}_done`]: done, [`${prefix}_by`]: viewer.id, [`${prefix}_by_name`]: viewer.name, [`${prefix}_at`]: now.toISOString() }, { onConflict: "staff_id" });
+  if (error) return /relation|does not exist|schema cache|column/i.test(error.message) ? NOT_READY_R : { ok: false, error: "Could not save. Try again.", status: 500 };
   return { ok: true };
+}
+
+export function setPayrollDone(viewer: StaffMember, body: Record<string, unknown>, now: Date = new Date()): Promise<Result> {
+  return setSetupFlag(viewer, body, "payroll", now);
+}
+
+/** Manual signed: admins tick it; it drives the roster flag and the Manual Signed column of the ratings CSV. */
+export function setManualSigned(viewer: StaffMember, body: Record<string, unknown>, now: Date = new Date()): Promise<Result> {
+  return setSetupFlag(viewer, body, "manual", now);
 }
 
 export async function saveTierSettings(viewer: StaffMember, body: Record<string, unknown>, now: Date = new Date()): Promise<Result<{ settings: TierSettings }>> {
@@ -709,7 +740,8 @@ export interface PersonCard {
   calls: { sessionId: string; title: string; day: string | null; done: boolean; outcome: Outcome | null; confidence: number | null; notes: string; by: string | null; at: string | null }[];
   reviews: ReviewView[];
   payroll: { done: boolean; by: string | null; at: string | null };
-  canTickPayroll: boolean;
+  manual: { done: boolean; by: string | null; at: string | null };
+  canTick: boolean; // admins tick the setup flags; managers see them read only
 }
 
 /** One person's scorecard. Never the viewer's own; null for anyone but admins and managers. */
@@ -723,7 +755,7 @@ export async function personCard(viewer: StaffMember, staffId: string, now: Date
     ratingsFor([staffId]),
     rows<CallRow>(supabase.from("staff_checkin_calls").select("*").eq("staff_id", staffId)),
     rows<ReviewRow>(supabase.from("staff_reviews").select("*").eq("staff_id", staffId)),
-    rows<{ payroll_done: boolean; payroll_by_name: string | null; payroll_at: string | null }>(supabase.from("staff_setup_flags").select("*").eq("staff_id", staffId)),
+    rows<SetupFlagRow>(supabase.from("staff_setup_flags").select("*").eq("staff_id", staffId)),
   ]);
   const callSessions = await sessionsById(calls.rows.map((c) => c.session_id));
   const title = (s: SessionRow | undefined) => (s ? adminEventTitle(eventData(s)) : "Event");
@@ -751,7 +783,8 @@ export async function personCard(viewer: StaffMember, staffId: string, now: Date
         .sort((a, b) => b.review_date.localeCompare(a.review_date) || b.created_at.localeCompare(a.created_at))
         .map((x) => ({ id: x.id, kind: x.kind, date: x.review_date, body: x.body, author: x.author_name ?? "", createdAt: x.created_at, editedBy: x.updated_by_name, editedAt: x.updated_at, canEdit: canEditReview(viewer, x) })),
       payroll: { done: !!flag.rows[0]?.payroll_done, by: flag.rows[0]?.payroll_by_name ?? null, at: flag.rows[0]?.payroll_at ?? null },
-      canTickPayroll: isFullAdmin(viewer.role),
+      manual: { done: flag.rows[0]?.manual_done === true, by: flag.rows[0]?.manual_by_name ?? null, at: flag.rows[0]?.manual_at ?? null },
+      canTick: isFullAdmin(viewer.role),
     },
   };
 }
@@ -793,7 +826,7 @@ export async function ratingsCsvFor(viewer: StaffMember, now: Date = new Date())
         person: person.name,
         callDone: call ? call.done : false,
         locked: lock ? lock.locked : false,
-        manualSigned: person.onboarding.done >= person.onboarding.total,
+        manualSigned: person.manualSigned,
         marks: marksOf(x),
         tier: person.result.tier as Tier,
         clientFeedback: x.client_feedback,

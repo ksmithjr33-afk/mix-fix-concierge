@@ -42,6 +42,7 @@ export default async function ScorecardPage() {
     onboarding: `${x.onboarding.done} of ${x.onboarding.total}`,
     onboardingDone: x.onboarding.done >= x.onboarding.total,
     cert: x.cert,
+    manualSigned: x.manualSigned,
     payrollDone: x.payrollDone,
   }));
 

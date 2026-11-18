@@ -227,6 +227,48 @@ check("Editing keeps the earlier save in the history", db.staff_ratings.length =
 const form2 = await scdb.rateForm(admin, "e1", "b1", NOW);
 check("The history shows on the form", form2.ok && form2.form.history.length === 1 && form2.form.history[0].by === "Kenneth Smith");
 
+// ----- 7b. Corrected times from the Time page -----
+reset();
+const ts = await import("../lib/team/timesheet.ts");
+const tsdb = await import("../lib/team/timesheet-db.ts");
+const late = new Date(e1.arrival!.getTime() + 25 * 60_000).toISOString();
+db.time_punches.push(
+  { id: "pin", assignment_id: "x1", staff_id: "b1", session_id: "e1", type: "in", punched_at: late, flags: [], source: "phone" },
+  { id: "pout", assignment_id: "x1", staff_id: "b1", session_id: "e1", type: "out", punched_at: new Date(e1.end!.getTime() + 15 * 60_000).toISOString(), flags: [], source: "phone" },
+);
+const raw = await scdb.rateForm(admin, "e1", "b1", NOW);
+check("A punch nobody changed is not marked corrected", raw.ok && raw.form.facts.arrivalText === "25 minutes late" && !raw.form.facts.clockInCorrected && !raw.form.facts.clockOutCorrected, raw.ok ? JSON.stringify(raw.form.facts) : "");
+check("The roster counts the raw late arrival before any correction", (await scdb.roster(admin, NOW))!.rows.find((r) => r.staffId === "b1")!.facts.late === 1);
+const onTime = new Date(e1.arrival!.getTime() - 5 * 60_000);
+const fix = await tsdb.editPunch(mgr, "x1", "in", onTime, "Forgot to clock in at the door");
+check("An admin corrects the clock in on the Time page", fix.ok, fix.ok ? "" : fix.error);
+const payrollRow = (await tsdb.eventTimesheetRows("e1")).find((r) => r.staffId === "b1")!;
+const fixed = await scdb.rateForm(admin, "e1", "b1", NOW);
+check(
+  "The rating form uses the corrected clock in, the same value payroll uses",
+  fixed.ok && fixed.form.facts.clockIn === onTime.toISOString() && fixed.form.facts.clockIn === payrollRow.clockIn!.at && fixed.form.facts.clockOut === payrollRow.clockOut!.at,
+  fixed.ok ? JSON.stringify(fixed.form.facts) : "",
+);
+check("The arrival fact follows the correction", fixed.ok && fixed.form.facts.arrivalText === "5 minutes early");
+check("Only the changed time is marked corrected", fixed.ok && fixed.form.facts.clockInCorrected && !fixed.form.facts.clockOutCorrected);
+check("The reliability counts use the corrected time", (await scdb.roster(admin, NOW))!.rows.find((r) => r.staffId === "b1")!.facts.late === 0);
+const added = await tsdb.editPunch(admin, "x2", "in", new Date(e1.arrival!.getTime() + 40 * 60_000), "Clocked in on the wrong phone");
+const addedForm = await scdb.rateForm(admin, "e1", "m1", NOW);
+check("A clock in an admin added counts and is marked corrected", added.ok && addedForm.ok && addedForm.form.facts.arrivalText === "40 minutes late" && addedForm.form.facts.clockInCorrected && addedForm.form.facts.missingClockOut);
+await tsdb.approveRows(admin, ["x1"]);
+const approved = await scdb.rateForm(admin, "e1", "b1", NOW);
+check("Approving the row keeps the corrected times", approved.ok && approved.form.facts.clockIn === onTime.toISOString() && approved.form.facts.clockInCorrected);
+check(
+  "Corrected clocks are read per assignment, one in and one out, marked from the edit or its flag",
+  JSON.stringify(ts.correctedClock([{ type: "in", punched_at: "A", flags: [] }, { type: "out", punched_at: "B", flags: ["edited"] }])) ===
+    JSON.stringify({ clockIn: { at: "A", corrected: false, flags: [] }, clockOut: { at: "B", corrected: true, flags: ["edited"] } }) &&
+    ts.correctedClock([{ type: "in", punched_at: "A", flags: [] }], [{ type: "in" }]).clockIn!.corrected &&
+    ts.correctedClock([]).clockIn === null,
+);
+const ratePage = src("app/team/admin/scorecard/rate/[sessionId]/[staffId]/page.tsx");
+check("The rating page shows corrected beside a changed time", ratePage.includes('" (corrected)"') && ratePage.includes("fixed(f.facts.clockInCorrected)") && ratePage.includes("fixed(f.facts.clockOutCorrected)"));
+check("The Scorecard and reliability read the clock the way payroll does", src("lib/team/scorecard-db.ts").includes("correctedClocks(") && src("lib/team/reliability-db.ts").includes("correctedClocks(") && !/from\("time_punches"\)/.test(src("lib/team/reliability-db.ts")) && !/"time_punches"/.test(src("lib/team/scorecard-db.ts")));
+
 // ----- 8. Check in calls and Locked by Tuesday -----
 check("The Tuesday before a Saturday is that week's Tuesday", sc.tuesdayBefore("2026-11-21") === "2026-11-17");
 check("The Tuesday before a Wednesday is the day before", sc.tuesdayBefore("2026-11-18") === "2026-11-17");
@@ -273,6 +315,31 @@ const facts = rel.computeRecord(
 );
 check("Reliability counts over 90 days: late, no clock out, declined, handed off, no closeout", facts.lateArrivals === 1 && facts.missingClockOuts === 1 && facts.declines === 1 && facts.handoffs === 1 && facts.missingCloseouts === 1, JSON.stringify(facts));
 check("Only admins tick Payroll setup done", !(await scdb.setPayrollDone(mgr, { staffId: "b1", done: true }, NOW)).ok && (await scdb.setPayrollDone(admin, { staffId: "b1", done: true }, NOW)).ok && (await scdb.roster(admin, NOW))!.rows.find((r) => r.staffId === "b1")!.payrollDone);
+// Manual signed: a real tick, like Payroll setup done.
+const cfg = await import("../lib/team/cert-config.ts");
+db.staff_onboarding = cfg.ONBOARDING.map((i) => ({ staff_id: "b2", item_id: i.id, done_at: NOW.toISOString() }));
+const b2Row = (await scdb.roster(admin, NOW))!.rows.find((r) => r.staffId === "b2")!;
+check("Finishing onboarding alone does not mark the manual signed", b2Row.onboarding.done === b2Row.onboarding.total && !b2Row.manualSigned);
+check("A manager cannot tick Manual signed", (await scdb.setManualSigned(mgr, { staffId: "b1", done: true }, NOW)).ok === false && !db.staff_setup_flags.some((f) => (f as Record<string, unknown>).manual_done));
+check("Nobody ticks Manual signed for themselves", (await scdb.setManualSigned(admin, { staffId: "a1", done: true }, NOW)).ok === false);
+check("An admin ticks Manual signed", (await scdb.setManualSigned(admin, { staffId: "b1", done: true }, NOW)).ok);
+const flagRow = db.staff_setup_flags.find((f) => (f as Record<string, unknown>).staff_id === "b1") as Record<string, unknown>;
+check("Manual signed records who and when", flagRow.manual_done === true && flagRow.manual_by === "a1" && flagRow.manual_by_name === "Kenneth Smith" && flagRow.manual_at === NOW.toISOString());
+check("Manual signed and Payroll setup done are kept apart", flagRow.payroll_done === true && flagRow.payroll_by === "a1");
+await scdb.setPayrollDone(admin, { staffId: "b1", done: false }, NOW);
+check("Unticking payroll leaves the manual signed", (db.staff_setup_flags.find((f) => (f as Record<string, unknown>).staff_id === "b1") as Record<string, unknown>).manual_done === true);
+check("The roster flag comes from the tick", (await scdb.roster(mgr, NOW))!.rows.find((r) => r.staffId === "b1")!.manualSigned && !(await scdb.roster(mgr, NOW))!.rows.find((r) => r.staffId === "b2")!.manualSigned);
+const mgrCard = await scdb.personCard(mgr, "b1", NOW);
+const adminCard = await scdb.personCard(admin, "b1", NOW);
+check("Managers see Manual signed read only, with who and when", mgrCard.ok && mgrCard.card.manual.done && mgrCard.card.manual.by === "Kenneth Smith" && !!mgrCard.card.manual.at && !mgrCard.card.canTick && adminCard.ok && adminCard.card.canTick);
+const personPage = src("app/team/admin/scorecard/[staffId]/page.tsx");
+check("The person page has a Manual signed tick beside Payroll setup done", personPage.includes('action="manual" label="Manual signed"') && personPage.includes('action="payroll" label="Payroll setup done"') && !personPage.includes("manual read"));
+check("The roster shows Manual signed", src("app/team/admin/scorecard/roster-table.tsx").includes('Manual {r.manualSigned ? "signed" : "not signed"}'));
+check("The save route takes the manual action", src("app/api/team/admin/scorecard/route.ts").includes('body.action === "manual"'));
+const manualMig = src("supabase/migrations/20261221_manual_signed.sql");
+check("The migration adds the Manual signed columns and refuses ticking yourself", ["manual_done", "manual_by", "manual_by_name", "manual_at"].every((c) => manualMig.includes(`add column if not exists ${c}`)) && manualMig.includes("manual_by <> staff_id"));
+await scdb.setManualSigned(admin, { staffId: "b1", done: false }, NOW);
+check("Unticking Manual signed clears the flag", !(await scdb.roster(admin, NOW))!.rows.find((r) => r.staffId === "b1")!.manualSigned);
 const ros = (await scdb.roster(admin, NOW))!;
 const jo = ros.rows.find((r) => r.staffId === "b1")!;
 check("The roster has one row per active person who works events", ros.rows.some((r) => r.staffId === "s1") && !ros.rows.some((r) => r.staffId === "a1") && jo.worked === 2 && jo.facts.noCloseout === 2);
@@ -298,6 +365,10 @@ check(
   csv[0],
 );
 check("One row per person per event, blanks left blank", csv.length === 2 && csv[1].startsWith(`${addDays(today, -3)},Justin Reyes · Wedding,Full Bar,Justin Reyes,Jordan Lee,No,No,No,,5,5,5,5,5,5,5.00,5,New,"Great, ""really""",,No`), csv[1]);
+db.staff_onboarding = cfg.ONBOARDING.map((i) => ({ staff_id: "b1", item_id: i.id, done_at: NOW.toISOString() }));
+check("Manual Signed in the ratings CSV is No until ticked, even with onboarding done", (await scdb.ratingsCsvFor(admin, NOW))!.split("\r\n")[1].split(",")[7] === "No");
+await scdb.setManualSigned(admin, { staffId: "b1", done: true }, NOW);
+check("Manual Signed in the ratings CSV comes from the tick", (await scdb.ratingsCsvFor(admin, NOW))!.split("\r\n")[1].split(",")[7] === "Yes");
 check("Roster CSV has a header and a row each", (await scdb.rosterCsvFor(admin, NOW))!.split("\r\n")[0].startsWith("Name,Market,Events Worked,Events Rated"));
 
 // ----- 13. Nothing reaches staff -----

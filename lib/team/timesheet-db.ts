@@ -16,6 +16,8 @@ import {
   checkApprove,
   checkEdit,
   checkReopen,
+  correctedClock,
+  countedPunch,
   LOCKED_MESSAGE,
   OWN_APPROVE_MESSAGE,
   OWN_EDIT_MESSAGE,
@@ -25,6 +27,7 @@ import {
   rowMinutes,
   sortRows,
   weekApproval,
+  type ClockTime,
   type EditSummary,
   type PunchSummary,
   type ReopenSummary,
@@ -136,8 +139,8 @@ async function buildRows(filter: { from: string; to: string } | { assignmentIds:
     const sched = eventSchedule(ed);
     const mine = punches.filter((p) => p.assignment_id === a.id);
     const shape = (p: PunchDb | undefined): PunchSummary | null => (p ? { id: p.id, at: p.punched_at, flags: p.flags ?? [], source: p.source } : null);
-    const clockIn = shape(mine.find((p) => p.type === "in"));
-    const clockOut = shape(mine.find((p) => p.type === "out"));
+    const clockIn = shape(countedPunch(mine, "in"));
+    const clockOut = shape(countedPunch(mine, "out"));
     const myEdits: EditSummary[] = edits
       .filter((e) => e.assignment_id === a.id)
       .sort((x, y) => x.created_at.localeCompare(y.created_at))
@@ -195,6 +198,44 @@ export function timesheetRows(from: string, to: string): Promise<TimesheetRow[]>
 /** One event's rows, built exactly as the Time page and the CSV build them. For the manager view's Time clock card. */
 export function eventTimesheetRows(sessionId: string): Promise<TimesheetRow[]> {
   return buildRows({ sessionId });
+}
+
+export interface CorrectedClock {
+  assignmentId: string;
+  staffId: string;
+  sessionId: string;
+  clockIn: ClockTime | null;
+  clockOut: ClockTime | null;
+}
+
+/**
+ * The corrected clock in and clock out per assignment, read the way the Time
+ * page and payroll read them, for the Scorecard and the reliability counts.
+ * By person (every assignment they punched on) or by assignment. Empty before
+ * the clock tables exist; never throws.
+ */
+export async function correctedClocks(by: { staffIds: string[] } | { assignmentIds: string[] }): Promise<CorrectedClock[]> {
+  const [col, ids] = "staffIds" in by ? (["staff_id", by.staffIds] as const) : (["assignment_id", by.assignmentIds] as const);
+  if (ids.length === 0) return [];
+  try {
+    const [punchRes, editRes] = await Promise.all([
+      supabase.from("time_punches").select("assignment_id, staff_id, session_id, type, punched_at, flags").in(col, [...ids]),
+      supabase.from("time_edits").select("assignment_id, type").in(col, [...ids]),
+    ]);
+    if (punchRes.error) return [];
+    const punches = (punchRes.data as { assignment_id: string; staff_id: string; session_id: string; type: PunchType; punched_at: string; flags: PunchFlag[] | null }[]) ?? [];
+    const edits = editRes.error ? [] : ((editRes.data as { assignment_id: string; type: PunchType }[]) ?? []);
+    const byAssignment = new Map<string, typeof punches>();
+    for (const p of punches) byAssignment.set(p.assignment_id, [...(byAssignment.get(p.assignment_id) ?? []), p]);
+    return [...byAssignment].map(([assignmentId, mine]) => ({
+      assignmentId,
+      staffId: mine[0].staff_id,
+      sessionId: mine[0].session_id,
+      ...correctedClock(mine, edits.filter((e) => e.assignment_id === assignmentId)),
+    }));
+  } catch {
+    return [];
+  }
 }
 
 export type ActionResult = { ok: true; rows: TimesheetRow[]; message?: string } | { ok: false; error: string; status: number };

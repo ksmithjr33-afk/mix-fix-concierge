@@ -94,6 +94,38 @@ export interface TimesheetRow {
   approved: { byName: string; at: string } | null;
 }
 
+// ----- The clock times that count -----
+//
+// An admin correction on the Time page replaces the punch's time in place (the
+// original stays on the time_edits row), and there is one clock in and one
+// clock out per assignment. So the punch row as it stands is the corrected
+// time: the one the Time page, payroll and the Scorecard all use.
+
+export interface ClockTime {
+  at: string; // ISO, after any correction
+  corrected: boolean; // an admin added or changed it on the Time page
+  flags: PunchFlag[];
+}
+
+/** The punch of this type that counts for an assignment, the same one the Time page and payroll show. */
+export function countedPunch<P extends { type: string }>(punches: P[], type: PunchType): P | undefined {
+  return punches.find((p) => p.type === type);
+}
+
+/** One assignment's clock in and clock out, as payroll counts them, each marked when an admin changed it. */
+export function correctedClock(
+  punches: { type: string; punched_at: string; flags?: string[] | null }[],
+  edits: { type: string }[] = [],
+): { clockIn: ClockTime | null; clockOut: ClockTime | null } {
+  const one = (type: PunchType): ClockTime | null => {
+    const p = countedPunch(punches, type);
+    if (!p) return null;
+    const flags = (p.flags ?? []) as PunchFlag[];
+    return { at: p.punched_at, corrected: edits.some((e) => e.type === type) || flags.includes("edited") || flags.includes("admin_entry"), flags };
+  };
+  return { clockIn: one("in"), clockOut: one("out") };
+}
+
 export function rowMinutes(clockIn: PunchSummary | null, clockOut: PunchSummary | null): number | null {
   return clockIn && clockOut ? workedMinutes(clockIn.at, clockOut.at) : null;
 }

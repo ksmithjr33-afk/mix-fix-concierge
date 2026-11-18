@@ -3,13 +3,15 @@
 // Read only: everything comes from rows the portal already keeps (assignments,
 // clock punches, bar ready photos, closeouts, handoffs). The one new column is
 // event_assignments.dropped_at, set when someone declines a shift they had
-// accepted.
+// accepted. Clock times are the corrected ones the Time page and payroll use
+// (an admin correction there changes the counts here).
 
 import { supabase } from "@/lib/supabase";
 import type { SessionRow } from "@/lib/event-updates";
 import { eventData } from "@/lib/team/markets";
 import { eventDayStart, eventSchedule } from "@/lib/team/time";
 import { hiddenEventIds } from "@/lib/team/hidden";
+import { correctedClocks } from "@/lib/team/timesheet-db";
 import { compactLine, computeRecord, emptyFacts, LOCATION_FLAGS, since90, type RecordFacts, type RecordStats, type WorkedEvent } from "@/lib/team/reliability";
 
 export interface StaffRecord {
@@ -41,9 +43,9 @@ export async function recordFacts(staffIds: string[], now: Date = new Date()): P
   const out = new Map(ids.map((id) => [id, emptyFacts()]));
   if (ids.length === 0) return out;
 
-  const [{ data: asg }, { data: punches }, { data: bars }, { data: closeouts }, { data: handoffs }, hidden] = await Promise.all([
+  const [{ data: asg }, clocks, { data: bars }, { data: closeouts }, { data: handoffs }, hidden] = await Promise.all([
     supabase.from("event_assignments").select("session_id, staff_id, status, dropped_at, responded_at, session:session_id (*)").in("staff_id", ids),
-    supabase.from("time_punches").select("staff_id, session_id, type, punched_at, flags").in("staff_id", ids),
+    correctedClocks({ staffIds: ids }),
     supabase.from("bar_ready_reports").select("staff_id, session_id, created_at").in("staff_id", ids),
     supabase.from("event_closeouts").select("staff_id, session_id").in("staff_id", ids),
     supabase.from("shift_handoffs").select("from_staff_id, created_at, urgent").in("from_staff_id", ids),
@@ -53,10 +55,11 @@ export async function recordFacts(staffIds: string[], now: Date = new Date()): P
   const key = (staffId: string, sessionId: string) => `${staffId}|${sessionId}`;
   const clockIns = new Map<string, Date>();
   const clockOuts = new Map<string, Date>();
-  for (const p of (punches as { staff_id: string; session_id: string; type: string; punched_at: string; flags: string[] | null }[]) ?? []) {
-    if (p.type === "in") clockIns.set(key(p.staff_id, p.session_id), new Date(p.punched_at));
-    if (p.type === "out") clockOuts.set(key(p.staff_id, p.session_id), new Date(p.punched_at));
-    if ((p.flags ?? []).some((f) => LOCATION_FLAGS.includes(f))) out.get(p.staff_id)?.flaggedPunches.push(new Date(p.punched_at));
+  // The corrected times, as the Time page and payroll have them.
+  for (const c of clocks) {
+    if (c.clockIn) clockIns.set(key(c.staffId, c.sessionId), new Date(c.clockIn.at));
+    if (c.clockOut) clockOuts.set(key(c.staffId, c.sessionId), new Date(c.clockOut.at));
+    for (const p of [c.clockIn, c.clockOut]) if (p && p.flags.some((f) => LOCATION_FLAGS.includes(f))) out.get(c.staffId)?.flaggedPunches.push(new Date(p.at));
   }
   const firstBar = new Map<string, Date>();
   for (const b of (bars as { staff_id: string; session_id: string; created_at: string }[]) ?? []) {
