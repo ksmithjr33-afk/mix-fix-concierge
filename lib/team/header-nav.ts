@@ -63,7 +63,7 @@ export function headerLinks(showAdmin: boolean, counts: NavCounts, showBusiness 
       { href: "/team/admin/timesheets", label: "Time", badge: 0, match: ["/team/admin/timesheets"], inline: true },
       ...(showBusiness
         ? [
-            { href: "/team/admin/business", label: "Business", badge: 0, match: ["/team/admin/business"], inline: true },
+            { href: "/team/admin/business", label: "Business", badge: 0, match: ["/team/admin/business", "/team/admin/receipts"], inline: true },
             { href: "/team/admin/payroll", label: "Payroll", badge: 0, match: ["/team/admin/payroll"], inline: true },
           ]
         : []),

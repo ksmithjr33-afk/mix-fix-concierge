@@ -63,7 +63,7 @@ export default function ManagerTabs({
     <main className={`${tab === "order" ? "max-w-[52rem]" : "max-w-2xl"} mx-auto px-4 py-4 sm:py-6 space-y-4 print:max-w-none print:p-0`}>
       <div className="print:hidden">{header}</div>
       <nav className="-mx-4 px-4 overflow-x-auto print:hidden" aria-label="Manager view">
-        <div className={`flex sm:grid ${tabs.length > 6 ? "sm:grid-cols-7" : "sm:grid-cols-6"} gap-1 bg-[#DDD5CC] p-1 rounded-xl min-w-max sm:min-w-0`} role="tablist">
+        <div className={`flex ${tabs.length > 7 ? "md:grid md:grid-cols-8" : tabs.length > 6 ? "sm:grid sm:grid-cols-7" : "sm:grid sm:grid-cols-6"} gap-1 bg-[#DDD5CC] p-1 rounded-xl min-w-max sm:min-w-0`} role="tablist">
           {tabs.map(([key, label]) => {
             const n = key === "chat" ? chatUnread : (counts[key] ?? 0);
             return (

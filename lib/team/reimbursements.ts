@@ -10,14 +10,16 @@
 
 import { money } from "@/lib/team/pay";
 
+/** The types an admin picks on Payroll. Supplies only ever comes from an approved receipt. */
 export const REIMBURSEMENT_KINDS = ["ice", "menu_printing", "other"] as const;
-export type ReimbursementKind = (typeof REIMBURSEMENT_KINDS)[number];
-export const KIND_LABEL: Record<ReimbursementKind, string> = { ice: "Ice", menu_printing: "Menu printing", other: "Other" };
+export type ReimbursementKind = (typeof REIMBURSEMENT_KINDS)[number] | "supplies";
+export const KIND_LABEL: Record<ReimbursementKind, string> = { ice: "Ice", menu_printing: "Menu printing", supplies: "Supplies", other: "Other" };
 export const MAX_REIMBURSEMENT_CENTS = 1000_00;
 export const MAX_REIMBURSEMENT_NOTE = 120;
 export const REIMBURSED_LABEL = "Reimbursed to staff";
 export const REIMBURSEMENTS_NOT_READY = "Reimbursements are not set up yet. Run the payroll reimbursements migration first.";
 export const LOCKED_MESSAGE = "This line is marked paid, so its reimbursements cannot change. Undo paid first.";
+export const FROM_RECEIPT_MESSAGE = "This one came from a receipt. Reopen the receipt on the event's Receipts tab to change it.";
 
 export interface Reimbursement {
   id: string;
@@ -27,6 +29,7 @@ export interface Reimbursement {
   kind: ReimbursementKind;
   cents: number;
   note: string;
+  receiptId?: string | null; // set when an approved receipt created it
 }
 
 export const reimbursementsCents = (list: Pick<Reimbursement, "cents">[]) => list.reduce((n, r) => n + r.cents, 0);
@@ -38,7 +41,7 @@ export function reimbursementText(r: Pick<Reimbursement, "kind" | "cents" | "not
 
 /** What an admin typed: a type, dollars, an optional note. */
 export function validateReimbursement(raw: { kind?: unknown; amount?: unknown; note?: unknown }): { ok: true; kind: ReimbursementKind; cents: number; note: string } | { ok: false; error: string } {
-  const kind = String(raw.kind ?? "") as ReimbursementKind;
+  const kind = String(raw.kind ?? "") as (typeof REIMBURSEMENT_KINDS)[number];
   if (!(REIMBURSEMENT_KINDS as readonly string[]).includes(kind)) return { ok: false, error: "Pick Ice, Menu printing, or Other." };
   const s = String(raw.amount ?? "").trim().replace(/[$,\s]/g, "");
   if (!/^\d{1,4}(\.\d{1,2})?$/.test(s)) return { ok: false, error: "Enter the amount in dollars, like 24 or 24.50." };
@@ -75,7 +78,7 @@ export function pickupPrompts(did: { ice: boolean; menu: boolean }, list: Pick<R
 // and is left out of Other costs. Each reimbursement covers one other cost at
 // most.
 
-const KIND_WORDS: Record<ReimbursementKind, RegExp> = { ice: /\bice\b/i, menu_printing: /\bmenus?\b|\bprint/i, other: /$^/ };
+const KIND_WORDS: Record<ReimbursementKind, RegExp> = { ice: /\bice\b/i, menu_printing: /\bmenus?\b|\bprint/i, supplies: /$^/, other: /$^/ };
 const REIMBURSE_WORD = /reimburs/i;
 
 /** The ids of other costs already counted as a reimbursement. */

@@ -25,6 +25,7 @@ import { isAdminRole } from "@/lib/team/roles";
 import { itemChoices, lowStockOpen } from "@/lib/team/low-stock";
 import { allSupplies } from "@/lib/team/supplies";
 import { venuePhotosFor } from "@/lib/team/venue-photos-db";
+import { staffReceiptsView } from "@/lib/team/receipts-db";
 
 export const dynamic = "force-dynamic";
 
@@ -46,7 +47,7 @@ async function TeamEventPage({
   const query = await searchParams;
   const chatTab = query.tab === "chat";
   // Links from texts can open a tab: the chat, or the wrap up reminder.
-  const askedTab: Tab = (["chat", "wrapup", "shopping", "checklist"] as const).find((t) => t === query.tab) ?? "details";
+  const askedTab: Tab = (["chat", "wrapup", "shopping", "checklist", "receipts"] as const).find((t) => t === query.tab) ?? "details";
   const asBartender = query.as === "bartender";
   const staff = await requireStaff(`/team/e/${encodeURIComponent(id)}${askedTab !== "details" ? `?tab=${askedTab}` : asBartender ? "?as=bartender" : ""}`);
   // Admins land on the manager view of the event from any link (texts, lists,
@@ -82,6 +83,13 @@ async function TeamEventPage({
       console.error("[venue photos] could not load:", err);
       return null;
     });
+  // Receipts: only this person's own, on an event they are on (not declined), until 14 days after it.
+  const receiptsP = assignmentP
+    .then((a) => staffReceiptsView(access.session, staff, a))
+    .catch((err) => {
+      console.error("[receipts] could not load:", err);
+      return null;
+    });
   const [data, entries, assignment, messages, unread, closeout, menuPickup, menuSection, punches, pay, [handoff, teammates], ice] = await Promise.all([
     eventPageData(access.session, staff),
     barReadyEntries(id, staff),
@@ -98,7 +106,7 @@ async function TeamEventPage({
     // The ice pickup card: everyone on the event sees who is picking up and each status.
     staffIceView(access.session, staff),
   ]);
-  const venuePhotos = await venueP;
+  const [venuePhotos, receipts] = await Promise.all([venueP, receiptsP]);
   if (chatTab) await markThreadRead(id, staff.id);
   const accepted = assignment?.status === "accepted";
   const renderedAt = serverNow();
@@ -115,7 +123,7 @@ async function TeamEventPage({
     <>
       <TeamHeader signedIn admin={isAdminRole(staff.role)} back={back} />
       <EventTabs
-        initialTab={askedTab === "wrapup" && !closeout.open ? "details" : askedTab}
+        initialTab={(askedTab === "wrapup" && !closeout.open) || (askedTab === "receipts" && !receipts) ? "details" : askedTab}
         chat={{ sessionId: id, initial: messages, unread: unread.get(id) ?? 0, timeZone: data.view.timeZone, isAdmin: isAdminRole(staff.role), gifSearch: giphyEnabled() }}
         offered={assignment?.status === "offered"}
         giveUp={accepted ? { sessionId: id, handoff, teammates, canStart: punches.length === 0 } : null}
@@ -157,6 +165,7 @@ async function TeamEventPage({
         ice={ice}
         runningLow={runningLow}
         venuePhotos={venuePhotos}
+        receipts={receipts}
       />
     </>
   );

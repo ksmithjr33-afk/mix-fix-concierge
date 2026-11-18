@@ -8,6 +8,7 @@ export const MANAGER_TABS = [
   ["order", "Shopping list"],
   ["client", "Client list"],
   ["dayof", "Day of"],
+  ["receipts", "Receipts"],
   ["chat", "Chat"],
 ] as const;
 /** Business, after Chat: admins only (role admin, never managers). */

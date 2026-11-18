@@ -32,11 +32,14 @@ import PackageCard from "../../package-card";
 import PayEstimateCard from "../../pay-estimate-card";
 import { money, type StaffEstimate } from "@/lib/team/pay";
 import RunningLowButton from "../../running-low";
+import Receipts from "./receipts";
+import type { StaffReceiptsView } from "@/lib/team/receipts-db";
+import { RECEIPTS_TAB } from "@/lib/team/receipts";
 
 export { Details };
 
 
-export type Tab = "details" | "checklist" | "shopping" | "wrapup" | "chat";
+export type Tab = "details" | "checklist" | "shopping" | "wrapup" | "receipts" | "chat";
 
 function Progress({ state }: { state: Record<string, CheckState> }) {
   const values = Object.values(state);
@@ -526,7 +529,9 @@ export default function EventTabs({
   ice = null,
   runningLow = null,
   venuePhotos = null,
+  receipts = null,
 }: {
+  receipts?: StaffReceiptsView | null; // the Receipts tab: on the event, not declined, until 14 days after it
   venuePhotos?: VenuePhotoView | null; // Bar and venue photos on the Location card, read only, for staff on the event
   runningLow?: { items: string[] } | null; // the Running low button, from setup through the end of breakdown
   ice?: IceView | null; // the ice pickup card on the Details tab, for people on the event
@@ -567,6 +572,7 @@ export default function EventTabs({
     ["checklist", TOOLS_TAB],
     ["shopping", SUPPLIES_TAB],
     ...(closeout ? ([["wrapup", WRAP_UP_TAB]] as [Tab, string][]) : []),
+    ...(receipts ? ([["receipts", RECEIPTS_TAB]] as [Tab, string][]) : []),
     ["chat", `Chat${chatUnread ? ` (${chatUnread})` : ""}`],
   ];
 
@@ -614,7 +620,7 @@ export default function EventTabs({
         </section>
       )}
 
-      <nav className={`grid ${tabs.length === 5 ? "grid-cols-5" : "grid-cols-4"} gap-1 bg-[#DDD5CC] p-1 rounded-xl`} role="tablist">
+      <nav className={`grid ${tabs.length === 6 ? "grid-cols-6" : tabs.length === 5 ? "grid-cols-5" : "grid-cols-4"} gap-1 bg-[#DDD5CC] p-1 rounded-xl`} role="tablist">
         {tabs.map(([key, label]) => (
           <button
             key={key}
@@ -676,6 +682,11 @@ export default function EventTabs({
       {closeout && (
         <div hidden={tab !== "wrapup"}>
           <CloseoutCard sessionId={view.sessionId} {...closeout} onSent={() => setWrapped(true)} />
+        </div>
+      )}
+      {receipts && (
+        <div hidden={tab !== "receipts"}>
+          <Receipts sessionId={view.sessionId} mode="staff" initial={receipts.receipts} ready={receipts.ready} openUntil={receipts.openUntil} timeZone={view.timeZone} />
         </div>
       )}
       <div hidden={tab !== "chat"}>

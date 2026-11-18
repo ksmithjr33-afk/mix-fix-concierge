@@ -69,7 +69,7 @@ check("Manage staff for this event is gone", !src("app/team/e/[id]/event-tabs.ts
 check("Admin event lists open the manager view", src("lib/team/my-events.ts").includes("href: `/team/admin/e/${r.id}`") && src("app/team/admin/events/page.tsx").includes("href: `/team/admin/e/${s.id}`"));
 
 // ----- Tabs and their links -----
-check("Six tabs in order", tabs.MANAGER_TABS.map(([, l]) => l).join(" | ") === "Details | Team | Shopping list | Client list | Day of | Chat");
+check("Seven tabs in order, Receipts between Day of and Chat", tabs.MANAGER_TABS.map(([, l]) => l).join(" | ") === "Details | Team | Shopping list | Client list | Day of | Receipts | Chat");
 check("Tab links", tabs.managerHref("s1") === "/team/admin/e/s1" && tabs.managerHref("s1", "order") === "/team/admin/e/s1?tab=order" && tabs.managerHref("a b", "team") === "/team/admin/e/a%20b?tab=team");
 const page = src("app/team/admin/e/[id]/page.tsx");
 const bar = src("app/team/admin/e/[id]/manager-tabs.tsx");

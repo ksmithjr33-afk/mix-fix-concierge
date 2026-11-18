@@ -132,7 +132,7 @@ export default function BusinessTab({ view }: { view: EventBusinessView }) {
           </li>
         </ul>
         <SuppliesForm sessionId={view.sessionId} manual={view.manualSupplies} />
-        {!view.manualSupplies && view.supplies && view.supplies.unmatched.length > 0 && (
+        {!view.manualSupplies && b.supplies !== "receipts" && view.supplies && view.supplies.unmatched.length > 0 && (
           <div className="mt-2">
             <p className="text-sm font-medium text-[#2C2420]">No cost in the catalog yet</p>
             <ul className="text-sm text-[#6B5D52] list-disc pl-5">

@@ -13,12 +13,17 @@
 //   burden    the settings percent of labor
 //   mileage   after the event only; left out of the estimate until then
 //   tips      the gratuity, all of it to the bartenders
-//   supplies  entered by hand, else the Shopping list against the cost
+//   supplies  entered by hand, else approved Supplies receipts (whoever
+//             paid, "from receipts"), else the Shopping list against the cost
 //             catalog, with the per guest estimate filling in what has no cost
 //   card      percent plus the fixed fee for each charge
 //   reimbursed  reimbursements to staff (ice, menu printing, other), entered on
 //             Payroll; never labor, so no payroll burden on them
+//             A Supplies receipt paid by staff is reimbursed on Payroll but
+//             its reimbursement is left out here: it is already in supplies.
+//   company   approved receipts other than Supplies paid by Company
 //   other     lines an admin adds, less any already counted as a reimbursement
+// Every approved receipt dollar counts exactly once.
 // Only two things hold profit back: no booked total, or a blank per guest
 // supply estimate when one is needed.
 //
@@ -27,6 +32,7 @@
 
 import type { CostSettings } from "@/lib/team/business-settings";
 import { otherCostsCovered, REIMBURSED_LABEL, type ReimbursementKind } from "@/lib/team/reimbursements";
+import { COMPANY_COST_LABEL, receiptCosts, SUPPLIES_FROM_RECEIPTS, type ApprovedReceipt } from "@/lib/team/receipts";
 
 export const DEPOSIT_DUE_DAYS = 14; // the balance is due 14 days before the event
 export const CARD_CHARGES = 2; // deposit and balance
@@ -95,12 +101,13 @@ export interface BusinessInputs {
   packageLabel: string; // "Full Bar", "legacy packages": named in the settings link
   other: OtherCost[];
   reimbursements?: { kind: ReimbursementKind; cents: number }[]; // everyone's on this event
+  receipts?: ApprovedReceipt[]; // approved receipts on this event
   settings: CostSettings;
 }
 
 export type PaidStatus = "paid_in_full" | "partly_paid" | "overdue" | "deposit_paid";
 
-export type CostKey = "labor" | "burden" | "mileage" | "tips" | "supplies" | "card" | "reimbursed" | "other";
+export type CostKey = "labor" | "burden" | "mileage" | "tips" | "supplies" | "card" | "reimbursed" | "company" | "other";
 export const COST_LABEL: Record<CostKey, string> = {
   labor: "Labor",
   burden: "Payroll burden",
@@ -109,16 +116,18 @@ export const COST_LABEL: Record<CostKey, string> = {
   supplies: "Supplies",
   card: "Card processing",
   reimbursed: REIMBURSED_LABEL,
+  company: COMPANY_COST_LABEL,
   other: "Other costs",
 };
-export const COST_KEYS: CostKey[] = ["labor", "burden", "mileage", "tips", "supplies", "card", "reimbursed", "other"];
+export const COST_KEYS: CostKey[] = ["labor", "burden", "mileage", "tips", "supplies", "card", "reimbursed", "company", "other"];
 
 export type LaborSource = "booking" | "crew" | "actual";
 export const LABOR_LABEL: Record<LaborSource, string> = { booking: "estimate from booking", crew: "estimate from crew", actual: "actual" };
 
-export type SuppliesMethod = "manual" | "catalog" | "partial" | "per_guest" | "missing";
+export type SuppliesMethod = "manual" | "receipts" | "catalog" | "partial" | "per_guest" | "missing";
 export const SUPPLIES_METHOD_LABEL: Record<SuppliesMethod, string> = {
   manual: "entered by hand",
+  receipts: SUPPLIES_FROM_RECEIPTS,
   catalog: "from the shopping list",
   partial: "partly costed",
   per_guest: "estimate per guest",
@@ -223,9 +232,25 @@ export function laborEstimate(i: Pick<BusinessInputs, "done" | "crew" | "bookedB
   return { cents, source: "booking", note: `${LABOR_LABEL.booking}, ${who} × ${time} × ${usd(i.defaultRateCents)}/hr package rate` };
 }
 
-/** Supplies and how they were worked out. Cents null only when the per guest estimate is needed and blank. */
-export function suppliesEstimate(manualCents: number | null, lines: SupplyLines | null, perGuestCents: number | null, guests: number | null): { cents: number | null; method: SuppliesMethod; note: string } {
-  if (manualCents !== null) return { cents: manualCents, method: "manual", note: SUPPLIES_METHOD_LABEL.manual };
+/**
+ * Supplies and how they were worked out. Cents null only when the per guest
+ * estimate is needed and blank. A hand entered amount wins; then approved
+ * Supplies receipts replace the estimate.
+ */
+export function suppliesEstimate(
+  manualCents: number | null,
+  lines: SupplyLines | null,
+  perGuestCents: number | null,
+  guests: number | null,
+  fromReceipts: { cents: number; count: number } | null = null
+): { cents: number | null; method: SuppliesMethod; note: string } {
+  if (manualCents !== null) {
+    const extra = fromReceipts?.count ? `; ${usd(fromReceipts.cents)} in supplies receipts not added again` : "";
+    return { cents: manualCents, method: "manual", note: `${SUPPLIES_METHOD_LABEL.manual}${extra}` };
+  }
+  if (fromReceipts && fromReceipts.count > 0) {
+    return { cents: fromReceipts.cents, method: "receipts", note: `${SUPPLIES_METHOD_LABEL.receipts}, ${fromReceipts.count} ${fromReceipts.count === 1 ? "receipt" : "receipts"}` };
+  }
   if (lines && lines.lines > 0 && lines.costed === lines.lines) return { cents: lines.catalogCents, method: "catalog", note: SUPPLIES_METHOD_LABEL.catalog };
   const perGuest = perGuestCents === null ? null : perGuestCents * (guests ?? 0);
   if (lines && lines.lines > 0 && lines.costed > 0) {
@@ -252,9 +277,13 @@ export function eventBusiness(i: BusinessInputs): EventBusiness {
 
   const labor = laborEstimate(i);
   const tips = i.gratuityCents ?? 0;
-  const reimbursements = i.reimbursements ?? [];
+  // Supplies reimbursements only ever come from Supplies receipts, which are counted in supplies.
+  const allReimbursed = i.reimbursements ?? [];
+  const reimbursements = allReimbursed.filter((r) => r.kind !== "supplies");
+  const fromSupplyReceipts = allReimbursed.length - reimbursements.length;
   const covered = otherCostsCovered(i.other, reimbursements);
-  const supplies = suppliesEstimate(f?.supplies_cents ?? null, i.supplyLines, i.perGuestCents, i.guests);
+  const receipts = receiptCosts(i.receipts ?? []);
+  const supplies = suppliesEstimate(f?.supplies_cents ?? null, i.supplyLines, i.perGuestCents, i.guests, { cents: receipts.suppliesCents, count: receipts.suppliesCount });
   const settingsText = `Set a per guest estimate for ${i.packageLabel} in Business settings`;
   if (supplies.cents === null) missing.push({ key: "per_guest", text: settingsText, href: SETTINGS_HREF });
 
@@ -267,7 +296,8 @@ export function eventBusiness(i: BusinessInputs): EventBusiness {
       ? { key: "supplies", label: COST_LABEL.supplies, cents: null, note: `${supplies.note ? `${supplies.note}; ` : ""}set a per guest estimate in Business settings`, href: SETTINGS_HREF }
       : { key: "supplies", label: COST_LABEL.supplies, cents: supplies.cents, note: supplies.note },
     { key: "card", label: COST_LABEL.card, cents: total === null ? null : cardFee(total, i.settings), note: `${i.settings.cardPct}% + ${usd(i.settings.cardFixedCents)} a charge, confirm your rate` },
-    reimbursedLine(reimbursements),
+    reimbursedLine(reimbursements, fromSupplyReceipts),
+    { key: "company", label: COST_LABEL.company, cents: receipts.companyCents, note: receipts.companyCount ? `${receipts.companyCount} ${receipts.companyCount === 1 ? "receipt" : "receipts"}` : "none" },
     otherLine(i.other, covered),
   ];
 
@@ -303,9 +333,11 @@ export function eventBusiness(i: BusinessInputs): EventBusiness {
   };
 }
 
-function reimbursedLine(list: { cents: number }[]): CostLine {
+function reimbursedLine(list: { cents: number }[], suppliesLeftOut = 0): CostLine {
   const cents = list.reduce((n, r) => n + r.cents, 0);
-  return { key: "reimbursed", label: COST_LABEL.reimbursed, cents, note: list.length ? `${list.length} ${list.length === 1 ? "line" : "lines"}, entered on Payroll` : "none" };
+  const base = list.length ? `${list.length} ${list.length === 1 ? "line" : "lines"}, entered on Payroll` : "none";
+  const note = suppliesLeftOut ? `${base}; ${suppliesLeftOut} supplies ${suppliesLeftOut === 1 ? "receipt" : "receipts"} counted under Supplies instead` : base;
+  return { key: "reimbursed", label: COST_LABEL.reimbursed, cents, note };
 }
 
 /** Other costs, leaving out any already counted in Reimbursed to staff. */

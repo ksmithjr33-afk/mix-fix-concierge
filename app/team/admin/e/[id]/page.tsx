@@ -72,11 +72,13 @@ import { rateTeamCard, tierBadges } from "@/lib/team/scorecard-db";
 import RateTeamCard from "./rate-team-card";
 import { venuePhotosFor } from "@/lib/team/venue-photos-db";
 import VenuePhotos from "../../../e/[id]/venue-photos";
+import Receipts from "../../../e/[id]/receipts";
+import { adminReceiptsView, pendingReceiptCount } from "@/lib/team/receipts-db";
 
 export const dynamic = "force-dynamic";
 
 // The manager view of one event, admins only: every admin section of the
-// event under tabs (Details, Team, Shopping list, Client list, Day of, Chat).
+// event under tabs (Details, Team, Shopping list, Client list, Day of, Receipts, Chat).
 // requireAdmin runs first, so bartenders (and admins in Bartender view) never
 // get past it, and every route behind each tab checks admin again on the server.
 async function AdminEventPage({
@@ -131,7 +133,7 @@ async function AdminEventPage({
       ]))
     : null;
 
-  const [supplies, people, lists, staff, panel, handoffs, hidden, unread, view, sheet, bar, missing, pickup, menuFile, closeouts, pendingHolds, ice, places] = await Promise.all([
+  const [supplies, people, lists, staff, panel, handoffs, hidden, unread, view, sheet, bar, missing, pickup, menuFile, closeouts, pendingHolds, ice, places, receiptsWaiting] = await Promise.all([
     suppliesP,
     peopleP,
     listsP,
@@ -150,6 +152,8 @@ async function AdminEventPage({
     holdsFor(id, "pending"),
     iceP,
     placesP,
+    // The Receipts tab badge: receipts waiting on review. 0 before the migration.
+    pendingReceiptCount(id),
   ]);
   // Team tab only.
   const [records, certs, distances, away, tiers] =
@@ -170,7 +174,7 @@ async function AdminEventPage({
           {} as Record<string, string>,
         ];
   // Details, Client list and Chat only.
-  const [links, autoSend, listEntries, messages, muted, history, eventNumber, agreements, clockRows, payout, business, supplyCosts, lowStock, rateCard, venue] = await Promise.all([
+  const [links, autoSend, listEntries, messages, muted, history, eventNumber, agreements, clockRows, payout, business, supplyCosts, lowStock, rateCard, venue, receipts] = await Promise.all([
     on("details") ? clientLinks(session, me) : null, // admins only: null for anyone else
     on("client") ? autoSendOn() : false,
     on("client") ? listLog(id) : [],
@@ -212,6 +216,13 @@ async function AdminEventPage({
     on("details")
       ? venuePhotosFor(session, me, null).catch((err) => {
           console.error("[venue photos] could not load:", err);
+          return null;
+        })
+      : null,
+    // Receipts: every receipt on the event, admins and managers (approving is admins only).
+    on("receipts")
+      ? adminReceiptsView(session, me, people.map((p) => ({ staffId: p.staffId, name: p.name, status: p.status }))).catch((err) => {
+          console.error("[receipts] could not load:", err);
           return null;
         })
       : null,
@@ -427,6 +438,10 @@ async function AdminEventPage({
         {payout && <PayoutCard sessionId={id} title={[adminEventTitle(ed), v.date].filter(Boolean).join(", ")} rows={payout.rows} totals={payout.totals} tipNote={payout.tipNote} />}
       </>
     ),
+    receipts: () =>
+      receipts ? (
+        <Receipts sessionId={id} mode="admin" initial={receipts.receipts} ready={receipts.ready} canApprove={receipts.canApprove} people={receipts.people} timeZone={v.timeZone} />
+      ) : null,
     business: () => (business ? <BusinessTab view={business} /> : null),
     chat: () => <ManagerChat sessionId={id} initial={messages} unread={chatUnread} timeZone={v.timeZone} muted={muted.has(id)} isAdmin gifSearch={giphyEnabled()} />,
   };
@@ -447,6 +462,7 @@ async function AdminEventPage({
           order: sheetFlags,
           client: pendingHolds.length,
           dayof: dayofCount,
+          receipts: receiptsWaiting,
           chat: chatUnread,
         }}
       />

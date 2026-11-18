@@ -21,6 +21,7 @@ import { payoutFrom } from "@/lib/team/payout-db";
 import { eventPackageName } from "@/lib/team/pay";
 import { businessShared, eventBusinessFor, type BusinessShared } from "@/lib/team/business-db";
 import { pickupsDone } from "@/lib/team/reimbursements-db";
+import { submittedReceiptsFor } from "@/lib/team/receipts-db";
 import { eventTimesheetRows, timesheetRows } from "@/lib/team/timesheet-db";
 import { weekRange, weekStart, type TimesheetRow } from "@/lib/team/timesheet";
 import { chicagoToday, eventSchedule } from "@/lib/team/time";
@@ -94,6 +95,7 @@ async function sessionsById(ids: string[]): Promise<Map<string, SessionRow>> {
 }
 
 type Pickups = Awaited<ReturnType<typeof pickupsDone>>;
+type Submitted = Awaited<ReturnType<typeof submittedReceiptsFor>>;
 
 interface EventRead {
   lines: PayrollLine[];
@@ -106,7 +108,7 @@ interface EventRead {
  * sheet) and, when shared is given, the sheet's revenue and supplies from the
  * Business tab.
  */
-async function eventLines(admin: StaffMember, session: SessionRow, sheet: TimesheetRow[], paid: Map<string, PaidRecord>, pickups?: Pickups, shared?: BusinessShared | null): Promise<EventRead> {
+async function eventLines(admin: StaffMember, session: SessionRow, sheet: TimesheetRow[], paid: Map<string, PaidRecord>, pickups?: Pickups, shared?: BusinessShared | null, submitted?: Submitted): Promise<EventRead> {
   const payout = await payoutFrom(admin, session, sheet);
   if (!payout) return { lines: [], info: null, reimbursementsReady: true };
   const ed = eventData(session);
@@ -114,7 +116,9 @@ async function eventLines(admin: StaffMember, session: SessionRow, sheet: Timesh
   const ev = { sessionId: session.id, day: sched.day, title: adminEventTitle(ed), timeZone: sched.tz };
   const byAssignment = new Map(sheet.map((r) => [r.assignmentId, r]));
   const did = pickups?.get(session.id);
-  const lines = payout.rows.map((p) => lineFrom(p, byAssignment.get(p.assignmentId) ?? null, ev, paid.get(p.assignmentId) ?? null, { ice: !!did?.ice.has(p.staffId), menu: !!did?.menu.has(p.staffId) }));
+  const lines = payout.rows.map((p) =>
+    lineFrom(p, byAssignment.get(p.assignmentId) ?? null, ev, paid.get(p.assignmentId) ?? null, { ice: !!did?.ice.has(p.staffId), menu: !!did?.menu.has(p.staffId) }, submitted?.get(session.id)?.get(p.staffId) ?? {})
+  );
   let info: EventInfo | null = null;
   if (shared) {
     const biz = await eventBusinessFor(admin, session, new Date(), shared, payout);
@@ -143,8 +147,8 @@ export async function payrollView(admin: StaffMember, period: Period): Promise<P
   const weekRows = await timesheetRows(weekStart(period.from), weekRange(period.to).to);
   const inPeriod = weekRows.filter((r) => !!r.eventDay && r.eventDay >= period.from && r.eventDay <= period.to);
   const ids = [...new Set(inPeriod.map((r) => r.sessionId))];
-  const [sessions, paid, pickups, shared] = await Promise.all([sessionsById(ids), activePaid(inPeriod.map((r) => r.assignmentId)), pickupsDone(ids), businessShared(admin)]);
-  const reads = await Promise.all([...sessions.values()].map((s) => eventLines(admin, s, inPeriod.filter((r) => r.sessionId === s.id), paid.byAssignment, pickups, shared)));
+  const [sessions, paid, pickups, shared, submitted] = await Promise.all([sessionsById(ids), activePaid(inPeriod.map((r) => r.assignmentId)), pickupsDone(ids), businessShared(admin), submittedReceiptsFor(ids)]);
+  const reads = await Promise.all([...sessions.values()].map((s) => eventLines(admin, s, inPeriod.filter((r) => r.sessionId === s.id), paid.byAssignment, pickups, shared, submitted)));
   return buildPayroll(
     period,
     reads.flatMap((r) => r.lines),

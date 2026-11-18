@@ -25,7 +25,24 @@ import {
   type PayrollView,
   type SheetEvent,
 } from "@/lib/team/payroll";
-import { KIND_LABEL, LOCKED_MESSAGE, PICKUP_PROMPT, REIMBURSEMENT_KINDS, REIMBURSEMENTS_NOT_READY, type Reimbursement, type ReimbursementKind } from "@/lib/team/reimbursements";
+import { FROM_RECEIPT_MESSAGE, KIND_LABEL, LOCKED_MESSAGE, PICKUP_PROMPT, REIMBURSEMENT_KINDS, REIMBURSEMENTS_NOT_READY, type Reimbursement, type ReimbursementKind } from "@/lib/team/reimbursements";
+import { receiptPhotoHref } from "@/lib/team/receipts";
+import { managerHref } from "@/lib/team/manager-tabs";
+
+/** The small "receipt" link on a reimbursement that came from a receipt: opens the photo after the access check. */
+function ReceiptLink({ r }: { r: Reimbursement }) {
+  if (!r.receiptId) return null;
+  return (
+    <a href={receiptPhotoHref(r.receiptId)} target="_blank" rel="noopener noreferrer" className="text-xs text-[#B5845A] underline" aria-label={`Receipt for ${KIND_LABEL[r.kind]} ${money(r.cents)}`}>
+      receipt
+    </a>
+  );
+}
+
+const PROMPT_RECEIPT: Record<keyof typeof PICKUP_PROMPT, string> = {
+  ice: "Picked up the ice and submitted a receipt. Review it",
+  menu_printing: "Picked up the menus and submitted a receipt. Review it",
+};
 
 const card = "bg-[#F5F0EB] rounded-2xl border border-[#DDD5CC] px-4 py-3 sm:px-5 sm:py-4";
 const input = "rounded-xl border border-[#DDD5CC] bg-white px-3 py-2 text-[16px] text-[#2C2420] placeholder:text-[#A39585] focus:outline-none focus:ring-2 focus:ring-[#B5845A]/30";
@@ -376,11 +393,21 @@ function PaidBox({ l, a }: { l: PayrollLine; a: Actions }) {
 
 function ReimbursedButton({ l, a }: { l: PayrollLine; a: Actions }) {
   const can = a.reimbursementsReady;
+  const fromReceipts = l.reimbursements.filter((r) => r.receiptId);
   return (
-    <button type="button" onClick={() => a.editReimbursements(l)} disabled={!can} className="tabular-nums underline decoration-[#DDD5CC] disabled:no-underline" aria-label={`Reimbursements for ${l.name}`}>
-      {money(l.reimbursementsCents)}
-      {l.reimbursements.length > 0 && <span className="block text-xs text-[#6B5D52]">{l.reimbursements.map((r) => KIND_LABEL[r.kind]).join(", ")}</span>}
-    </button>
+    <>
+      <button type="button" onClick={() => a.editReimbursements(l)} disabled={!can} className="tabular-nums underline decoration-[#DDD5CC] disabled:no-underline" aria-label={`Reimbursements for ${l.name}`}>
+        {money(l.reimbursementsCents)}
+        {l.reimbursements.length > 0 && <span className="block text-xs text-[#6B5D52]">{l.reimbursements.map((r) => KIND_LABEL[r.kind]).join(", ")}</span>}
+      </button>
+      {fromReceipts.length > 0 && (
+        <span className="flex flex-wrap justify-end gap-x-2">
+          {fromReceipts.map((r) => (
+            <ReceiptLink key={r.id} r={r} />
+          ))}
+        </span>
+      )}
+    </>
   );
 }
 
@@ -405,11 +432,17 @@ function LineNotes({ l, a }: { l: PayrollLine; a: Actions }) {
       )}
       {a.reimbursementsReady &&
         !l.paid &&
-        l.prompts.map((k) => (
-          <button key={k} type="button" onClick={() => a.editReimbursements(l, k)} className="block text-left rounded-lg bg-[#FFF3DF] px-2 py-1 text-xs text-[#9A7049] underline">
-            {PICKUP_PROMPT[k]}
-          </button>
-        ))}
+        l.prompts.map((k) =>
+          l.promptReceipts[k] ? (
+            <Link key={k} href={managerHref(l.sessionId, "receipts")} className="block text-left rounded-lg bg-[#FFF3DF] px-2 py-1 text-xs text-[#9A7049] underline">
+              {PROMPT_RECEIPT[k]}
+            </Link>
+          ) : (
+            <button key={k} type="button" onClick={() => a.editReimbursements(l, k)} className="block text-left rounded-lg bg-[#FFF3DF] px-2 py-1 text-xs text-[#9A7049] underline">
+              {PICKUP_PROMPT[k]}
+            </button>
+          )
+        )}
     </div>
   );
 }
@@ -576,10 +609,11 @@ function ReimbursementEditor({ line, startKind, ready, onClose }: { line: Payrol
             {line.reimbursements.map((r) => (
               <li key={r.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
                 <span className="text-[15px] text-[#2C2420]">
-                  {KIND_LABEL[r.kind]} <span className="tabular-nums font-medium">{money(r.cents)}</span>
+                  {KIND_LABEL[r.kind]} <span className="tabular-nums font-medium">{money(r.cents)}</span> <ReceiptLink r={r} />
                   {r.note && <span className="block text-xs text-[#6B5D52]">{r.note}</span>}
+                  {r.receiptId && !locked && <span className="block text-xs text-[#6B5D52]">{FROM_RECEIPT_MESSAGE}</span>}
                 </span>
-                {!locked && ready && (
+                {!locked && ready && !r.receiptId && (
                   <span className="flex gap-3">
                     <button type="button" className={link} onClick={() => startEdit(r)} disabled={busy}>
                       Edit

@@ -22,6 +22,7 @@ import { packageKey, staffingFor } from "@/lib/pricing";
 import { bookedGuestCount } from "@/lib/booked-facts";
 import { catalogRows, supplyCostFor, type SupplyCost } from "@/lib/team/supply-costs-db";
 import type { CatalogRow } from "@/lib/team/supply-costs";
+import { approvedReceiptsFor } from "@/lib/team/receipts-db";
 import { allPayments, dollarsToCents, eventBusiness, isYmd, type EventBusiness, type FinanceRow, type OtherCost, type Payment } from "@/lib/team/business";
 
 type Result<T = object> = ({ ok: true } & T) | { ok: false; error: string; status: number };
@@ -97,7 +98,7 @@ export function supplyPackage(name: unknown): SupplyPackage {
 /** The Business tab for one event. Null for anyone but an admin. Payroll hands in the payout sheet it already built. */
 export async function eventBusinessFor(viewer: StaffMember, session: SessionRow, now: Date = new Date(), shared?: BusinessShared | null, built?: PayoutSheet | null): Promise<EventBusinessView | null> {
   if (!isFullAdmin(viewer.role)) return null;
-  const [finance, other, payments, payout, settings, perGuest, supplies, rates] = await Promise.all([
+  const [finance, other, payments, payout, settings, perGuest, supplies, rates, receipts] = await Promise.all([
     financeRow(session.id),
     otherCosts(session.id),
     eventPayments(session.id),
@@ -106,6 +107,7 @@ export async function eventBusinessFor(viewer: StaffMember, session: SessionRow,
     shared ? shared.perGuest : suppliesSettings(viewer),
     supplyCostFor(viewer, session, undefined, shared?.catalog),
     packageRates(),
+    approvedReceiptsFor(session.id),
   ]);
   const ed = eventData(session);
   const bp = (session.booked_price ?? null) as Partial<BookedPrice> | null;
@@ -134,6 +136,7 @@ export async function eventBusinessFor(viewer: StaffMember, session: SessionRow,
     packageLabel: SUPPLY_PACKAGE_LABEL[pkg],
     other,
     reimbursements: rows.flatMap((r) => r.reimbursements.map((x) => ({ kind: x.kind, cents: x.cents }))),
+    receipts,
     settings: settings!,
   });
   return {

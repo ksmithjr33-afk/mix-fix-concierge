@@ -147,6 +147,7 @@ export interface PayrollLine {
   changed: Changed | null;
   attention: boolean; // fix hours first, or changed after it was marked paid
   prompts: PickupKind[]; // "Picked up the ice. Add a reimbursement?"
+  promptReceipts: Partial<Record<PickupKind, string>>; // a submitted receipt of that type: link to it instead
   payout: PayoutRow; // the source row, for totals
 }
 
@@ -158,7 +159,15 @@ export interface LineEvent {
 }
 
 /** One payout row as a payroll line. Every number is the payout row's. */
-export function lineFrom(p: PayoutRow, sheet: TimesheetRow | null, ev: LineEvent, paid: PaidRecord | null, did: { ice: boolean; menu: boolean } = { ice: false, menu: false }): PayrollLine {
+export function lineFrom(
+  p: PayoutRow,
+  sheet: TimesheetRow | null,
+  ev: LineEvent,
+  paid: PaidRecord | null,
+  did: { ice: boolean; menu: boolean } = { ice: false, menu: false },
+  submitted: Partial<Record<PickupKind, string>> = {}
+): PayrollLine {
+  const prompts = pickupPrompts(did, p.reimbursements);
   const tips = p.tipsCents ?? 0;
   const problem: LineProblem | null = !sheet?.clockIn ? "no_clock_in" : !sheet.clockOut ? "no_clock_out" : null;
   const payable = !p.fromEstimate && p.actualMinutes !== null && problem === null;
@@ -191,7 +200,8 @@ export function lineFrom(p: PayoutRow, sheet: TimesheetRow | null, ev: LineEvent
     paid,
     changed: null,
     attention: false,
-    prompts: pickupPrompts(did, p.reimbursements),
+    prompts,
+    promptReceipts: Object.fromEntries(prompts.filter((k) => submitted[k]).map((k) => [k, submitted[k]!])),
     payout: p,
   };
   line.changed = paid ? changedAfterPaid(paid.snapshot, line) : null;

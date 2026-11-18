@@ -220,6 +220,16 @@ export default async function BusinessPage({ searchParams }: { searchParams: Pro
           )}
         </section>
 
+        <section className={card} aria-label="Receipts">
+          <h2 className={h2}>Receipts</h2>
+          <p className="text-[15px] text-[#2C2420]">
+            <Link href="/team/admin/receipts" className="text-[#B5845A] underline">
+              Open every receipt
+            </Link>{" "}
+            across all events, with filters, totals and a CSV export.
+          </p>
+        </section>
+
         <section className={card} aria-label="Supply costs">
           <h2 className={h2}>Supply costs</h2>
           <p className="text-[15px] text-[#2C2420]">

@@ -12,7 +12,7 @@
 import { supabase } from "@/lib/supabase";
 import type { StaffMember } from "@/lib/team/event-view";
 import { isFullAdmin } from "@/lib/team/roles";
-import { LOCKED_MESSAGE, REIMBURSEMENTS_NOT_READY, validateReimbursement, type Reimbursement, type ReimbursementKind } from "@/lib/team/reimbursements";
+import { FROM_RECEIPT_MESSAGE, LOCKED_MESSAGE, REIMBURSEMENTS_NOT_READY, validateReimbursement, type Reimbursement, type ReimbursementKind } from "@/lib/team/reimbursements";
 
 export const REIMBURSEMENTS_TABLE = "payroll_reimbursements";
 const PAID_TABLE = "payroll_paid";
@@ -29,9 +29,10 @@ interface Row {
   amount_cents: number;
   note: string | null;
   created_at?: string;
+  receipt_id?: string | null; // from 20261223_receipts.sql; missing before it runs
 }
 
-const toItem = (r: Row): Reimbursement => ({ id: r.id, assignmentId: r.assignment_id, sessionId: r.session_id, staffId: r.staff_id, kind: r.kind, cents: Number(r.amount_cents), note: r.note ?? "" });
+const toItem = (r: Row): Reimbursement => ({ id: r.id, assignmentId: r.assignment_id, sessionId: r.session_id, staffId: r.staff_id, kind: r.kind, cents: Number(r.amount_cents), note: r.note ?? "", receiptId: r.receipt_id ?? null });
 
 export interface ReimbursementsRead {
   ready: boolean; // false until the migration runs
@@ -80,7 +81,7 @@ export async function pickupsDone(sessionIds: string[]): Promise<Map<string, { i
   return out;
 }
 
-async function lineIsPaid(assignmentId: string): Promise<boolean> {
+export async function lineIsPaid(assignmentId: string): Promise<boolean> {
   const { data, error } = await supabase.from(PAID_TABLE).select("assignment_id").eq("assignment_id", assignmentId).is("undone_at", null);
   return !error && ((data as unknown[]) ?? []).length > 0;
 }
@@ -121,6 +122,7 @@ export async function editReimbursement(admin: StaffMember, body: Record<string,
   const row = await existing(body.id);
   if (row === "not_ready") return { ok: false, error: REIMBURSEMENTS_NOT_READY, status: 503 };
   if (!row) return { ok: false, error: "That reimbursement is gone. Reload the page.", status: 404 };
+  if (row.receipt_id) return { ok: false, error: FROM_RECEIPT_MESSAGE, status: 409 };
   if (await lineIsPaid(row.assignment_id)) return { ok: false, error: LOCKED_MESSAGE, status: 409 };
   const { error } = await supabase
     .from(REIMBURSEMENTS_TABLE)
@@ -136,6 +138,7 @@ export async function removeReimbursement(admin: StaffMember, body: Record<strin
   const row = await existing(body.id);
   if (row === "not_ready") return { ok: false, error: REIMBURSEMENTS_NOT_READY, status: 503 };
   if (!row) return { ok: false, error: "That reimbursement is gone. Reload the page.", status: 404 };
+  if (row.receipt_id) return { ok: false, error: FROM_RECEIPT_MESSAGE, status: 409 };
   if (await lineIsPaid(row.assignment_id)) return { ok: false, error: LOCKED_MESSAGE, status: 409 };
   const { error } = await supabase.from(REIMBURSEMENTS_TABLE).delete().eq("id", row.id);
   if (error) return { ok: false, ...saveError(error.message) };
