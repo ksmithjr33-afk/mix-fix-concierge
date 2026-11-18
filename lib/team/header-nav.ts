@@ -3,8 +3,8 @@
 // can check it. The header (app/team/team-header.tsx) reads the counts and the
 // links render in app/team/header-nav.tsx.
 //
-// Admins and managers: Staffing, Staff, Clients, Time, News, Training, Me.
-// Admins (role admin, never managers) also get Business and Payroll, after Time.
+// Admins and managers: Staffing, Staff, Clients, Time, Scorecard, News, Training, Me.
+// Admins (role admin, never managers) also get Business and Payroll, after Time (before Scorecard).
 // Everyone else, and admins in Bartender view: Events, Training, News, Me.
 // Training has a badge for anything not yet read or acknowledged.
 // On phones every link is a row in the Menu panel; on wider screens all but Me
@@ -67,6 +67,7 @@ export function headerLinks(showAdmin: boolean, counts: NavCounts, showBusiness 
             { href: "/team/admin/payroll", label: "Payroll", badge: 0, match: ["/team/admin/payroll"], inline: true },
           ]
         : []),
+      { href: "/team/admin/scorecard", label: "Scorecard", badge: 0, match: ["/team/admin/scorecard"], inline: true },
       news,
       training,
       me,

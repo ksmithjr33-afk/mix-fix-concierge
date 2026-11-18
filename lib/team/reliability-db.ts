@@ -22,6 +22,7 @@ interface AssignmentWithSession {
   staff_id: string;
   status: string;
   dropped_at?: string | null;
+  responded_at?: string | null;
   session: SessionRow | SessionRow[] | null;
 }
 
@@ -41,7 +42,7 @@ export async function recordFacts(staffIds: string[], now: Date = new Date()): P
   if (ids.length === 0) return out;
 
   const [{ data: asg }, { data: punches }, { data: bars }, { data: closeouts }, { data: handoffs }, hidden] = await Promise.all([
-    supabase.from("event_assignments").select("session_id, staff_id, status, dropped_at, session:session_id (*)").in("staff_id", ids),
+    supabase.from("event_assignments").select("session_id, staff_id, status, dropped_at, responded_at, session:session_id (*)").in("staff_id", ids),
     supabase.from("time_punches").select("staff_id, session_id, type, punched_at, flags").in("staff_id", ids),
     supabase.from("bar_ready_reports").select("staff_id, session_id, created_at").in("staff_id", ids),
     supabase.from("event_closeouts").select("staff_id, session_id").in("staff_id", ids),
@@ -51,8 +52,10 @@ export async function recordFacts(staffIds: string[], now: Date = new Date()): P
 
   const key = (staffId: string, sessionId: string) => `${staffId}|${sessionId}`;
   const clockIns = new Map<string, Date>();
+  const clockOuts = new Map<string, Date>();
   for (const p of (punches as { staff_id: string; session_id: string; type: string; punched_at: string; flags: string[] | null }[]) ?? []) {
     if (p.type === "in") clockIns.set(key(p.staff_id, p.session_id), new Date(p.punched_at));
+    if (p.type === "out") clockOuts.set(key(p.staff_id, p.session_id), new Date(p.punched_at));
     if ((p.flags ?? []).some((f) => LOCATION_FLAGS.includes(f))) out.get(p.staff_id)?.flaggedPunches.push(new Date(p.punched_at));
   }
   const firstBar = new Map<string, Date>();
@@ -67,13 +70,17 @@ export async function recordFacts(staffIds: string[], now: Date = new Date()): P
     const f = out.get(a.staff_id);
     if (!f) continue;
     if (a.dropped_at) f.drops.push(new Date(a.dropped_at));
+    if (a.status === "declined" && !hidden.has(a.session_id)) {
+      const at = a.dropped_at ?? a.responded_at;
+      if (at) f.declines!.push(new Date(at));
+    }
     if (a.status !== "accepted" || hidden.has(a.session_id)) continue;
     const s = Array.isArray(a.session) ? a.session[0] : a.session;
     if (!s || s.status !== "submitted") continue;
     const when = eventOver(s);
     if (!when || when.end.getTime() > now.getTime()) continue; // not worked yet
     const k = key(a.staff_id, a.session_id);
-    const e: WorkedEvent = { sessionId: a.session_id, ...when, clockIn: clockIns.get(k) ?? null, barReadyAt: firstBar.get(k) ?? null, closeout: closed.has(k) };
+    const e: WorkedEvent = { sessionId: a.session_id, ...when, clockIn: clockIns.get(k) ?? null, clockOut: clockOuts.get(k) ?? null, barReadyAt: firstBar.get(k) ?? null, closeout: closed.has(k) };
     f.events.push(e);
   }
   for (const h of (handoffs as { from_staff_id: string; created_at: string; urgent: boolean }[]) ?? []) {

@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import type { HandoffPanelRow, PostPanel, Requester } from "@/lib/team/shifts-db";
 import { timeLabel } from "@/lib/team/clock-label";
+import TierBadge from "../../scorecard/tier-badge";
 
 const card = "bg-[#F5F0EB] rounded-2xl border border-[#DDD5CC] px-4 py-3 sm:px-5 sm:py-4";
 
@@ -43,7 +44,7 @@ function useAction() {
   return { busy, error, note, run, confirm, setConfirm };
 }
 
-function RequesterList({ people, postId, spots, tz, run, busy, records, certs }: { people: Requester[]; postId: string; spots: number; tz: string; run: ReturnType<typeof useAction>["run"]; busy: string; records: Record<string, string>; certs: Record<string, string> }) {
+function RequesterList({ people, postId, spots, tz, run, busy, records, certs, tiers = {} }: { people: Requester[]; postId: string; spots: number; tz: string; run: ReturnType<typeof useAction>["run"]; busy: string; records: Record<string, string>; certs: Record<string, string>; tiers?: Record<string, string> }) {
   if (people.length === 0) return <p className="text-[15px] text-[#6B5D52] py-1">No requests yet.</p>;
   return (
     <ul className="divide-y divide-[#DDD5CC]">
@@ -52,6 +53,7 @@ function RequesterList({ people, postId, spots, tz, run, busy, records, certs }:
           <div className="min-w-0">
             <p className="font-medium text-[#2C2420]">
               {r.name}
+              {tiers[r.staffId] && <TierBadge tier={tiers[r.staffId]} />}
               {r.unavailable && <span className="ml-2 align-middle text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-[#FFF3DF] text-[#9A7049]">Unavailable</span>}
               {certs[r.staffId] && <span className="ml-2 align-middle text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-[#F6E3DC] text-[#A0412D]">{certs[r.staffId]}</span>}
             </p>
@@ -91,6 +93,7 @@ export default function ShiftPanel({
   marketSource,
   timeZone,
   records = {},
+  tiers = {},
   certs = {},
 }: {
   sessionId: string;
@@ -99,6 +102,7 @@ export default function ShiftPanel({
   marketSource: string | null;
   timeZone: string;
   records?: Record<string, string>; // reliability line per staff id
+  tiers?: Record<string, string>; // Scorecard tier per staff id: display only, never the viewer
   certs?: Record<string, string>; // "TABC expired" per staff id, for the event's market
 }) {
   const { busy, error, note, run, confirm, setConfirm } = useAction();
@@ -149,7 +153,7 @@ export default function ShiftPanel({
             <p className="text-sm text-[#6B5D52] mb-2">
               Posted {timeLabel(p.posted_at, undefined, timeZone)} · {panel.spotsOpen} {panel.spotsOpen === 1 ? "spot" : "spots"} open. Approve up to {panel.spotsOpen}. Approved staff are accepted right away.
             </p>
-            <RequesterList people={panel.requesters} postId={p.id} spots={panel.spotsOpen} tz={timeZone} run={run} busy={busy} records={records} certs={certs} />
+            <RequesterList people={panel.requesters} postId={p.id} spots={panel.spotsOpen} tz={timeZone} run={run} busy={busy} records={records} certs={certs} tiers={tiers} />
             <button type="button" disabled={!!busy} onClick={() => run("unpost", "/api/team/admin/shifts", { action: "unpost", postId: p.id })} className="text-sm text-[#A0412D] underline mt-2 disabled:opacity-40">
               {busy === "unpost" ? "Unposting..." : "Unpost"}
             </button>
@@ -190,7 +194,7 @@ export default function ShiftPanel({
               : "Cover needed: open to the market. Approve one person who asked."}{" "}
             {h.fromName.split(" ")[0]} stays on the shift until you approve.
           </p>
-          {h.mode === "market" && h.postId && <div className="mt-2"><RequesterList people={h.requesters} postId={h.postId} spots={1} tz={timeZone} run={run} busy={busy} records={records} certs={certs} /></div>}
+          {h.mode === "market" && h.postId && <div className="mt-2"><RequesterList people={h.requesters} postId={h.postId} spots={1} tz={timeZone} run={run} busy={busy} records={records} certs={certs} tiers={tiers} /></div>}
           <div className="flex flex-wrap gap-3 mt-2">
             {h.mode === "teammate" && h.status === "teammate_accepted" && (
               <button type="button" disabled={!!busy} onClick={() => run(`ha:${h.id}`, "/api/team/admin/handoff", { action: "approve", handoffId: h.id })} className="rounded-lg bg-[#8B9E7E] text-white px-3 py-1.5 text-sm font-medium disabled:opacity-40">

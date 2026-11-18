@@ -20,6 +20,7 @@ export interface WorkedEvent {
   arrival: Date | null;
   start: Date | null;
   clockIn: Date | null;
+  clockOut?: Date | null; // the last clock out; missing (undefined) in older callers is read as none
   barReadyAt: Date | null; // first bar ready photo
   closeout: boolean;
 }
@@ -29,6 +30,7 @@ export interface RecordFacts {
   drops: Date[]; // when they declined a shift they had accepted
   handoffs: { at: Date; urgent: boolean }[];
   flaggedPunches: Date[]; // punch times with a location flag
+  declines?: Date[]; // when they declined an event offered to them, or dropped one they had accepted
 }
 
 export interface RecordStats {
@@ -41,9 +43,14 @@ export interface RecordStats {
   urgentHandoffs: number;
   locationFlags: number;
   isNew: boolean;
+  // For the Scorecard, shown beside the score and never part of it.
+  lateArrivals: number; // clocked in after the arrival time
+  missingClockOuts: number; // clocked in, never clocked out
+  declines: number; // events declined (offers and drops)
+  missingCloseouts: number; // events worked with no closeout sent
 }
 
-export const emptyFacts = (): RecordFacts => ({ events: [], drops: [], handoffs: [], flaggedPunches: [] });
+export const emptyFacts = (): RecordFacts => ({ events: [], drops: [], handoffs: [], flaggedPunches: [], declines: [] });
 
 /** The record for everything since `since` (null for all time). */
 export function computeRecord(f: RecordFacts, since: Date | null): RecordStats {
@@ -60,6 +67,10 @@ export function computeRecord(f: RecordFacts, since: Date | null): RecordStats {
     urgentHandoffs: handoffs.filter((h) => h.urgent).length,
     locationFlags: f.flaggedPunches.filter(inWindow).length,
     isNew: events.length < NEW_UNDER,
+    lateArrivals: events.filter((e) => e.clockIn && e.arrival && e.clockIn.getTime() > e.arrival.getTime()).length,
+    missingClockOuts: events.filter((e) => e.clockIn && !e.clockOut).length,
+    declines: (f.declines ?? []).filter(inWindow).length,
+    missingCloseouts: events.filter((e) => !e.closeout).length,
   };
 }
 

@@ -68,6 +68,8 @@ import { eventTimesheetRows } from "@/lib/team/timesheet-db";
 import { payoutSheet } from "@/lib/team/payout-db";
 import PayoutCard from "../../payout-card";
 import { timePageHref } from "@/lib/team/clock-card";
+import { rateTeamCard, tierBadges } from "@/lib/team/scorecard-db";
+import RateTeamCard from "./rate-team-card";
 
 export const dynamic = "force-dynamic";
 
@@ -148,22 +150,25 @@ async function AdminEventPage({
     placesP,
   ]);
   // Team tab only.
-  const [records, certs, distances, away] =
+  const [records, certs, distances, away, tiers] =
     panel && lookIdsP
       ? await Promise.all([
           lookIdsP.then((ids) => compactLines(ids)),
           lookIdsP.then((ids) => certIssues(ids, panel.market)),
           distancesToEvent(session, staff.filter((s) => s.active).map((s) => s.id)),
           unavailableOn(eventDayOf(session)),
+          // Scorecard tiers beside names: admins and managers, display only, never their own.
+          lookIdsP.then((ids) => tierBadges(me, [...ids, ...people.map((p) => p.staffId)])).catch(() => ({}) as Record<string, string>),
         ])
       : [
           {} as Awaited<ReturnType<typeof compactLines>>,
           {} as Awaited<ReturnType<typeof certIssues>>,
           new Map() as Awaited<ReturnType<typeof distancesToEvent>>,
           new Set<string>() as Awaited<ReturnType<typeof unavailableOn>>,
+          {} as Record<string, string>,
         ];
   // Details, Client list and Chat only.
-  const [links, autoSend, listEntries, messages, muted, history, eventNumber, agreements, clockRows, payout, business, supplyCosts, lowStock] = await Promise.all([
+  const [links, autoSend, listEntries, messages, muted, history, eventNumber, agreements, clockRows, payout, business, supplyCosts, lowStock, rateCard] = await Promise.all([
     on("details") ? clientLinks(session, me) : null, // admins only: null for anyone else
     on("client") ? autoSendOn() : false,
     on("client") ? listLog(id) : [],
@@ -199,6 +204,8 @@ async function AdminEventPage({
     on("order") ? sheetP.then((s) => supplyCostFor(me, session, s)).then((c) => (c && !c.catalogEmpty ? c : null)) : null,
     // Running low: the open reports for this event, at the top of Day of.
     on("dayof") ? listReports(me, { open: true, sessionId: id }) : [],
+    // Rate the team: admins and managers, after the event ends, never the viewer.
+    on("dayof") ? rateTeamCard(me, session, people.map((p) => ({ staffId: p.staffId, name: p.name, status: p.status }))).catch(() => null) : null,
   ]);
   const repeat = repeatLabel(eventNumber);
   if (tab === "chat") await markThreadRead(id, me.id);
@@ -342,8 +349,9 @@ async function AdminEventPage({
             timeZone={v.timeZone}
             market={panel.market}
             showProgress={false}
+            tiers={tiers}
           />
-          <ShiftPanel sessionId={id} panel={panel} handoffs={handoffs} marketSource={marketSource} timeZone={v.timeZone} records={records} certs={certs} />
+          <ShiftPanel sessionId={id} panel={panel} handoffs={handoffs} marketSource={marketSource} timeZone={v.timeZone} records={records} certs={certs} tiers={tiers} />
         </>
       );
     },
@@ -384,6 +392,7 @@ async function AdminEventPage({
     ),
     dayof: () => (
       <>
+        {rateCard && <RateTeamCard sessionId={id} card={rateCard} />}
         {lowStock.length > 0 && (
           <section className="space-y-2">
             <h2 className="px-1 font-heading text-base font-bold text-[#A0412D]">Running low</h2>

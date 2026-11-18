@@ -23,6 +23,9 @@ const UNIQUE: Record<string, string[][]> = {
   order_sheet_stores: [["color"]],
 };
 
+/** Tables a test treats as not created yet (a migration not run): every query on them returns an error. */
+export const missingTables = new Set<string>();
+
 /** Tests can stand in for database constraints and triggers: return an error message to refuse a write. */
 export const guards: ((table: string, op: string, rows: Record<string, unknown>[]) => string | null)[] = [];
 
@@ -157,6 +160,7 @@ class Query implements PromiseLike<Result> {
   }
 
   private run(): Result {
+    if (missingTables.has(this.table)) return { data: null, error: { message: `relation "public.${this.table}" does not exist` } };
     const rows = db[this.table];
     if (this.op !== "select") {
       const touched = this.op === "insert" || this.op === "upsert" ? (Array.isArray(this.payload) ? this.payload : [this.payload!]) : rows.filter((r) => this.filters.every((f) => f(r)));

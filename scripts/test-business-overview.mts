@@ -130,7 +130,7 @@ const evs2 = await ovDb.overviewEvents(admin as never, addDays(d, -1), addDays(d
 check("Once it is set, every event with a total shows an estimated profit", evs2.find((e) => e.sessionId === "s1")!.business.complete && evs2.find((e) => e.sessionId === "s1")!.business.profitCents !== null && !evs2.find((e) => e.sessionId === "s2")!.business.complete);
 
 // ----- The header, the page, the routes -----
-check("Admins get a Business link after Time", nav.headerLinks(true, { unreadNews: 0 }, true).map((l) => l.label).join() === "Staffing,Staff,Clients,Time,Business,Payroll,News,Training,Me");
+check("Admins get a Business link after Time", nav.headerLinks(true, { unreadNews: 0 }, true).map((l) => l.label).join() === "Staffing,Staff,Clients,Time,Business,Payroll,Scorecard,News,Training,Me");
 check("Managers do not", !nav.headerLinks(true, { unreadNews: 0 }, false).some((l) => l.label === "Business"));
 check("The header shows Business only to role admin", src("app/team/team-header.tsx").includes("const showBusiness = showAdmin && isFullAdmin(viewed?.role);"));
 check("The page sends anyone but an admin away before loading", /export default async function BusinessPage[\s\S]*?const me = await requireFullAdmin\(/.test(src("app/team/admin/business/page.tsx")) && src("lib/team/auth.ts").includes('if (!isFullAdmin(staff.role)) redirect("/team/admin/events");'));

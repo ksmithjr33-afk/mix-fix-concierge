@@ -8,6 +8,7 @@ import { FLAG_LABELS, formatWorked, type PunchFlag } from "@/lib/team/clock";
 import { roleSuffix, ROLES, ROLE_LABEL } from "@/lib/team/roles";
 import { TOOLS_TAB } from "@/lib/team/prep";
 import { PrepStatusLine } from "./day-of";
+import TierBadge from "../../scorecard/tier-badge";
 
 const card = "bg-[#F5F0EB] rounded-2xl border border-[#DDD5CC] px-4 py-3 sm:px-5 sm:py-4";
 
@@ -42,7 +43,10 @@ export default function AssignPanel({
   timeZone,
   market,
   showProgress = true,
+  tiers = {},
 }: {
+  tiers?: Record<string, string>; // Scorecard tier per staff id: display only, admins and managers, never the viewer
+
   showProgress?: boolean; // the manager view shows checklist progress and punches on Day of instead
   timeZone: string;
   market: string | null;
@@ -116,6 +120,7 @@ export default function AssignPanel({
                     <p className="font-medium text-[#2C2420]">
                       {p.name}
                       {roleSuffix(p.role) && <span className="font-normal text-[#6B5D52]">{roleSuffix(p.role)}</span>}
+                      {tiers[p.staffId] && <TierBadge tier={tiers[p.staffId]} />}
                     </p>
                     <p className="text-xs text-[#6B5D52]">
                       Assigned {timeLabel(p.assignedAt, undefined, timeZone)}
@@ -195,6 +200,7 @@ export default function AssignPanel({
               {pickable.map((s) => (
                 <option key={s.id} value={s.id}>
                   {s.name}
+                  {tiers[s.id] ? ` [${tiers[s.id]}]` : ""}
                   {roleSuffix(s.role)}
                   {s.declined ? " (declined before)" : ""}
                   {market && !s.markets.includes(market) ? " (other market)" : ""}
