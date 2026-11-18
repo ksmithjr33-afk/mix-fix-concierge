@@ -9,7 +9,7 @@ import { PAYOUT_FLAG_LABEL, diffHours, diffMoney, payoutText, type PayoutRow, ty
 // The payout sheet for one event: admins and managers, on the manager Day of
 // tab and on the Time page for that event. Estimate against actual, mileage,
 // tips, and what to pay each person.
-export default function PayoutCard({ sessionId, title, rows, totals }: { sessionId: string; title: string; rows: PayoutRow[]; totals: PayoutTotals }) {
+export default function PayoutCard({ sessionId, title, rows, totals, tipNote = null }: { sessionId: string; title: string; rows: PayoutRow[]; totals: PayoutTotals; tipNote?: string | null }) {
   return (
     <section className="rounded-2xl border border-[#DDD5CC] bg-white px-4 py-3" aria-label="Payout">
       <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
@@ -43,6 +43,7 @@ export default function PayoutCard({ sessionId, title, rows, totals }: { session
             <dt className="font-semibold">Total to pay</dt>
             <dd className="text-right font-heading font-bold">{money(totals.totalCents)}</dd>
           </dl>
+          {tipNote && <p className="text-xs text-[#9A7049] mt-1">{tipNote} Tips here stay the gratuity split evenly among the accepted bartenders.</p>}
           {totals.open > 0 && (
             <p className="text-xs text-[#9A7049] mt-1">
               {totals.open} of {totals.people} without actual hours yet: their totals use the estimate.

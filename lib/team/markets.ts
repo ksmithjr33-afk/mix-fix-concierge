@@ -5,6 +5,7 @@
 
 import { distanceMeters, type LatLng } from "@/lib/team/clock";
 import { TZ, TZ_KEY } from "@/lib/team/time";
+import { cityFallback } from "@/lib/booking-webhook";
 
 export const MARKETS = ["dallas", "austin", "houston", "los_angeles"] as const;
 export type Market = (typeof MARKETS)[number];
@@ -94,7 +95,12 @@ export function eventData(s: { event_date?: string | null; event_data: Record<st
  */
 export function needsAutoMarket(s: MarketSession): boolean {
   if (s.team_market_source === "admin") return false;
-  const address = String(s.event_data?.event_address ?? "").trim();
+  const address = marketAddress(s);
   if (!s.team_market_source) return true;
   return (s.team_market_address ?? "") !== address;
+}
+
+/** What the automatic market is worked out from: the event address, else the booked city ("Prosper, TX"). */
+export function marketAddress(s: MarketSession): string {
+  return String(s.event_data?.event_address ?? "").trim() || cityFallback(s as unknown as Record<string, unknown>);
 }

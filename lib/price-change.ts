@@ -48,6 +48,9 @@ export interface BookedPrice {
   source: "create-session" | "computed" | "change-order" | "update";
   basis?: PriceBasis | null; // the event the total was priced for, set once known
   class49_used?: boolean; // CLASS49 already taken off an earlier price change
+  // What the booking said each bartender's tip is, in dollars (GHL tip_per_bartender).
+  // Shown only; the payout card always splits the gratuity evenly.
+  tip_per_bartender?: number | null;
   updated_at?: string;
 }
 
@@ -85,12 +88,25 @@ export function toMoney(v: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-export function toBool(v: unknown, fallback: boolean): boolean {
+/**
+ * Yes or no from loose text: Yes, No, true, false, and phrases like
+ * "No tip jar.", "No, thanks", "Yes - tip jar". Null when it says neither.
+ * Replaces an exact match that read "No tip jar." (with a period) as yes.
+ */
+export function parseTipJar(v: unknown): boolean | null {
   if (typeof v === "boolean") return v;
-  const s = String(v ?? "").trim().toLowerCase();
-  if (!s) return fallback;
-  if (/^(no|false|0|off|no tip jar|none)$/.test(s)) return false;
-  return /^(yes|true|1|on|tip jar|jar)$/.test(s) ? true : fallback;
+  if (typeof v === "number") return v === 1 ? true : v === 0 ? false : null;
+  const raw = String(v ?? "");
+  if (raw.includes("{{")) return null;
+  const s = raw.trim().toLowerCase().replace(/[^a-z0-9 ]+/g, " ").replace(/\s+/g, " ").trim();
+  if (!s) return null;
+  if (/^(no|n|nope|false|f|0|off|none|without)\b/.test(s) || /\bno tip jar\b/.test(s) || /\bwithout (a )?tip jar\b/.test(s)) return false;
+  if (/^(yes|y|yep|yeah|true|t|1|on|with)\b/.test(s) || /\btip jar\b/.test(s) || s === "jar") return true;
+  return null;
+}
+
+export function toBool(v: unknown, fallback: boolean): boolean {
+  return parseTipJar(v) ?? fallback;
 }
 
 export function toCount(v: unknown): number | null {

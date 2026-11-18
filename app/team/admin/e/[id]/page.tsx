@@ -56,6 +56,9 @@ import { giphyEnabled } from "@/lib/team/media";
 import { eventNumberFor, historyFor } from "@/lib/client-history-db";
 import { repeatLabel } from "@/lib/client-history";
 import ClientHistoryCard from "./client-history-card";
+import BookingSummaryCard from "./booking-summary-card";
+import { bookingSummary } from "@/lib/booking-summary";
+import { isAdminRole } from "@/lib/team/roles";
 import PriceNeededCard from "./price-needed-card";
 import { pendingBlocks, pendingSummary } from "@/lib/price-pending";
 import { eventTimesheetRows } from "@/lib/team/timesheet-db";
@@ -288,6 +291,8 @@ async function AdminEventPage({
           )}
           {agreements && <AgreementCard sessionId={id} initial={agreements} />}
           {history && <ClientHistoryCard history={history} clientKey={history.matchedOn} />}
+          {/* Discount and gratuity amounts: admins and managers only. */}
+          {isAdminRole(me.role) && bookingSummary(session) && <BookingSummaryCard summary={bookingSummary(session)!} />}
           {hidden ? (
             // Hidden events are not edited: the cards are read only until it is unhidden.
             <Details v={v} />
@@ -374,7 +379,7 @@ async function AdminEventPage({
         <MissingReports reports={missing.filter((r) => !onList.has(r.staffId))} timeZone={v.timeZone} />
         <Closeouts sessionId={id} closeouts={closeouts} waiting={started ? waiting : []} timeZone={v.timeZone} />
         <TimePunches people={people} timeZone={v.timeZone} />
-        {payout && <PayoutCard sessionId={id} title={[adminEventTitle(ed), v.date].filter(Boolean).join(", ")} rows={payout.rows} totals={payout.totals} />}
+        {payout && <PayoutCard sessionId={id} title={[adminEventTitle(ed), v.date].filter(Boolean).join(", ")} rows={payout.rows} totals={payout.totals} tipNote={payout.tipNote} />}
       </>
     ),
     business: () => (business ? <BusinessTab view={business} /> : null),

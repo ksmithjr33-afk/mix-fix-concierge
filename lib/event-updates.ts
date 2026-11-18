@@ -35,6 +35,7 @@ import { eventTimeZone } from "@/lib/team/markets";
 import { addPending, unpriced, unpricedReason, type PricePendingInfo } from "@/lib/price-pending";
 import { packageKey } from "@/lib/pricing";
 import { autoSendOn, holdChange, listWouldChange } from "@/lib/client-list-db";
+import { bookingFill } from "@/lib/booking-webhook";
 
 export const SESSION_COLUMNS =
   "id, name, email, event_date, package_type, guest_count, event_name, hours_booked, status, event_data, version, submitted_at, updated_at";
@@ -62,6 +63,17 @@ export interface SessionRow {
   price_pending_info?: PricePendingInfo | null;
   // "Already confirmed, add to our calendar only": nothing to GHL or the client (supabase/migrations/20261207_calendar_only.sql).
   calendar_only?: boolean | null;
+  // As booked through GHL (supabase/migrations/20261215_booking_webhook_fields.sql).
+  ghl_contact_id?: string | null;
+  phone?: string | null;
+  event_type?: string | null;
+  bar_service_start?: string | null;
+  bartender_count?: number | null;
+  tip_jar?: boolean | null;
+  promo_code?: string | null;
+  package_summary?: string | null;
+  event_city?: string | null;
+  event_state?: string | null;
 }
 
 export interface EventUpdateRow {
@@ -127,8 +139,12 @@ export function stripLegacyFields(eventData: EventData): EventData {
  * exist (chats started without a /s link) or was already submitted.
  */
 export async function recordSubmission(sessionId: string, eventData: EventData): Promise<boolean> {
-  const { data: bookedRow } = await supabase.from("sessions").select("hours_booked").eq("id", sessionId).maybeSingle();
-  const clean = withHoursBooked(stripLegacyFields(eventData), { hours_booked: bookedRow?.hours_booked ?? null });
+  // select("*"): the booking columns from 20261215 may not exist yet.
+  const { data: bookedRow } = await supabase.from("sessions").select("*").eq("id", sessionId).maybeSingle();
+  const stripped = stripLegacyFields(eventData);
+  // What GHL booked fills only what the chatbot left blank: its answers win.
+  const filled = { ...stripped, ...bookingFill(stripped, (bookedRow ?? {}) as Record<string, unknown>) } as EventData;
+  const clean = withHoursBooked(filled, { hours_booked: bookedRow?.hours_booked ?? null });
   const nowIso = new Date().toISOString();
 
   const { data, error } = await supabase

@@ -189,8 +189,25 @@ const res = await createSession.POST(
 const made = (await res.json()) as { id: string };
 check("Same email and same date as an earlier booking still creates a new session", res.status === 200 && db.sessions.length === before + 1 && !["d-old", "d-new", "d-past"].includes(made.id));
 check("The earlier sessions are untouched", db.sessions.find((s) => s.id === "d-old")!.status === "in_progress" && db.sessions.find((s) => s.id === "d-new")!.status === "submitted");
+// The one lookup is the duplicate guard: the exact same payload within 10
+// minutes. A repeat client (same contact ID and email) booking again is new.
+const again = await createSession.POST(
+  new Request("http://plan.test/api/create-session", { method: "POST", headers: { host: "plan.test" }, body: JSON.stringify({ contact_id: "ghl-dulari", name: "Dulari Gandhi", email: "dulari.g@example.com", event_date: "April 11", package_type: "Full Bar", guest_count: "18", event_type: "Birthday" }) }) as never
+);
+const again2 = await createSession.POST(
+  new Request("http://plan.test/api/create-session", { method: "POST", headers: { host: "plan.test" }, body: JSON.stringify({ contact_id: "ghl-dulari", name: "Dulari Gandhi", email: "dulari.g@example.com", event_date: "June 6", package_type: "Full Bar", guest_count: "40", event_type: "Birthday" }) }) as never
+);
+const repeatIds = [made.id, ((await again.json()) as { id: string }).id, ((await again2.json()) as { id: string }).id];
+check("A repeat client with the same contact ID always gets a new event", new Set(repeatIds).size === 3 && db.sessions.length === before + 3);
 const createSrc = src("app/api/create-session/route.ts");
-check("Session create never looks a session up", !/\.eq\(|\.ilike\(|\.match\(|upsert|\.update\(/.test(createSrc) && createSrc.includes('.from("sessions").insert('));
+const guardSrc = src("lib/booking-webhook-db.ts");
+const lookup = guardSrc.slice(guardSrc.indexOf("export async function recentDuplicate"), guardSrc.indexOf("export function bookedPriceFrom"));
+check(
+  "Session create never matches an earlier event: the only lookup is the payload hash within 10 minutes",
+  !/\.eq\(|\.ilike\(|\.match\(|upsert|\.update\(/.test(createSrc) &&
+    (lookup.match(/\.eq\(/g) ?? []).length === 1 && lookup.includes('.eq("booking_payload_hash", hash)') && !/ghl_contact_id|email|event_date|ilike|match\(/.test(lookup) &&
+    !/upsert|from\("sessions"\)\s*\.update\(/.test(guardSrc) && guardSrc.includes('.from("sessions").insert(')
+);
 
 // ---- Bartenders refused everywhere ----
 reset();

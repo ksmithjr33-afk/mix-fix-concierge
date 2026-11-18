@@ -8,12 +8,13 @@ import { isAdminRole } from "@/lib/team/roles";
 import { crewEstimates } from "@/lib/team/pay-db";
 import { eventTimesheetRows } from "@/lib/team/timesheet-db";
 import type { TimesheetRow } from "@/lib/team/timesheet";
-import { payoutRow, payoutTotals, type PayoutRow, type PayoutTotals } from "@/lib/team/payout";
+import { payoutRow, payoutTotals, tipMismatchNote, type PayoutRow, type PayoutTotals } from "@/lib/team/payout";
 
 export interface PayoutSheet {
   sessionId: string;
   rows: PayoutRow[];
   totals: PayoutTotals;
+  tipNote: string | null; // booked tip per bartender against the split, when they differ by more than a dollar
 }
 
 /** Build the sheet from estimates and timesheet rows already loaded. */
@@ -30,7 +31,9 @@ export async function payoutFrom(viewer: StaffMember, session: SessionRow, sheet
   const rows = crew
     .map((c) => payoutRow({ staffId: c.staffId, assignmentId: c.assignmentId, name: names.get(c.staffId) || "Unknown staff member", role: c.role, estimate: c.estimate, sheet: bySheet.get(c.staffId) ?? null }))
     .sort((a, b) => a.name.localeCompare(b.name));
-  return { sessionId: session.id, rows, totals: payoutTotals(rows) };
+  const split = crew.map((c) => c.estimate.tips).find((t) => t.state === "on_file");
+  const tipNote = tipMismatchNote(session.booked_price?.tip_per_bartender, split?.state === "on_file" ? split.cents : null);
+  return { sessionId: session.id, rows, totals: payoutTotals(rows), tipNote };
 }
 
 export async function payoutSheet(viewer: StaffMember, session: SessionRow): Promise<PayoutSheet | null> {

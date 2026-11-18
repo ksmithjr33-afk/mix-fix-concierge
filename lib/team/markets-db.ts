@@ -9,7 +9,7 @@ import { supabase } from "@/lib/supabase";
 import type { SessionRow } from "@/lib/event-updates";
 import type { StaffMember } from "@/lib/team/event-view";
 import { eventLocation } from "@/lib/team/clock-db";
-import { isMarket, nearestMarket, needsAutoMarket, sessionMarket, staffMarketsOf, type Market, type MarketSession } from "@/lib/team/markets";
+import { isMarket, marketAddress, nearestMarket, needsAutoMarket, sessionMarket, staffMarketsOf, type Market, type MarketSession } from "@/lib/team/markets";
 
 type WithMarket = SessionRow & MarketSession;
 
@@ -23,8 +23,11 @@ export async function ensureMarket(session: SessionRow): Promise<Market | null> 
   const s = session as WithMarket;
   if (!needsAutoMarket(s)) return sessionMarket(s);
   try {
-    const address = String(s.event_data?.event_address ?? "").trim();
-    const location = address ? await eventLocation(session) : null;
+    const street = String(s.event_data?.event_address ?? "").trim();
+    const address = marketAddress(s);
+    const location = address ? await eventLocation(session, { cityFallback: true }) : null;
+    // Only the booked city, and it did not geocode: leave the market as it was.
+    if (!street && address && !location) return sessionMarket(s);
     const market = nearestMarket(location);
     const patch = {
       team_market: market,

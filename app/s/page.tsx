@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { supabase } from "@/lib/supabase";
-import { SESSION_COLUMNS, type SessionRow } from "@/lib/event-updates";
+import type { SessionRow } from "@/lib/event-updates";
 import UpdateMode from "./update-mode";
 import { clientCanSeeList, holdsFor } from "@/lib/client-list-db";
 import { recordClientOpen } from "@/lib/client-links";
@@ -15,6 +15,9 @@ const INTAKE_PARAMS = [
   "guest_count",
   "event_name",
   "hours_booked",
+  "event_type",
+  "bar_service_start",
+  "bartender_count",
 ] as const;
 
 export const dynamic = "force-dynamic";
@@ -50,7 +53,8 @@ export default async function ShortRedirectPage({
   try {
     const { data: row, error } = await supabase
       .from("sessions")
-      .select(SESSION_COLUMNS)
+      // "*": the booking columns from 20261215 may not exist yet, and naming them would fail the read.
+      .select("*")
       .eq("id", sessionId)
       .single();
 

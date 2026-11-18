@@ -75,16 +75,23 @@ function ChatContent() {
       const guestCount = searchParams.get("guest_count");
       const eventName = searchParams.get("event_name");
       const hoursBooked = searchParams.get("hours_booked");
+      const eventType = searchParams.get("event_type");
+      const startTime = searchParams.get("bar_service_start");
+      const bartenderCount = searchParams.get("bartender_count");
 
-      if (name || email || eventDate || packageType || guestCount || eventName || hoursBooked) {
+      if (name || email || eventDate || packageType || guestCount || eventName || hoursBooked || eventType || startTime || bartenderCount) {
         const parts: string[] = [];
         if (name) parts.push(`Client name: ${name}`);
         if (email) parts.push(`Email: ${email}`);
         if (eventDate) parts.push(`Event date: ${eventDate}`);
         if (packageType) parts.push(`Package: ${packageType}`);
         if (guestCount) parts.push(`Guest count: ${guestCount}`);
-        if (eventName) parts.push(`Event type: ${eventName}`);
+        // Older bookings sent the event type in event_name.
+        if (eventType) parts.push(`Event type: ${eventType}`);
+        if (eventName) parts.push(eventType ? `Event name: ${eventName}` : `Event type: ${eventName}`);
         if (hoursBooked) parts.push(`Hours of bar service booked: ${hoursBooked}`);
+        if (startTime) parts.push(`Bar service start time booked: ${startTime}`);
+        if (bartenderCount) parts.push(`Bartenders booked: ${bartenderCount}`);
 
         const contextMsg: Message = {
           role: "user",

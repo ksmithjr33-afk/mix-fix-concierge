@@ -272,7 +272,7 @@ export type HomeMiles = { miles: number | null; reason?: "no_address" | "not_fou
 export async function homeMiles(session: SessionRow, staffIds: string[]): Promise<{ event: boolean; eventAt: LatLng | null; byStaff: Map<string, HomeMiles> }> {
   const byStaff = new Map<string, HomeMiles>();
   if (staffIds.length === 0) return { event: false, eventAt: null, byStaff };
-  const [event, profiles] = await Promise.all([eventLocation(session).catch(() => null), profilesFor(staffIds)]);
+  const [event, profiles] = await Promise.all([eventLocation(session, { cityFallback: true }).catch(() => null), profilesFor(staffIds)]);
   for (const id of staffIds) {
     const p = profiles.get(id);
     const maxMiles = p?.max_miles ?? null;

@@ -144,3 +144,16 @@ export function payoutText(title: string, rows: PayoutRow[], totals: PayoutTotal
 export function overWeekLimit(totals: { staffId: string; minutes: number }[]): Set<string> {
   return new Set(totals.filter((t) => t.minutes >= WEEK_FLAG_MIN).map((t) => t.staffId));
 }
+
+/**
+ * A note when what the booking said each bartender's tip is (dollars) and the
+ * gratuity split the payout uses (cents) differ by more than a dollar. The
+ * split is never changed: it stays the gratuity divided evenly among the
+ * accepted bartenders. Null when either is missing or they agree.
+ */
+export function tipMismatchNote(bookedTipDollars: number | null | undefined, splitCents: number | null): string | null {
+  if (bookedTipDollars === null || bookedTipDollars === undefined || !Number.isFinite(Number(bookedTipDollars)) || splitCents === null) return null;
+  const booked = Math.round(Number(bookedTipDollars) * 100);
+  if (Math.abs(booked - splitCents) <= 100) return null;
+  return `Booked tip per bartender is ${money(booked)}, but the gratuity split is ${money(splitCents)} each.`;
+}

@@ -85,6 +85,7 @@ export async function POST(request: Request) {
       custom_price: prior.custom_price ?? null,
       discount_amount: prior.discount_amount ?? null,
       tip_jar: prior.tip_jar ?? true,
+      tip_per_bartender: prior.tip_per_bartender ?? null,
       deposit_paid: prior.deposit_paid ?? pending.deposit_paid,
       source: "change-order",
       // The next change order is priced against the event as signed.

@@ -13,6 +13,7 @@ import { eventTitle, adminEventTitle } from "@/lib/team/event-list";
 import { alertAdmins } from "@/lib/team/events";
 import { hiddenEventIds } from "@/lib/team/hidden";
 import { geocodeAddress } from "@/lib/team/geocode";
+import { cityFallback } from "@/lib/booking-webhook";
 import { sendStaffText } from "@/lib/team/sms";
 import { chicagoToday, eventTz } from "@/lib/team/time";
 import { eventData } from "@/lib/team/markets";
@@ -86,12 +87,18 @@ export async function hasPunches(sessionId: string, staffId: string): Promise<bo
  * session (geo_* columns only, never event_data). A new address from a
  * client update is geocoded again on the next punch.
  */
-export async function eventLocation(session: SessionRow): Promise<LatLng | null> {
+export async function eventLocation(session: SessionRow, opts: { cityFallback?: boolean } = {}): Promise<LatLng | null> {
   const s = session as SessionRow & { geo_lat?: number | null; geo_lng?: number | null; geo_address?: string | null };
-  const address = String(session.event_data?.event_address ?? "").trim();
+  const street = String(session.event_data?.event_address ?? "").trim();
+  // Mileage and the market may use the booked city while there is no address
+  // yet. Clock in distance never does: a city center is not the venue.
+  const fallback = !street && opts.cityFallback ? cityFallback(session as unknown as Record<string, unknown>) : "";
+  const address = street || fallback;
   if (!address) return null;
   if (s.geo_address === address) return s.geo_lat != null && s.geo_lng != null ? { lat: s.geo_lat, lng: s.geo_lng } : null;
   const { location, source } = await geocodeAddress(address);
+  // The booked city did not geocode: leave everything as it was, and do not guess.
+  if (fallback && !location) return null;
   const { error } = await supabase
     .from("sessions")
     .update({ geo_lat: location?.lat ?? null, geo_lng: location?.lng ?? null, geo_address: address, geo_source: source, geocoded_at: new Date().toISOString() })
