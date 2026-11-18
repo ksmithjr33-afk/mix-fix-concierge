@@ -2,21 +2,22 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import type { MileageSettings } from "@/lib/team/pay";
+import { PAY_PACKAGES, PAY_PACKAGE_LABEL, type MileageSettings, type PackageRates } from "@/lib/team/pay";
 import { SUPPLY_PACKAGES, SUPPLY_PACKAGE_LABEL, type CostSettings, type SuppliesPerGuest } from "@/lib/team/business-settings";
 
-// Business settings, admins only: mileage (staff pay), costs and supplies per guest (the Business area).
+// Business settings, admins only: hourly rate by package and mileage (staff pay), costs and supplies per guest (the Business area).
 const input = "w-full rounded-lg border border-[#DDD5CC] px-3 py-2 text-[16px]";
 const btn = "rounded-lg bg-[#B5845A] text-white px-3 py-2 text-sm font-medium disabled:opacity-50";
 
-export default function SettingsForm({ mileage, costs, perGuest }: { mileage: MileageSettings; costs: CostSettings; perGuest: SuppliesPerGuest }) {
+export default function SettingsForm({ mileage, costs, perGuest, rates }: { mileage: MileageSettings; costs: CostSettings; perGuest: SuppliesPerGuest; rates: PackageRates }) {
   const router = useRouter();
   const [m, setM] = useState({ thresholdMiles: String(mileage.thresholdMiles), deductionMiles: String(mileage.deductionMiles), rate: (mileage.rateCents / 100).toFixed(2), caRate: (mileage.caRateCents / 100).toFixed(2) });
   const [c, setC] = useState({ burdenPct: String(costs.burdenPct), cardPct: String(costs.cardPct), cardFixed: (costs.cardFixedCents / 100).toFixed(2) });
   const [g, setG] = useState<Record<string, string>>(Object.fromEntries(SUPPLY_PACKAGES.map((k) => [k, perGuest[k] === null ? "" : (perGuest[k]! / 100).toFixed(2)])));
+  const [r, setR] = useState<Record<string, string>>(Object.fromEntries(PAY_PACKAGES.map((k) => [k, (rates[k] / 100).toFixed(2)])));
   const [msg, setMsg] = useState<{ which: string; text: string; error: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
-  const save = async (which: "mileage" | "costs" | "supplies", body: Record<string, string>) => {
+  const save = async (which: "rates" | "mileage" | "costs" | "supplies", body: Record<string, string>) => {
     setBusy(true);
     setMsg(null);
     const res = await fetch("/api/team/admin/business/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ which, ...body }) }).catch(() => null);
@@ -35,6 +36,24 @@ export default function SettingsForm({ mileage, costs, perGuest }: { mileage: Mi
   return (
     <section className="rounded-2xl border border-[#DDD5CC] bg-white px-4 py-3 space-y-4" aria-label="Business settings" id="settings">
       <h2 className="font-heading text-base font-bold text-[#2C2420]">Business settings</h2>
+      <div className="space-y-2" id="rates">
+        <h3 className="text-sm font-semibold text-[#2C2420]">Hourly rate by package</h3>
+        <p className="text-xs text-[#6B5D52]">
+          The rate for a person on an event is their own rate when one is set on their profile, otherwise this package rate. Any package not listed here pays $30.00 an hour. Used for the pay estimate, the Payout card, Payroll and Business labor.
+        </p>
+        <div className="grid grid-cols-2 gap-2">
+          {PAY_PACKAGES.map((k) => (
+            <label key={k} className="text-sm text-[#2C2420]">
+              {PAY_PACKAGE_LABEL[k]}, $ an hour
+              <input className={input} inputMode="decimal" value={r[k]} onChange={(e) => setR({ ...r, [k]: e.target.value })} />
+            </label>
+          ))}
+        </div>
+        <button type="button" className={btn} disabled={busy} onClick={() => save("rates", r)}>
+          Save rates
+        </button>
+        {msg?.which === "rates" && <p className={`text-sm ${msg.error ? "text-[#A0412D]" : "text-[#55684A]"}`}>{msg.text}</p>}
+      </div>
       <div className="space-y-2">
         <h3 className="text-sm font-semibold text-[#2C2420]">Mileage pay</h3>
         <div className="grid grid-cols-2 gap-2">

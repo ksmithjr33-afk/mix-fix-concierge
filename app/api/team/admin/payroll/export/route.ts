@@ -1,28 +1,30 @@
 import { NextResponse } from "next/server";
 import { getCurrentStaff } from "@/lib/team/auth";
 import { payrollView } from "@/lib/team/payroll-db";
-import { linesCsv, peopleCsv, periodFor } from "@/lib/team/payroll";
-import { chicagoToday } from "@/lib/team/time";
+import { linesCsv, payoutSheetCsv, peopleCsv, rangePeriod } from "@/lib/team/payroll";
 import { isFullAdmin } from "@/lib/team/roles";
 
-// Payroll CSVs for a period: ?kind=lines (one row per line) or ?kind=people
-// (one row per person), &from=&to=. Admins only, never managers.
+// Payroll CSVs for a period, &from=&to=. Admins only, never managers.
+//   ?kind=sheet   one row per event in the payout sheet's own column order (paste into the Google Sheet)
+//   ?kind=lines   one row per line
+//   ?kind=people  one row per person (the Pay Out table)
+const BUILD = { sheet: payoutSheetCsv, lines: linesCsv, people: peopleCsv } as const;
+
 export async function GET(request: Request) {
   const staff = await getCurrentStaff();
   if (!staff) return NextResponse.json({ error: "Sign in again." }, { status: 401 });
   if (!isFullAdmin(staff.role)) return NextResponse.json({ error: "Admins only." }, { status: 403 });
   const url = new URL(request.url);
-  const kind = url.searchParams.get("kind");
+  const kind = url.searchParams.get("kind") as keyof typeof BUILD | null;
   const from = url.searchParams.get("from");
   const to = url.searchParams.get("to");
-  if (kind !== "lines" && kind !== "people") return NextResponse.json({ error: "Pick lines or people." }, { status: 400 });
-  const period = periodFor("custom", chicagoToday(), from, to);
-  if (period.from !== from || period.to !== to) return NextResponse.json({ error: "Pick a start and end date, 92 days or less." }, { status: 400 });
+  if (!kind || !(kind in BUILD)) return NextResponse.json({ error: "Pick sheet, lines or people." }, { status: 400 });
+  const period = rangePeriod(from, to);
+  if (!period) return NextResponse.json({ error: "Pick a start and end date, 92 days or less." }, { status: 400 });
   try {
     const view = await payrollView(staff, period);
     if (!view) return NextResponse.json({ error: "Admins only." }, { status: 403 });
-    const csv = kind === "lines" ? linesCsv(view) : peopleCsv(view);
-    return new NextResponse(csv, {
+    return new NextResponse(BUILD[kind](view), {
       headers: {
         "Content-Type": "text/csv; charset=utf-8",
         "Content-Disposition": `attachment; filename="mix-fix-payroll-${kind}-${from}-to-${to}.csv"`,

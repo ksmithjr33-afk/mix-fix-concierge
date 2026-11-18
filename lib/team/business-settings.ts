@@ -1,12 +1,13 @@
-// Business settings: mileage (part 2), costs (part 5). Pure, no database.
-// Stored in team_settings as two JSON values. Only a real admin (role admin,
+// Business settings: mileage, costs, supplies per guest, and the hourly rate
+// by package. Pure, no database. Stored in team_settings as JSON values. Only a real admin (role admin,
 // never a manager) changes them, from the Business settings section.
 
-import { MILEAGE_DEFAULTS, type MileageSettings } from "@/lib/team/pay";
+import { MAX_RATE_CENTS, MILEAGE_DEFAULTS, PACKAGE_RATE_DEFAULTS, PAY_PACKAGES, PAY_PACKAGE_LABEL, type MileageSettings, type PackageRates } from "@/lib/team/pay";
 
 export const MILEAGE_KEY = "business_mileage";
 export const COSTS_KEY = "business_costs";
 export const SUPPLIES_KEY = "business_supplies_per_guest";
+export const RATES_KEY = "business_pay_rates";
 
 export interface CostSettings {
   burdenPct: number; // payroll burden, a percent of labor
@@ -100,3 +101,23 @@ export function validateSupplies(raw: Record<string, unknown>): Checked<Supplies
 
 /** "$0.30" a mile, from cents (which may carry a tenth of a cent). */
 export const perMile = (cents: number) => `$${(cents / 100).toFixed(Number.isInteger(cents) ? 2 : 3)}`;
+
+// ----- Hourly rate by package -----
+// Saved cents an hour per package over the defaults ($25 Beer and Wine,
+// Bartender Only, Tailored; $30 the rest). lineRate in lib/team/pay.ts uses them.
+
+export function readPackageRates(v: unknown): PackageRates {
+  const o = (v && typeof v === "object" ? v : {}) as Record<string, unknown>;
+  return Object.fromEntries(PAY_PACKAGES.map((k) => [k, typeof o[k] === "number" && (o[k] as number) > 0 && (o[k] as number) <= MAX_RATE_CENTS ? (o[k] as number) : PACKAGE_RATE_DEFAULTS[k]])) as PackageRates;
+}
+
+/** The form: dollars an hour per package ("25" or "27.50"). Every package needs a rate. */
+export function validatePackageRates(raw: Record<string, unknown>): Checked<PackageRates> {
+  const out = {} as PackageRates;
+  for (const k of PAY_PACKAGES) {
+    const n = num(raw[k]);
+    if (n === null || n <= 0 || n * 100 > MAX_RATE_CENTS) return { ok: false, error: `Enter the ${PAY_PACKAGE_LABEL[k]} rate in dollars an hour, like 25 or 27.50.` };
+    out[k] = Math.round(n * 100);
+  }
+  return { ok: true, value: out };
+}

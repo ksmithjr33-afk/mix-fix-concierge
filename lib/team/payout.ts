@@ -1,10 +1,13 @@
 // The payout sheet: one row per person on an event, estimate against actual.
 // Pure, no database. Hours come from scheduledMinutes (the estimate) and the
-// timesheet rows (actual); pay is payCents on both. Nothing here figures hours
-// or pay a second way. Admins and managers only.
+// timesheet rows (actual); pay is payCents on both at the line's rate
+// (lineRate). Nothing here figures hours or pay a second way. Reimbursements
+// are added to the person's total in their own column; they are never wages.
+// Admins and managers only.
 
-import { hoursText, money, payCents, type MileageLine, type StaffEstimate } from "@/lib/team/pay";
+import { hoursText, money, payCents, type MileageLine, type PayPackage, type RateSource, type StaffEstimate } from "@/lib/team/pay";
 import type { TimesheetRow } from "@/lib/team/timesheet";
+import { reimbursementsCents, type Reimbursement } from "@/lib/team/reimbursements";
 
 /** A row 30 or more minutes over the estimate is flagged. */
 export const OVER_FLAG_MIN = 30;
@@ -25,6 +28,7 @@ export interface PayoutPerson {
   role: string;
   estimate: StaffEstimate;
   sheet: TimesheetRow | null; // their timesheet row for this event
+  reimbursements?: Reimbursement[];
 }
 
 export interface PayoutRow {
@@ -33,6 +37,8 @@ export interface PayoutRow {
   name: string;
   role: string;
   rateCents: number;
+  rateSource: RateSource;
+  ratePkg: PayPackage | null;
   estMinutes: number | null;
   estPayCents: number | null;
   actualMinutes: number | null; // null until clocked in and out
@@ -43,7 +49,9 @@ export interface PayoutRow {
   mileageMiles: number; // paid miles
   mileageCents: number;
   tipsCents: number | null; // null: not on file
-  totalCents: number; // pay (actual, else the estimate) + mileage + tips
+  reimbursements: Reimbursement[];
+  reimbursementsCents: number;
+  totalCents: number; // pay (actual, else the estimate) + mileage + tips + reimbursements
   fromEstimate: boolean; // no actual hours yet, so the total uses the estimate
   approved: boolean;
   flags: PayoutFlag[];
@@ -62,12 +70,16 @@ export function payoutRow(p: PayoutPerson): PayoutRow {
   else if (!p.sheet.clockOut) flags.push("not_clocked_out");
   if (diffMinutes !== null && diffMinutes >= OVER_FLAG_MIN) flags.push("over_estimate");
   const pay = actualPayCents ?? e.hourlyCents ?? 0;
+  const reimbursements = p.reimbursements ?? [];
+  const reimbursed = reimbursementsCents(reimbursements);
   return {
     staffId: p.staffId,
     assignmentId: p.assignmentId,
     name: p.name,
     role: p.role,
     rateCents: e.rateCents,
+    rateSource: e.rateSource,
+    ratePkg: e.ratePkg,
     estMinutes: e.minutes,
     estPayCents: e.hourlyCents,
     actualMinutes,
@@ -78,7 +90,9 @@ export function payoutRow(p: PayoutPerson): PayoutRow {
     mileageMiles: e.mileage.state === "paid" ? e.mileage.paidMiles : 0,
     mileageCents,
     tipsCents,
-    totalCents: pay + mileageCents + (tipsCents ?? 0),
+    reimbursements,
+    reimbursementsCents: reimbursed,
+    totalCents: pay + mileageCents + (tipsCents ?? 0) + reimbursed,
     fromEstimate: actualPayCents === null,
     approved: !!p.sheet?.approved,
     flags,
@@ -94,13 +108,14 @@ export interface PayoutTotals {
   mileageMiles: number;
   mileageCents: number;
   tipsCents: number;
+  reimbursementsCents: number;
   totalCents: number;
   flagged: number;
   open: number; // rows still waiting on a punch, so the totals lean on estimates
 }
 
 export function payoutTotals(rows: PayoutRow[]): PayoutTotals {
-  const t: PayoutTotals = { people: rows.length, estMinutes: 0, estPayCents: 0, actualMinutes: 0, actualPayCents: 0, mileageMiles: 0, mileageCents: 0, tipsCents: 0, totalCents: 0, flagged: 0, open: 0 };
+  const t: PayoutTotals = { people: rows.length, estMinutes: 0, estPayCents: 0, actualMinutes: 0, actualPayCents: 0, mileageMiles: 0, mileageCents: 0, tipsCents: 0, reimbursementsCents: 0, totalCents: 0, flagged: 0, open: 0 };
   for (const r of rows) {
     t.estMinutes += r.estMinutes ?? 0;
     t.estPayCents += r.estPayCents ?? 0;
@@ -109,6 +124,7 @@ export function payoutTotals(rows: PayoutRow[]): PayoutTotals {
     t.mileageMiles = Math.round((t.mileageMiles + r.mileageMiles) * 10) / 10;
     t.mileageCents += r.mileageCents;
     t.tipsCents += r.tipsCents ?? 0;
+    t.reimbursementsCents += r.reimbursementsCents;
     t.totalCents += r.totalCents;
     if (r.flags.length) t.flagged += 1;
     if (r.fromEstimate) t.open += 1;
@@ -122,7 +138,7 @@ export const diffMoney = (c: number | null) => (c === null ? "" : signed(c, mone
 
 /** The sheet as tab separated text, for "Copy payout" (pastes into a spreadsheet). */
 export function payoutText(title: string, rows: PayoutRow[], totals: PayoutTotals): string {
-  const head = ["Name", "Est hours", "Est pay", "Actual hours", "Actual pay", "Difference", "Mileage miles", "Mileage pay", "Tips", "Total to pay", "Flags"];
+  const head = ["Name", "Est hours", "Est pay", "Actual hours", "Actual pay", "Difference", "Mileage miles", "Mileage pay", "Tips", "Reimbursements", "Total to pay", "Flags"];
   const line = (r: PayoutRow) => [
     r.name,
     hoursText(r.estMinutes),
@@ -133,10 +149,11 @@ export function payoutText(title: string, rows: PayoutRow[], totals: PayoutTotal
     String(r.mileageMiles),
     money(r.mileageCents),
     r.tipsCents === null ? "not on file" : money(r.tipsCents),
+    money(r.reimbursementsCents),
     `${money(r.totalCents)}${r.fromEstimate ? " (estimate)" : ""}`,
     r.flags.map((f) => PAYOUT_FLAG_LABEL[f]).join("; "),
   ];
-  const total = ["Total", hoursText(totals.estMinutes), money(totals.estPayCents), hoursText(totals.actualMinutes), money(totals.actualPayCents), "", String(totals.mileageMiles), money(totals.mileageCents), money(totals.tipsCents), money(totals.totalCents), ""];
+  const total = ["Total", hoursText(totals.estMinutes), money(totals.estPayCents), hoursText(totals.actualMinutes), money(totals.actualPayCents), "", String(totals.mileageMiles), money(totals.mileageCents), money(totals.tipsCents), money(totals.reimbursementsCents), money(totals.totalCents), ""];
   return [title, head.join("\t"), ...rows.map((r) => line(r).join("\t")), total.join("\t")].join("\n");
 }
 

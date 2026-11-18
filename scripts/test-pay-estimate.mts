@@ -18,8 +18,8 @@ const S = pay.MILEAGE_DEFAULTS;
 const party = { event_date: today, bar_service_start: "6:00pm", bar_service_end: "10:00pm", event_type: "Birthday" };
 const wedding = { ...party, event_type: "Wedding" };
 check("4 hour event: 2 setup + 4 + 1 = 7 hours", pay.scheduledMinutes(party) === 420);
-check("7 hours at the $30 default is $210", pay.payCents(pay.effectiveRate(null), pay.scheduledMinutes(party)) === 21000);
-check("4 hour wedding: 3 setup + 4 + 1 = 8 hours = $240", pay.scheduledMinutes(wedding) === 480 && pay.payCents(pay.effectiveRate(null), 480) === 24000);
+check("7 hours at the $30 default is $210", pay.payCents(pay.lineRate(null, "Full Bar").cents, pay.scheduledMinutes(party)) === 21000);
+check("4 hour wedding: 3 setup + 4 + 1 = 8 hours = $240", pay.scheduledMinutes(wedding) === 480 && pay.payCents(pay.lineRate(null, "Full Bar").cents, 480) === 24000);
 check("The wedding rule is the arrival time's rule", time.isWeddingEvent({ package: "Big Day Bar" }) && pay.scheduledMinutes({ ...party, package: "Big Day Bar" }) === 480);
 check("The estimate uses scheduledMinutes, not a second calculation", src("lib/team/pay-db.ts").match(/scheduledMinutes\(eventData\(session\)\)/g)!.length >= 2 && !/BREAKDOWN_MIN|isWeddingEvent/.test(src("lib/team/pay-db.ts")));
 
@@ -48,9 +48,9 @@ check("Bad override numbers are refused", !pay.validateMileageOverride({ miles: 
 check("Gratuity split evenly among the bartenders", JSON.stringify(pay.tipsShare(300, 2, true)) === JSON.stringify({ state: "on_file", cents: 15000, bartenders: 2 }));
 check("No gratuity on file", pay.tipsShare(null, 2, true).state === "not_on_file" && pay.tipsText(pay.tipsShare(undefined, 2, true)) === "Tips: not on file yet");
 check("Bar backs and others get no tip share", pay.tipsShare(300, 2, false).state === "not_bartender");
-const e1 = pay.staffEstimate({ rateOnFile: null, minutes: 420, mileage: pay.mileageLine({ oneWayMiles: 50, source: "straight_line", locked: true }, S, false), tips: pay.tipsShare(null, 1, true) });
-check("Tips not on file are left out of the total", e1.totalCents === 21000 + 2400 && e1.rateIsDefault);
-const e2 = pay.staffEstimate({ rateOnFile: 2500, minutes: 420, mileage: { state: "no_address" }, tips: pay.tipsShare(119, 1, true) });
+const e1 = pay.staffEstimate({ rate: pay.lineRate(null, "Full Bar"), minutes: 420, mileage: pay.mileageLine({ oneWayMiles: 50, source: "straight_line", locked: true }, S, false), tips: pay.tipsShare(null, 1, true) });
+check("Tips not on file are left out of the total", e1.totalCents === 21000 + 2400 && e1.rateSource === "package");
+const e2 = pay.staffEstimate({ rate: pay.lineRate(2500, "Full Bar"), minutes: 420, mileage: { state: "no_address" }, tips: pay.tipsShare(119, 1, true) });
 check("Total is hourly + mileage + tips", e2.totalCents === 17500 + 11900);
 check("The note is exact", pay.ESTIMATE_NOTE === "Estimate only. Final pay is based on your actual clock in and clock out, before taxes.");
 
@@ -95,7 +95,7 @@ reset();
 const s = (id: string) => db.sessions.find((x) => x.id === id) as never;
 
 const mine = await payDb.myPayEstimate("b1", s("f1"));
-check("Hourly at the default $30: $210", mine.hourlyCents === 21000 && mine.rateIsDefault);
+check("Hourly at the default $30: $210", mine.hourlyCents === 21000 && mine.rateSource === "package");
 check("50 miles one way: $24.00 mileage", mine.mileage.state === "paid" && mine.mileage.cents === 2400 && mine.mileage.paidMiles === 80, JSON.stringify(mine.mileage));
 check("Before accepting, the viewer is counted in the tips split", mine.tips.state === "on_file" && mine.tips.cents === 15000 && mine.tips.bartenders === 2, JSON.stringify(mine.tips));
 check("Total adds them up", mine.totalCents === 21000 + 2400 + 15000);

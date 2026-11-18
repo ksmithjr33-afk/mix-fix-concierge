@@ -2,26 +2,94 @@
 //
 // Estimated hours = setup (arrival: 2 hours before service, 3 for weddings) +
 // service + 1 hour of breakdown, from scheduledMinutes below: the one place
-// hours are figured. Estimated pay = hours × the person's rate ($30 when no
-// rate is on file) + mileage + their share of the gratuity. Visible only to
+// hours are figured. Estimated pay = hours × the line's rate (lineRate below:
+// the person's own rate when one is on file, else the package rate) + mileage
+// + their share of the gratuity. Visible only to
 // admins, managers on the payout sheet, and the staff member it belongs to.
 // Payroll is the final record; everything here is labeled as an estimate.
 
 import { BREAKDOWN_MIN } from "@/lib/team/clock";
 import { eventSchedule } from "@/lib/team/time";
+import { packageKey } from "@/lib/pricing";
 
 export const PAY_LABEL = "Estimated pay, before taxes and tips";
 export const PAY_NOTE = "These are estimates, before taxes and tips. Payroll is the final record.";
 export const MAX_RATE_CENTS = 200_00;
-/** The hourly rate for anyone with no rate on file. */
+/** The hourly rate on any package not listed in the package rates. */
 export const DEFAULT_RATE_CENTS = 30_00;
 export const ESTIMATE_NOTE = "Estimate only. Final pay is based on your actual clock in and clock out, before taxes.";
 export const NO_ADDRESS_TEXT = "Add your home address to see mileage";
 export const PROFILE_HREF = "/team/me/profile";
 
-/** The rate pay is figured at: the one on file, else the default. */
-export function effectiveRate(cents: number | null | undefined): number {
-  return cents && cents > 0 ? cents : DEFAULT_RATE_CENTS;
+// ----- The hourly rate for a line (one person on one event) -----
+//
+// The pay rule: $25 an hour on Beer and Wine, Bartender Only and Tailored
+// events, $30 on every other package. Admins can change these in Business
+// settings. A person's own rate, when one is set on their profile, wins over
+// the package rate. lineRate is the only place this rule lives: the staff pay
+// estimate, the Payout card, Payroll, Business labor and the Time page all
+// figure their rate here.
+
+export type PayPackage = "beerwine" | "bartender_only" | "tailored" | "dive" | "essentials" | "full" | "premium" | "wedding";
+export const PAY_PACKAGES: PayPackage[] = ["beerwine", "bartender_only", "tailored", "dive", "essentials", "full", "premium", "wedding"];
+export const PAY_PACKAGE_LABEL: Record<PayPackage, string> = {
+  beerwine: "Beer and Wine",
+  bartender_only: "Bartender Only",
+  tailored: "Tailored",
+  dive: "Dive Bar",
+  essentials: "Essentials",
+  full: "Full Bar",
+  premium: "Premium Bar",
+  wedding: "The Big Day Bar",
+};
+export type PackageRates = Record<PayPackage, number>; // cents an hour
+export const PACKAGE_RATE_DEFAULTS: PackageRates = {
+  beerwine: 25_00,
+  bartender_only: 25_00,
+  tailored: 25_00,
+  dive: 30_00,
+  essentials: 30_00,
+  full: 30_00,
+  premium: 30_00,
+  wedding: 30_00,
+};
+
+/** The package as stored ("Tailored Bar", "Bartender Only Package", "Essentials Bar") as a rate slot. Null for anything not listed. */
+export function payPackage(name: unknown): PayPackage | null {
+  const p = String(name ?? "").toLowerCase().trim();
+  if (!p) return null;
+  if (p.includes("tailored")) return "tailored";
+  if (p.includes("bartender only")) return "bartender_only";
+  if (p.includes("essential")) return "essentials";
+  return packageKey(p);
+}
+
+/** The package an event was booked with: the event's own field, else the session's. */
+export function eventPackageName(ed: Record<string, unknown>, session?: { package_type?: unknown } | null): string {
+  return String(ed.package || session?.package_type || "").trim();
+}
+
+export type RateSource = "own" | "package" | "default";
+
+export interface LineRate {
+  cents: number;
+  source: RateSource; // own: set on the profile; package: the package rate; default: a package not listed
+  pkg: PayPackage | null;
+}
+
+/** The rate for one person on one event: their own rate if one is set, otherwise the package rate. */
+export function lineRate(ownCents: number | null | undefined, packageName: unknown, rates: PackageRates = PACKAGE_RATE_DEFAULTS): LineRate {
+  const pkg = payPackage(packageName);
+  if (ownCents && ownCents > 0) return { cents: ownCents, source: "own", pkg };
+  if (pkg) return { cents: rates[pkg] ?? DEFAULT_RATE_CENTS, source: "package", pkg };
+  return { cents: DEFAULT_RATE_CENTS, source: "default", pkg: null };
+}
+
+/** Which rule applied: "own rate", "Tailored rate", "standard rate". */
+export function rateSourceText(r: Pick<LineRate, "source" | "pkg">): string {
+  if (r.source === "own") return "own rate";
+  if (r.source === "package" && r.pkg) return `${PAY_PACKAGE_LABEL[r.pkg]} rate`;
+  return "standard rate";
 }
 
 /** Arrival to service end plus an hour of breakdown, in minutes. Null without the times. */
@@ -70,6 +138,11 @@ export interface PayRow {
   sessionId: string;
   day: string | null;
   title: string;
+  rateCents: number;
+  rateSource: RateSource;
+  ratePkg: PayPackage | null;
+  tipsCents: number | null; // their share of the gratuity once it is on file
+  reimbursements: { label: string; cents: number; note: string }[]; // their own, once an admin enters them
   scheduledMinutes: number | null;
   approvedMinutes: number | null; // clocked hours once an admin approved them
   payCents: number | null; // from approved hours, else the scheduled estimate
@@ -211,7 +284,8 @@ export function tipsText(t: TipsLine): string {
 
 export interface StaffEstimate {
   rateCents: number;
-  rateIsDefault: boolean;
+  rateSource: RateSource;
+  ratePkg: PayPackage | null;
   minutes: number | null;
   hourlyCents: number | null;
   mileage: MileageLine;
@@ -219,14 +293,15 @@ export interface StaffEstimate {
   totalCents: number; // hourly + mileage + tips, leaving out what is not on file
 }
 
-export function staffEstimate(o: { rateOnFile: number | null; minutes: number | null; mileage: MileageLine; tips: TipsLine }): StaffEstimate {
-  const rateCents = effectiveRate(o.rateOnFile);
+export function staffEstimate(o: { rate: LineRate; minutes: number | null; mileage: MileageLine; tips: TipsLine }): StaffEstimate {
+  const rateCents = o.rate.cents;
   const hourlyCents = payCents(rateCents, o.minutes);
   const mileageCents = o.mileage.state === "paid" ? o.mileage.cents : 0;
   const tipsCents = o.tips.state === "on_file" ? o.tips.cents : 0;
   return {
     rateCents,
-    rateIsDefault: !(o.rateOnFile && o.rateOnFile > 0),
+    rateSource: o.rate.source,
+    ratePkg: o.rate.pkg,
     minutes: o.minutes,
     hourlyCents,
     mileage: o.mileage,

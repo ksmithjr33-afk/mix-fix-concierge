@@ -22,7 +22,7 @@ check("Service past midnight", pay.scheduledMinutes({ ...party, bar_service_end:
 check("No times, no estimate", pay.scheduledMinutes({ event_date: today }) === null);
 check("Rate times hours", pay.estimatedPayCents(2500, party) === 17500 && pay.money(17500) === "$175.00");
 check("estimatedPayCents itself still needs a rate", pay.estimatedPayCents(null, party) === null && pay.estimatedPayCents(0, party) === null);
-check("No rate on file is figured at $30", pay.effectiveRate(null) === 3000 && pay.effectiveRate(0) === 3000 && pay.effectiveRate(2500) === 2500);
+check("No own rate: the package rate ($30 on Full Bar, $25 on Tailored)", pay.lineRate(null, "Full Bar").cents === 3000 && pay.lineRate(0, "Tailored Bar").cents === 2500 && pay.lineRate(2500, "Full Bar").cents === 2500);
 check("Cents round", pay.payCents(2750, 25) === 1146);
 check("Money reads well", pay.money(123450) === "$1,234.50" && pay.rateText(2500) === "$25.00/hr");
 check("The label is exact", pay.PAY_LABEL === "Estimated pay, before taxes and tips");
@@ -69,13 +69,13 @@ function reset() {
   db.team_hidden_events = [];
 }
 reset();
-check("A person's own rate", (await payDb.rateFor("b1")) === 2500 && (await payDb.rateOnFile("a1")) === null && (await payDb.rateFor("a1")) === 3000);
+check("A person's own rate", (await payDb.rateOnFile("b1")) === 2500 && (await payDb.rateOnFile("a1")) === null);
 check("Admins can list rates", (await payDb.ratesFor(admin, ["b1", "b2"])).get("b2") === 3000);
 check("A bartender gets no one's rates from the admin list", (await payDb.ratesFor(b1, ["b1", "b2"])).size === 0);
 check("Only admins set rates", !(await payDb.setRate(b1, "b1", "99")).ok && db.staff_pay_rates.find((r) => r.staff_id === "b1")?.hourly_rate_cents === 2500);
 check("An admin sets a rate", (await payDb.setRate(admin, "b1", "27.50")).ok && db.staff_pay_rates.find((r) => r.staff_id === "b1")?.hourly_rate_cents === 2750);
 check("An admin clears a rate", (await payDb.setRate(admin, "b2", "")).ok && !db.staff_pay_rates.some((r) => r.staff_id === "b2"));
-check("No rate on file: the $30 default", JSON.stringify(await payDb.myEstimates("b2", ["p1", "f1"])) === JSON.stringify({ p1: "$210.00", f1: "$210.00" }) && (await payDb.myEstimate("b2", db.sessions[0] as never)) === "$210.00");
+check("No rate on file: the Full Bar package rate, $30", JSON.stringify(await payDb.myEstimates("b2", ["p1", "f1"])) === JSON.stringify({ p1: "$210.00", f1: "$210.00" }) && (await payDb.myEstimate("b2", db.sessions[0] as never)) === "$210.00");
 reset();
 const est = await payDb.myEstimates("b1", ["p1", "f1"]);
 check("Estimates use only the viewer's own rate", est.f1 === "$175.00" && est.p1 === "$175.00", JSON.stringify(est));
@@ -94,11 +94,12 @@ check("Unapproved clocked hours are not shown as approved", theirs.rows.length =
 // CSV
 const sheet = (await import("../lib/team/timesheet-db.ts")).timesheetRows;
 const all = await sheet(addDays(today, -30), addDays(today, 30));
-const csv = ts.timesheetCsv(all, await payDb.ratesFor(admin, all.map((r) => r.staffId)));
+const csv = ts.timesheetCsv(all, await payDb.rowRates(admin, all));
 const lines = csv.trim().split("\r\n");
 check("The CSV has the rate, pay, mileage and tips columns", lines[0].endsWith("Hourly rate,Pay (hours x rate),Mileage miles,Mileage pay,Tips"));
 const b1Line = lines.find((l) => l.startsWith("Jordan Lee") && l.includes(d3)) ?? "";
 check("Hours times rate in the CSV", b1Line.endsWith(",25.00,187.50,,,"), b1Line);
+check("A bartender gets no row rates", (await payDb.rowRates(b1, all)).size === 0);
 const noRates = ts.timesheetCsv(all);
 check("Without rates the columns are blank", noRates.split("\r\n")[1].endsWith(",,,,,"));
 

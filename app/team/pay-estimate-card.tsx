@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ESTIMATE_NOTE, PROFILE_HREF, hoursText, mileageText, money, rateText, tipsText, type StaffEstimate } from "@/lib/team/pay";
+import { ESTIMATE_NOTE, PROFILE_HREF, hoursText, mileageText, money, rateSourceText, rateText, tipsText, type StaffEstimate } from "@/lib/team/pay";
 
 // The signed in person's own estimate: Hourly, Mileage, Tips, Total. Never anyone
 // else's, and nothing from the booking. Shown on an open shift before accepting
@@ -16,7 +16,7 @@ export default function PayEstimateCard({ estimate: e }: { estimate: StaffEstima
         <div className={row}>
           <span className={label}>
             Hourly (estimate)
-            <span className={sub}>{e.minutes !== null ? `${hoursText(e.minutes)} hours at ${rateText(e.rateCents)}` : "Times not set yet"}</span>
+            <span className={sub}>{e.minutes !== null ? `${hoursText(e.minutes)} hours at ${rateText(e.rateCents)}, ${rateSourceText({ source: e.rateSource, pkg: e.ratePkg })}` : "Times not set yet"}</span>
           </span>
           <span className={amount}>{e.hourlyCents !== null ? money(e.hourlyCents) : "—"}</span>
         </div>

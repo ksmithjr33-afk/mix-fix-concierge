@@ -17,7 +17,7 @@ const d3 = addDays(today, -3);
 
 // ----- Pure -----
 const est = (o: Partial<Parameters<typeof pay.staffEstimate>[0]> = {}) =>
-  pay.staffEstimate({ rateOnFile: null, minutes: 420, mileage: { state: "no_address" }, tips: pay.tipsShare(null, 1, true), ...o });
+  pay.staffEstimate({ rate: pay.lineRate(null, "Full Bar"), minutes: 420, mileage: { state: "no_address" }, tips: pay.tipsShare(null, 1, true), ...o });
 const sheet = (minutes: number | null, out = true) =>
   ({ minutes, clockIn: { id: "i", at: "2026-11-10T22:00:00Z", flags: [], source: "phone" }, clockOut: out ? { id: "o", at: "2026-11-11T05:00:00Z", flags: [], source: "phone" } : null, approved: null }) as never;
 const person = (s: unknown, e = est()) => ({ staffId: "b1", assignmentId: "x1", name: "Jordan Lee", role: "bartender", estimate: e, sheet: s as never });
@@ -39,7 +39,7 @@ check("Tips not on file are blank, not zero", exact.tipsCents === null);
 const totals = payout.payoutTotals([exact, r30, open, full]);
 check("Event totals add up", totals.people === 4 && totals.estPayCents === 84000 && totals.actualPayCents === 21000 + 22500 + 22500 && totals.mileageCents === 2400 && totals.tipsCents === 15000 && totals.flagged === 3 && totals.open === 1, JSON.stringify(totals));
 const text = payout.payoutText("Justin · Birthday, Nov 14", [exact, open], payout.payoutTotals([exact, open]));
-check("Copy payout is a pasteable table with totals", text.split("\n")[1].startsWith("Name\tEst hours\tEst pay\tActual hours\tActual pay\tDifference\tMileage miles\tMileage pay\tTips\tTotal to pay") && text.includes("Not clocked out") && text.split("\n").at(-1)!.startsWith("Total\t"));
+check("Copy payout is a pasteable table with totals", text.split("\n")[1].startsWith("Name\tEst hours\tEst pay\tActual hours\tActual pay\tDifference\tMileage miles\tMileage pay\tTips\tReimbursements\tTotal to pay") && text.includes("Not clocked out") && text.split("\n").at(-1)!.startsWith("Total\t"));
 check("40 hours in a week is flagged, 39.98 is not", payout.overWeekLimit([{ staffId: "a", minutes: 2400 }, { staffId: "b", minutes: 2399 }]).has("a") && !payout.overWeekLimit([{ staffId: "b", minutes: 2399 }]).has("b"));
 
 // ----- From the database -----

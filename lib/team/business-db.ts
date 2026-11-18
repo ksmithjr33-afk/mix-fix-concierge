@@ -12,9 +12,9 @@ import { isFullAdmin } from "@/lib/team/roles";
 import { eventData } from "@/lib/team/markets";
 import { chicagoToday, eventSchedule, isWeddingEvent } from "@/lib/team/time";
 import { BREAKDOWN_MIN } from "@/lib/team/clock";
-import { DEFAULT_RATE_CENTS, scheduledMinutes } from "@/lib/team/pay";
-import { payoutSheet } from "@/lib/team/payout-db";
-import { costSettings, suppliesSettings } from "@/lib/team/business-settings-db";
+import { eventPackageName, lineRate, scheduledMinutes } from "@/lib/team/pay";
+import { payoutSheet, type PayoutSheet } from "@/lib/team/payout-db";
+import { costSettings, packageRates, suppliesSettings } from "@/lib/team/business-settings-db";
 import { SUPPLY_PACKAGE_LABEL, type CostSettings, type SuppliesPerGuest, type SupplyPackage } from "@/lib/team/business-settings";
 import { setPendingPrice } from "@/lib/price-pending-db";
 import { DEFAULT_DEPOSIT, type BookedPrice } from "@/lib/price-change";
@@ -35,7 +35,7 @@ export interface EventBusinessView {
   manualSupplies: boolean;
   supplies: SupplyCost | null; // the Shopping list against the catalog, line by line
   pricePending: boolean;
-  payrollCents: number; // estimated pay + mileage + tips for the crew, for the cash view
+  payrollCents: number; // estimated pay + mileage + tips + reimbursements for the crew, for the cash view
 }
 
 /** What the overview loads once for many events. */
@@ -94,17 +94,18 @@ export function supplyPackage(name: unknown): SupplyPackage {
   return k === null ? "legacy" : (k as SupplyPackage);
 }
 
-/** The Business tab for one event. Null for anyone but an admin. */
-export async function eventBusinessFor(viewer: StaffMember, session: SessionRow, now: Date = new Date(), shared?: BusinessShared): Promise<EventBusinessView | null> {
+/** The Business tab for one event. Null for anyone but an admin. Payroll hands in the payout sheet it already built. */
+export async function eventBusinessFor(viewer: StaffMember, session: SessionRow, now: Date = new Date(), shared?: BusinessShared | null, built?: PayoutSheet | null): Promise<EventBusinessView | null> {
   if (!isFullAdmin(viewer.role)) return null;
-  const [finance, other, payments, payout, settings, perGuest, supplies] = await Promise.all([
+  const [finance, other, payments, payout, settings, perGuest, supplies, rates] = await Promise.all([
     financeRow(session.id),
     otherCosts(session.id),
     eventPayments(session.id),
-    payoutSheet(viewer, session),
+    built ?? payoutSheet(viewer, session),
     shared ? shared.settings : costSettings(viewer),
     shared ? shared.perGuest : suppliesSettings(viewer),
     supplyCostFor(viewer, session, undefined, shared?.catalog),
+    packageRates(),
   ]);
   const ed = eventData(session);
   const bp = (session.booked_price ?? null) as Partial<BookedPrice> | null;
@@ -126,12 +127,13 @@ export async function eventBusinessFor(viewer: StaffMember, session: SessionRow,
     guests: bookedGuestCount(ed.guest_count) ?? bookedGuestCount(session.guest_count),
     scheduledMinutes: scheduledMinutes(ed),
     bookedMinutes: bookedMinutes(session, ed),
-    defaultRateCents: DEFAULT_RATE_CENTS,
+    defaultRateCents: lineRate(null, eventPackageName(ed, session), rates).cents,
     staffingFor,
     supplyLines: supplies ? { catalogCents: supplies.cents, costed: supplies.matched, lines: supplies.lines } : null,
     perGuestCents: perGuest![pkg],
     packageLabel: SUPPLY_PACKAGE_LABEL[pkg],
     other,
+    reimbursements: rows.flatMap((r) => r.reimbursements.map((x) => ({ kind: x.kind, cents: x.cents }))),
     settings: settings!,
   });
   return {
@@ -141,7 +143,7 @@ export async function eventBusinessFor(viewer: StaffMember, session: SessionRow,
     manualSupplies: finance?.supplies_cents != null,
     supplies,
     pricePending: !!session.price_pending,
-    payrollCents: rows.reduce((n, r) => n + (r.estPayCents ?? 0) + r.mileageCents + (r.tipsCents ?? 0), 0),
+    payrollCents: rows.reduce((n, r) => n + (r.estPayCents ?? 0) + r.mileageCents + (r.tipsCents ?? 0) + r.reimbursementsCents, 0),
   };
 }
 

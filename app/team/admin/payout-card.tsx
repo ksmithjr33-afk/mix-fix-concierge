@@ -3,7 +3,8 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import CopyButton from "./copy-button";
-import { hoursText, mileageText, money } from "@/lib/team/pay";
+import { hoursText, mileageText, money, rateSourceText, rateText } from "@/lib/team/pay";
+import { reimbursementText } from "@/lib/team/reimbursements";
 import { PAYOUT_FLAG_LABEL, diffHours, diffMoney, payoutText, type PayoutRow, type PayoutTotals } from "@/lib/team/payout";
 
 // The payout sheet for one event: admins and managers, on the manager Day of
@@ -40,6 +41,8 @@ export default function PayoutCard({ sessionId, title, rows, totals, tipNote = n
             </dd>
             <dt>Tips</dt>
             <dd className="text-right">{money(totals.tipsCents)}</dd>
+            <dt>Reimbursements</dt>
+            <dd className="text-right">{money(totals.reimbursementsCents)}</dd>
             <dt className="font-semibold">Total to pay</dt>
             <dd className="text-right font-heading font-bold">{money(totals.totalCents)}</dd>
           </dl>
@@ -78,6 +81,10 @@ function PayoutLine({ sessionId, r }: { sessionId: string; r: PayoutRow }) {
         </p>
       )}
       <dl className="grid grid-cols-[auto_1fr] gap-x-3 text-sm text-[#2C2420] tabular-nums">
+        <dt className="text-[#6B5D52]">Rate</dt>
+        <dd>
+          {rateText(r.rateCents)} · {rateSourceText({ source: r.rateSource, pkg: r.ratePkg })}
+        </dd>
         <dt className="text-[#6B5D52]">Estimated</dt>
         <dd>
           {r.estMinutes === null ? "times not set" : `${hoursText(r.estMinutes)} h · ${money(r.estPayCents ?? 0)}`}
@@ -102,6 +109,12 @@ function PayoutLine({ sessionId, r }: { sessionId: string; r: PayoutRow }) {
         </dd>
         <dt className="text-[#6B5D52]">Tips</dt>
         <dd>{r.tipsCents === null ? "not on file yet" : money(r.tipsCents)}</dd>
+        {r.reimbursements.length > 0 && (
+          <>
+            <dt className="text-[#6B5D52]">Reimbursed</dt>
+            <dd className="break-words">{r.reimbursements.map(reimbursementText).join(", ")}</dd>
+          </>
+        )}
       </dl>
       <div className="flex flex-wrap items-center gap-x-4">
         <button type="button" onClick={() => setOpen((o) => !o)} className="min-h-[44px] text-sm text-[#B5845A] underline">

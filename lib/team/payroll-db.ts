@@ -3,17 +3,24 @@
 //
 // Lines are the payout sheet (lib/team/payout-db.ts payoutFrom) built from the
 // Time page's timesheet rows, so this page, the Payout card and the payroll CSV
-// always agree. Paid records live in payroll_paid
-// (supabase/migrations/20261218_payroll_paid.sql). Until that migration runs,
-// reads come back empty (everything shows unpaid) and marking says so.
+// always agree. Revenue and the supplies estimate for each event come from the
+// Business tab (eventBusinessFor), handed the same payout sheet. Paid records
+// live in payroll_paid (supabase/migrations/20261218_payroll_paid.sql) and the
+// reimbursement total in its snapshot comes with
+// 20261219_payroll_reimbursements.sql. Until those run, reads come back empty
+// (everything shows unpaid, no reimbursements) and marking says so.
 
 import { supabase } from "@/lib/supabase";
 import type { SessionRow } from "@/lib/event-updates";
 import type { StaffMember } from "@/lib/team/event-view";
 import { adminEventTitle } from "@/lib/team/event-list";
+import { scrub } from "@/lib/team/event-view";
 import { eventData } from "@/lib/team/markets";
 import { isFullAdmin } from "@/lib/team/roles";
 import { payoutFrom } from "@/lib/team/payout-db";
+import { eventPackageName } from "@/lib/team/pay";
+import { businessShared, eventBusinessFor, type BusinessShared } from "@/lib/team/business-db";
+import { pickupsDone } from "@/lib/team/reimbursements-db";
 import { eventTimesheetRows, timesheetRows } from "@/lib/team/timesheet-db";
 import { weekRange, weekStart, type TimesheetRow } from "@/lib/team/timesheet";
 import { chicagoToday, eventSchedule } from "@/lib/team/time";
@@ -24,6 +31,7 @@ import {
   NOT_READY_MESSAGE,
   snapshotOf,
   validateMark,
+  type EventInfo,
   type PaidRecord,
   type PayrollLine,
   type PayrollView,
@@ -46,6 +54,7 @@ interface PaidDb {
   mileage_miles: number | string;
   mileage_cents: number;
   tips_cents: number | null;
+  reimbursements_cents?: number | null; // from 20261219; missing before it runs
   total_cents: number;
   marked_by_name: string | null;
   marked_at: string;
@@ -63,6 +72,7 @@ const toRecord = (r: PaidDb): PaidRecord => ({
     mileageMiles: Number(r.mileage_miles),
     mileageCents: Number(r.mileage_cents),
     tipsCents: r.tips_cents === null || r.tips_cents === undefined ? null : Number(r.tips_cents),
+    reimbursementsCents: Number(r.reimbursements_cents ?? 0),
     totalCents: Number(r.total_cents),
   },
 });
@@ -83,30 +93,66 @@ async function sessionsById(ids: string[]): Promise<Map<string, SessionRow>> {
   return new Map(((data as SessionRow[]) ?? []).map((s) => [s.id, s]));
 }
 
-/** Payroll lines for one event's timesheet rows: one per person on its payout sheet. */
-async function eventLines(admin: StaffMember, session: SessionRow, sheet: TimesheetRow[], paid: Map<string, PaidRecord>): Promise<PayrollLine[]> {
+type Pickups = Awaited<ReturnType<typeof pickupsDone>>;
+
+interface EventRead {
+  lines: PayrollLine[];
+  info: EventInfo | null;
+  reimbursementsReady: boolean;
+}
+
+/**
+ * Payroll lines for one event's timesheet rows (one per person on its payout
+ * sheet) and, when shared is given, the sheet's revenue and supplies from the
+ * Business tab.
+ */
+async function eventLines(admin: StaffMember, session: SessionRow, sheet: TimesheetRow[], paid: Map<string, PaidRecord>, pickups?: Pickups, shared?: BusinessShared | null): Promise<EventRead> {
   const payout = await payoutFrom(admin, session, sheet);
-  if (!payout) return [];
+  if (!payout) return { lines: [], info: null, reimbursementsReady: true };
   const ed = eventData(session);
   const sched = eventSchedule(ed);
   const ev = { sessionId: session.id, day: sched.day, title: adminEventTitle(ed), timeZone: sched.tz };
   const byAssignment = new Map(sheet.map((r) => [r.assignmentId, r]));
-  return payout.rows.map((p) => lineFrom(p, byAssignment.get(p.assignmentId) ?? null, ev, paid.get(p.assignmentId) ?? null));
+  const did = pickups?.get(session.id);
+  const lines = payout.rows.map((p) => lineFrom(p, byAssignment.get(p.assignmentId) ?? null, ev, paid.get(p.assignmentId) ?? null, { ice: !!did?.ice.has(p.staffId), menu: !!did?.menu.has(p.staffId) }));
+  let info: EventInfo | null = null;
+  if (shared) {
+    const biz = await eventBusinessFor(admin, session, new Date(), shared, payout);
+    info = {
+      sessionId: session.id,
+      day: sched.day,
+      title: ev.title,
+      packageName: eventPackageName(ed, session),
+      venue: scrub(ed.event_address),
+      timeZone: sched.tz,
+      revenueCents: biz?.business.revenue.totalCents ?? null,
+      suppliesCents: biz?.business.costs.find((c) => c.key === "supplies")?.cents ?? null,
+    };
+  }
+  return { lines, info, reimbursementsReady: payout.reimbursementsReady };
 }
 
 /**
- * Everything for a pay period: one card per person who worked an event dated
- * in it, their lines, totals, the 40 hour flag (whole weeks), and paid status.
+ * Everything for a pay week (or a custom range): one row per event dated in
+ * it with everyone on it, one Pay Out row per person, the 40 hour flag (whole
+ * weeks), and paid status.
  */
 export async function payrollView(admin: StaffMember, period: Period): Promise<PayrollView | null> {
   if (!isFullAdmin(admin.role)) return null;
   // Whole weeks, so the 40 hour flag matches the Time page even for a custom range.
   const weekRows = await timesheetRows(weekStart(period.from), weekRange(period.to).to);
   const inPeriod = weekRows.filter((r) => !!r.eventDay && r.eventDay >= period.from && r.eventDay <= period.to);
-  const sessions = await sessionsById(inPeriod.map((r) => r.sessionId));
-  const paid = await activePaid(inPeriod.map((r) => r.assignmentId));
-  const lines = (await Promise.all([...sessions.values()].map((s) => eventLines(admin, s, inPeriod.filter((r) => r.sessionId === s.id), paid.byAssignment)))).flat();
-  return buildPayroll(period, lines, weekRows, paid.ready);
+  const ids = [...new Set(inPeriod.map((r) => r.sessionId))];
+  const [sessions, paid, pickups, shared] = await Promise.all([sessionsById(ids), activePaid(inPeriod.map((r) => r.assignmentId)), pickupsDone(ids), businessShared(admin)]);
+  const reads = await Promise.all([...sessions.values()].map((s) => eventLines(admin, s, inPeriod.filter((r) => r.sessionId === s.id), paid.byAssignment, pickups, shared)));
+  return buildPayroll(
+    period,
+    reads.flatMap((r) => r.lines),
+    weekRows,
+    paid.ready,
+    reads.map((r) => r.info).filter((i): i is EventInfo => i !== null),
+    reads.every((r) => r.reimbursementsReady)
+  );
 }
 
 /** One line, built fresh from the database. Null when the assignment is not on a payout sheet. */
@@ -118,7 +164,7 @@ async function lineFor(admin: StaffMember, assignmentId: string): Promise<{ line
   const session = sessions.get(asg.session_id);
   if (!session) return { line: null, ready: true };
   const [sheet, paid] = await Promise.all([eventTimesheetRows(session.id), activePaid([assignmentId])]);
-  const lines = await eventLines(admin, session, sheet, paid.byAssignment);
+  const { lines } = await eventLines(admin, session, sheet, paid.byAssignment);
   return { line: lines.find((l) => l.assignmentId === assignmentId) ?? null, ready: paid.ready };
 }
 
@@ -136,6 +182,8 @@ function paidRow(admin: StaffMember, l: PayrollLine, paidOn: string, note: strin
     mileage_miles: s.mileageMiles,
     mileage_cents: s.mileageCents,
     tips_cents: s.tipsCents,
+    // Only written when there is one, so marking paid works before 20261219 adds the column.
+    ...(s.reimbursementsCents ? { reimbursements_cents: s.reimbursementsCents } : {}),
     total_cents: s.totalCents,
     marked_by: admin.id,
     marked_by_name: admin.name,
@@ -179,6 +227,28 @@ export async function markAllPaid(
   const toMark = person.lines.filter((l) => checkMarkable(l).ok);
   const skipped = person.lines.filter((l) => !l.paid && !l.payable).length;
   if (toMark.length === 0) return { ok: false, error: skipped ? "Nothing to mark. Fix hours first on the lines left." : "Every line is already marked paid.", status: 400 };
+  const { error } = await supabase.from(PAID_TABLE).insert(toMark.map((l) => paidRow(admin, l, v.paidOn, v.note, now)));
+  if (error) return { ok: false, ...insertError(error.message) };
+  return { ok: true, marked: toMark.length, skipped };
+}
+
+/**
+ * Mark the week paid: every payable line in the pay week, for everyone, with
+ * the Monday pay date. Lines without clocked hours are left and counted.
+ */
+export async function markWeekPaid(admin: StaffMember, body: { period?: Period; note?: unknown }, now: Date = new Date()): Promise<Result<{ marked: number; skipped: number }>> {
+  if (!isFullAdmin(admin.role)) return ADMINS_ONLY;
+  const period = body.period;
+  if (!period || period.key !== "week" || !period.payDate) return { ok: false, error: "Pick a pay week, Monday to Sunday.", status: 400 };
+  const v = validateMark({ paidOn: period.payDate, note: body.note }, chicagoToday(now));
+  if (!v.ok) return { ok: false, error: v.error, status: 400 };
+  const view = await payrollView(admin, period);
+  if (!view) return ADMINS_ONLY;
+  if (!view.ready) return { ok: false, error: NOT_READY_MESSAGE, status: 503 };
+  const lines = view.people.flatMap((p) => p.lines);
+  const toMark = lines.filter((l) => checkMarkable(l).ok);
+  const skipped = lines.filter((l) => !l.paid && !l.payable).length;
+  if (toMark.length === 0) return { ok: false, error: skipped ? "Nothing to mark. Fix hours first on the lines left." : lines.length ? "Every line this week is already marked paid." : "Nobody worked an event this week.", status: 400 };
   const { error } = await supabase.from(PAID_TABLE).insert(toMark.map((l) => paidRow(admin, l, v.paidOn, v.note, now)));
   if (error) return { ok: false, ...insertError(error.message) };
   return { ok: true, marked: toMark.length, skipped };

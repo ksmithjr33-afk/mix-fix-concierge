@@ -9,18 +9,20 @@ import { crewEstimates } from "@/lib/team/pay-db";
 import { eventTimesheetRows } from "@/lib/team/timesheet-db";
 import type { TimesheetRow } from "@/lib/team/timesheet";
 import { payoutRow, payoutTotals, tipMismatchNote, type PayoutRow, type PayoutTotals } from "@/lib/team/payout";
+import { reimbursementsFor } from "@/lib/team/reimbursements-db";
 
 export interface PayoutSheet {
   sessionId: string;
   rows: PayoutRow[];
   totals: PayoutTotals;
   tipNote: string | null; // booked tip per bartender against the split, when they differ by more than a dollar
+  reimbursementsReady: boolean; // false until the reimbursements migration runs
 }
 
 /** Build the sheet from estimates and timesheet rows already loaded. */
 export async function payoutFrom(viewer: StaffMember, session: SessionRow, sheet: TimesheetRow[]): Promise<PayoutSheet | null> {
   if (!isAdminRole(viewer.role)) return null;
-  const crew = await crewEstimates(viewer, session);
+  const [crew, reimb] = await Promise.all([crewEstimates(viewer, session), reimbursementsFor([session.id])]);
   const bySheet = new Map(sheet.map((r) => [r.staffId, r]));
   const names = new Map(sheet.map((r) => [r.staffId, r.staffName]));
   const missing = crew.filter((c) => !names.has(c.staffId)).map((c) => c.staffId);
@@ -29,11 +31,11 @@ export async function payoutFrom(viewer: StaffMember, session: SessionRow, sheet
     for (const s of (data as { id: string; name: string }[]) ?? []) names.set(s.id, s.name);
   }
   const rows = crew
-    .map((c) => payoutRow({ staffId: c.staffId, assignmentId: c.assignmentId, name: names.get(c.staffId) || "Unknown staff member", role: c.role, estimate: c.estimate, sheet: bySheet.get(c.staffId) ?? null }))
+    .map((c) => payoutRow({ staffId: c.staffId, assignmentId: c.assignmentId, name: names.get(c.staffId) || "Unknown staff member", role: c.role, estimate: c.estimate, sheet: bySheet.get(c.staffId) ?? null, reimbursements: reimb.byAssignment.get(c.assignmentId) ?? [] }))
     .sort((a, b) => a.name.localeCompare(b.name));
   const split = crew.map((c) => c.estimate.tips).find((t) => t.state === "on_file");
   const tipNote = tipMismatchNote(session.booked_price?.tip_per_bartender, split?.state === "on_file" ? split.cents : null);
-  return { sessionId: session.id, rows, totals: payoutTotals(rows), tipNote };
+  return { sessionId: session.id, rows, totals: payoutTotals(rows), tipNote, reimbursementsReady: reimb.ready };
 }
 
 export async function payoutSheet(viewer: StaffMember, session: SessionRow): Promise<PayoutSheet | null> {

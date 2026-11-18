@@ -14,7 +14,7 @@ import { AUTO_SEND_KEY, ICE_RULE_KEY, POPULAR_COCKTAILS_KEY, POPULAR_MOCKTAILS_K
 import { currentPopularDrinks } from "@/lib/popular-drinks-db";
 import { popularStatusLine } from "@/lib/popular-drinks";
 import { ratesFor } from "@/lib/team/pay-db";
-import { DEFAULT_RATE_CENTS, rateText } from "@/lib/team/pay";
+import { rateText } from "@/lib/team/pay";
 import { rangeLabel } from "@/lib/team/availability";
 import { chicagoToday } from "@/lib/team/time";
 import { staffOverview } from "@/lib/team/profile-db";
@@ -47,7 +47,7 @@ async function AdminStaffPage() {
   for (const s of staff) {
     add(s.id, `Record: ${records[s.id]}`);
     add(s.id, `Training: ${progressLine(onboard.get(s.id) ?? [])}`);
-    add(s.id, `Rate: ${rates.get(s.id) ? rateText(rates.get(s.id)!) : `${rateText(DEFAULT_RATE_CENTS)} (default)`}`);
+    add(s.id, `Rate: ${rates.get(s.id) ? `${rateText(rates.get(s.id)!)} (own rate)` : "package rate"}`);
   }
   for (const [id, rows] of away) {
     const shown = rows.slice(0, 3).map(rangeLabel).join("; ");

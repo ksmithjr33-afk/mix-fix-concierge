@@ -267,7 +267,7 @@ export default function TimesheetWeek({
   meId: string;
   from: string;
   to: string;
-  rates?: Record<string, number>;
+  rates?: Record<string, number>; // hourly cents by assignment: own rate, else the package rate
   scope?: "week" | "event"; // "event": opened from a manager view's Time clock card, only that event's rows
   over40?: string[]; // staff whose hours for the whole week reach 40 or more
 }) {
@@ -276,6 +276,15 @@ export default function TimesheetWeek({
   const [busy, setBusy] = useState(false);
   const [range, setRange] = useState({ from, to });
   const totals = useMemo(() => staffTotals(rows), [rows]);
+  // Each row at its own rate (rates differ by package), added up per person.
+  const payByStaff = useMemo(() => {
+    const out: Record<string, number> = {};
+    for (const r of rows) {
+      const c = payCents(rates[r.assignmentId], r.minutes);
+      if (c !== null) out[r.staffId] = (out[r.staffId] ?? 0) + c;
+    }
+    return out;
+  }, [rows, rates]);
   const plan = useMemo(() => weekApproval(meId, rows), [rows, meId]);
   const ownWaiting = plan.skipped.filter((s) => s.reason === OWN_APPROVE_MESSAGE).length;
 
@@ -298,7 +307,7 @@ export default function TimesheetWeek({
                 </span>
                 <span className="tabular-nums">
                   {formatWorked(t.minutes)}
-                  {rates[t.staffId] ? ` · ${money(payCents(rates[t.staffId], t.minutes) ?? 0)}` : ""}
+                  {payByStaff[t.staffId] ? ` · ${money(payByStaff[t.staffId])}` : ""}
                   {t.open > 0 && <span className="text-xs text-[#A0412D]"> · {t.open} incomplete</span>}
                 </span>
               </li>
@@ -341,7 +350,7 @@ export default function TimesheetWeek({
         ) : (
           <ul className="divide-y divide-[#DDD5CC]">
             {rows.map((r) => (
-              <Row key={r.assignmentId} row={r} meId={meId} onRows={merge} rate={rates[r.staffId]} />
+              <Row key={r.assignmentId} row={r} meId={meId} onRows={merge} rate={rates[r.assignmentId]} />
             ))}
           </ul>
         )}

@@ -277,7 +277,7 @@ export const FLAG_CSV: Record<string, string> = {
   edited: "corrected by admin",
 };
 
-/** Admin CSV. `rates` is hourly cents by staff id; blank columns for anyone without a rate. */
+/** Admin CSV. `rates` is hourly cents by assignment (rowRates: own rate, else the package rate); blank when missing. */
 export function timesheetCsv(rows: TimesheetRow[], rates: Map<string, number> = new Map(), extras: CsvExtras = new Map()): string {
   const lines = [CSV_COLUMNS.map(csvCell).join(",")];
   for (const r of rows) {
@@ -296,8 +296,8 @@ export function timesheetCsv(rows: TimesheetRow[], rates: Map<string, number> = 
         r.editedByAdmin ? "Yes" : "No",
         r.approved?.byName ?? "",
         zoneShort(r.timeZone || TZ),
-        rates.get(r.staffId) ? (rates.get(r.staffId)! / 100).toFixed(2) : "",
-        rates.get(r.staffId) && r.minutes !== null ? ((rates.get(r.staffId)! * r.minutes) / 6000).toFixed(2) : "",
+        rates.get(r.assignmentId) ? (rates.get(r.assignmentId)! / 100).toFixed(2) : "",
+        rates.get(r.assignmentId) && r.minutes !== null ? ((rates.get(r.assignmentId)! * r.minutes) / 6000).toFixed(2) : "",
         extras.has(r.assignmentId) ? String(extras.get(r.assignmentId)!.mileageMiles) : "",
         extras.has(r.assignmentId) ? (extras.get(r.assignmentId)!.mileageCents / 100).toFixed(2) : "",
         extras.get(r.assignmentId)?.tipsCents != null ? (extras.get(r.assignmentId)!.tipsCents! / 100).toFixed(2) : "",

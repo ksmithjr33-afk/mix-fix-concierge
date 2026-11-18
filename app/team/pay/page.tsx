@@ -3,7 +3,7 @@ import type { Metadata } from "next";
 import { requireStaff } from "@/lib/team/auth";
 import { myPayRows } from "@/lib/team/pay-db";
 import { myPaidDates } from "@/lib/team/payroll-db";
-import { hoursText, money, payTotals, rateText, PAY_LABEL, PAY_NOTE } from "@/lib/team/pay";
+import { hoursText, money, payTotals, rateSourceText, rateText, PAY_LABEL, PAY_NOTE } from "@/lib/team/pay";
 import { todayFor } from "@/lib/team/availability-db";
 import { shortDate } from "@/lib/team/time";
 import TeamHeader from "../team-header";
@@ -23,18 +23,22 @@ function monthBounds(ym: string): { from: string; to: string; prev: string; next
   return { from: first.toISOString().slice(0, 10), to: last.toISOString().slice(0, 10), prev, next, label: first.toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" }) };
 }
 
-// A staff member's own pay estimates, one month at a time. Only ever the signed in person's.
+// A staff member's own pay estimates, one month at a time. Only ever the signed
+// in person's: their rate on each event, hours, pay, their share of the
+// gratuity and their reimbursements once entered. Nothing about anyone else.
 export default async function MyPayPage({ searchParams }: { searchParams: Promise<{ m?: string }> }) {
   const staff = await requireStaff("/team/pay");
   const { m } = await searchParams;
   const today = await todayFor(staff.id);
   const month = typeof m === "string" && /^\d{4}-(0[1-9]|1[0-2])$/.test(m) ? m : today.slice(0, 7);
   const b = monthBounds(month);
-  const { rate, rows } = await myPayRows(staff.id, b.from, b.to);
+  const { rows } = await myPayRows(staff.id, b.from, b.to);
   // Only the signed in person's own paid dates: no amounts, notes, or anyone else.
   const paidDates = await myPaidDates(staff.id, rows.map((r) => r.sessionId));
   const totals = payTotals(rows);
   const monthTotal = totals.months.find((t) => t.month === month)?.cents ?? 0;
+  const monthTips = rows.reduce((n, r) => n + (r.tipsCents ?? 0), 0);
+  const monthReimbursed = rows.reduce((n, r) => n + r.reimbursements.reduce((m, x) => m + x.cents, 0), 0);
   return (
     <>
       <TeamHeader signedIn admin={isAdminRole(staff.role)} back={{ href: "/team/me", label: "Me" }} />
@@ -42,12 +46,9 @@ export default async function MyPayPage({ searchParams }: { searchParams: Promis
         <div className="px-1">
           <h1 className="font-heading text-2xl font-bold text-[#2C2420]">My pay</h1>
           <p className="text-[15px] text-[#6B5D52]">{PAY_NOTE}</p>
-          {rate && <p className="text-sm text-[#6B5D52] mt-1">Your rate: {rateText(rate)}</p>}
+          <p className="text-sm text-[#6B5D52] mt-1">Your rate is set for each event: your own rate if an admin set one for you, otherwise the rate for that event&apos;s package.</p>
         </div>
-        {!rate ? (
-          <p className={`${card} text-[15px] text-[#6B5D52]`}>No hourly rate is set for you yet, so there is no pay to show. Ask an admin.</p>
-        ) : (
-          <>
+        <>
             <div className="flex items-center justify-between gap-2 px-1">
               <Link href={`/team/pay?m=${b.prev}`} className="text-sm text-[#B5845A] underline">
                 Previous
@@ -63,6 +64,22 @@ export default async function MyPayPage({ searchParams }: { searchParams: Promis
                 <span className="font-heading text-lg font-bold text-[#2C2420] tabular-nums">{money(monthTotal)}</span>
               </div>
               <p className="text-xs text-[#6B5D52]">{PAY_LABEL}</p>
+              {(monthTips > 0 || monthReimbursed > 0) && (
+                <dl className="mt-1 grid grid-cols-2 gap-x-3 text-[15px] text-[#2C2420] tabular-nums">
+                  {monthTips > 0 && (
+                    <>
+                      <dt>Your gratuity</dt>
+                      <dd className="text-right">{money(monthTips)}</dd>
+                    </>
+                  )}
+                  {monthReimbursed > 0 && (
+                    <>
+                      <dt>Reimbursed to you</dt>
+                      <dd className="text-right">{money(monthReimbursed)}</dd>
+                    </>
+                  )}
+                </dl>
+              )}
               {totals.weeks.length > 0 && (
                 <ul className="mt-2 divide-y divide-[#DDD5CC]">
                   {totals.weeks.map((w) => (
@@ -89,9 +106,16 @@ export default async function MyPayPage({ searchParams }: { searchParams: Promis
                         <span className="shrink-0 font-heading font-bold text-[#2C2420] tabular-nums">{r.payCents === null ? "--" : money(r.payCents)}</span>
                       </div>
                       <p className="text-xs text-[#6B5D52]">
-                        Scheduled {r.scheduledMinutes === null ? "--" : `${hoursText(r.scheduledMinutes)} h`} · Approved {r.approvedMinutes === null ? "not yet" : `${hoursText(r.approvedMinutes)} h`}
+                        {rateText(r.rateCents)}, {rateSourceText({ source: r.rateSource, pkg: r.ratePkg })} · Scheduled {r.scheduledMinutes === null ? "--" : `${hoursText(r.scheduledMinutes)} h`} · Approved {r.approvedMinutes === null ? "not yet" : `${hoursText(r.approvedMinutes)} h`}
                         {r.fromApproved ? " · from approved hours" : " · from scheduled hours"}
                       </p>
+                      {(r.tipsCents !== null || r.reimbursements.length > 0) && (
+                        <p className="text-xs text-[#2C2420]">
+                          {r.tipsCents !== null && `Your gratuity ${money(r.tipsCents)}`}
+                          {r.tipsCents !== null && r.reimbursements.length > 0 && " · "}
+                          {r.reimbursements.length > 0 && `Reimbursed ${r.reimbursements.map((x) => `${x.label} ${money(x.cents)}${x.note ? ` (${x.note})` : ""}`).join(", ")}`}
+                        </p>
+                      )}
                       <p className={`text-xs font-medium ${paidDates.has(r.sessionId) ? "text-[#55684A]" : "text-[#9A7049]"}`}>
                         {paidDates.has(r.sessionId) ? `Paid ${shortDate(paidDates.get(r.sessionId)!)}` : "Not paid yet"}
                       </p>
@@ -100,8 +124,7 @@ export default async function MyPayPage({ searchParams }: { searchParams: Promis
                 </ul>
               )}
             </section>
-          </>
-        )}
+        </>
       </main>
     </>
   );
