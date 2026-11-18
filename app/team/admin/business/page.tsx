@@ -2,10 +2,10 @@ import Link from "next/link";
 import { requireFullAdmin } from "@/lib/team/auth";
 import { chicagoToday } from "@/lib/team/time";
 import { money } from "@/lib/team/pay";
-import { COST_KEYS, COST_LABEL, PAID_LABEL, type PaidStatus } from "@/lib/team/business";
+import { COST_KEYS, COST_LABEL, profitTitle } from "@/lib/team/business";
 import { RANGE_LABEL, breakdown, cashView, completeness, rangeFor, totalsOf, type RangePreset, type Totals } from "@/lib/team/business-overview";
 import { cashEvents, overviewEvents } from "@/lib/team/business-overview-db";
-import { costSettings, mileageSettings } from "@/lib/team/business-settings-db";
+import { costSettings, mileageSettings, suppliesSettings } from "@/lib/team/business-settings-db";
 import { managerHref } from "@/lib/team/manager-tabs";
 import TeamHeader from "../../team-header";
 import SettingsForm from "./settings-form";
@@ -27,7 +27,7 @@ export default async function BusinessPage({ searchParams }: { searchParams: Pro
   const me = await requireFullAdmin("/team/admin/business");
   const today = chicagoToday();
   const range = rangeFor(p.range, today, p.from, p.to);
-  const [events, cash, mileage, costs] = await Promise.all([overviewEvents(me, range.from, range.to), cashEvents(me, today), mileageSettings(), costSettings(me)]);
+  const [events, cash, mileage, costs, perGuest] = await Promise.all([overviewEvents(me, range.from, range.to), cashEvents(me, today), mileageSettings(), costSettings(me), suppliesSettings(me)]);
   const totals = totalsOf(events);
   const done = completeness(events);
   const byPackage = breakdown(events, (e) => e.package);
@@ -81,7 +81,20 @@ export default async function BusinessPage({ searchParams }: { searchParams: Pro
                     {g.title}
                   </Link>
                   <span className="text-sm text-[#6B5D52]"> · {dateText(g.day)}</span>
-                  <span className="block text-sm text-[#2C2420]">{g.missing.join(", ")}</span>
+                  <span className="block text-sm text-[#2C2420]">
+                    {g.missing.map((m, i) => (
+                      <span key={m.key}>
+                        {i > 0 && ", "}
+                        {m.key === "per_guest" ? (
+                          <a href="#settings" className="text-[#B5845A] underline">
+                            {m.text}
+                          </a>
+                        ) : (
+                          m.text
+                        )}
+                      </span>
+                    ))}
+                  </span>
                 </li>
               ))}
             </ul>
@@ -151,7 +164,7 @@ export default async function BusinessPage({ searchParams }: { searchParams: Pro
                     {o.title}
                   </Link>
                   <span className="text-sm tabular-nums">
-                    {dateText(o.day)} · {o.balanceCents === null ? "total not on file" : money(o.balanceCents)} · {PAID_LABEL[o.status as PaidStatus]}
+                    {dateText(o.day)} · {o.balanceCents === null ? "total not on file" : money(o.balanceCents)} · {o.status}
                   </span>
                 </li>
               ))}
@@ -180,9 +193,26 @@ export default async function BusinessPage({ searchParams }: { searchParams: Pro
                       </Link>
                       <span className="text-sm text-[#6B5D52]"> · {dateText(e.day)} · {e.package} · {e.market}</span>
                     </span>
-                    <span className="text-sm tabular-nums">
+                    <span className="text-sm tabular-nums text-right">
                       {e.business.revenue.totalCents === null ? "no total" : money(e.business.revenue.totalCents)} ·{" "}
-                      {e.business.complete ? `${e.business.mode} ${money(e.business.profitCents ?? 0)}` : <span className="text-[#9A7049]">Incomplete</span>}
+                      {e.business.complete ? (
+                        <>
+                          {profitTitle(e.business)} {money(e.business.profitCents ?? 0)}
+                          {e.business.marginPct !== null && ` (${e.business.marginPct}%)`}
+                        </>
+                      ) : (
+                        <span className="text-[#9A7049]">{e.business.missing.map((m) => m.text).join(", ")}</span>
+                      )}
+                      <span className="block text-xs text-[#6B5D52]">
+                        Collected {money(e.business.revenue.collectedCents)} ·{" "}
+                        {e.business.revenue.overpaidCents ? (
+                          <span className="text-[#A0412D]">Overpaid by {money(e.business.revenue.overpaidCents)}</span>
+                        ) : e.business.revenue.balanceCents === null ? (
+                          "remaining unknown"
+                        ) : (
+                          `${money(e.business.revenue.balanceCents)} remaining`
+                        )}
+                      </span>
                     </span>
                   </li>
                 ))}
@@ -200,7 +230,7 @@ export default async function BusinessPage({ searchParams }: { searchParams: Pro
           </p>
         </section>
 
-        <SettingsForm mileage={mileage} costs={costs!} />
+        <SettingsForm mileage={mileage} costs={costs!} perGuest={perGuest!} />
       </main>
     </>
   );

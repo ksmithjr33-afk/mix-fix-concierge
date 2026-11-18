@@ -96,7 +96,11 @@ check("Matched lines times quantity", cost.matched >= 1 && cost.byRef[pick.ref]?
 check("Every other line is listed as No cost yet", cost.unmatched.length === lines.length - cost.matched);
 check("The client's own lines are never costed", view.sheet.sections.flatMap((x) => x.lines).filter((l) => l.clientBuys).every((l) => !(l.ref in cost.byRef)));
 const biz = (await bizDb.eventBusinessFor(admin as never, s))!;
-check("The Business tab uses the catalog estimate for supplies", biz.business.costs.find((c) => c.key === "supplies")!.cents === cost.cents && biz.supplies?.unmatched.length === cost.unmatched.length);
+check("Partly costed with no per guest estimate: the Business tab asks for one", biz.business.supplies === "missing" && biz.business.costs.find((c) => c.key === "supplies")!.cents === null && biz.supplies?.unmatched.length === cost.unmatched.length);
+db.team_settings = [...(db.team_settings ?? []), { key: "business_supplies_per_guest", value: { full: 200 } }];
+const biz2 = (await bizDb.eventBusinessFor(admin as never, s))!;
+const share = Math.round((200 * 80 * (cost.lines - cost.matched)) / cost.lines);
+check("The Business tab uses the catalog for costed lines and the per guest share for the rest", biz2.business.supplies === "partial" && biz2.business.costs.find((c) => c.key === "supplies")!.cents === cost.cents + share && biz2.business.costs.find((c) => c.key === "supplies")!.note === `${cost.matched} of ${cost.lines} items costed, rest estimated`);
 check("A manual amount wins over the catalog", (await bizDb.saveEventBusiness(admin as never, "f1", { action: "supplies", amount: "50" })).ok && (await bizDb.eventBusinessFor(admin as never, s))!.business.costs.find((c) => c.key === "supplies")!.cents === 5000);
 
 // ----- Never to managers, staff, or clients (source checks) -----
@@ -111,7 +115,7 @@ check("The catalog table is read only in the supply costs module", code.filter((
 check("Every supply costs function checks for an admin first", ["catalogRows", "supplyCostFor", "catalogAction"].every((fn) => new RegExp(`export async function ${fn}\\([^\\n]*\\{\\n  if \\(!isFullAdmin\\(`).test(src("lib/team/supply-costs-db.ts"))));
 check("The catalog route answers 403 to anyone but an admin", src("app/api/team/admin/business/supplies/route.ts").includes('if (!staff || !isFullAdmin(staff.role)) return NextResponse.json({ error: "Admins only." }, { status: 403 });'));
 check("The catalog page is admins only", src("app/team/admin/business/supplies/page.tsx").includes('await requireFullAdmin("/team/admin/business/supplies")'));
-check("The Shopping list tab gets costs from supplyCostFor, which is null for managers", src("app/team/admin/e/[id]/page.tsx").includes('on("order") ? sheetP.then((s) => supplyCostFor(me, session, s)) : null'));
+check("The Shopping list tab gets costs from supplyCostFor, which is null for managers", src("app/team/admin/e/[id]/page.tsx").includes('on("order") ? sheetP.then((s) => supplyCostFor(me, session, s)).then((c) => (c && !c.catalogEmpty ? c : null)) : null'));
 check("Staff and client pages never see supply costs", code.filter((f) => (f.startsWith("app/team/") && !f.startsWith("app/team/admin/")) || f.startsWith("app/s/") || f.startsWith("app/api/team/") && !f.startsWith("app/api/team/admin/")).every((f) => !/supplyCost|supply_catalog|SheetCosts|catalogRows/.test(src(f))));
 check("The staff Supplies tab and the client list do not carry costs", !/cost/i.test(src("lib/client-list.ts").match(/export interface ClientList[\s\S]*?\n\}/)?.[0] ?? "") && !/supply_catalog|supplyCost/.test(src("lib/order-sheet-db.ts")));
 

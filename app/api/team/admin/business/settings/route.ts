@@ -3,7 +3,7 @@ import { getCurrentStaff } from "@/lib/team/auth";
 import { saveBusinessSettings } from "@/lib/team/business-settings-db";
 import { isFullAdmin } from "@/lib/team/roles";
 
-// Business settings: { which: "mileage" | "costs", ...fields }. Admins only, never managers.
+// Business settings: { which: "mileage" | "costs" | "supplies", ...fields }. Admins only, never managers.
 export async function POST(request: Request) {
   const staff = await getCurrentStaff();
   if (!staff || !isFullAdmin(staff.role)) return NextResponse.json({ error: "Admins only." }, { status: 403 });

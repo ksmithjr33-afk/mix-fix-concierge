@@ -194,7 +194,7 @@ async function AdminEventPage({
     // The Business tab: admins only (null for anyone else, managers included).
     on("business") ? eventBusinessFor(me, session) : null,
     // Costs on the Shopping list: admins only (null for managers).
-    on("order") ? sheetP.then((s) => supplyCostFor(me, session, s)) : null,
+    on("order") ? sheetP.then((s) => supplyCostFor(me, session, s)).then((c) => (c && !c.catalogEmpty ? c : null)) : null,
   ]);
   const repeat = repeatLabel(eventNumber);
   if (tab === "chat") await markThreadRead(id, me.id);

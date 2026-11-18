@@ -6,7 +6,8 @@ import { supabase } from "@/lib/supabase";
 import type { SessionRow } from "@/lib/event-updates";
 import type { StaffMember } from "@/lib/team/event-view";
 import { isFullAdmin } from "@/lib/team/roles";
-import { getSheetView, type SheetView } from "@/lib/order-sheet-db";
+import { staffSheet } from "@/lib/order-sheet-db";
+import type { Sheet } from "@/lib/order-sheet";
 import { cleanRow, matchLines, previewImport, type BuyLine, type CatalogRow, type ImportPreview, type LineCost } from "@/lib/team/supply-costs";
 
 type Result<T = object> = ({ ok: true } & T) | { ok: false; error: string; status: number };
@@ -16,6 +17,8 @@ export interface SupplyCost {
   cents: number;
   byRef: Record<string, LineCost | null>; // each "we buy" line on the Shopping list
   matched: number;
+  lines: number; // every "we buy" line, costed or not
+  catalogEmpty: boolean;
   unmatched: string[]; // "we buy" lines with no cost yet
 }
 
@@ -27,17 +30,22 @@ export async function catalogRows(viewer: StaffMember): Promise<CatalogRow[]> {
 }
 
 /** The "we buy" lines on a Shopping list: not the client's own, not removed. */
-export function buyLines(view: SheetView): BuyLine[] {
+export function buyLines(view: { sheet: Sheet }): BuyLine[] {
   return view.sheet.sections.flatMap((s) => s.lines.filter((l) => !l.clientBuys && !l.gone).map((l) => ({ ref: l.ref, name: l.fields.name, quantity: l.fields.quantity })));
 }
 
-/** An event's estimated supply cost. Null for anyone but an admin, or with no catalog yet. */
-export async function supplyCostFor(viewer: StaffMember, session: SessionRow, sheet?: SheetView): Promise<SupplyCost | null> {
+/**
+ * An event's supply cost from its Shopping list (the team order sheet, "we buy"
+ * lines only, never the client's alcohol) against the cost catalog. Worked out
+ * live, so it follows every Shopping list change. Null for anyone but an admin.
+ * With no catalog yet every line is uncosted.
+ */
+export async function supplyCostFor(viewer: StaffMember, session: SessionRow, sheet?: { sheet: Sheet }, catalog?: CatalogRow[]): Promise<SupplyCost | null> {
   if (!isFullAdmin(viewer.role)) return null;
-  const [catalog, view] = await Promise.all([catalogRows(viewer), sheet ? Promise.resolve(sheet) : getSheetView(session)]);
-  if (catalog.length === 0) return null;
-  const m = matchLines(buyLines(view), catalog);
-  return { cents: m.cents, byRef: m.byRef, matched: Object.values(m.byRef).filter(Boolean).length, unmatched: m.unmatched };
+  const [rows, view] = await Promise.all([catalog ? Promise.resolve(catalog) : catalogRows(viewer), sheet ? Promise.resolve(sheet) : staffSheet(session).catch(() => null)]);
+  const lines = view ? buyLines(view) : [];
+  const m = matchLines(lines, rows);
+  return { cents: m.cents, byRef: m.byRef, matched: Object.values(m.byRef).filter(Boolean).length, lines: lines.length, catalogEmpty: rows.length === 0, unmatched: m.unmatched };
 }
 
 const toDb = (v: { product: string; brand: string; size: string; costCents: number; store: string; aliases: string[] }, admin: StaffMember) => ({

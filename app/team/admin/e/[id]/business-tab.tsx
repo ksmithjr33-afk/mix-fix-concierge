@@ -1,19 +1,24 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { money } from "@/lib/team/pay";
-import { PAID_LABEL } from "@/lib/team/business";
+import { costsTitle, profitTitle, type Payment } from "@/lib/team/business";
 import type { EventBusinessView } from "@/lib/team/business-db";
 
 // The Business tab: admins only (the server never builds it for anyone else).
-// Revenue, costs, and profit for this event, with admin entry for payments,
-// supplies, a missing total, and other costs.
+// A filled in estimate for every event: profit at the top, then revenue and
+// payments, then costs. The app stores no card information: a payment is an
+// amount, a date, and an optional note.
 
 const card = "rounded-2xl border border-[#DDD5CC] bg-white px-4 py-3";
 const input = "w-full rounded-lg border border-[#DDD5CC] px-3 py-2 text-[16px]";
 const btn = "rounded-lg bg-[#B5845A] text-white px-3 py-2 text-sm font-medium disabled:opacity-50";
-const cents = (c: number | null) => (c === null ? "not on file" : money(c));
+const ghost = "rounded-lg border border-[#DDD5CC] px-3 py-2 text-sm disabled:opacity-50";
+const link = "min-h-[44px] text-sm text-[#B5845A] underline disabled:opacity-50";
+const warn = "text-[#A0412D]";
+const today = () => new Date().toLocaleDateString("en-CA", { timeZone: "America/Chicago" });
 const dateText = (ymd: string | null) => {
   if (!ymd) return "";
   const [y, m, d] = ymd.split("-").map(Number);
@@ -39,30 +44,43 @@ function useSave(sessionId: string) {
   return { busy, error, save };
 }
 
+function FixLink({ href, children }: { href: string; children: React.ReactNode }) {
+  return href.startsWith("#") ? (
+    <a href={href} className="text-[#B5845A] underline">
+      {children}
+    </a>
+  ) : (
+    <Link href={href} className="text-[#B5845A] underline">
+      {children}
+    </Link>
+  );
+}
+
 export default function BusinessTab({ view }: { view: EventBusinessView }) {
   const b = view.business;
   const r = b.revenue;
   return (
     <>
       <section className={card} aria-label="Profit">
-        <div className="flex items-baseline justify-between gap-2">
-          <h2 className="font-heading text-base font-bold text-[#2C2420]">{b.mode} profit</h2>
-          {b.complete ? (
-            <span className="font-heading text-xl font-bold tabular-nums text-[#2C2420]">{money(b.profitCents ?? 0)}</span>
-          ) : (
-            <span className="rounded-full bg-[#FFF8EC] border border-[#E3C9A0] px-2 py-0.5 text-sm font-medium text-[#9A7049]">Incomplete</span>
-          )}
-        </div>
-        {b.complete && b.marginPct !== null && <p className="text-sm text-[#6B5D52]">{b.marginPct}% margin on {money(r.totalCents ?? 0)}</p>}
+        <h2 className="font-heading text-base font-bold text-[#2C2420] mb-1">{profitTitle(b)}</h2>
+        <dl className="grid grid-cols-[1fr_auto] gap-x-3 gap-y-1 text-[15px] text-[#2C2420] tabular-nums">
+          <dt>Revenue</dt>
+          <dd className="text-right">{r.totalCents === null ? "no booked total" : money(r.totalCents)}</dd>
+          <dt>{costsTitle(b)}</dt>
+          <dd className="text-right">{money(b.costCents)}</dd>
+          <dt className="font-semibold">{profitTitle(b)}</dt>
+          <dd className="text-right font-heading text-xl font-bold">{b.profitCents === null ? "—" : money(b.profitCents)}</dd>
+          <dt>Margin</dt>
+          <dd className="text-right">{b.marginPct === null ? "—" : `${b.marginPct}%`}</dd>
+        </dl>
         {!b.complete && (
-          <>
-            <p className="text-sm text-[#6B5D52] mt-1">Profit shows once these are on file:</p>
-            <ul className="list-disc pl-5 text-[15px] text-[#2C2420]">
-              {b.missing.map((m) => (
-                <li key={m}>{m}</li>
-              ))}
-            </ul>
-          </>
+          <ul className="mt-2 space-y-1 text-[15px] text-[#9A7049]">
+            {b.missing.map((m) => (
+              <li key={m.key}>
+                Profit needs one thing: <FixLink href={m.href}>{m.text}</FixLink>
+              </li>
+            ))}
+          </ul>
         )}
       </section>
 
@@ -70,46 +88,53 @@ export default function BusinessTab({ view }: { view: EventBusinessView }) {
         <h2 className="font-heading text-base font-bold text-[#2C2420] mb-1">Revenue</h2>
         <dl className="grid grid-cols-[1fr_auto] gap-x-3 gap-y-1 text-[15px] text-[#2C2420] tabular-nums">
           <dt>Booked total</dt>
-          <dd className="text-right font-semibold">{cents(r.totalCents)}</dd>
+          <dd className="text-right font-semibold">{r.totalCents === null ? "no booked total" : money(r.totalCents)}</dd>
           <dt className="text-[#6B5D52]">Gratuity inside it</dt>
-          <dd className="text-right">{cents(r.gratuityCents)}</dd>
-          <dt>Deposit paid</dt>
-          <dd className="text-right">{r.depositPaidCents === null ? "not recorded" : `${money(r.depositPaidCents)}${r.depositPaidOn ? `, ${dateText(r.depositPaidOn)}` : ""}`}</dd>
-          <dt>Balance paid</dt>
-          <dd className="text-right">{r.balancePaidCents === null ? "not recorded" : `${money(r.balancePaidCents)}${r.balancePaidOn ? `, ${dateText(r.balancePaidOn)}` : ""}`}</dd>
-          <dt>Balance</dt>
-          <dd className="text-right">{cents(r.balanceCents)}</dd>
-          <dt>Balance due</dt>
+          <dd className="text-right">{money(r.gratuityCents ?? 0)}</dd>
+        </dl>
+        {r.noGratuity && <p className="text-xs text-[#9A7049] mt-0.5">No gratuity on file. Tips paid out will show $0 until it is entered.</p>}
+        {r.totalCents === null && <TotalForm sessionId={view.sessionId} pending={view.pricePending} askGratuity={r.gratuityCents === null} />}
+
+        <h3 className="text-sm font-semibold text-[#2C2420] mt-3">Payments</h3>
+        <Deposit sessionId={view.sessionId} cents={r.depositPaidCents} on={r.depositPaidOn} edited={r.depositEdited} />
+        <ul className="divide-y divide-[#EFE8E0]">
+          {r.payments.map((p) => (
+            <PaymentLine key={p.id} sessionId={view.sessionId} p={p} />
+          ))}
+        </ul>
+        <PaymentActions sessionId={view.sessionId} canPayInFull={r.totalCents !== null && (r.balanceCents ?? 0) > 0} remaining={r.balanceCents} />
+
+        <dl className="mt-2 grid grid-cols-[1fr_auto] gap-x-3 gap-y-1 text-[15px] text-[#2C2420] tabular-nums border-t border-[#DDD5CC] pt-2">
+          <dt className="font-semibold">Remaining balance</dt>
+          <dd className={`text-right font-semibold ${r.overpaidCents ? warn : ""}`}>{r.overpaidCents ? `Overpaid by ${money(r.overpaidCents)}` : r.balanceCents === null ? "no booked total" : money(r.balanceCents)}</dd>
+          <dt>Balance due date</dt>
           <dd className="text-right">{dateText(r.balanceDue) || "no event date"}</dd>
           <dt>Status</dt>
-          <dd className="text-right">{PAID_LABEL[r.paid]}</dd>
+          <dd className={`text-right ${r.paid === "overdue" ? warn : ""}`}>{r.status}</dd>
         </dl>
-        {r.totalCents === null && <TotalForm sessionId={view.sessionId} pending={view.pricePending} askGratuity={r.gratuityCents === null} />}
-        <PaymentForm sessionId={view.sessionId} action="deposit" label="Deposit paid" suggest={view.bookedDepositCents} />
-        <PaymentForm sessionId={view.sessionId} action="balance" label="Balance paid" suggest={r.balanceCents} />
       </section>
 
       <section className={card} aria-label="Costs">
-        <h2 className="font-heading text-base font-bold text-[#2C2420] mb-1">{b.mode} costs</h2>
+        <h2 className="font-heading text-base font-bold text-[#2C2420] mb-1">{costsTitle(b)}</h2>
         <ul className="divide-y divide-[#DDD5CC]">
           {b.costs.map((c) => (
             <li key={c.key} className="flex items-baseline justify-between gap-3 py-1.5">
               <span className="text-[15px] text-[#2C2420]">
                 {c.label}
-                {c.note && <span className="block text-xs text-[#6B5D52]">{c.note}</span>}
+                {c.note && <span className="block text-xs text-[#6B5D52]">{c.href ? <FixLink href={c.href}>{c.note}</FixLink> : c.note}</span>}
               </span>
-              <span className={`tabular-nums ${c.cents === null ? "text-sm text-[#9A7049]" : "text-[#2C2420]"}`}>{cents(c.cents)}</span>
+              <span className={`tabular-nums ${c.cents === null ? "text-sm text-[#9A7049]" : "text-[#2C2420]"}`}>{c.cents === null ? (c.key === "mileage" ? "after the event" : "—") : money(c.cents)}</span>
             </li>
           ))}
           <li className="flex items-baseline justify-between gap-3 py-1.5 font-semibold">
-            <span>Costs on file</span>
+            <span>{costsTitle(b)}</span>
             <span className="tabular-nums">{money(b.costCents)}</span>
           </li>
         </ul>
         <SuppliesForm sessionId={view.sessionId} manual={view.manualSupplies} />
-        {view.supplies && view.supplies.unmatched.length > 0 && (
+        {!view.manualSupplies && view.supplies && view.supplies.unmatched.length > 0 && (
           <div className="mt-2">
-            <p className="text-sm font-medium text-[#2C2420]">No cost yet</p>
+            <p className="text-sm font-medium text-[#2C2420]">No cost in the catalog yet</p>
             <ul className="text-sm text-[#6B5D52] list-disc pl-5">
               {view.supplies.unmatched.map((u) => (
                 <li key={u}>{u}</li>
@@ -123,13 +148,182 @@ export default function BusinessTab({ view }: { view: EventBusinessView }) {
   );
 }
 
+function Deposit({ sessionId, cents, on, edited }: { sessionId: string; cents: number; on: string | null; edited: boolean }) {
+  const { busy, error, save } = useSave(sessionId);
+  const [open, setOpen] = useState(false);
+  const [amount, setAmount] = useState((cents / 100).toFixed(2));
+  const [date, setDate] = useState(on ?? "");
+  return (
+    <div className="py-1.5">
+      <div className="flex items-baseline justify-between gap-3 text-[15px] tabular-nums">
+        <span>
+          Deposit paid{on ? <span className="text-sm text-[#6B5D52]"> · {dateText(on)}</span> : null}
+          {!open && (
+            <button type="button" className={`${link} ml-3`} onClick={() => setOpen(true)}>
+              Edit deposit
+            </button>
+          )}
+        </span>
+        <span>{money(cents)}</span>
+      </div>
+      {open && (
+        <div className="mt-1 rounded-xl bg-[#FAF6F1] p-3 space-y-2">
+          <div className="grid grid-cols-2 gap-2">
+            <label className="text-sm">
+              Deposit ($)
+              <input className={input} inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} />
+            </label>
+            <label className="text-sm">
+              Date paid
+              <input className={input} type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+            </label>
+          </div>
+          {error && <p className={`text-sm ${warn}`}>{error}</p>}
+          <div className="flex flex-wrap gap-2">
+            <button type="button" className={btn} disabled={busy || !amount.trim()} onClick={async () => (await save({ action: "deposit", amount, date })) && setOpen(false)}>
+              Save
+            </button>
+            {edited && (
+              <button type="button" className={ghost} disabled={busy} onClick={async () => (await save({ action: "deposit", amount: "" })) && setOpen(false)}>
+                Back to the default
+              </button>
+            )}
+            <button type="button" className={ghost} disabled={busy} onClick={() => setOpen(false)}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PaymentFields({ amount, date, note, set }: { amount: string; date: string; note: string; set: (k: "amount" | "date" | "note", v: string) => void }) {
+  return (
+    <div className="grid grid-cols-2 gap-2">
+      <label className="text-sm">
+        Amount ($)
+        <input className={input} inputMode="decimal" value={amount} onChange={(e) => set("amount", e.target.value)} />
+      </label>
+      <label className="text-sm">
+        Date
+        <input className={input} type="date" value={date} onChange={(e) => set("date", e.target.value)} />
+      </label>
+      <label className="text-sm col-span-2">
+        Note
+        <input className={input} value={note} maxLength={120} onChange={(e) => set("note", e.target.value)} placeholder="optional, like Zelle or second payment" />
+      </label>
+    </div>
+  );
+}
+
+function PaymentLine({ sessionId, p }: { sessionId: string; p: Payment }) {
+  const { busy, error, save } = useSave(sessionId);
+  const [editing, setEditing] = useState(false);
+  const [f, setF] = useState({ amount: (p.cents / 100).toFixed(2), date: p.paidOn ?? today(), note: p.note });
+  if (editing)
+    return (
+      <li className="py-2 space-y-2">
+        <PaymentFields {...f} set={(k, v) => setF({ ...f, [k]: v })} />
+        {error && <p className={`text-sm ${warn}`}>{error}</p>}
+        <div className="flex flex-wrap gap-2">
+          <button type="button" className={btn} disabled={busy} onClick={async () => (await save({ action: "edit_payment", id: p.id, ...f })) && setEditing(false)}>
+            Save
+          </button>
+          <button type="button" className={ghost} disabled={busy} onClick={() => setEditing(false)}>
+            Cancel
+          </button>
+        </div>
+      </li>
+    );
+  return (
+    <li className="py-1.5">
+      <div className="flex items-baseline justify-between gap-3 text-[15px] tabular-nums">
+        <span>
+          Payment<span className="text-sm text-[#6B5D52]">{p.paidOn ? ` · ${dateText(p.paidOn)}` : ""}</span>
+        </span>
+        <span>{money(p.cents)}</span>
+      </div>
+      <div className="flex flex-wrap items-center gap-x-3 text-xs text-[#6B5D52]">
+        {p.note && <span>{p.note}</span>}
+        {p.recordedBy && <span>Recorded by {p.recordedBy}</span>}
+        <button type="button" className={link} disabled={busy} onClick={() => setEditing(true)}>
+          Edit
+        </button>
+        <button
+          type="button"
+          className={`${link} !text-[#A0412D]`}
+          disabled={busy}
+          onClick={() => {
+            if (window.confirm(`Delete the ${money(p.cents)} payment?`)) void save({ action: "delete_payment", id: p.id });
+          }}
+        >
+          Delete
+        </button>
+      </div>
+      {error && <p className={`text-sm ${warn}`}>{error}</p>}
+    </li>
+  );
+}
+
+function PaymentActions({ sessionId, canPayInFull, remaining }: { sessionId: string; canPayInFull: boolean; remaining: number | null }) {
+  const { busy, error, save } = useSave(sessionId);
+  const [open, setOpen] = useState(false);
+  const blank = () => ({ amount: "", date: today(), note: "" });
+  const [f, setF] = useState(blank);
+  return (
+    <div className="mt-1">
+      {!open ? (
+        <div className="flex flex-wrap gap-x-4">
+          <button
+            type="button"
+            className={link}
+            onClick={() => {
+              setF(blank());
+              setOpen(true);
+            }}
+          >
+            Record a payment
+          </button>
+          {canPayInFull && (
+            <button
+              type="button"
+              className={link}
+              disabled={busy}
+              onClick={() => {
+                if (window.confirm(`Record one payment of ${money(remaining ?? 0)} for the remaining balance, dated today?`)) void save({ action: "paid_in_full", date: today() });
+              }}
+            >
+              Mark paid in full
+            </button>
+          )}
+        </div>
+      ) : (
+        <div className="rounded-xl bg-[#FAF6F1] p-3 space-y-2">
+          <p className="text-sm font-medium">Record a payment</p>
+          <PaymentFields {...f} set={(k, v) => setF({ ...f, [k]: v })} />
+          <div className="flex flex-wrap gap-2">
+            <button type="button" className={btn} disabled={busy || !f.amount.trim()} onClick={async () => (await save({ action: "add_payment", ...f })) && setOpen(false)}>
+              Save payment
+            </button>
+            <button type="button" className={ghost} disabled={busy} onClick={() => setOpen(false)}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+      {error && <p className={`text-sm ${warn}`}>{error}</p>}
+    </div>
+  );
+}
+
 function TotalForm({ sessionId, pending, askGratuity }: { sessionId: string; pending: boolean; askGratuity: boolean }) {
   const { busy, error, save } = useSave(sessionId);
   const [total, setTotal] = useState("");
   const [grat, setGrat] = useState("");
   return (
-    <div className="mt-3 rounded-xl bg-[#FAF6F1] p-3 space-y-2">
-      <p className="text-sm text-[#2C2420]">{pending ? "This event is price pending. Entering the total clears it and sends the normal change order." : "No total is on file. Enter it here."}</p>
+    <div id="total" className="mt-3 rounded-xl bg-[#FAF6F1] p-3 space-y-2 scroll-mt-24">
+      <p className="text-sm text-[#2C2420]">{pending ? "This event is price pending. Entering the total clears it and sends the normal change order." : "No booked total is on file. Enter it here."}</p>
       <div className="grid grid-cols-2 gap-2">
         <label className="text-sm">
           Total ($)
@@ -142,47 +336,10 @@ function TotalForm({ sessionId, pending, askGratuity }: { sessionId: string; pen
           </label>
         )}
       </div>
-      {error && <p className="text-sm text-[#A0412D]">{error}</p>}
+      {error && <p className={`text-sm ${warn}`}>{error}</p>}
       <button type="button" className={btn} disabled={busy || !total.trim()} onClick={() => save({ action: "total", total, gratuity: grat })}>
         Save total
       </button>
-    </div>
-  );
-}
-
-function PaymentForm({ sessionId, action, label, suggest }: { sessionId: string; action: "deposit" | "balance"; label: string; suggest: number | null }) {
-  const { busy, error, save } = useSave(sessionId);
-  const [open, setOpen] = useState(false);
-  const [amount, setAmount] = useState(suggest ? (suggest / 100).toFixed(2) : "");
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
-  if (!open)
-    return (
-      <button type="button" className="min-h-[44px] mr-4 text-sm text-[#B5845A] underline" onClick={() => setOpen(true)}>
-        Record {label.toLowerCase()}
-      </button>
-    );
-  return (
-    <div className="mt-2 rounded-xl bg-[#FAF6F1] p-3 space-y-2">
-      <p className="text-sm font-medium">{label}</p>
-      <div className="grid grid-cols-2 gap-2">
-        <label className="text-sm">
-          Amount ($)
-          <input className={input} inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} />
-        </label>
-        <label className="text-sm">
-          Date
-          <input className={input} type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-        </label>
-      </div>
-      {error && <p className="text-sm text-[#A0412D]">{error}</p>}
-      <div className="flex flex-wrap gap-2">
-        <button type="button" className={btn} disabled={busy} onClick={async () => (await save({ action, amount, date })) && setOpen(false)}>
-          Save
-        </button>
-        <button type="button" className="rounded-lg border border-[#DDD5CC] px-3 py-2 text-sm" disabled={busy} onClick={async () => (await save({ action, amount: "" })) && setOpen(false)}>
-          Clear
-        </button>
-      </div>
     </div>
   );
 }
@@ -193,18 +350,18 @@ function SuppliesForm({ sessionId, manual }: { sessionId: string; manual: boolea
   return (
     <div className="mt-2 flex flex-wrap items-end gap-2">
       <label className="text-sm flex-1 min-w-[10rem]">
-        Supplies for this event ($)
-        <input className={input} inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder={manual ? "entered" : "uses the cost catalog"} />
+        Supplies for this event, by hand ($)
+        <input className={input} inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder={manual ? "entered by hand" : "optional"} />
       </label>
       <button type="button" className={btn} disabled={busy || !amount.trim()} onClick={async () => (await save({ action: "supplies", amount })) && setAmount("")}>
         Save
       </button>
       {manual && (
-        <button type="button" className="rounded-lg border border-[#DDD5CC] px-3 py-2 text-sm" disabled={busy} onClick={() => save({ action: "supplies", amount: "" })}>
-          Use the catalog
+        <button type="button" className={ghost} disabled={busy} onClick={() => save({ action: "supplies", amount: "" })}>
+          Use the estimate
         </button>
       )}
-      {error && <p className="w-full text-sm text-[#A0412D]">{error}</p>}
+      {error && <p className={`w-full text-sm ${warn}`}>{error}</p>}
     </div>
   );
 }
@@ -223,7 +380,7 @@ function OtherCosts({ sessionId, lines }: { sessionId: string; lines: { id: stri
               <span>{l.label}</span>
               <span className="flex items-center gap-2 tabular-nums">
                 {money(l.cents)}
-                <button type="button" className="min-h-[44px] text-sm text-[#A0412D] underline" disabled={busy} onClick={() => save({ action: "remove_cost", id: l.id })}>
+                <button type="button" className={`${link} !text-[#A0412D]`} disabled={busy} onClick={() => save({ action: "remove_cost", id: l.id })}>
                   Remove
                 </button>
               </span>
@@ -254,7 +411,7 @@ function OtherCosts({ sessionId, lines }: { sessionId: string; lines: { id: stri
           Add
         </button>
       </div>
-      {error && <p className="text-sm text-[#A0412D]">{error}</p>}
+      {error && <p className={`text-sm ${warn}`}>{error}</p>}
     </div>
   );
 }

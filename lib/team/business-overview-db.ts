@@ -10,7 +10,7 @@ import { eventSchedule } from "@/lib/team/time";
 import { adminEventTitle } from "@/lib/team/event-list";
 import { hiddenEventIds } from "@/lib/team/hidden";
 import { isCalendarOnly } from "@/lib/calendar-only";
-import { eventBusinessFor } from "@/lib/team/business-db";
+import { businessShared, eventBusinessFor, type BusinessShared } from "@/lib/team/business-db";
 import { addDays } from "@/lib/team/business";
 import type { OverviewEvent } from "@/lib/team/business-overview";
 
@@ -31,8 +31,8 @@ async function inBatches<T, R>(items: T[], size: number, f: (t: T) => Promise<R>
   return out;
 }
 
-async function toOverview(admin: StaffMember, s: SessionRow, now: Date): Promise<OverviewEvent | null> {
-  const view = await eventBusinessFor(admin, s, now);
+async function toOverview(admin: StaffMember, s: SessionRow, now: Date, shared: BusinessShared): Promise<OverviewEvent | null> {
+  const view = await eventBusinessFor(admin, s, now, shared);
   if (!view) return null;
   const ed = eventData(s);
   return {
@@ -49,8 +49,9 @@ async function toOverview(admin: StaffMember, s: SessionRow, now: Date): Promise
 
 export async function overviewEvents(admin: StaffMember, from: string, to: string, now: Date = new Date()): Promise<OverviewEvent[]> {
   if (!isFullAdmin(admin.role)) return [];
-  const sessions = await sessionsBetween(from, to);
-  return (await inBatches(sessions, 6, (s) => toOverview(admin, s, now))).filter((e): e is OverviewEvent => !!e);
+  const [sessions, shared] = await Promise.all([sessionsBetween(from, to), businessShared(admin)]);
+  if (!shared) return [];
+  return (await inBatches(sessions, 6, (s) => toOverview(admin, s, now, shared))).filter((e): e is OverviewEvent => !!e);
 }
 
 /** Events from today to 74 days out, for the cash view (a balance due in 60 days is for an event 74 days out). */

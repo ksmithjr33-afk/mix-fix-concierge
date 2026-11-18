@@ -2,10 +2,11 @@
 // across many events. Pure, no database. Admins only (business-overview-db.ts).
 //
 // Every number here is added up from each event's own Business figures
-// (lib/team/business.ts). Incomplete events are left out of the profit totals
-// and counted separately, so the totals are never quietly wrong.
+// (lib/team/business.ts), so the tab, this page, and the CSV never disagree.
+// An event is incomplete only with no booked total or a blank per guest supply
+// estimate; those are left out of the profit totals and counted separately.
 
-import { addDays, COST_KEYS, COST_LABEL, type CostKey, type EventBusiness } from "@/lib/team/business";
+import { addDays, COST_KEYS, COST_LABEL, LABOR_LABEL, SUPPLIES_METHOD_LABEL, type CostKey, type EventBusiness, type Missing } from "@/lib/team/business";
 import { csvCell } from "@/lib/team/timesheet";
 
 export type RangePreset = "this_month" | "last_month" | "next_30" | "custom";
@@ -98,14 +99,12 @@ export interface Completeness {
   complete: number;
   incomplete: number;
   incompleteRevenueCents: number; // totals on file for events left out of profit
-  gaps: { sessionId: string; title: string; day: string | null; missing: string[] }[]; // missing a total, payment status, or supplies
+  gaps: { sessionId: string; title: string; day: string | null; missing: Missing[] }[]; // no booked total, or a blank per guest estimate
 }
-
-const GAP = /^(Total not on file|Payment status not on file|Supplies not on file)/;
 
 export function completeness(events: OverviewEvent[]): Completeness {
   const gaps = events
-    .map((e) => ({ sessionId: e.sessionId, title: e.title, day: e.day, missing: e.business.missing.filter((m) => GAP.test(m)) }))
+    .map((e) => ({ sessionId: e.sessionId, title: e.title, day: e.day, missing: e.business.missing }))
     .filter((g) => g.missing.length > 0)
     .sort((a, b) => (a.day ?? "").localeCompare(b.day ?? ""));
   const incomplete = events.filter((e) => !e.business.complete);
@@ -139,7 +138,7 @@ export interface CashView {
   weeks: CashWeek[];
   next30: { balancesDueCents: number; payrollCents: number; unknownBalances: number };
   next60: { balancesDueCents: number; payrollCents: number; unknownBalances: number };
-  overdue: { sessionId: string; title: string; day: string; balanceCents: number | null; status: string }[]; // inside 14 days of the event, balance unpaid
+  overdue: { sessionId: string; title: string; day: string; balanceCents: number | null; status: string }[]; // inside 14 days of the event, balance unpaid; status is the readable one
 }
 
 /**
@@ -182,7 +181,7 @@ export function cashView(events: OverviewEvent[], today: string): CashView {
     }
     // Already inside 14 days of the event (the balance was due), and not paid.
     if (e.day && due && due < today && e.day >= today && owed && (r.balanceCents === null || r.balanceCents > 0)) {
-      overdue.push({ sessionId: e.sessionId, title: e.title, day: e.day, balanceCents: r.balanceCents, status: r.paid });
+      overdue.push({ sessionId: e.sessionId, title: e.title, day: e.day, balanceCents: r.balanceCents, status: r.status });
     }
   }
   return {
@@ -204,10 +203,14 @@ export const EVENT_CSV_COLUMNS = [
   "Total",
   "Gratuity",
   "Deposit paid",
-  "Balance paid",
-  "Balance",
-  "Balance due",
-  "Paid status",
+  "Payments",
+  "Collected",
+  "Remaining balance",
+  "Overpaid",
+  "Balance due date",
+  "Payment status",
+  "Labor basis",
+  "Supplies method",
   ...COST_KEYS.map((k) => COST_LABEL[k]),
   "Costs",
   "Profit",
@@ -228,14 +231,18 @@ export function eventsCsv(events: OverviewEvent[]): string {
         e.package,
         e.market,
         b.complete ? `${b.mode}` : "Incomplete",
-        b.missing.join("; "),
+        b.missing.map((m) => m.text).join("; "),
         dollars(r.totalCents),
         dollars(r.gratuityCents),
         dollars(r.depositPaidCents),
-        dollars(r.balancePaidCents),
+        dollars(r.paymentsCents),
+        dollars(r.collectedCents),
         dollars(r.balanceCents),
+        r.overpaidCents ? dollars(r.overpaidCents) : "",
         r.balanceDue ?? "",
-        r.paid,
+        r.status,
+        LABOR_LABEL[b.labor],
+        SUPPLIES_METHOD_LABEL[b.supplies],
         ...COST_KEYS.map((k) => dollars(b.costs.find((c) => c.key === k)?.cents ?? null)),
         dollars(b.costCents),
         dollars(b.profitCents),

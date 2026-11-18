@@ -5,7 +5,7 @@ import { supabase } from "@/lib/supabase";
 import type { StaffMember } from "@/lib/team/event-view";
 import { isFullAdmin } from "@/lib/team/roles";
 import type { MileageSettings } from "@/lib/team/pay";
-import { COSTS_KEY, MILEAGE_KEY, readCosts, readMileage, validateCosts, validateMileage, type CostSettings } from "@/lib/team/business-settings";
+import { COSTS_KEY, MILEAGE_KEY, SUPPLIES_KEY, readCosts, readMileage, readSupplies, validateCosts, validateMileage, validateSupplies, type CostSettings, type SuppliesPerGuest } from "@/lib/team/business-settings";
 
 async function raw(key: string): Promise<unknown> {
   const { data, error } = await supabase.from("team_settings").select("value").eq("key", key).maybeSingle();
@@ -23,16 +23,22 @@ export async function costSettings(admin: StaffMember): Promise<CostSettings | n
   return readCosts(await raw(COSTS_KEY));
 }
 
+/** Supplies per guest, per package. Admins only: anyone else gets nothing. */
+export async function suppliesSettings(admin: StaffMember): Promise<SuppliesPerGuest | null> {
+  if (!isFullAdmin(admin.role)) return null;
+  return readSupplies(await raw(SUPPLIES_KEY));
+}
+
 type Result<T> = { ok: true; value: T } | { ok: false; error: string; status: number };
 
-export async function saveBusinessSettings(admin: StaffMember, which: unknown, body: Record<string, unknown>): Promise<Result<MileageSettings | CostSettings>> {
+export async function saveBusinessSettings(admin: StaffMember, which: unknown, body: Record<string, unknown>): Promise<Result<MileageSettings | CostSettings | SuppliesPerGuest>> {
   if (!isFullAdmin(admin.role)) return { ok: false, error: "Admins only.", status: 403 };
-  const v = which === "mileage" ? validateMileage(body) : which === "costs" ? validateCosts(body) : null;
+  const v = which === "mileage" ? validateMileage(body) : which === "costs" ? validateCosts(body) : which === "supplies" ? validateSupplies(body) : null;
   if (!v) return { ok: false, error: "Unknown setting.", status: 400 };
   if (!v.ok) return { ok: false, error: v.error, status: 400 };
   const { error } = await supabase
     .from("team_settings")
-    .upsert({ key: which === "mileage" ? MILEAGE_KEY : COSTS_KEY, value: v.value, updated_by: admin.id, updated_at: new Date().toISOString() }, { onConflict: "key" });
+    .upsert({ key: which === "mileage" ? MILEAGE_KEY : which === "costs" ? COSTS_KEY : SUPPLIES_KEY, value: v.value, updated_by: admin.id, updated_at: new Date().toISOString() }, { onConflict: "key" });
   if (error) return { ok: false, error: "Could not save. Try again.", status: 500 };
   return { ok: true, value: v.value };
 }
