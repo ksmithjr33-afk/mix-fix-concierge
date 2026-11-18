@@ -51,7 +51,7 @@ check("At submit, Dive Bar records the five, whatever the model sent", (submitte
 const full = { package: "Full Bar", signature_drinks: [{ name: "Mojito" }] };
 check("Other packages are untouched at submit", dive.applyDiveSetMenu(full) === full);
 const chat = src("app/api/chat/route.ts");
-check("The chat route records the set menu at submit", chat.includes("const eventData = applyDiveSetMenu(toolUse.input as Record<string, unknown>);"));
+check("The chat route records the set menu at submit", chat.includes("const eventData = applyDiveSetMenu(filled);"));
 const also = dive.diveAlsoAvailable().map((c) => c.name);
 check("Also available leaves out the five and the eleven", !also.some((n) => FIVE.split(",").includes(n) || ELEVEN.includes(n)) && also.includes("Pina Colada") && also.includes("Paloma"));
 

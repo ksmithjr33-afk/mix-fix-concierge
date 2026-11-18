@@ -78,7 +78,15 @@ export const autoSendOn = () => teamSetting(AUTO_SEND_KEY);
 // ----- Text settings: a line of wording an admin can edit -----
 
 export const ICE_RULE_KEY = "ice_rule";
-export const TEXT_SETTING_DEFAULTS: Record<string, string> = { [ICE_RULE_KEY]: "No gas stations. No grocery stores." };
+// The concierge's most popular lists until enough events have menu picks (lib/popular-drinks.ts).
+export const POPULAR_COCKTAILS_KEY = "popular_cocktails_fallback";
+export const POPULAR_MOCKTAILS_KEY = "popular_mocktails_fallback";
+export const TEXT_SETTING_DEFAULTS: Record<string, string> = {
+  [ICE_RULE_KEY]: "No gas stations. No grocery stores.",
+  // The three the concierge called best sellers before counts existed.
+  [POPULAR_COCKTAILS_KEY]: "French Martini, Whiskey Smash, Tequila Mucho",
+  [POPULAR_MOCKTAILS_KEY]: "",
+};
 export const TEXT_SETTING_MAX = 200;
 
 /** The saved wording, or the default when nothing is saved (or before the table exists). */

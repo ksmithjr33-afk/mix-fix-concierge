@@ -32,6 +32,11 @@ import { eventTimeZone } from "@/lib/team/markets";
 import { submitEventDataTool } from "@/lib/intake-tools";
 import { createFillerFilter, pendingLines, PRICE_PENDING_CLIENT_MESSAGE, quotedAmount, unpriced, type PricePendingInfo } from "@/lib/price-pending";
 import { recordClientQuoted, textPricePending } from "@/lib/price-pending-db";
+import { bookedFacts, factsAsSession } from "@/lib/booked-facts";
+import { bookingFill } from "@/lib/booking-webhook";
+import { currentPopularDrinks } from "@/lib/popular-drinks-db";
+import { popularForPrompt } from "@/lib/popular-drinks";
+import { createInviteFilter, inviteToAdd, inviteUsed } from "@/lib/menu-invite";
 
 const anthropic = new Anthropic();
 
@@ -539,6 +544,13 @@ export async function POST(request: Request) {
 
   // The payment step quotes the remaining balance: booked total minus the deposit.
   const booked = session?.booked_price ?? null;
+  // What the booking already gave (start time, bartenders, event type) is never asked again.
+  const facts = bookedFacts(session as unknown as Record<string, unknown> | null, messages);
+  // The most popular lists the concierge answers "what is popular?" from (cached 10 minutes).
+  const popular = await currentPopularDrinks().catch((err) => {
+    console.error("popular drinks failed:", err);
+    return null;
+  });
   const stream = anthropic.messages.stream({
     model: "claude-sonnet-4-6",
     max_tokens: 8192,
@@ -547,7 +559,10 @@ export async function POST(request: Request) {
     system: [
       {
         type: "text",
-        text: buildIntakePrompt(booked ? { total: booked.total ?? null, deposit: booked.deposit_paid ?? DEFAULT_DEPOSIT } : null),
+        text: buildIntakePrompt(booked ? { total: booked.total ?? null, deposit: booked.deposit_paid ?? DEFAULT_DEPOSIT } : null, new Date(), {
+          booked: facts,
+          popular: popular ? popularForPrompt(popular) : null,
+        }),
         cache_control: { type: "ephemeral" },
       },
     ],
@@ -571,16 +586,25 @@ export async function POST(request: Request) {
         },
         (menu) => controller.enqueue(encoder.encode(`data: ${JSON.stringify({ event: "menu", menu })}\n\n`))
       );
+      // The recommendation invite: once, with the first menu, never repeated.
+      const used = inviteUsed(messages);
+      const invite = createInviteFilter(used, (t) => menuFilter.push(t));
       try {
         for await (const event of stream) {
           if (
             event.type === "content_block_delta" &&
             event.delta.type === "text_delta"
           ) {
-            menuFilter.push(event.delta.text);
+            invite.push(event.delta.text);
           }
         }
+        invite.finish();
         menuFilter.finish();
+        const addInvite = inviteToAdd(used, menuFilter.menus().length, fullText);
+        if (addInvite) {
+          fullText += addInvite;
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ text: addInvite })}\n\n`));
+        }
 
         // Inspect the assembled message for the completion tool call.
         const finalMessage = await stream.finalMessage();
@@ -607,8 +631,13 @@ export async function POST(request: Request) {
           );
 
           if (toolUse) {
+            // What the booking gave fills what the concierge left blank (it never
+            // asks for a booked start time), so the events row, the GHL webhook,
+            // and the session all get bar_service_start and bar_service_end.
+            const input = toolUse.input as Record<string, unknown>;
+            const filled = { ...input, ...bookingFill(input, factsAsSession(facts)) };
             // Dive Bar: record the five set menu drinks as the event's menu.
-            const eventData = applyDiveSetMenu(toolUse.input as Record<string, unknown>);
+            const eventData = applyDiveSetMenu(filled);
             const transcript = buildTranscript(updatedMessages);
             const origin = new URL(request.url).origin;
 

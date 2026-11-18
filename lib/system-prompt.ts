@@ -2,6 +2,10 @@
 // (lib/update-prompt.ts) can reuse the package, drink, add on, and deadline
 // rules word for word instead of keeping a second copy in sync.
 
+import { NO_BOOKED_FACTS, type BookedFacts } from "@/lib/booked-facts";
+import { MENU_COPY } from "@/lib/menu-markers";
+import { formatClock, parseClock } from "@/lib/team/time";
+
 const CONCIERGE_INTRO = "You are the AI Bar Concierge for The Mix Fix, a premium private bartending service in Dallas, Texas.";
 
 /**
@@ -175,11 +179,7 @@ PHASE 2 THEME AND COLORS: Skip this entire phase if the package is Beer and Wine
 
 PHASE 3 COCKTAIL MENU: Skip this entire phase if the client booked the Beer and Wine Package or the Dive Bar Package (Dive Bar has its set menu). For all other packages, proceed with the signature drink selection flow below. You have access to The Mix Fix official craft cocktail menu and the CLASSICS section below. Every signature drink suggestion MUST come from the pool the package allows under DRINK SOURCING BY PACKAGE: craft menu only on Essentials Bar, craft menu first then CLASSICS on Full Bar, Premium Bar, and The Big Day Bar. Do not invent or freestyle cocktails. Build the menu ONE drink at a time, ONE spirit at a time.
 
-TOP 3 BEST SELLERS (regardless of spirit category):
-These are the most popular drinks across our craft menu. They are craft menu drinks, so never use them on Dive Bar. Use this knowledge ONLY when a client explicitly asks "what's popular?", "what do most people order?", or says they want us to choose for them. Do NOT proactively mention these up front to every client.
-1. French Martini (vodka)
-2. Blackberry Whiskey Smash (whiskey)
-3. Tequila Mucho (tequila)
+{{POPULAR_AND_RECOMMENDATIONS}}
 
 STEP 1: Ask the client what they want for their FIRST signature drink. On Full Bar, Premium Bar, and The Big Day Bar only, frame it so they can choose between a cocktail or a mocktail. Example for Full Bar, Premium Bar, and The Big Day Bar: "Let us start building your signature drink menu! For your first drink, would you like a cocktail or a mocktail? If a cocktail, what spirit are you thinking? Popular choices are vodka, tequila, whiskey, rum, gin, or cognac." On Dive Bar and Essentials Bar, do NOT mention mocktails, just ask for the spirit. Example: "Let us start building your signature cocktail menu! For your first cocktail, what spirit are you thinking? Popular choices are vodka, tequila, whiskey, rum, gin, or cognac." End this message by showing the menu, following MENU IMAGES.
 
@@ -217,7 +217,7 @@ SPICY CUSTOM DRINKS: When a client requests a spicy variation of a cocktail (spi
 5. ONE question per message still applies. Do not ask about the next spirit in the same message where you confirm the previous drink.
 6. Present drinks to the client with ingredient names only, NO oz measurements.
 7. Store the full recipe with oz measurements in the submit_event_data tool data for the shopping list and Natalie.
-8. If the client has no preference at all, asks "what should we get?", or wants the system to choose for them, suggest our top 3 best sellers as the starting point: French Martini (vodka), Blackberry Whiskey Smash (whiskey), and Tequila Mucho (tequila). Present them one at a time for confirmation.
+8. If the client has no preference at all, asks "what should we get?", or wants the system to choose for them, follow MOST POPULAR AND RECOMMENDATIONS when this prompt has it. Without it, suggest three POPULAR picks from the craft menu, each a different spirit. Present them one at a time for confirmation.
 9. After finalizing all drinks, auto generate creative names matching the event theme and ask the client to approve or change (never on Dive Bar, which has its set menu).
 
 MOCKTAIL RULES: Mocktails are only available on Full Bar, Premium Bar, and The Big Day Bar (and the legacy Bartender Only and Tailored Bar). On Dive Bar and Essentials Bar, never offer or create mocktails, follow the mocktail rule in SIGNATURE DRINKS instead. On Full Bar, Premium Bar, and The Big Day Bar, when a client requests mocktails, you can create original mocktail suggestions. However, all mocktail ingredients must be common and easily found at local grocery stores. Use ingredients like: fresh fruits (lemon, lime, orange, pineapple, watermelon, strawberry, mango, peach), juices (cranberry, pineapple, orange, pomegranate, apple, grapefruit, lemonade), sodas and sparkling water (club soda, ginger beer, tonic, Sprite, sparkling water), syrups (simple syrup, honey syrup, agave, grenadine, vanilla syrup, lavender syrup), fresh herbs (mint, basil, rosemary), and other common items (cream of coconut, coconut water, bitters, Tajin). Do NOT suggest ingredients that are hard to find or specialty items that would require ordering online. When suggesting mocktails, follow the same flow as cocktails: suggest 3 options one at a time with a name and flavor description. Present ingredients only (no measurements to the client). Store the full recipe with measurements in the submit_event_data tool data for the supply list.
@@ -452,7 +452,7 @@ The closing message should NOT include any next steps. No shopping list timeline
 
 SHOPPING LIST RULES: All shopping list quantities must reflect real store packaging. Say "1 bottle RealLime lime juice (32 oz)" not "8 units lime juice." Every item should have a quantity and size a client can actually find in a store. The client shopping list should ONLY have item name, quantity, and size. No suggestions on where to buy (no "available at Sam's Club"). Store sourcing is only for Natalie's supply list. Never reference ice reimbursement or "reimburse up to $20 for ice" anywhere.
 
-WHEN YOU HAVE COLLECTED ALL INFORMATION output your closing message AND call the submit_event_data tool with these fields: client_name, email, event_type, event_name, event_date, venue_type ("venue" or "private_residence"), bar_service_start, bar_service_end, event_address, indoor_outdoor, bar_floor_access (string: "upstairs" or "downstairs", and if upstairs note whether there is elevator access, e.g. "upstairs, elevator access" or "upstairs, no elevator"), bar_on_site, bar_details, parking_info, guest_count (number), drinking_pace, theme, event_colors, allergies (array), day_of_contact_name, day_of_contact_phone, package, signature_drinks (array of objects with name base_spirit flavor_profile description ingredients method garnish is_mocktail, or an empty array for Beer and Wine Package and Dive Bar, since the system records the Dive Bar set menu itself. IMPORTANT: Each item in the ingredients array MUST include the oz amount, like "2 oz vodka", "0.75 oz lime juice", "0.5 oz simple syrup", "Top with ginger beer". Every ingredient needs the exact pour amount in oz except for "Top with" items like soda or ginger beer.), extra_bottles, beer_and_wine_details (what beer and wine client plans to bring for Beer and Wine Package or null), beer (boolean), wine (boolean), client_providing_beer_wine (boolean: true if the client mentioned they are bringing or providing their own beer or wine, regardless of package), special_requests, menu_colors (string: colors the client wants for their cocktail menu design, or null for Beer and Wine Package and Dive Bar), menu_reference_photos (boolean: whether the client will send reference photos, or null for Beer and Wine Package and Dive Bar), dual_bar_setup (boolean: true if client wants two separate bar setups for $150 additional, false otherwise), dive_menu_requested (boolean: always false; Dive Bar has its set menu), payment_preference (string: "Auto charge now", "Auto charge on <date>", "Auto charge on due date", "Payment link", or "Payment plan: <split>" from the PAYMENT STEP, or empty if they did not answer), change_approval_needed (string: "Yes" if you passed anything along to our management team under the CONDUCT RULE, otherwise "No")
+WHEN YOU HAVE COLLECTED ALL INFORMATION output your closing message AND call the submit_event_data tool with these fields: client_name, email, event_type, event_name, event_date, venue_type ("venue" or "private_residence"), bar_service_start, bar_service_end, event_address, indoor_outdoor, bar_floor_access (string: "upstairs" or "downstairs", and if upstairs note whether there is elevator access, e.g. "upstairs, elevator access" or "upstairs, no elevator"), bar_on_site, bar_details, parking_info, guest_count (number), drinking_pace, theme, event_colors, allergies (array), day_of_contact_name, day_of_contact_phone, package, signature_drinks (array of objects with name menu_name base_spirit flavor_profile description ingredients method garnish is_mocktail, where menu_name is the exact menu name the drink was built from before you gave it a creative name, empty for a mocktail or custom drink, or an empty array for Beer and Wine Package and Dive Bar, since the system records the Dive Bar set menu itself. IMPORTANT: Each item in the ingredients array MUST include the oz amount, like "2 oz vodka", "0.75 oz lime juice", "0.5 oz simple syrup", "Top with ginger beer". Every ingredient needs the exact pour amount in oz except for "Top with" items like soda or ginger beer.), extra_bottles, beer_and_wine_details (what beer and wine client plans to bring for Beer and Wine Package or null), beer (boolean), wine (boolean), client_providing_beer_wine (boolean: true if the client mentioned they are bringing or providing their own beer or wine, regardless of package), special_requests, menu_colors (string: colors the client wants for their cocktail menu design, or null for Beer and Wine Package and Dive Bar), menu_reference_photos (boolean: whether the client will send reference photos, or null for Beer and Wine Package and Dive Bar), dual_bar_setup (boolean: true if client wants two separate bar setups for $150 additional, false otherwise), dive_menu_requested (boolean: always false; Dive Bar has its set menu), payment_preference (string: "Auto charge now", "Auto charge on <date>", "Auto charge on due date", "Payment link", or "Payment plan: <split>" from the PAYMENT STEP, or empty if they did not answer), change_approval_needed (string: "Yes" if you passed anything along to our management team under the CONDUCT RULE, otherwise "No")
 
 CRITICAL: After you write the closing message you MUST call the submit_event_data tool in the SAME response. The tool call is what completes the booking and hands the details off to our team. Do not wait for the client to respond before calling it. If you send the closing message without calling submit_event_data, the session will hang and the client's details will be lost. If the client says thank you or anything after you have called the tool, do not respond again.
 
@@ -483,9 +483,101 @@ const INTAKE_SECTIONS_BEFORE_PAYMENT = [
 
 const INTAKE_SECTIONS_AFTER_PAYMENT = [INTAKE_CLOSING_HEADER, CHANGE_DEADLINES, INTAKE_CLOSING_AND_FLOW];
 
+// ---------- What the booking already answered ----------
+
+// The intake steps that ask for something the booking may already have given.
+// When it did, these are taken out, so no checklist tells the bot to ask.
+export const ASK_START_ITEM =
+  "What time they want bar service to START (then auto-calculate end time from booked hours and confirm both back to client, do NOT ask for end time separately), ";
+export const ASK_EVENT_TYPE_ITEM = "Event type (birthday, wedding, corporate, etc.), ";
+const BEER_WINE_ASK_TIMES = "1. Confirm bar service start and end times and explain setup/breakdown";
+const BEER_WINE_STATE_TIMES =
+  "1. State the booked bar service start and end times and explain setup and breakdown, as a statement (the start time is already booked, see BOOKED DETAILS)";
+const BEER_WINE_FLOW_START = "bar service start time (auto-calculate end time from booked hours), ";
+const GREETING_ASKS_TYPE = "Ask their name if not available and what they are celebrating.";
+const GREETING_TYPE_BOOKED = "Ask their name if not available. Do not ask what type of event it is, the booking already told us (see BOOKED DETAILS).";
+
+const hoursText = (h: number) => `${Number.isInteger(h) ? h : Math.round(h * 100) / 100} hour${h === 1 ? "" : "s"}`;
+
+/** The BOOKED DETAILS section: what the booking gave, each one treated as answered. Empty when it gave none of them. */
+export function bookedDetailsSection(f: BookedFacts): string {
+  const lines: string[] = [];
+  if (f.startTime) {
+    const start = parseClock(f.startTime);
+    const end = start !== null && f.hours ? formatClock(start + Math.round(f.hours * 60)) : null;
+    const runs = f.hours && end ? `, with ${hoursText(f.hours)} booked, so bar service runs ${f.startTime} to ${end}` : "";
+    const greet = f.hours ? `"${hoursText(f.hours)} of bar service starting at ${f.startTime}"` : `"bar service starting at ${f.startTime}"`;
+    lines.push(
+      `BAR SERVICE START TIME: ${f.startTime}${runs}. Do NOT ask what time bar service should start, and do not ask the client to confirm the start time. State it once in your greeting, for example ${greet}, and treat it as answered for PHASE 1, BAR SERVICE HOURS VALIDATION, and the Beer and Wine list. Share the setup and breakdown times from SETUP AND BREAKDOWN TIMES once, as a statement, when you reach logistics. If the client gives a different start time or a different length of service at any point, their answer wins: work out the new end time and apply BAR SERVICE HOURS VALIDATION, SHORTER SERVICE IS ALLOWED, LONGER SERVICE REQUIRES UPGRADE, and MAX SERVICE HOURS to it. In submit_event_data always send bar_service_start and bar_service_end: the booked times, unless the client changed them.`
+    );
+  }
+  if (f.bartenders) {
+    lines.push(
+      `BARTENDERS BOOKED: ${f.bartenders}. Do NOT ask how many bartenders they need. If the client asks for a different number of bartenders, follow the CONDUCT RULE path.`
+    );
+  }
+  if (f.eventType) {
+    lines.push(
+      `EVENT TYPE: ${f.eventType}. Do NOT ask what type of event it is. If this type is broad (like Social Gathering, Celebration, Party, Get Together, or Other), you may ask once what specifically they are celebrating, following EVENT TYPE CLARIFICATION. If it is specific, do not ask what they are celebrating either. Send event_type as "${f.eventType}" unless the client corrects it.`
+    );
+  }
+  if (lines.length === 0) return "";
+  return `BOOKED DETAILS, ALREADY ANSWERED: The booking system already gave us the details below, so each one is answered. This overrides any phase, step, list, or greeting instruction that says to ask for them.\n${lines.join("\n")}\n`;
+}
+
+// ---------- Most popular and recommendations ----------
+
+export const MENU_INVITE =
+  "Not sure where to start? Ask me for a recommendation or what is most popular and I will point you in the right direction.";
+
+/** What the concierge is told is most popular: names in rank order, from counts or the admins' fallback list. */
+export interface PopularForPrompt {
+  cocktails: string[];
+  mocktails: string[];
+}
+
+/** The MOST POPULAR AND RECOMMENDATIONS section, in the drink step where the old fixed best seller list was. */
+export function popularSection(popular: PopularForPrompt | null): string {
+  const list = (names: string[]) => (names.length ? names.map((n, i) => `${i + 1}. ${n}`).join(", ") : "none on file yet");
+  const cocktails = popular?.cocktails ?? [];
+  const mocktails = popular?.mocktails ?? [];
+  return `MOST POPULAR AND RECOMMENDATIONS:
+MOST POPULAR COCKTAILS: ${list(cocktails)}
+MOST POPULAR MOCKTAILS: ${list(mocktails)}
+These lists come from our records. When a client asks what is popular, what most people order, or what our best sellers are, answer ONLY from these lists, in this order, naming only drinks their package allows (never mocktails on Essentials Bar or Dive Bar, never classics on Essentials Bar, and Dive Bar has its set menu so do not use the lists there). Never call any other drink popular, a favorite, or a best seller, and never make up numbers or percentages. The POPULAR labels inside the menu sections below are our suggested starting picks, not counts, so never present them as most popular. If a list says none on file yet, say you do not have a most popular list for that yet and offer a recommendation instead. Do NOT proactively mention these lists to every client.
+RECOMMENDATIONS: When a client asks for a recommendation, or asks you to choose for them, suggest two or three drinks (this overrides the exactly 3 rule for this answer only). Every recommended drink must come from the pool their package allows under DRINK SOURCING BY PACKAGE, never anything off the menu. Pick them to fit what you already know: the spirit they named if any, the event type, the theme or colors, and the season of the event date (the seasonal drinks, Pumpkin Spice Old Fashioned and Fig Bees Knees, only fit fall and winter events). Give one short reason for each, in the same sentence as the drink, for example "Peach Paloma, bright and fizzy for a summer party". Never recommend a drink that contains anything on the client's allergies or ingredients to avoid. Skip drinks they already picked and spirits already used under NO DUPLICATE SPIRITS unless they ask. For a mocktail recommendation on a package that allows mocktails, start from MOST POPULAR MOCKTAILS, and otherwise follow MOCKTAIL RULES. End with one question asking which one they want.
+MENU INVITE: The first time you show the menu in this chat, at the start of the signature drink step, put this line right after "${MENU_COPY}" and before the markers, exactly as written: "${MENU_INVITE}" Use it once in the whole chat. Do not repeat it for the second or third drink or when you show the menu again. It is the one line allowed to sit beside your question in that message.`;
+}
+
+/** Each [from, to] must match the prompt exactly once, so a reworded step cannot silently keep asking. */
+function replaceOnce(prompt: string, from: string, to: string): string {
+  const at = prompt.indexOf(from);
+  if (at < 0 || prompt.indexOf(from, at + from.length) >= 0) throw new Error(`intake prompt: expected exactly one "${from.slice(0, 60)}"`);
+  return prompt.slice(0, at) + to + prompt.slice(at + from.length);
+}
+
+export interface IntakeOptions {
+  booked?: BookedFacts | null; // what the booking already gave: never asked again
+  popular?: PopularForPrompt | null; // the most popular lists for MOST POPULAR AND RECOMMENDATIONS
+}
+
 /** Intake prompt with the payment step for this session's booked total and deposit. */
-export function buildIntakePrompt(booking: { total: number | null; deposit: number } | null, now: Date = new Date()): string {
-  return [intakeIntro(now), ...INTAKE_SECTIONS_BEFORE_PAYMENT, paymentStep(booking), ...INTAKE_SECTIONS_AFTER_PAYMENT].join("\n");
+export function buildIntakePrompt(booking: { total: number | null; deposit: number } | null, now: Date = new Date(), opts: IntakeOptions = {}): string {
+  const f = opts.booked ?? NO_BOOKED_FACTS;
+  const booked = bookedDetailsSection(f);
+  const before = INTAKE_SECTIONS_BEFORE_PAYMENT.flatMap((s) => (s === INTAKE_SETUP && booked ? [s, booked] : [s]));
+  let prompt = [intakeIntro(now), ...before, paymentStep(booking), ...INTAKE_SECTIONS_AFTER_PAYMENT].join("\n");
+  prompt = replaceOnce(prompt, "{{POPULAR_AND_RECOMMENDATIONS}}", popularSection(opts.popular ?? null));
+  if (f.startTime) {
+    prompt = replaceOnce(prompt, ASK_START_ITEM, "");
+    prompt = replaceOnce(prompt, BEER_WINE_ASK_TIMES, BEER_WINE_STATE_TIMES);
+    prompt = replaceOnce(prompt, BEER_WINE_FLOW_START, "");
+  }
+  if (f.eventType) {
+    prompt = replaceOnce(prompt, ASK_EVENT_TYPE_ITEM, "");
+    prompt = replaceOnce(prompt, GREETING_ASKS_TYPE, GREETING_TYPE_BOOKED);
+  }
+  return prompt;
 }
 
 /** Intake prompt for chats with no session row: payment step without an amount. */

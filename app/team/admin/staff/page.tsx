@@ -10,7 +10,9 @@ import { progressLine } from "@/lib/team/training";
 import EnforceToggle from "./enforce-toggle";
 import SettingToggle from "./setting-toggle";
 import SettingText from "./setting-text";
-import { AUTO_SEND_KEY, ICE_RULE_KEY, SUGGEST_STORES_KEY, teamSetting, teamText } from "@/lib/client-list-db";
+import { AUTO_SEND_KEY, ICE_RULE_KEY, POPULAR_COCKTAILS_KEY, POPULAR_MOCKTAILS_KEY, SUGGEST_STORES_KEY, teamSetting, teamText } from "@/lib/client-list-db";
+import { currentPopularDrinks } from "@/lib/popular-drinks-db";
+import { popularStatusLine } from "@/lib/popular-drinks";
 import { ratesFor } from "@/lib/team/pay-db";
 import { DEFAULT_RATE_CENTS, rateText } from "@/lib/team/pay";
 import { rangeLabel } from "@/lib/team/availability";
@@ -24,7 +26,7 @@ async function AdminStaffPage() {
   // The staff list first; everything about each person is then read together, with the settings alongside.
   const staffP = listStaff();
   const ids = staffP.then((staff) => staff.map((s) => s.id));
-  const [staff, away, records, onboard, enforced, autoSend, suggestStores, rates, overview, iceRule] = await Promise.all([
+  const [staff, away, records, onboard, enforced, autoSend, suggestStores, rates, overview, iceRule, popularCocktails, popularMocktails, popular] = await Promise.all([
     staffP,
     upcomingUnavailableByStaff(chicagoToday()),
     ids.then(compactLines),
@@ -35,6 +37,9 @@ async function AdminStaffPage() {
     ids.then((list) => ratesFor(me, list)),
     staffP.then((list) => staffOverview(me, list)),
     teamText(ICE_RULE_KEY),
+    teamText(POPULAR_COCKTAILS_KEY),
+    teamText(POPULAR_MOCKTAILS_KEY),
+    currentPopularDrinks(),
   ]);
   // One line per person per topic, shown under their name.
   const notes: Record<string, string[]> = {};
@@ -76,6 +81,18 @@ async function AdminStaffPage() {
           initial={iceRule}
           title="Ice rule"
           help="Shown under Recommended location on every ice card and in the ice pickup text. Leave it empty to put back: No gas stations. No grocery stores."
+        />
+        <SettingText
+          settingKey={POPULAR_COCKTAILS_KEY}
+          initial={popularCocktails}
+          title="Most popular cocktails (fallback)"
+          help={`What the concierge calls most popular until ${popular.minEvents} events have menu picks. Drink names from the menu, separated by commas, top five used. A name not on the current menu is skipped. ${popularStatusLine(popular, "cocktails")}`}
+        />
+        <SettingText
+          settingKey={POPULAR_MOCKTAILS_KEY}
+          initial={popularMocktails}
+          title="Most popular mocktails (fallback)"
+          help={`There is no mocktail menu to count from, so the concierge always uses this list for mocktails. Names separated by commas, top five used. Empty means the concierge says it has no most popular mocktails yet. ${popularStatusLine(popular, "mocktails")}`}
         />
         <section className="bg-[#F5F0EB] rounded-2xl border border-[#DDD5CC] px-4 py-3 flex flex-wrap items-center justify-between gap-2">
           <div className="min-w-0">

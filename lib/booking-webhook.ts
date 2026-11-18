@@ -8,6 +8,7 @@
 
 import { parseTipJar } from "@/lib/price-change";
 import { normalizePhone } from "@/lib/team/codes";
+import { formatClock, parseClock } from "@/lib/team/time";
 
 export { parseTipJar };
 
@@ -309,6 +310,13 @@ export function bookingFill(ed: Record<string, unknown>, session: Record<string,
   const fill: Record<string, unknown> = {};
   const start = clean(session.bar_service_start);
   if (start && blank(ed.bar_service_start)) fill.bar_service_start = start;
+  // The concierge does not ask for a booked start time, so the end comes from
+  // the start and the booked hours when the chatbot left it blank.
+  const finalStart = parseClock(fill.bar_service_start ?? ed.bar_service_start);
+  const hours = Number(session.hours_booked);
+  if (finalStart !== null && blank(ed.bar_service_end) && Number.isFinite(hours) && hours > 0) {
+    fill.bar_service_end = formatClock(finalStart + Math.round(hours * 60));
+  }
   const bartenders = Number(session.bartender_count);
   if (Number.isInteger(bartenders) && bartenders > 0 && blank(ed.bartenders)) fill.bartenders = bartenders;
   const type = clean(session.event_type);

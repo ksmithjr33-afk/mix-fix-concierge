@@ -44,6 +44,10 @@ export const submitEventDataTool: Anthropic.Tool = {
           additionalProperties: true,
           properties: {
             name: { type: "string" },
+            menu_name: {
+              type: "string",
+              description: "The exact menu name of the drink this was built from (French Martini, Old Fashioned), before any creative name. Empty for a mocktail or a custom drink.",
+            },
             base_spirit: { type: "string" },
             flavor_profile: { type: "string" },
             description: { type: "string" },
