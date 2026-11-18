@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
+import { clientLinkBlockedById } from "@/lib/partners/client-view";
 
 export async function GET(req: NextRequest) {
   const sessionId = req.nextUrl.searchParams.get("session_id");
@@ -10,6 +11,8 @@ export async function GET(req: NextRequest) {
       { status: 400 }
     );
   }
+
+  if (await clientLinkBlockedById(sessionId)) return NextResponse.json({ error: "This link is no longer active." }, { status: 403 });
 
   const { data, error } = await supabase
     .from("conversation_logs")

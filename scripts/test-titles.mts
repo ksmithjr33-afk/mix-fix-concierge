@@ -32,7 +32,7 @@ check("Staff search matches first name, type and event name, never the last name
 check("The list and calendar show the second line", src("app/team/events/event-list.tsx").includes("{e.subtitle && <span") && src("app/team/calendar-view.tsx").includes("{e.subtitle && <span"));
 check("The admin lists and calendar use the admin title", src("lib/team/my-events.ts").includes("eventListItem(r, own.get(r.id), { admin: true })") && src("app/team/admin/events/page.tsx").includes("eventListItem(s, undefined, { showMarket: true, admin: true })"));
 const mgr = src("app/team/admin/e/[id]/page.tsx");
-check("The manager view header: full name title, event name below", mgr.includes("{adminEventTitle(ed)}</h1>") && mgr.includes("{eventSubtitle(ed) && <p"));
+check("The manager view header: full name title, event name below", mgr.includes("{adminEventTitle(titled)}</h1>") && mgr.includes("{eventSubtitle(ed) && <p"));
 const tabs = src("app/team/e/[id]/event-tabs.tsx");
 check("The staff event page header: first name title, event name below", tabs.includes('[view.clientFirstName, view.eventType].filter(Boolean).join(" · ")') && tabs.includes("{view.eventName && (view.clientFirstName || view.eventType) && <p"));
 check("Chat texts and the chat list title by the reader's role", src("lib/team/chat-db.ts").includes("title: titleFor(ed, m.role)") && src("lib/team/chat-db.ts").includes("title: titleFor(eventData(access.session), person.role)") && src("lib/team/chat-db.ts").includes("title: titleFor(eventData(s), staff.role)"));

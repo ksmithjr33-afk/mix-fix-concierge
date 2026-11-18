@@ -5,6 +5,8 @@ import UpdateMode from "./update-mode";
 import { clientCanSeeList, holdsFor } from "@/lib/client-list-db";
 import { recordClientOpen } from "@/lib/client-links";
 import { clientMenu } from "@/lib/team/approved-menu-db";
+import PlannersCard from "./planners-card";
+import { clientPlannersCard, clientLinkBlocked } from "@/lib/partners/client-view";
 
 // The booking fields /chat takes as query params for intake.
 const INTAKE_PARAMS = [
@@ -83,16 +85,35 @@ export default async function ShortRedirectPage({
     );
   }
 
+  // A planner held event whose booking contact (a planner) was removed or deactivated: their old link no longer opens it.
+  if (await clientLinkBlocked(data).catch(() => false)) {
+    return (
+      <div className="min-h-dvh bg-[#E8DDD5] flex items-center justify-center px-4">
+        <div className="text-center max-w-sm">
+          <p className="text-[#6B5D52] text-[15px]">
+            This link is no longer active. Questions? Text us at{" "}
+            <a href="sms:4697548512" className="underline">
+              469 754 8512
+            </a>
+            .
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   // When the client last opened their link, for the manager view. An admin's Open button adds admin=1.
   if (params.admin !== "1") await recordClientOpen(sessionId).catch(() => {});
 
   // Submitted sessions open in update mode: chat on top, event summary below.
   if (data.status === "submitted" && data.event_data) {
-    const [{ data: log }, showList, pending, menu] = await Promise.all([
+    const [{ data: log }, showList, pending, menu, planners] = await Promise.all([
       supabase.from("conversation_logs").select("update_messages").eq("session_id", sessionId).maybeSingle(),
       clientCanSeeList(sessionId).catch(() => false),
       holdsFor(sessionId, "pending").catch(() => []),
       clientMenu(sessionId).catch(() => null),
+      // Client held events only; null before the partners migration, so nothing shows.
+      clientPlannersCard(data).catch(() => null),
     ]);
     return (
       <UpdateMode
@@ -105,6 +126,7 @@ export default async function ShortRedirectPage({
         showList={showList}
         listPending={pending.some((h) => h.kind === "change")}
         menu={menu}
+        extra={planners ? <PlannersCard sessionId={sessionId} planners={planners.planners} pricingOn={planners.pricingOn} activity={planners.activity} /> : null}
       />
     );
   }

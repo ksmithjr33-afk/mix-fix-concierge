@@ -571,14 +571,19 @@ function replaceOnce(prompt: string, from: string, to: string): string {
 export interface IntakeOptions {
   booked?: BookedFacts | null; // what the booking already gave: never asked again
   popular?: PopularForPrompt | null; // the most popular lists for MOST POPULAR AND RECOMMENDATIONS
+  people?: string; // who is planning: the booking questions, or the planner section (lib/partners/chat.ts)
+  noPayment?: boolean; // a planner who does not hold the booking: no payment step at all
 }
+
+const NO_PAYMENT_STEP = "PAYMENT STEP: skip it entirely for this chat. Do not ask about the remaining balance or payment, and leave payment_preference empty. Go from Phase 5 straight to Phase 6.";
 
 /** Intake prompt with the payment step for this session's booked total and deposit. */
 export function buildIntakePrompt(booking: { total: number | null; deposit: number } | null, now: Date = new Date(), opts: IntakeOptions = {}): string {
   const f = opts.booked ?? NO_BOOKED_FACTS;
   const booked = bookedDetailsSection(f);
-  const before = INTAKE_SECTIONS_BEFORE_PAYMENT.flatMap((s) => (s === INTAKE_SETUP && booked ? [s, booked] : [s]));
-  let prompt = [intakeIntro(now), ...before, paymentStep(booking), ...INTAKE_SECTIONS_AFTER_PAYMENT].join("\n");
+  const people = opts.people ?? "";
+  const before = INTAKE_SECTIONS_BEFORE_PAYMENT.flatMap((s) => (s === INTAKE_SETUP ? [s, booked, people].filter(Boolean) : [s]));
+  let prompt = [intakeIntro(now), ...before, opts.noPayment ? NO_PAYMENT_STEP : paymentStep(booking), ...INTAKE_SECTIONS_AFTER_PAYMENT].join("\n");
   prompt = replaceOnce(prompt, "{{POPULAR_AND_RECOMMENDATIONS}}", popularSection(opts.popular ?? null));
   if (f.startTime) {
     prompt = replaceOnce(prompt, ASK_START_ITEM, "");

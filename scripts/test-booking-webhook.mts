@@ -233,7 +233,7 @@ const page = src("app/team/admin/e/[id]/page.tsx");
 check("The card renders for admins and managers only", page.includes("{isAdminRole(me.role) && bookingSummary(session) && <BookingSummaryCard"));
 check("The card keeps line breaks and is titled Booking summary", src("app/team/admin/e/[id]/booking-summary-card.tsx").includes("whitespace-pre-wrap") && src("app/team/admin/e/[id]/booking-summary-card.tsx").includes(">Booking summary</h2>"));
 check("Staff pages never read the summary", !src("app/team/e/[id]/page.tsx").includes("package_summary") && !src("lib/team/event-view.ts").includes("package_summary"));
-check("The admin title format is untouched", src("lib/team/event-list.ts").includes('return [scrub(ed.client_name), scrub(ed.event_type)].filter(Boolean).join(" · ");'));
+check("The admin title format is untouched", src("lib/team/event-list.ts").includes('const base = [titleName(ed), scrub(ed.event_type)].filter(Boolean).join(" · ");') && src("lib/team/event-list.ts").includes("return host || scrub(ed.client_name);"));
 
 // ---------- payout tip note ----------
 

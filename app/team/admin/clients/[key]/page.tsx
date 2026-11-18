@@ -5,6 +5,8 @@ import { clientPage } from "@/lib/client-history-db";
 import TeamHeader from "../../../team-header";
 import ClientHistoryCard from "../../e/[id]/client-history-card";
 import { clientAgreements } from "@/lib/team/agreements-db";
+import { plannersBySession } from "@/lib/partners/db";
+import { managerHref } from "@/lib/team/manager-tabs";
 
 export const dynamic = "force-dynamic";
 
@@ -33,6 +35,9 @@ async function ClientPage({ params }: { params: Promise<{ key: string }> }) {
   const { client } = page;
   // Agreements across all their events (admins and managers only).
   const agreements = (await clientAgreements(page.rows.map((r) => r.id), admin).catch(() => null)) ?? [];
+  // The planners on each event. Empty before the partners migration.
+  const planners = await plannersBySession(page.rows.map((r) => r.id)).catch(() => new Map<string, { name: string; company: string; isLead: boolean }[]>());
+  const withPlanners = page.rows.filter((r) => (planners.get(r.id) ?? []).length > 0);
   return (
     <>
       <TeamHeader signedIn admin back={back} />
@@ -45,6 +50,23 @@ async function ClientPage({ params }: { params: Promise<{ key: string }> }) {
           </p>
         </div>
         <ClientHistoryCard history={{ matchedOn: client.key, rows: page.rows }} clientKey="" title="Events" />
+        {withPlanners.length > 0 && (
+          <section className="rounded-2xl border border-[#DDD5CC] bg-[#F5F0EB] px-4 py-3 sm:px-5 sm:py-4 space-y-2" aria-label="Planners">
+            <h2 className="font-heading text-lg font-bold text-[#2C2420]">Planners</h2>
+            <ul className="divide-y divide-[#DDD5CC]">
+              {withPlanners.map((r) => (
+                <li key={r.id} className="py-2 text-[15px]">
+                  <Link href={managerHref(r.id)} className="font-medium text-[#2C2420] underline">
+                    {r.title}
+                  </Link>
+                  <span className="block text-[#6B5D52]">
+                    {(planners.get(r.id) ?? []).map((p) => `${p.name}${p.company ? `, ${p.company}` : ""}${p.isLead ? " (Lead)" : ""}`).join("; ")}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
         <section className="rounded-2xl border border-[#DDD5CC] bg-[#F5F0EB] px-4 py-3 sm:px-5 sm:py-4 space-y-2" aria-label="Agreements">
           <h2 className="font-heading text-lg font-bold text-[#2C2420]">Agreements</h2>
           {agreements.length === 0 ? (

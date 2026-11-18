@@ -37,7 +37,9 @@ export default function UpdateMode({
   showList = false,
   listPending = false,
   menu = null,
+  extra = null,
 }: {
+  extra?: React.ReactNode; // the planners card, on client held events
   menu?: { type: string; typeLabel: string; viewHref: string; downloadHref: string } | null; // "Your menu": the approved menu, once uploaded
   sessionId: string;
   clientName: string | null;
@@ -284,6 +286,8 @@ export default function UpdateMode({
         )}
 
         {showList && <ShoppingList data={eventData} pending={pending} />}
+
+        {extra}
       </main>
     </div>
   );

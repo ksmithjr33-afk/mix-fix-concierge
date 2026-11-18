@@ -86,6 +86,13 @@ export function eventData(s: { event_date?: string | null; event_data: Record<st
   const ed: Record<string, unknown> = { ...(s.event_data ?? {}) };
   if (!ed.event_date && s.event_date) ed.event_date = s.event_date;
   ed[TZ_KEY] = marketTz(sessionMarket(s));
+  // Planner held events: the title rule's keys (see lib/team/event-list.ts). Absent before the partners migration.
+  const b = s as { booking_holder?: string | null; host_name?: string | null; planner_label?: string | null };
+  if (b.booking_holder === "planner") {
+    ed.__holder = "planner";
+    if (b.host_name) ed.__host_name = b.host_name;
+    if (b.planner_label) ed.__via = b.planner_label;
+  }
   return ed;
 }
 

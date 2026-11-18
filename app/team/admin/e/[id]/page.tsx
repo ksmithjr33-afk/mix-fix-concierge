@@ -21,7 +21,7 @@ import { eventSchedule, todayIn } from "@/lib/team/time";
 import { isHidden } from "@/lib/team/hidden";
 import { ensureMarket } from "@/lib/team/markets-db";
 import { handoffPanel, postPanel } from "@/lib/team/shifts-db";
-import { marketLabel } from "@/lib/team/markets";
+import { eventData, marketLabel } from "@/lib/team/markets";
 import { eventDayOf, unavailableOn } from "@/lib/team/availability-db";
 import { closeoutsFor, unreviewedProblems } from "@/lib/team/closeout-db";
 import { staffSupplies } from "@/lib/team/supplies-db";
@@ -70,6 +70,9 @@ import PayoutCard from "../../payout-card";
 import { timePageHref } from "@/lib/team/clock-card";
 import { rateTeamCard, tierBadges } from "@/lib/team/scorecard-db";
 import RateTeamCard from "./rate-team-card";
+import BookingCard from "./booking-card";
+import { bookingCardData } from "@/lib/partners/client-view";
+import type { EventSession } from "@/lib/partners/db";
 import { venuePhotosFor } from "@/lib/team/venue-photos-db";
 import VenuePhotos from "../../../e/[id]/venue-photos";
 import Receipts from "../../../e/[id]/receipts";
@@ -174,7 +177,7 @@ async function AdminEventPage({
           {} as Record<string, string>,
         ];
   // Details, Client list and Chat only.
-  const [links, autoSend, listEntries, messages, muted, history, eventNumber, agreements, clockRows, payout, business, supplyCosts, lowStock, rateCard, venue, receipts] = await Promise.all([
+  const [links, autoSend, listEntries, messages, muted, history, eventNumber, agreements, clockRows, payout, business, supplyCosts, lowStock, rateCard, venue, receipts, booking] = await Promise.all([
     on("details") ? clientLinks(session, me) : null, // admins only: null for anyone else
     on("client") ? autoSendOn() : false,
     on("client") ? listLog(id) : [],
@@ -226,6 +229,13 @@ async function AdminEventPage({
           return null;
         })
       : null,
+    // The Booking card: who holds the booking, the host, planners. Shows "not set up yet" before the partners migration.
+    on("details") && isAdminRole(me.role)
+      ? bookingCardData(session as EventSession, me.role).catch((err) => {
+          console.error("[partners] booking card could not load:", err);
+          return null;
+        })
+      : null,
   ]);
   const repeat = repeatLabel(eventNumber);
   if (tab === "chat") await markThreadRead(id, me.id);
@@ -254,6 +264,8 @@ async function AdminEventPage({
   const marketSource = (session as { team_market_source?: string | null }).team_market_source ?? null;
   const counts = staffingCounts(bartendersNeeded(session), people.map((p) => p.status));
   const ed = session.event_data ?? {};
+  // The title follows the planner title rule (host's name, "via" the planner) once the partners migration runs.
+  const titled = eventData(session);
   // The safety net: the guest count changed with no price change applied or pending.
   const guestFlag = guestCountFlag(session);
   const sheetFlags = sheet.sheet.sections.flatMap((s) => s.lines).filter((l) => l.conflict || l.gone).length;
@@ -261,7 +273,7 @@ async function AdminEventPage({
   const header = (
     <div className="px-1 flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
       <div className="min-w-0">
-        <h1 className="font-heading text-2xl font-bold text-[#2C2420] break-words">{adminEventTitle(ed)}</h1>
+        <h1 className="font-heading text-2xl font-bold text-[#2C2420] break-words">{adminEventTitle(titled)}</h1>
         {eventSubtitle(ed) && <p className="text-[17px] text-[#2C2420] break-words">{eventSubtitle(ed)}</p>}
         <p className="text-[15px] text-[#6B5D52]">
           {[v.date, v.arrival ? `arrive ${v.arrival}` : "", v.serviceStart && v.serviceEnd ? `service ${v.serviceStart} to ${v.serviceEnd}` : ""].filter(Boolean).join(", ")}
@@ -337,6 +349,7 @@ async function AdminEventPage({
           {links && (
             <ClientLinksCard conciergeUrl={links.conciergeUrl} eventUrl={links.eventUrl} openConcierge={links.openConcierge} openEvent={links.openEvent} status={clientStatusLine(links, v.timeZone)} />
           )}
+          {booking && <BookingCard sessionId={id} data={booking} />}
           {agreements && <AgreementCard sessionId={id} initial={agreements} />}
           {history && <ClientHistoryCard history={history} clientKey={history.matchedOn} />}
           {/* Discount and gratuity amounts: admins and managers only. */}

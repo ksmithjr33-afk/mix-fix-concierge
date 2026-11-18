@@ -40,14 +40,35 @@ export interface EventListItem {
   calendarOnly?: boolean; // admins: added to our calendar only, nothing goes to GHL or the client
 }
 
-/** "Justin · Wedding": client first name and event type. */
-export function nameAndType(ed: Record<string, unknown>): string {
-  return [firstName(ed.client_name), scrub(ed.event_type)].filter(Boolean).join(" · ");
+// Planner held events: eventData() in lib/team/markets.ts copies the booking
+// holder, the host's name, and the Lead's company or name onto these keys, so
+// every title below follows the planner title rule. Missing (every client held
+// event, and every event before the partners migration) means nothing changes.
+export const HOLDER_KEY = "__holder";
+export const HOST_KEY = "__host_name";
+export const VIA_KEY = "__via";
+
+/** Whose name titles the event: the host on a planner held event with a host named, otherwise the client (the booking contact). */
+function titleName(ed: Record<string, unknown>): string {
+  const host = ed[HOLDER_KEY] === "planner" ? scrub(ed[HOST_KEY]) : "";
+  return host || scrub(ed.client_name);
 }
 
-/** "Justin Reyes · Wedding": client full name and event type. Admins and managers only. */
+/** " via Bloom Events" on a planner held event, admins and managers only. Empty otherwise. */
+function viaSuffix(ed: Record<string, unknown>): string {
+  const via = ed[HOLDER_KEY] === "planner" ? scrub(ed[VIA_KEY]) : "";
+  return via ? ` via ${via}` : "";
+}
+
+/** "Justin · Wedding": client first name and event type. On a planner held event with a host, the host's first name. */
+export function nameAndType(ed: Record<string, unknown>): string {
+  return [firstName(titleName(ed)), scrub(ed.event_type)].filter(Boolean).join(" · ");
+}
+
+/** "Justin Reyes · Wedding": client full name and event type. Admins and managers only. Planner held: the host's full name, then "via [planner]". */
 export function fullNameAndType(ed: Record<string, unknown>): string {
-  return [scrub(ed.client_name), scrub(ed.event_type)].filter(Boolean).join(" · ");
+  const base = [titleName(ed), scrub(ed.event_type)].filter(Boolean).join(" · ");
+  return base ? `${base}${viaSuffix(ed)}` : "";
 }
 
 /**

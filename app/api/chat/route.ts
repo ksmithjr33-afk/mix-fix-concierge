@@ -37,6 +37,25 @@ import { bookingFill } from "@/lib/booking-webhook";
 import { currentPopularDrinks } from "@/lib/popular-drinks-db";
 import { popularForPrompt } from "@/lib/popular-drinks";
 import { createInviteFilter, inviteToAdd, inviteUsed } from "@/lib/menu-invite";
+import { partnerChatFor, type PartnerChat } from "@/lib/partners/chat-bridge";
+import {
+  APPROVAL_FAILED_TOOL_RESULT,
+  bookingQuestionsSection,
+  hideMoney,
+  keepAuthors,
+  plannerIntakeSection,
+  plannerUpdateSection,
+  sentForApprovalToolResult,
+  takeBookingAnswers,
+  withBookingFields,
+  type MessageAuthor,
+} from "@/lib/partners/chat";
+import { askForApproval, changedPriced, splitPriced } from "@/lib/partners/approvals";
+import { applyBookingAnswers, plannerChanged, requestGuestCountApproval } from "@/lib/partners/planning";
+import { sentForApprovalLine } from "@/lib/partners/rules";
+import { savePartnerChat } from "@/lib/partners/event-page";
+import { clientLinkBlocked } from "@/lib/partners/client-view";
+import type { EventSession } from "@/lib/partners/db";
 
 const anthropic = new Anthropic();
 
@@ -44,6 +63,7 @@ interface ChatMessage {
   role: string;
   content: string;
   menus?: MenuKey[]; // menu images shown with this message, never sent to the model
+  by?: MessageAuthor; // who wrote a user message: a planner, or (untagged) the client
 }
 
 /** The stored assistant message, with the menu images it showed so a reload brings them back. */
@@ -118,7 +138,7 @@ async function upsertConversationLog(
 ) {
   const { data: existing, error: selectError } = await supabase
     .from("conversation_logs")
-    .select("id")
+    .select("id, messages")
     .eq("session_id", sessionId)
     .maybeSingle();
 
@@ -130,6 +150,8 @@ async function upsertConversationLog(
   const nowIso = new Date().toISOString();
 
   if (existing) {
+    // A planner's answers stay marked as theirs when the client's browser sends the chat back without the marks.
+    messages = keepAuthors((existing as { messages?: ChatMessage[] }).messages, messages);
     const { error } = await supabase
       .from("conversation_logs")
       .update({ messages, updated_at: nowIso })
@@ -303,13 +325,16 @@ function updateToolResult(result: ApplyResult | null): string {
   return `TOOL RESULT:\n\n${parts.join("\n\n")}`;
 }
 
-async function updateModeResponse(session: SessionRow, messages: ChatMessage[], chatStartVersion: number, origin: string) {
+async function updateModeResponse(session: SessionRow, messages: ChatMessage[], chatStartVersion: number, origin: string, partner: PartnerChat | null = null) {
   const eventData = session.event_data as EventData;
+  // A planner who does not hold the booking never hears a price and never accepts one: priced changes go to the holder.
+  const approvalOnly = !!partner && !partner.ctx.holdsBooking;
   const deadlines = computeDeadlines(eventData.event_date ?? session.event_date, undefined, eventTimeZone(session));
   // Every change saved since this chat opened, for the final recap.
   const since = await changesSince(session.id, chatStartVersion).catch(() => null);
   const systemText = buildUpdatePrompt(eventData, session.version, deadlines, {
-    booked: session.booked_price ?? null,
+    booked: approvalOnly ? null : (session.booked_price ?? null),
+    planner: partner ? plannerUpdateSection(partner.ctx) : undefined,
     recap: since ? { lines: recapLines(since.changes), totalBefore: since.totalBefore, totalAfter: since.totalAfter } : null,
     pricePending: session.price_pending ? (session.price_pending_info ?? null) : null,
   });
@@ -326,7 +351,7 @@ async function updateModeResponse(session: SessionRow, messages: ChatMessage[], 
   const tools = [quotePriceChangeTool, updateEventDataTool];
   const history: Anthropic.MessageParam[] = messages.map((m: ChatMessage) => ({
     role: m.role as "user" | "assistant",
-    content: m.content,
+    content: partner && !partner.money.total ? hideMoney(m.content) : m.content,
   }));
 
   const stream = anthropic.messages.stream({
@@ -394,14 +419,37 @@ async function updateModeResponse(session: SessionRow, messages: ChatMessage[], 
           // Send the GHL note and update webhook before the bot confirms the change.
           // Assigned staff get a text with their event page link; it never blocks the update.
           await deliverEventUpdates(session.id, result.rows, { staffOrigin: origin });
+          // A planner's change: logged under their name, and the client (or the Lead) gets a summary.
+          if (partner && result.rows.some((r) => r.applied)) {
+            await plannerChanged(partner.access, { submitted: false, summary: result.rows.filter((r) => r.applied).flatMap((r) => recapLines(r.changes)).join("; ") });
+          }
         };
 
         if (toolUses.length > 0) {
           const toolResults: Anthropic.ToolResultBlockParam[] = [];
           let lastApply: ApplyResult | null | undefined;
           let lastQuote: QuoteResult | null | undefined;
+          let approvalLine = ""; // a planner's priced change sent to the booking holder
           for (const toolUse of toolUses) {
             const input = toolUse.input as Record<string, unknown>;
+            if (toolUse.name === "quote_price_change" && approvalOnly && partner) {
+              // Quoted the same way, but it goes to the booking holder instead of to this planner.
+              const priced = changedPriced(eventData, splitPriced(input).priced);
+              const asked = Object.keys(priced).length > 0 ? await askForApproval(session, priced, partner.access.actor) : ({ kind: "no_price" } as const);
+              if (asked.kind === "no_price") {
+                // No change in price: they already said yes, so it saves the normal way.
+                const saved = await applyEventUpdate(session.id, input, {}).catch(() => null);
+                lastApply = saved;
+                await afterApply(saved);
+                toolResults.push({ type: "tool_result", tool_use_id: toolUse.id, content: updateToolResult(saved) });
+              } else {
+                lastApply = undefined;
+                lastQuote = undefined;
+                approvalLine = asked.kind === "sent" ? sentForApprovalLine(asked.holderFirstName) : "";
+                toolResults.push({ type: "tool_result", tool_use_id: toolUse.id, content: asked.kind === "sent" ? sentForApprovalToolResult(approvalLine) : APPROVAL_FAILED_TOOL_RESULT });
+              }
+              continue;
+            }
             if (toolUse.name === "quote_price_change") {
               lastQuote = await quoteEventUpdate(session.id, input).catch((err) => {
                 console.error("quote_price_change failed:", err);
@@ -428,8 +476,25 @@ async function updateModeResponse(session: SessionRow, messages: ChatMessage[], 
               manager_request: managerRequest,
               change_approval_needed: changeApprovalNeeded,
               quoted_new_total: quotedNewTotal,
-              ...partial
+              ...asSent
             } = input;
+            let partial: Record<string, unknown> = asSent;
+            if (approvalOnly && partner) {
+              // Never applied for this planner: a priced change (it goes to the holder) or a payment choice.
+              const { priced, rest } = splitPriced(asSent);
+              delete rest.payment_preference;
+              const changed = changedPriced(eventData, priced);
+              partial = rest;
+              if (Object.keys(changed).length > 0) {
+                const asked = await askForApproval(session, changed, partner.access.actor);
+                if (asked.kind === "no_price") partial = { ...rest, ...changed };
+                else approvalLine = asked.kind === "sent" ? sentForApprovalLine(asked.holderFirstName) : "";
+              }
+              if (Object.keys(partial).length === 0) {
+                toolResults.push({ type: "tool_result", tool_use_id: toolUse.id, content: approvalLine ? sentForApprovalToolResult(approvalLine) : APPROVAL_FAILED_TOOL_RESULT });
+                continue;
+              }
+            }
             const result = await applyEventUpdate(session.id, partial, {
               managerRequest: typeof managerRequest === "string" ? managerRequest : null,
               changeApprovalNeeded: changeApprovalNeeded === true,
@@ -439,7 +504,8 @@ async function updateModeResponse(session: SessionRow, messages: ChatMessage[], 
             });
             lastApply = result;
             await afterApply(result);
-            toolResults.push({ type: "tool_result", tool_use_id: toolUse.id, content: updateToolResult(result) });
+            const recorded = updateToolResult(result);
+            toolResults.push({ type: "tool_result", tool_use_id: toolUse.id, content: approvalLine ? `${recorded}\n\nALSO SENT FOR APPROVAL, NOT SAVED: the part of this change that affects the price. Say exactly: "${approvalLine}"` : recorded });
           }
 
           // Second turn: the model sees what was priced or recorded and says
@@ -470,7 +536,9 @@ async function updateModeResponse(session: SessionRow, messages: ChatMessage[], 
 
           if (!fullText.slice(beforeConfirmation).trim()) {
             let text: string;
-            if (lastApply === undefined) {
+            if (approvalLine && lastApply === undefined) {
+              text = `${approvalLine} Anything else you would like to change?`;
+            } else if (lastApply === undefined) {
               text = lastQuote?.price
                 ? `${lastQuote.price.price_text} Should I make that change?`
                 : lastQuote?.diveMenuSet
@@ -508,7 +576,12 @@ async function updateModeResponse(session: SessionRow, messages: ChatMessage[], 
 
         menuFilter.finish();
 
-        await saveUpdateMessages(session.id, [...messages, assistantMessage(fullText.trim(), menuFilter.menus())]);
+        if (partner && partner.access.actor.partnerId) {
+          // Each planner's update chat is their own, never the client's (which can show prices).
+          await savePartnerChat(session.id, partner.access.actor.partnerId, [...messages, assistantMessage(fullText.trim(), menuFilter.menus())]);
+        } else {
+          await saveUpdateMessages(session.id, [...messages, assistantMessage(fullText.trim(), menuFilter.menus())]);
+        }
 
         controller.enqueue(encoder.encode("data: [DONE]\n\n"));
         controller.close();
@@ -531,14 +604,21 @@ async function updateModeResponse(session: SessionRow, messages: ChatMessage[], 
 
 export async function POST(request: Request) {
   const { messages, sessionId, clientName, email, chatStartVersion } = await request.json();
+  // A planner, checked by /api/partners/chat and attached in process. Null for every browser request here.
+  const partner = partnerChatFor(request);
+  const approvalOnly = !!partner && !partner.ctx.holdsBooking;
 
   // Sessions that already submitted their event get update mode instead of intake.
   let session: SessionRow | null = null;
   if (sessionId) {
     session = await getSession(sessionId);
+    // A removed or deactivated planner's old booking link changes nothing.
+    if (!partner && session && (await clientLinkBlocked(session as EventSession).catch(() => false))) {
+      return Response.json({ error: "This link is no longer active." }, { status: 403 });
+    }
     if (session?.status === "submitted" && session.event_data) {
       const start = typeof chatStartVersion === "number" ? chatStartVersion : session.version;
-      return updateModeResponse(session, messages, start, new URL(request.url).origin);
+      return updateModeResponse(session, messages, start, new URL(request.url).origin, partner);
     }
   }
 
@@ -553,23 +633,35 @@ export async function POST(request: Request) {
   });
   // A booked guest count is confirmed, not asked, and a different number is
   // priced with quote_guest_count. Only with a session row to price from.
-  const guestTool = session !== null && !!facts.guests;
+  // A planner who cannot approve price changes never gets it: a different count goes to the holder.
+  const guestTool = session !== null && !!facts.guests && !approvalOnly;
   // Cached (with the tools before it): the ~18k token prompt is the same on
   // every turn, so later turns read it from the cache. Same words to the model.
   const system: Anthropic.TextBlockParam[] = [
     {
       type: "text",
-      text: buildIntakePrompt(booked ? { total: booked.total ?? null, deposit: booked.deposit_paid ?? DEFAULT_DEPOSIT } : null, new Date(), {
-        booked: guestTool ? facts : { ...facts, guests: null },
+      text: buildIntakePrompt(booked && !approvalOnly ? { total: booked.total ?? null, deposit: booked.deposit_paid ?? DEFAULT_DEPOSIT } : null, new Date(), {
+        booked: guestTool || approvalOnly ? facts : { ...facts, guests: null },
         popular: popular ? popularForPrompt(popular) : null,
+        // Who is planning: a planner, or the client asked once (only for a session we can record the answer on).
+        people: partner
+          ? plannerIntakeSection(partner.ctx)
+          : session
+            ? bookingQuestionsSection({
+                askRole: (session as { booking_holder?: string | null }).booking_holder !== "planner" && !(session as { planner_asked?: boolean | null }).planner_asked,
+                askPlanner: (session as { booking_holder?: string | null }).booking_holder !== "planner" && !(session as { planner_asked?: boolean | null }).planner_asked,
+              })
+            : "",
+        noPayment: approvalOnly,
       }),
       cache_control: { type: "ephemeral" },
     },
   ];
-  const tools = guestTool ? [quoteGuestCountTool, submitEventDataTool] : [submitEventDataTool];
+  const submitTool = session ? withBookingFields(submitEventDataTool) : submitEventDataTool;
+  const tools = guestTool ? [quoteGuestCountTool, submitTool] : [submitTool];
   const history: Anthropic.MessageParam[] = messages.map((m: ChatMessage) => ({
     role: m.role as "user" | "assistant",
-    content: m.content,
+    content: partner && !partner.money.total ? hideMoney(m.content) : m.content,
   }));
   const stream = anthropic.messages.stream({
     model: "claude-sonnet-4-6",
@@ -677,7 +769,9 @@ export async function POST(request: Request) {
             // What the booking gave fills what the concierge left blank (it never
             // asks for a booked start time), so the events row, the GHL webhook,
             // and the session all get bar_service_start and bar_service_end.
-            const { guest_count_quoted_total: quotedTotal, ...input } = toolUse.input as Record<string, unknown>;
+            const { guest_count_quoted_total: quotedTotal, ...submitted } = toolUse.input as Record<string, unknown>;
+            // Who is planning (and a planner's guest count ask) never goes in the event itself.
+            const { answers: bookingAnswers, rest: input } = takeBookingAnswers(submitted);
             const filled = { ...input, ...bookingFill(input, factsAsSession(facts)) };
             // Dive Bar: record the five set menu drinks as the event's menu.
             const eventData = applyDiveSetMenu(filled);
@@ -715,6 +809,14 @@ export async function POST(request: Request) {
             const after = await getSession(sessionId);
             const flag = after ? guestCountFlag(after) : null;
             if (flag) console.error(`[GUEST COUNT FLAG] session=${sessionId}: ${flag.text}`);
+
+            // Planners: a client's answers about who is planning, or a planner's submission noticed and logged.
+            if (partner) {
+              await plannerChanged(partner.access, { submitted: true, summary: "" });
+              if (approvalOnly && bookingAnswers.requestedGuests) await requestGuestCountApproval(partner.access, bookingAnswers.requestedGuests);
+            } else {
+              await applyBookingAnswers(sessionId, bookingAnswers);
+            }
 
             const completePayload = JSON.stringify({
               event: "complete",

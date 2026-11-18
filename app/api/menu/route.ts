@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { clientMenuLink } from "@/lib/team/approved-menu-db";
+import { clientLinkBlockedById } from "@/lib/partners/client-view";
 
 // "Your menu" on the client's event page: GET ?id=<their session>&download=1.
 // Their link is their key, the same as the page itself. Sends the browser to
@@ -9,6 +10,7 @@ export async function GET(request: Request) {
   const id = q.get("id");
   if (!id) return NextResponse.json({ error: "Bad request" }, { status: 400 });
   try {
+    if (await clientLinkBlockedById(id)) return NextResponse.json({ error: "This link is no longer active." }, { status: 403 });
     const url = await clientMenuLink(id, q.get("download") === "1");
     if (!url) return NextResponse.json({ error: "No menu yet." }, { status: 404 });
     const res = NextResponse.redirect(url, 302);
