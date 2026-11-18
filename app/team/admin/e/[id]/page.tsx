@@ -60,6 +60,7 @@ import BookingSummaryCard from "./booking-summary-card";
 import { bookingSummary } from "@/lib/booking-summary";
 import { isAdminRole } from "@/lib/team/roles";
 import PriceNeededCard from "./price-needed-card";
+import { guestCountFlag } from "@/lib/intake-guests";
 import { pendingBlocks, pendingSummary } from "@/lib/price-pending";
 import { eventTimesheetRows } from "@/lib/team/timesheet-db";
 import { payoutSheet } from "@/lib/team/payout-db";
@@ -222,6 +223,8 @@ async function AdminEventPage({
   const marketSource = (session as { team_market_source?: string | null }).team_market_source ?? null;
   const counts = staffingCounts(bartendersNeeded(session), people.map((p) => p.status));
   const ed = session.event_data ?? {};
+  // The safety net: the guest count changed with no price change applied or pending.
+  const guestFlag = guestCountFlag(session);
   const sheetFlags = sheet.sheet.sections.flatMap((s) => s.lines).filter((l) => l.conflict || l.gone).length;
 
   const header = (
@@ -264,6 +267,12 @@ async function AdminEventPage({
         <>
           {session.price_pending && (
             <PriceNeededCard sessionId={id} summary={pendingSummary(session.price_pending_info)} blocks={pendingBlocks(session.price_pending_info)} />
+          )}
+          {guestFlag && (
+            <section role="alert" className="rounded-2xl border-2 border-[#B3261E] bg-[#FDECEA] px-4 py-3 space-y-1">
+              <h2 className="font-heading font-bold text-[#8C1D18]">Guest count differs from the booking</h2>
+              <p className="text-sm text-[#2C2420]">{guestFlag.text}</p>
+            </section>
           )}
           <ClockStatus
             people={people}
@@ -397,7 +406,7 @@ async function AdminEventPage({
         panel={panels[tab]()}
         counts={{
           // The menu is not picked up (or nobody is assigned) inside 48 hours, and no approved menu inside 72 hours.
-          details: (pickup.outstanding ? 1 : 0) + (menuFile.missing ? 1 : 0) + (session.price_pending ? 1 : 0) + (ice.outstanding ? 1 : 0),
+          details: (pickup.outstanding ? 1 : 0) + (menuFile.missing ? 1 : 0) + (session.price_pending ? 1 : 0) + (guestFlag ? 1 : 0) + (ice.outstanding ? 1 : 0),
           team: hidden ? 0 : counts.stillNeeded + handoffs.length,
           order: sheetFlags,
           client: pendingHolds.length,

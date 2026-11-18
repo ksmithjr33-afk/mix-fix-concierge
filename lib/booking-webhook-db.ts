@@ -7,7 +7,8 @@
 
 import crypto from "crypto";
 import { supabase } from "@/lib/supabase";
-import { DEFAULT_DEPOSIT, type BookedPrice } from "@/lib/price-change";
+import { basisFromEvent, DEFAULT_DEPOSIT, type BookedPrice, type PriceBasis } from "@/lib/price-change";
+import { bookedGuestCount } from "@/lib/booked-facts";
 import { centsToDollars, hasPriceInfo, validTotal, type Booking } from "@/lib/booking-webhook";
 
 export const DUPLICATE_WINDOW_MS = 10 * 60 * 1000;
@@ -39,10 +40,26 @@ export async function recentDuplicate(hash: string, now: Date = new Date()): Pro
   return row?.id ?? null;
 }
 
+/**
+ * What the booked total was priced for: guests (a range is its higher end),
+ * hours, bartenders, and package. Later changes are priced against this event,
+ * not against whatever the concierge or an edit saved since. Null when the
+ * package has no engine price or the guests or hours are missing.
+ */
+export function bookingBasis(b: Booking): PriceBasis | null {
+  const guests = bookedGuestCount(b.guestCount);
+  return basisFromEvent(
+    { package: b.packageType, guest_count: guests, hours_booked: b.hoursBooked, event_type: b.eventType ?? b.eventName, bartenders: b.bartenderCount ?? undefined },
+    {},
+    { tipJar: b.tipJar ?? true, bartenders: b.bartenderCount }
+  );
+}
+
 export function bookedPriceFrom(b: Booking, nowIso: string): BookedPrice | null {
   if (!hasPriceInfo(b)) return null;
   const total = validTotal(b) ? centsToDollars(b.totalCents) : null;
   return {
+    basis: bookingBasis(b),
     package_price: centsToDollars(b.packagePriceCents),
     gratuity: centsToDollars(b.gratuityCents),
     total,

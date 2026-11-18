@@ -11,7 +11,7 @@ function when(iso: string | null): string {
 // not save, and saved events whose date was already past when they booked.
 // Renders nothing when there is nothing to check.
 export default function SaveAlerts({ alerts }: { alerts: Alerts | null }) {
-  if (!alerts || (alerts.unsaved.length === 0 && alerts.pastDate.length === 0 && alerts.stale.length === 0 && alerts.pricePending.length === 0)) return null;
+  if (!alerts || (alerts.unsaved.length === 0 && alerts.pastDate.length === 0 && alerts.stale.length === 0 && alerts.pricePending.length === 0 && (alerts.guestCount ?? []).length === 0)) return null;
   return (
     <div className="space-y-3" role="alert">
       {alerts.unsaved.length > 0 && (
@@ -42,6 +42,24 @@ export default function SaveAlerts({ alerts }: { alerts: Alerts | null }) {
                   {p.name}
                 </Link>{" "}
                 · {p.summary}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+      {(alerts.guestCount ?? []).length > 0 && (
+        <section className="rounded-xl border-2 border-[#B3261E] bg-[#FDECEA] p-4 space-y-2">
+          <h2 className="font-semibold text-[#8C1D18]">
+            Guest count differs from the booking: {alerts.guestCount.length} {alerts.guestCount.length === 1 ? "event" : "events"}
+          </h2>
+          <p className="text-sm text-[#6B5D52]">The guest count changed but no price change was applied or is pending. Check the total and staffing on the event.</p>
+          <ul className="text-sm space-y-1">
+            {alerts.guestCount.map((g) => (
+              <li key={g.sessionId}>
+                <Link href={`/team/admin/e/${g.sessionId}`} className="text-[#B5845A] underline">
+                  {g.name}
+                </Link>{" "}
+                · {g.text}
               </li>
             ))}
           </ul>

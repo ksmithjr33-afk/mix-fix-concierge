@@ -19,7 +19,7 @@ registerHooks({
 });
 
 const { db, guards } = await import("./fake-supabase.mts");
-const { submitEventDataTool } = await import("../lib/intake-tools.ts");
+const { submitEventDataTool, INTAKE_ONLY_FIELDS } = await import("../lib/intake-tools.ts");
 const { EVENTS_COLUMNS, SESSION_ONLY_FIELDS, eventsInsertRow } = await import("../lib/events-row.ts");
 const updates = await import("../lib/event-updates.ts");
 const saveRoute = await import("../app/api/save-event/route.ts");
@@ -41,7 +41,8 @@ guards.push((table, op, rows) => {
 
 // ---- 1. Every submit tool field has a home ----
 const toolFields = Object.keys(submitEventDataTool.input_schema.properties as Record<string, unknown>);
-const homeless = toolFields.filter((f) => !LIVE_EVENTS.has(f) && !(SESSION_ONLY_FIELDS as readonly string[]).includes(f));
+// INTAKE_ONLY_FIELDS are read and removed by the chat route before anything is saved.
+const homeless = toolFields.filter((f) => !LIVE_EVENTS.has(f) && !(SESSION_ONLY_FIELDS as readonly string[]).includes(f) && !(INTAKE_ONLY_FIELDS as readonly string[]).includes(f));
 check("Every submit tool field is an events column or kept on the session only", homeless.length === 0, `no home: ${homeless.join(", ")}`);
 check("payment_preference and change_approval_needed are kept on the session only", ["payment_preference", "change_approval_needed"].every((f) => (SESSION_ONLY_FIELDS as readonly string[]).includes(f)));
 

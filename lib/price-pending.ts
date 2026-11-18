@@ -24,6 +24,7 @@ export interface PricePendingInfo {
   old_total: number | null;
   client_quoted: string | null; // what the client says they were quoted, "$115"
   reason: string;
+  notes?: string[]; // for the admins, like "Needs 2 bartenders for 100 guests, booked with 1."
 }
 
 /** The client's one message about the price. */
@@ -45,9 +46,11 @@ export function unpricedReason(oldPackage: string | null, packageKnown: boolean,
 /** Add a newly saved unpriced change to what is already pending. */
 export function addPending(
   prior: PricePendingInfo | null | undefined,
-  next: { changes: FieldChange[]; oldPackage: string | null; newPackage: string | null; oldTotal: number | null; clientQuoted: string | null; reason: string; at: string }
+  next: { changes: FieldChange[]; oldPackage: string | null; newPackage: string | null; oldTotal: number | null; clientQuoted: string | null; reason: string; at: string; note?: string | null }
 ): PricePendingInfo {
+  const notes = [...(prior?.notes ?? []), ...(next.note ? [next.note] : [])];
   return {
+    ...(notes.length ? { notes } : {}),
     items: [...(prior?.items ?? []), { changes: next.changes, at: next.at }],
     old_package: prior?.old_package ?? next.oldPackage,
     new_package: next.newPackage ?? prior?.new_package ?? null,
@@ -70,6 +73,7 @@ export function pendingSummary(info: PricePendingInfo | null | undefined): strin
     info.old_package && info.new_package && info.old_package !== info.new_package ? `Old package ${info.old_package}, new package ${info.new_package}.` : "",
     info.old_total !== null ? `Old total ${money(info.old_total)}.` : "No total on file before the change.",
     info.client_quoted ? `Client says they were quoted ${info.client_quoted}.` : "",
+    ...(info.notes ?? []),
     info.reason,
   ];
   return parts.filter(Boolean).join(" ");
@@ -79,7 +83,8 @@ export function pendingSummary(info: PricePendingInfo | null | undefined): strin
 export function pendingAdminText(o: { client: string; date: string; info: PricePendingInfo; link: string }): string {
   const what = pendingLines(o.info).join("; ") || "a change";
   const quoted = o.info.client_quoted ? ` Client says they were quoted ${o.info.client_quoted}.` : "";
-  return `Price needed: ${o.client || "A client"} on ${o.date || "date to be confirmed"} changed ${what}. The change is saved.${quoted} Set the new total: ${o.link}`;
+  const notes = (o.info.notes ?? []).map((n) => ` ${n}`).join("");
+  return `Price needed: ${o.client || "A client"} on ${o.date || "date to be confirmed"} changed ${what}. The change is saved.${quoted}${notes} Set the new total: ${o.link}`;
 }
 
 /** The detail blocks for the manager view card. */

@@ -30,6 +30,10 @@ export const submitEventDataTool: Anthropic.Tool = {
       bar_details: { type: "string" },
       parking_info: { type: "string" },
       guest_count: { type: "number" },
+      guest_count_quoted_total: {
+        type: "number",
+        description: "Only when quote_guest_count gave a new total for a different guest count and the client clearly said yes: that new total. The server checks it against the pricing engine before applying the change.",
+      },
       drinking_pace: { type: "string" },
       theme: { type: "string" },
       event_colors: { type: "string" },
@@ -85,5 +89,23 @@ export const submitEventDataTool: Anthropic.Tool = {
       },
     },
     required: ["client_name", "package"],
+  },
+};
+
+/** Submit fields the chat route reads and removes: they never land in event_data or the events row. */
+export const INTAKE_ONLY_FIELDS = ["guest_count_quoted_total"] as const;
+
+// Prices a guest count that differs from the booked one, with the same engine
+// update mode uses, before the event is saved. Offered only when the session
+// has a booked guest count.
+export const quoteGuestCountTool: Anthropic.Tool = {
+  name: "quote_guest_count",
+  description:
+    "Price a guest count that differs from the booked guest count, with our pricing engine. Saves nothing. Call it as soon as the client gives a different number, then follow the TOOL RESULT exactly.",
+  input_schema: {
+    type: "object",
+    additionalProperties: false,
+    properties: { guest_count: { type: "number", description: "The new guest count the client gave. A range is its higher end." } },
+    required: ["guest_count"],
   },
 };

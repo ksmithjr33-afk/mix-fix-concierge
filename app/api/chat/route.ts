@@ -18,18 +18,18 @@ import {
   getSession,
   quoteEventUpdate,
   type QuoteResult,
-  saveFinalSubmission,
   type SessionRow,
 } from "@/lib/event-updates";
 import { UPDATE_OPENER } from "@/lib/update-mode-shared";
 import { deliverEventUpdates } from "@/lib/update-delivery";
 import { allowedMenus, createMenuFilter, type MenuKey } from "@/lib/menu-markers";
 import { applyDiveSetMenu, DIVE_MENU_SET_MESSAGE } from "@/lib/dive-menu";
-import { DEFAULT_DEPOSIT, impliedLine, money, paymentPhrase, type PriceChange } from "@/lib/price-change";
+import { DEFAULT_DEPOSIT, impliedLine, money, paymentPhrase, toCount, type PriceChange } from "@/lib/price-change";
 import { CHANGE_REQUEST_MESSAGE } from "@/lib/client-list";
 import { announceRequest } from "@/lib/change-requests";
 import { eventTimeZone } from "@/lib/team/markets";
-import { submitEventDataTool } from "@/lib/intake-tools";
+import { quoteGuestCountTool, submitEventDataTool } from "@/lib/intake-tools";
+import { guestCountFlag, guestQuoteToolResult, quoteGuestCount, submitWithGuestCount } from "@/lib/intake-guests";
 import { createFillerFilter, pendingLines, PRICE_PENDING_CLIENT_MESSAGE, quotedAmount, unpriced, type PricePendingInfo } from "@/lib/price-pending";
 import { recordClientQuoted, textPricePending } from "@/lib/price-pending-db";
 import { bookedFacts, factsAsSession } from "@/lib/booked-facts";
@@ -551,26 +551,32 @@ export async function POST(request: Request) {
     console.error("popular drinks failed:", err);
     return null;
   });
+  // A booked guest count is confirmed, not asked, and a different number is
+  // priced with quote_guest_count. Only with a session row to price from.
+  const guestTool = session !== null && !!facts.guests;
+  // Cached (with the tools before it): the ~18k token prompt is the same on
+  // every turn, so later turns read it from the cache. Same words to the model.
+  const system: Anthropic.TextBlockParam[] = [
+    {
+      type: "text",
+      text: buildIntakePrompt(booked ? { total: booked.total ?? null, deposit: booked.deposit_paid ?? DEFAULT_DEPOSIT } : null, new Date(), {
+        booked: guestTool ? facts : { ...facts, guests: null },
+        popular: popular ? popularForPrompt(popular) : null,
+      }),
+      cache_control: { type: "ephemeral" },
+    },
+  ];
+  const tools = guestTool ? [quoteGuestCountTool, submitEventDataTool] : [submitEventDataTool];
+  const history: Anthropic.MessageParam[] = messages.map((m: ChatMessage) => ({
+    role: m.role as "user" | "assistant",
+    content: m.content,
+  }));
   const stream = anthropic.messages.stream({
     model: "claude-sonnet-4-6",
     max_tokens: 8192,
-    // Cached (with the tool before it): the ~18k token prompt is the same on
-    // every turn, so later turns read it from the cache. Same words to the model.
-    system: [
-      {
-        type: "text",
-        text: buildIntakePrompt(booked ? { total: booked.total ?? null, deposit: booked.deposit_paid ?? DEFAULT_DEPOSIT } : null, new Date(), {
-          booked: facts,
-          popular: popular ? popularForPrompt(popular) : null,
-        }),
-        cache_control: { type: "ephemeral" },
-      },
-    ],
-    tools: [submitEventDataTool],
-    messages: messages.map((m: ChatMessage) => ({
-      role: m.role as "user" | "assistant",
-      content: m.content,
-    })),
+    system,
+    tools,
+    messages: history,
   });
 
   const encoder = new TextEncoder();
@@ -589,22 +595,20 @@ export async function POST(request: Request) {
       // The recommendation invite: once, with the first menu, never repeated.
       const used = inviteUsed(messages);
       const invite = createInviteFilter(used, (t) => menuFilter.push(t));
+      // With the guest count tool, "Let me get a price" never reaches the client: the price is never in that sentence.
+      let filler = guestTool ? createFillerFilter((t) => invite.push(t)) : null;
+      const push = (t: string) => (filler ? filler.push(t) : invite.push(t));
       try {
         for await (const event of stream) {
           if (
             event.type === "content_block_delta" &&
             event.delta.type === "text_delta"
           ) {
-            invite.push(event.delta.text);
+            push(event.delta.text);
           }
         }
+        filler?.finish();
         invite.finish();
-        menuFilter.finish();
-        const addInvite = inviteToAdd(used, menuFilter.menus().length, fullText);
-        if (addInvite) {
-          fullText += addInvite;
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ text: addInvite })}\n\n`));
-        }
 
         // Inspect the assembled message for the completion tool call.
         const finalMessage = await stream.finalMessage();
@@ -612,6 +616,45 @@ export async function POST(request: Request) {
           (block): block is Anthropic.ToolUseBlock =>
             block.type === "tool_use" && block.name === "submit_event_data"
         );
+        const quoteUse = finalMessage.content.find(
+          (block): block is Anthropic.ToolUseBlock => block.type === "tool_use" && block.name === "quote_guest_count"
+        );
+
+        // A different guest count: price it, then a second turn where the bot
+        // says what the TOOL RESULT says, the same way update mode quotes.
+        if (quoteUse && !toolUse && session) {
+          const asked = toCount((quoteUse.input as Record<string, unknown>).guest_count);
+          const quote = asked ? quoteGuestCount(session, asked) : null;
+          const followUp = anthropic.messages.stream({
+            model: "claude-sonnet-4-6",
+            max_tokens: 1024,
+            system,
+            tools,
+            tool_choice: { type: "none" },
+            messages: [
+              ...history,
+              { role: "assistant", content: finalMessage.content },
+              { role: "user", content: [{ type: "tool_result", tool_use_id: quoteUse.id, content: guestQuoteToolResult(quote, asked) }] },
+            ],
+          });
+          let separated = !fullText.trim();
+          filler = createFillerFilter((t) => invite.push(t));
+          for await (const event of followUp) {
+            if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
+              filler.push(separated ? event.delta.text : `\n\n${event.delta.text}`);
+              separated = true;
+            }
+          }
+          filler.finish();
+          invite.finish();
+        }
+
+        menuFilter.finish();
+        const addInvite = inviteToAdd(used, menuFilter.menus().length, fullText);
+        if (addInvite) {
+          fullText += addInvite;
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ text: addInvite })}\n\n`));
+        }
 
         const closingText = fullText.trim();
 
@@ -634,7 +677,7 @@ export async function POST(request: Request) {
             // What the booking gave fills what the concierge left blank (it never
             // asks for a booked start time), so the events row, the GHL webhook,
             // and the session all get bar_service_start and bar_service_end.
-            const input = toolUse.input as Record<string, unknown>;
+            const { guest_count_quoted_total: quotedTotal, ...input } = toolUse.input as Record<string, unknown>;
             const filled = { ...input, ...bookingFill(input, factsAsSession(facts)) };
             // Dive Bar: record the five set menu drinks as the event's menu.
             const eventData = applyDiveSetMenu(filled);
@@ -645,22 +688,37 @@ export async function POST(request: Request) {
             // session link opens in update mode from now on.
             // A failure is retried once, logged as [FINAL SAVE FAILED], and
             // listed for admins; it never stops the webhook or the client's finish.
-            await saveFinalSubmission(sessionId, eventData as EventData);
+            // A guest count different from the booked one is applied as version 2
+            // (priced, or price pending), the way update mode applies it.
+            const sub = await submitWithGuestCount(sessionId, session, eventData as EventData, quotedTotal);
+            const finalData = { ...eventData, guest_count: sub.guestCount, ...(sub.bartenders !== undefined ? { bartenders: sub.bartenders } : {}) };
 
             // Fire (and await) the completion side effects BEFORE telling the
             // client we are done, so they run regardless of whether the tab
             // stays open.
             await fireCompletion(
               origin,
-              eventData,
+              finalData,
               transcript,
               email ?? null,
               sessionId
             );
 
+            // The guest count update: one admin text when it could not be priced,
+            // then the GHL update with the change order, after the completion webhook.
+            if (sub.apply) {
+              const fresh = await getSession(sessionId);
+              if (sub.apply.pricePending?.fresh) await textPricePending(fresh ?? session!, sub.apply.pricePending.info);
+              if (sub.apply.rows.length > 0) await deliverEventUpdates(sessionId, sub.apply.rows, { staffOrigin: origin });
+            }
+            // The safety net: a guest count that differs from the booking with no price change applied or pending.
+            const after = await getSession(sessionId);
+            const flag = after ? guestCountFlag(after) : null;
+            if (flag) console.error(`[GUEST COUNT FLAG] session=${sessionId}: ${flag.text}`);
+
             const completePayload = JSON.stringify({
               event: "complete",
-              eventData,
+              eventData: finalData,
             });
             controller.enqueue(
               encoder.encode(`data: ${completePayload}\n\n`)

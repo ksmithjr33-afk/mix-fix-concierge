@@ -13,14 +13,24 @@ function startTime(v: unknown): string | null {
   return m === null ? null : formatClock(m);
 }
 
+/**
+ * The booked guest count as one number. A range ("50-75", "50 to 75") is its
+ * higher end, the number the concierge has always planned for. Null when none.
+ */
+export function bookedGuestCount(v: unknown): number | null {
+  const nums = (String(v ?? "").match(/\d+/g) ?? []).map(Number).filter((n) => n > 0);
+  return nums.length ? Math.max(...nums) : null;
+}
+
 export interface BookedFacts {
   startTime: string | null; // "6:00 PM"
+  guests?: number | null; // booked guest count, a range read as its higher end
   hours: number | null; // hours of bar service booked
   bartenders: number | null;
   eventType: string | null; // "Social Gathering"
 }
 
-export const NO_BOOKED_FACTS: BookedFacts = { startTime: null, hours: null, bartenders: null, eventType: null };
+export const NO_BOOKED_FACTS: BookedFacts = { startTime: null, guests: null, hours: null, bartenders: null, eventType: null };
 
 export const CONTEXT_PREFIX = "CONTEXT - Pre-filled from booking system:";
 
@@ -71,6 +81,7 @@ export function bookedFacts(session: Record<string, unknown> | null | undefined,
   const bartenders = count(s.bartender_count) ?? count(ctx["Bartenders booked"]);
   return {
     startTime: startTime(s.bar_service_start) ?? startTime(ctx["Bar service start time booked"]),
+    guests: bookedGuestCount(s.guest_count) ?? bookedGuestCount(ctx["Guest count"]),
     hours: count(s.hours_booked) ?? count(ctx["Hours of bar service booked"]),
     bartenders: bartenders !== null && Number.isInteger(bartenders) ? bartenders : null,
     // Older bookings put the type in event_name, and the chat page labels it Event type then.

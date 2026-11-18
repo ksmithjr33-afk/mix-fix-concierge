@@ -490,6 +490,12 @@ const INTAKE_SECTIONS_AFTER_PAYMENT = [INTAKE_CLOSING_HEADER, CHANGE_DEADLINES, 
 export const ASK_START_ITEM =
   "What time they want bar service to START (then auto-calculate end time from booked hours and confirm both back to client, do NOT ask for end time separately), ";
 export const ASK_EVENT_TYPE_ITEM = "Event type (birthday, wedding, corporate, etc.), ";
+export const ASK_GUESTS_ITEM = "Guest count, Drinking pace";
+const CONFIRM_GUESTS_ITEM = "Confirm the booked guest count (see BOOKED GUEST COUNT), Drinking pace";
+export const GUEST_COUNT_HANDLING =
+  'GUEST COUNT HANDLING: If the prefilled guest_count is a range like "50-75" or "50 to 75", silently use the HIGHER number (75 in this example) for all planning. Do not ask the client to confirm a single number, just proceed with the higher one. If the prefilled guest_count is null, missing, or zero, ask the client: "How many guests are you expecting?" Treat their answer as a single number. If they give a range in their answer, use the higher end and confirm: "Got it, we will plan for [higher number] guests."';
+const GUEST_COUNT_BOOKED =
+  'GUEST COUNT HANDLING: The booking gave a guest count, so follow BOOKED GUEST COUNT in BOOKED DETAILS. Never ask "How many guests are you expecting?"';
 const BEER_WINE_ASK_TIMES = "1. Confirm bar service start and end times and explain setup/breakdown";
 const BEER_WINE_STATE_TIMES =
   "1. State the booked bar service start and end times and explain setup and breakdown, as a statement (the start time is already booked, see BOOKED DETAILS)";
@@ -509,6 +515,12 @@ export function bookedDetailsSection(f: BookedFacts): string {
     const greet = f.hours ? `"${hoursText(f.hours)} of bar service starting at ${f.startTime}"` : `"bar service starting at ${f.startTime}"`;
     lines.push(
       `BAR SERVICE START TIME: ${f.startTime}${runs}. Do NOT ask what time bar service should start, and do not ask the client to confirm the start time. State it once in your greeting, for example ${greet}, and treat it as answered for PHASE 1, BAR SERVICE HOURS VALIDATION, and the Beer and Wine list. Share the setup and breakdown times from SETUP AND BREAKDOWN TIMES once, as a statement, when you reach logistics. If the client gives a different start time or a different length of service at any point, their answer wins: work out the new end time and apply BAR SERVICE HOURS VALIDATION, SHORTER SERVICE IS ALLOWED, LONGER SERVICE REQUIRES UPGRADE, and MAX SERVICE HOURS to it. In submit_event_data always send bar_service_start and bar_service_end: the booked times, unless the client changed them.`
+    );
+  }
+  if (f.guests) {
+    const g = f.guests;
+    lines.push(
+      `BOOKED GUEST COUNT: ${g}. Do NOT ask how many guests they are expecting. When you reach the guest count in PHASE 1, state the booked number and ask once to confirm, like this: "You are booked for ${g} guests, is that still right?" If they confirm, say something like "Perfect, planning for ${g} guests!", move on, and send guest_count ${g}. If they give a different number (a range counts as its higher end), call quote_guest_count with that number before saying anything about price, and follow its TOOL RESULT exactly: it tells you whether the price stays the same, the difference and new total to quote, whether more bartenders are needed, or that our management team will confirm the price. When a new total was quoted, the client must clearly say yes before you use the new number. On a yes, send guest_count with the new number and guest_count_quoted_total with the new total you quoted. On a no, keep guest_count ${g}. Never state or estimate a price for a guest count change yourself.`
     );
   }
   if (f.bartenders) {
@@ -572,6 +584,10 @@ export function buildIntakePrompt(booking: { total: number | null; deposit: numb
     prompt = replaceOnce(prompt, ASK_START_ITEM, "");
     prompt = replaceOnce(prompt, BEER_WINE_ASK_TIMES, BEER_WINE_STATE_TIMES);
     prompt = replaceOnce(prompt, BEER_WINE_FLOW_START, "");
+  }
+  if (f.guests) {
+    prompt = replaceOnce(prompt, ASK_GUESTS_ITEM, CONFIRM_GUESTS_ITEM);
+    prompt = replaceOnce(prompt, GUEST_COUNT_HANDLING, GUEST_COUNT_BOOKED);
   }
   if (f.eventType) {
     prompt = replaceOnce(prompt, ASK_EVENT_TYPE_ITEM, "");

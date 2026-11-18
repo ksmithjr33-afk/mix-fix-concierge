@@ -33,7 +33,8 @@ import {
 } from "@/lib/price-change";
 import { eventTimeZone } from "@/lib/team/markets";
 import { addPending, unpriced, unpricedReason, type PricePendingInfo } from "@/lib/price-pending";
-import { packageKey } from "@/lib/pricing";
+import { packageKey, staffingFor } from "@/lib/pricing";
+import { bookedGuestCount } from "@/lib/booked-facts";
 import { autoSendOn, holdChange, listWouldChange } from "@/lib/client-list-db";
 import { bookingFill } from "@/lib/booking-webhook";
 
@@ -341,6 +342,41 @@ function prepareUpdate(
   return { current, deadlines, applied, requests: plan.requests, next, price, booked, bookedComputed, cutoffChanges: plan.cutoffChanges, diveMenuSet: plan.diveMenuSet };
 }
 
+/**
+ * The event as booked, before the concierge saved anything: package, guests
+ * (a range is its higher end), hours, bartenders, type, and date from the
+ * session. What an intake change is priced from.
+ */
+export function bookedEventFrom(session: SessionRow): EventData {
+  const ed: EventData = {
+    package: session.package_type ?? undefined,
+    guest_count: bookedGuestCount(session.guest_count) ?? undefined,
+    hours_booked: toCount(session.hours_booked) ?? undefined,
+    event_type: session.event_type ?? session.event_name ?? undefined,
+    event_date: session.event_date ?? undefined,
+  };
+  const bartenders = session.booked_price?.bartenders ?? session.bartender_count ?? null;
+  if (bartenders) ed.bartenders = bartenders;
+  return ed;
+}
+
+/**
+ * Price a change against an event that is not saved yet, with exactly the
+ * engine and rules update mode uses (prepareUpdate). For the intake concierge,
+ * where the session is still in progress. Saves nothing.
+ */
+export function quoteOnEvent(session: SessionRow, eventData: EventData, partial: EventData, now?: Date): { price: PriceChange | null; changes: FieldChange[] } {
+  const prep = prepareUpdate({ ...session, status: "submitted", event_data: eventData } as SessionRow & { event_data: EventData }, partial, { now, ignoreCutoff: true });
+  return { price: prep.price, changes: prep.applied?.changes ?? [] };
+}
+
+/** "Needs 2 bartenders for 100 guests, booked with 1." when a new guest count needs more than the event has. */
+export function bartenderNote(guests: number | null, bartenders: number | null): string | null {
+  if (!guests || !bartenders) return null;
+  const needed = staffingFor(guests);
+  return needed > bartenders ? `Needs ${needed} bartenders for ${guests} guests, booked with ${bartenders}.` : null;
+}
+
 export interface QuoteResult {
   price: PriceChange | null; // null when nothing priced changes
   listHold: boolean; // saving it will send it to an admin as a request: it changes the shopping list inside six days
@@ -540,6 +576,10 @@ export async function applyEventUpdate(
         clientQuoted: options.clientQuoted ?? null,
         reason: unpricedReason(oldPackage, packageKey(oldPackage) !== null, booked?.total ?? null),
         at: nowIso,
+        // No price means no staffing worked out either, so a guest count that needs more bartenders is said here.
+        note: applied.changes.some((c) => c.field === "guest_count")
+          ? bartenderNote(toCount(next.guest_count), toCount(next.bartenders) ?? booked?.bartenders ?? null)
+          : null,
       });
       const { error: markErr } = await supabase
         .from("sessions")
