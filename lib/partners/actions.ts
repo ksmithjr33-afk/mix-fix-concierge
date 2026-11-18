@@ -10,11 +10,13 @@ import {
   findOrCreatePlanner,
   linkByRemoveToken,
   linkPlanner,
+  plannerRefusal,
   plannersOn,
   removePlanner,
   setBookingHolder,
   setHost,
   setLead,
+  setSurprise,
   setSwitch,
   type Actor,
   type EventAccess,
@@ -32,6 +34,8 @@ const SWITCHES: PricingSwitch[] = ["planner_can_see_pricing", "others_can_see_pr
 
 export async function leadAddPlanner(a: EventAccess, input: PartnerInput): Promise<Result> {
   if (!canAddPlanner(a.booking, a.viewer)) return fail("Only the Lead planner can add planners to this event.");
+  const refused = plannerRefusal(a.session, input);
+  if (refused) return fail(refused, 409);
   const found = await findOrCreatePlanner(input, a.actor.name);
   if (!found.ok) return found;
   const linked = await linkPlanner(a.session, found.partner, { via: "lead", by: a.actor });
@@ -66,6 +70,8 @@ export async function leadDecide(a: EventAccess, approvalId: string, yes: boolea
 export async function clientAddPlanner(s: EventSession, input: PartnerInput): Promise<Result> {
   if (!canAddPlanner(bookingOf(s), "client")) return fail("Your planner manages planners on this event.");
   const name = str(s.event_data?.client_name) || "Client";
+  const refused = plannerRefusal(s, input);
+  if (refused) return fail(refused, 409);
   const found = await findOrCreatePlanner(input, name);
   if (!found.ok) return found;
   const linked = await linkPlanner(s, found.partner, { via: "client", by: { kind: "client", name } });
@@ -107,8 +113,9 @@ export async function clientDecideByToken(token: string, yes: boolean): Promise<
 // ----- Admins and managers, on the event's Booking card -----
 
 /**
- * One action from the Booking card. Admins and managers can do all of it,
- * except "Planner can see pricing", which is the client's or an admin's.
+ * One action from the Booking card. Admins and managers can do all of it
+ * (Surprise and the guest of honor included), except "Planner can see
+ * pricing", which is the client's or an admin's.
  */
 export async function staffBookingAction(staff: StaffMember, s: EventSession, body: Record<string, unknown>): Promise<Result> {
   if (!isAdminRole(staff.role)) return fail("Admins and managers only.");
@@ -120,6 +127,8 @@ export async function staffBookingAction(staff: StaffMember, s: EventSession, bo
     case "host":
       return setHost(s, { name: body.name, phone: body.phone, email: body.email }, by);
     case "add": {
+      const refused = plannerRefusal(s, body);
+      if (refused) return fail(refused, 409);
       const found = await findOrCreatePlanner(body as PartnerInput, by.name);
       if (!found.ok) return found;
       const r = await linkPlanner(s, found.partner, { via: "staff", by, lead: body.lead === true });
@@ -133,6 +142,8 @@ export async function staffBookingAction(staff: StaffMember, s: EventSession, bo
       // Remove one planner and add another in one step; the new one keeps the Lead if the old one had it.
       const target = (await plannersOn(s.id)).find((p) => p.partner.id === str(body.partnerId));
       if (!target) return fail("That planner is not on this event.", 404);
+      const refused = plannerRefusal(s, body);
+      if (refused) return fail(refused, 409);
       const found = await findOrCreatePlanner(body as PartnerInput, by.name);
       if (!found.ok) return found;
       if (found.partner.id === target.partner.id) return fail("That is the same planner.", 400);
@@ -144,6 +155,9 @@ export async function staffBookingAction(staff: StaffMember, s: EventSession, bo
     }
     case "lead":
       return setLead(s, str(body.partnerId), by);
+    case "surprise":
+      // Admins and managers: Surprise on or off, and the guest of honor. Logged in partner activity.
+      return setSurprise(s, { on: body.on, name: body.name, phone: body.phone, email: body.email }, by);
     case "switch": {
       const sw = str(body.switch) as PricingSwitch;
       if (sw !== "planner_can_see_pricing") return fail("Only the Lead planner changes that switch.");

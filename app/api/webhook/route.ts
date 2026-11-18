@@ -5,6 +5,7 @@ import { createNoteByEmail } from "@/lib/ghl-api";
 import { completionFields } from "@/lib/client-list-db";
 import { createdByFields } from "@/lib/update-notes";
 import { supabase } from "@/lib/supabase";
+import { scrubHostContact } from "@/lib/partners/rules";
 
 const anthropic = new Anthropic();
 
@@ -126,6 +127,8 @@ export async function POST(request: Request) {
     if (!payload.email && clientEmail) {
       payload.email = clientEmail;
     }
+    // The agreement, invoice, and payment link go to the booking holder, never the host.
+    if (sessionRow) Object.assign(payload, scrubHostContact(payload, sessionRow as Record<string, unknown>));
 
     // Debug: log the conversation summary and transcript in full before sending
     console.log("=== CONVERSATION SUMMARY (sent to GHL) ===");

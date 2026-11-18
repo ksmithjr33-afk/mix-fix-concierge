@@ -10,6 +10,8 @@
 // Server only.
 
 import { applyEventUpdate, getSession, quoteEventUpdate, VersionConflictError } from "@/lib/event-updates";
+import { eventTimeZone } from "@/lib/team/markets";
+import { honoreeRefusal, isHonoree, surpriseActive, type SurpriseColumns } from "@/lib/partners/surprise";
 import { deliverEventUpdates } from "@/lib/update-delivery";
 import { applyChanges, isPricedField } from "@/lib/event-diff";
 import { withHoursBooked } from "@/lib/price-change";
@@ -71,6 +73,11 @@ export async function saveAdminEdit(opts: {
   if (!session || session.status !== "submitted" || !session.event_data) return { ok: false, error: "We could not find that event.", status: 404 };
   const clean = cleanAdminEdit(opts.changes, session.event_data.package);
   if (!clean.ok) return { ok: false, error: clean.error, status: 400 };
+  // A surprise event: the guest of honor's number is never the day of contact.
+  const sx = session as typeof session & SurpriseColumns;
+  if (surpriseActive(sx, new Date(), eventTimeZone(session)) && isHonoree(sx, { phone: clean.partial.day_of_contact_phone })) {
+    return { ok: false, error: honoreeRefusal("day of contact"), status: 409 };
+  }
   const choice = cleanPriceChoice(opts.price);
   if (!choice.ok) return { ok: false, error: choice.error, status: 400 };
   const expectedVersion = typeof opts.expectedVersion === "number" ? opts.expectedVersion : undefined;

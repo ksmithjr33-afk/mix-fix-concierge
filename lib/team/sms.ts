@@ -1,8 +1,14 @@
 // Staff texts go out through a GHL inbound webhook: POST {phone, name, message}
 // to env GHL_STAFF_SMS_WEBHOOK. Never throws: a missing env or a failed send is
 // logged and skipped so it never blocks what triggered it.
+//
+// Every text from this app comes through here, so the surprise event guard
+// lives here too: a text to the guest of honor's number is dropped and logged.
+
+import { dropTextToHonoree } from "@/lib/surprise-guard";
 
 export async function sendStaffText(phone: string, name: string, message: string): Promise<boolean> {
+  if (await dropTextToHonoree(phone)) return false;
   const url = process.env.GHL_STAFF_SMS_WEBHOOK;
   if (!url) {
     console.warn(`[staff-sms] GHL_STAFF_SMS_WEBHOOK is not set, text to ${phone} skipped`);

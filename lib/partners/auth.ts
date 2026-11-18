@@ -26,6 +26,7 @@ import {
   type CodeRow,
 } from "@/lib/team/codes";
 import { PARTNER_COOKIE, type Partner } from "@/lib/partners/rules";
+import { surpriseActive, type SurpriseColumns } from "@/lib/partners/surprise";
 
 export const PARTNER_CODE_SENT_MESSAGE = "If that number has access, we sent a code. It expires in 10 minutes.";
 export const PARTNER_COLUMNS = "id, type, name, company, phone, email, website, markets, active, last_sign_in_at, created_at";
@@ -39,11 +40,19 @@ export async function findPartnerByPhone(phone: string): Promise<Partner | null>
   return (data as Partner | null) ?? null;
 }
 
-/** A host with this phone on any event, and the name on the most recent one. */
+/**
+ * A host with this phone on any event, and the name on the most recent one.
+ * A surprise event never counts: its host cannot sign in until the block lifts.
+ * (Selects every column, so it reads the same before the surprise migration.)
+ */
 async function findHost(phone: string): Promise<{ name: string } | null> {
-  const { data, error } = await supabase.from("sessions").select("id, host_name, host_phone, created_at").eq("host_phone", phone);
+  const { data, error } = await supabase.from("sessions").select("*").eq("host_phone", phone);
   if (error || !data || data.length === 0) return null;
-  const rows = (data as { host_name: string | null; created_at?: string }[]).sort((a, b) => String(b.created_at ?? "").localeCompare(String(a.created_at ?? "")));
+  const live = (data as (SurpriseColumns & { host_name: string | null; created_at?: string; team_market?: string | null; event_date?: string | null; event_data?: Record<string, unknown> | null })[]).filter(
+    (s) => !surpriseActive(s, new Date(), s.team_market === "los_angeles" ? "America/Los_Angeles" : "America/Chicago")
+  );
+  if (live.length === 0) return null;
+  const rows = live.sort((a, b) => String(b.created_at ?? "").localeCompare(String(a.created_at ?? "")));
   return { name: rows[0].host_name ?? "" };
 }
 

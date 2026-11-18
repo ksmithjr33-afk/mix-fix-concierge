@@ -26,6 +26,8 @@ import { itemChoices, lowStockOpen } from "@/lib/team/low-stock";
 import { allSupplies } from "@/lib/team/supplies";
 import { venuePhotosFor } from "@/lib/team/venue-photos-db";
 import { staffReceiptsView } from "@/lib/team/receipts-db";
+import SurpriseBanner from "../../surprise-banner";
+import { surpriseBannerText } from "@/lib/partners/surprise-banner";
 
 export const dynamic = "force-dynamic";
 
@@ -110,6 +112,8 @@ async function TeamEventPage({
   if (chatTab) await markThreadRead(id, staff.id);
   const accepted = assignment?.status === "accepted";
   const renderedAt = serverNow();
+  // A surprise event: the banner at the top of the event, first name only.
+  const surprise = surpriseBannerText(access.session, new Date(renderedAt));
   const open = barPhotosOpen(ed);
   const photoCount = entries.reduce((n, e) => n + e.photos.length, 0);
   const onEvent = isAdminRole(staff.role) || (!!assignment && assignment.status !== "declined");
@@ -122,6 +126,11 @@ async function TeamEventPage({
   return (
     <>
       <TeamHeader signedIn admin={isAdminRole(staff.role)} back={back} />
+      {surprise && (
+        <div className="max-w-2xl mx-auto px-4 pt-4">
+          <SurpriseBanner text={surprise} />
+        </div>
+      )}
       <EventTabs
         initialTab={(askedTab === "wrapup" && !closeout.open) || (askedTab === "receipts" && !receipts) ? "details" : askedTab}
         chat={{ sessionId: id, initial: messages, unread: unread.get(id) ?? 0, timeZone: data.view.timeZone, isAdmin: isAdminRole(staff.role), gifSearch: giphyEnabled() }}

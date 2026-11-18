@@ -56,11 +56,25 @@ function FixLink({ href, children }: { href: string; children: React.ReactNode }
   );
 }
 
-export default function BusinessTab({ view }: { view: EventBusinessView }) {
+export default function BusinessTab({ view, billing = null }: { view: EventBusinessView; billing?: { billedTo: string; eventFor: string } | null }) {
   const b = view.business;
   const r = b.revenue;
   return (
     <>
+      {billing && (
+        <section className={card} aria-label="Billing">
+          <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-[15px] text-[#2C2420]">
+            <dt className="text-[#6B5D52]">Billed to:</dt>
+            <dd>{billing.billedTo}</dd>
+            {billing.eventFor && (
+              <>
+                <dt className="text-[#6B5D52]">Event for:</dt>
+                <dd>{billing.eventFor}</dd>
+              </>
+            )}
+          </dl>
+        </section>
+      )}
       <section className={card} aria-label="Profit">
         <h2 className="font-heading text-base font-bold text-[#2C2420] mb-1">{profitTitle(b)}</h2>
         <dl className="grid grid-cols-[1fr_auto] gap-x-3 gap-y-1 text-[15px] text-[#2C2420] tabular-nums">

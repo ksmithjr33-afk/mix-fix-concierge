@@ -52,6 +52,7 @@ export default async function PartnerEventPage({ params }: { params: Promise<{ k
             All events
           </Link>
           <h1 className="font-heading text-2xl font-bold text-[#2C2420] mt-1">{title}</h1>
+          {v.surprise && <p className="mt-1 inline-block text-[11px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-[#EDE3F5] text-[#5B3F7A]">Surprise event</p>}
           {v.eventName && <p className="text-[17px] text-[#2C2420]">{v.eventName}</p>}
           <p className="text-[15px] text-[#6B5D52]">
             {[v.date, v.status].filter(Boolean).join(" · ")}
@@ -74,6 +75,14 @@ export default async function PartnerEventPage({ params }: { params: Promise<{ k
                 <li key={n}>{n}</li>
               ))}
             </ul>
+          </Card>
+        )}
+
+        {v.billing && (
+          <Card title="Billing">
+            <Row label="Billed to:" value={v.billing.billedTo} />
+            <Row label="Event for:" value={v.billing.eventFor} />
+            <p className="text-sm text-[#6B5D52]">The agreement, invoice, payment link, and balance reminders go to the booking holder only.</p>
           </Card>
         )}
 

@@ -9,6 +9,7 @@ import { sendStaffText } from "@/lib/team/sms";
 import { inQuietHours, sendableAt } from "@/lib/team/shifts";
 import { eventData } from "@/lib/team/markets";
 import { eventTz } from "@/lib/team/time";
+import { dropTextToHonoree } from "@/lib/surprise-guard";
 
 interface SessionLike {
   id: string;
@@ -22,7 +23,9 @@ export async function sendPartnerText(session: SessionLike, phone: string, name:
   try {
     if (!phone) return false;
     const tz = eventTz(eventData(session));
-    if (!inQuietHours(now, tz)) return await sendStaffText(phone, name, message);
+    if (!inQuietHours(now, tz)) return await sendStaffText(phone, name, message); // the surprise guard is in there
+    // Never held for the guest of honor either: dropped and logged now.
+    if (await dropTextToHonoree(phone, now)) return false;
     const { error } = await supabase.from("partner_texts").insert({
       session_id: session.id,
       phone,

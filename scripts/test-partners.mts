@@ -3,7 +3,9 @@
 // one Lead, switching planners, who sees money and who approves a price
 // change, hosts, the three ways of linking, the one tap remove link,
 // deactivation, a planner finishing the planning chat, the planner title rule,
-// and existing events unchanged.
+// and existing events unchanged. Then the follow up: the planner as the billed
+// party (A), surprise events (B), simultaneous chat saves (C), and existing
+// events unchanged before the surprise migration.
 // Run: node --no-warnings scripts/test-partners.mts
 
 import { registerHooks } from "node:module";
@@ -376,7 +378,7 @@ check("A host can never chat or change anything", hostChat.status === 403);
 check("Only the Lead can turn on Host can see pricing", !(await actions.leadSetSwitch(samAcc2, "host_can_see_pricing", true)).ok);
 await actions.leadSetSwitch(patAcc, "host_can_see_pricing", true);
 const hostView2 = await page.partnerEventView((await pdb.eventAccess(hostPrincipal, S("p1").partner_key as string))!);
-check("...and then the host sees the total and balance only", !!hostView2.pricing?.total && hostView2.pricing.payments.length === 0 && hostView2.pricing.agreements.length === 0);
+check("...and then the host sees the total and nothing else", !!hostView2.pricing?.total && hostView2.pricing.balance === "" && hostView2.pricing.payments.length === 0 && hostView2.pricing.agreements.length === 0);
 await actions.leadSetSwitch(patAcc, "host_can_see_pricing", false);
 await pdb.setHost(S("p1"), { name: "Jordan Lee", phone: "" }, staffActor(ADMIN));
 check("Taking the host's phone off ends their access", (await pdb.eventAccess(hostPrincipal, S("p1").partner_key as string)) === null);
@@ -418,7 +420,7 @@ const byLead = await actions.leadAddPlanner(bookerAcc, { name: "Lee Third", phon
 check("(c) The Lead on a planner held event adds another planner", byLead.ok && (db.event_planners ?? []).some((l) => l.session_id === "b1" && l.linked_via === "lead" && l.linked_by_name === booker.name));
 check("A client cannot add planners to a planner held event", !(await actions.clientAddPlanner(S("b1"), { name: "X", phone: "+14695550999" })).ok);
 const concierge = prompt.buildIntakePrompt(null, new Date(), { people: pchat.bookingQuestionsSection({ askRole: true, askPlanner: true }) });
-check("The planning chat asks once: yourself or a planner booking for a client", concierge.includes('"Are you planning this for yourself, or are you a planner booking for a client?" Ask it only once in the whole chat.') && concierge.includes("Are you working with an event planner?"));
+check("The planning chat asks once: guest of honor, hosting for someone else, or a planner", concierge.includes('"Are you the guest of honor, hosting this for someone else, or a planner booking for a client?" Ask it only once in the whole chat') && concierge.includes("Are you working with an event planner?"));
 const tool = pchat.withBookingFields((await import("../lib/intake-tools.ts")).submitEventDataTool);
 check("submit_event_data takes the booking answers, kept out of the saved event", ["booking_role", "host_name", "host_phone", "planner_phone"].every((k) => k in ((tool.input_schema as { properties: Record<string, unknown> }).properties)) && !("booking_role" in pchat.takeBookingAnswers({ booking_role: "planner", host_name: "J", guest_count: 1 }).rest));
 
@@ -521,5 +523,366 @@ check("Every existing page reads sessions with *, so the new columns never break
 check("One migration file, never run by the app", src("supabase/migrations/20261225_partners.sql").includes("create table if not exists public.partners") && src("supabase/migrations/20261225_partners.sql").includes("add column if not exists booking_holder         text        not null default 'client'"));
 check("The partners header link is for admins and managers", (await import("../lib/team/header-nav.ts")).headerLinks(true, { unreadNews: 0 }).some((l) => l.href === "/team/admin/partners") && !(await import("../lib/team/header-nav.ts")).headerLinks(false, { unreadNews: 0 }).some((l) => l.href === "/team/admin/partners"));
 check("Texts and screens about partners have no hyphens", [rules.clientPlannerAddedText({ name: "Pat", company: "Bloom" }, "L"), rules.plannerWelcomeText({ name: "Pat", eventFor: "Jordan", eventType: "Wedding", signInLink: "L" }), rules.sentForApprovalLine("Justin"), rules.planningNoticeText({ who: "Pat", submitted: false, summary: "Guest count: from 80 to 100", link: "L" }), rules.leadRemovedAdminText({ title: "T", date: "D", link: "L" })].every(hyphenFree));
+
+// =====================================================================
+// 14. Part A: the planner is the party on the agreement and invoice
+// =====================================================================
+const sms = await import("../lib/team/sms.ts");
+const surprise = await import("../lib/partners/surprise.ts");
+const guard = await import("../lib/surprise-guard.ts");
+const editDb = await import("../lib/team/admin-edit-db.ts");
+const delivery = await import("../lib/update-delivery.ts");
+const updates = await import("../lib/event-updates.ts");
+const banner = await import("../lib/partners/surprise-banner.ts");
+const sysText = (c: unknown) => (((c as { system?: { text: string }[] })?.system ?? []) as { text: string }[]).map((b) => b.text).join("");
+const toolNames = (c: unknown) => (((c as { tools?: { name: string }[] })?.tools ?? []) as { name: string }[]).map((t) => t.name);
+const lastUser = (p: { messages: { role: string; content: unknown }[] }) => {
+  const m = [...p.messages].reverse().find((x) => x.role === "user" && typeof x.content === "string");
+  return (m?.content as string) ?? "";
+};
+type Msg = { role: string; content: string };
+async function clientTurn(id: string, messages: Msg[]): Promise<string> {
+  const r = await clientChat.POST(new Request("http://plan.test/api/chat", { method: "POST", body: JSON.stringify({ messages, sessionId: id }) }));
+  return r.text();
+}
+const CTX: Msg = { role: "user", content: "CONTEXT - Pre-filled from booking system: Client name: Justin Reyes. Use this info and do not re-ask for it." };
+const ROLE_Q = pchat.ROLE_QUESTION;
+const SURPRISE_Q = pchat.SURPRISE_QUESTION;
+const PRIVATE_Q = pchat.PRIVATE_NUMBER_QUESTION;
+// After the surprise migration: every new column is on the row (null or false).
+const NEW_COLS = { is_surprise: false, honoree_name: null, honoree_phone: null, honoree_email: null, surprise_set_by: null, surprise_set_at: null, planning_role: null };
+const intakeRow = (id: string, top: Record<string, unknown> = {}) => session(id, { status: "in_progress", version: 0, event_data: null, event_type: "Birthday", name: "Justin Reyes", ...NEW_COLS, ...top });
+const HONOREE_PHONE = "+12145550155";
+const HOST2_PHONE = "+12145550160";
+const PRIVATE_PHONE = "+12145550166";
+
+reset();
+process.env.GHL_UPDATE_WEBHOOK_URL = "https://hooks.test/update";
+db.sessions = [
+  session("ph1", { booking_holder: "planner", host_name: "Jordan Lee", host_phone: HOST_PHONE, host_email: "jordan@example.com", phone: PLANNER_PHONE, email: "pat@bloom.test", ...NEW_COLS }, { client_name: "Pat Planner", client_phone: PLANNER_PHONE, email: "pat@bloom.test" }),
+];
+const aPat = (await pdb.findOrCreatePlanner({ name: "Pat Planner", company: "Bloom Events", phone: PLANNER_PHONE }, "Isabel")) as { ok: true; partner: import("../lib/partners/rules.ts").Partner };
+const aSam = (await pdb.findOrCreatePlanner({ name: "Sam Second", phone: PLANNER2_PHONE }, "Isabel")) as { ok: true; partner: import("../lib/partners/rules.ts").Partner };
+await pdb.linkPlanner(S("ph1"), aPat.partner, { via: "booked", by: { kind: "planner", name: "Pat Planner", partnerId: aPat.partner.id }, lead: true });
+await pdb.linkPlanner(S("ph1"), aSam.partner, { via: "lead", by: { kind: "planner", name: "Pat Planner", partnerId: aPat.partner.id } });
+const aCard = await clientView.bookingCardData(S("ph1"), "admin");
+check("A1: the admin Booking card shows Billed to the Lead (name, company) and Event for the host", aCard.billing?.billedTo === "Pat Planner, Bloom Events" && aCard.billing?.eventFor === "Jordan Lee");
+check("A1: the admin Business tab gets the same lines, and renders them", JSON.stringify(await clientView.billingFor(S("ph1"))) === JSON.stringify(aCard.billing) && src("app/team/admin/e/[id]/business-tab.tsx").includes("Billed to:") && src("app/team/admin/e/[id]/business-tab.tsx").includes("Event for:") && src("app/team/admin/e/[id]/page.tsx").includes("billing={billing}"));
+const aPatTok = await signInPartner(PLANNER_PHONE);
+const aPatAcc = (await pdb.eventAccess(await asPartner(aPatTok, () => pauth.getCurrentPrincipal()), S("ph1").partner_key as string))!;
+const aSamTok = await signInPartner(PLANNER2_PHONE);
+const aSamAcc = (await pdb.eventAccess(await asPartner(aSamTok, () => pauth.getCurrentPrincipal()), S("ph1").partner_key as string))!;
+check("A1: the planner's event page shows Billed to and Event for", (await page.partnerEventView(aPatAcc)).billing?.billedTo === "Pat Planner, Bloom Events" && (await page.partnerEventView(aSamAcc)).billing?.eventFor === "Jordan Lee" && src("app/partners/e/[key]/page.tsx").includes('label="Billed to:"') && src("app/partners/e/[key]/page.tsx").includes('label="Event for:"'));
+check("A1: a client held event shows no Billed to line", rules.billingLines(rules.bookingOf({}), null) === null);
+
+// A2 and A3: the host gets the total and nothing else, and never the money texts.
+await actions.leadSetSwitch(aPatAcc, "host_can_see_pricing", true);
+const aHostTok = await signInPartner(HOST_PHONE);
+const aHostAcc = (await pdb.eventAccess(await asPartner(aHostTok, () => pauth.getCurrentPrincipal()), S("ph1").partner_key as string))!;
+const aHostView = await page.partnerEventView(aHostAcc);
+const hm = rules.moneyAccess(rules.bookingOf(S("ph1")), { kind: "host", name: "Jordan" });
+check("A2: Host can see pricing shows the host the total and nothing else", aHostView.pricing?.total === "$2,400" && aHostView.pricing.balance === "" && aHostView.pricing.payments.length === 0 && aHostView.pricing.agreements.length === 0 && hm.total && !hm.balance && !hm.payments && !hm.agreement && !hm.approve);
+check("A3: the host page never shows the agreement, payments, or balance", !aHostView.money.agreement && !aHostView.money.payments && !aHostView.money.balance && (await page.partnerAgreementLink(aHostAcc, "x", false)) === null && aHostView.billing === null);
+texts.length = 0;
+db.partner_texts = [];
+await approvals.askForApproval(S("ph1"), { guest_count: 120 }, aSamAcc.actor);
+check("A2: a price change and its total go to the booking holder (the Lead), never the host, even with Host can see pricing on", !!textTo(PLANNER_PHONE, "affects the price") && !textTo(HOST_PHONE, /./));
+const scrubbed = rules.scrubHostContact({ email: "Jordan@example.com", client_phone: "(214) 555 0144", phone: "2145550144" }, S("ph1"));
+check("A2: a GHL payload never carries the host's email or phone: the booking holder's instead", scrubbed.email === "pat@bloom.test" && scrubbed.client_phone === PLANNER_PHONE && scrubbed.phone === PLANNER_PHONE && scrubbed.billed_to === "planner" && scrubbed.event_for_name === "Jordan Lee");
+// The update webhook (GHL's payment link and balance reminders follow its contact), with the host's email mixed in by mistake.
+(S("ph1").event_data as Record<string, unknown>).email = "jordan@example.com";
+hooks.length = 0;
+const aUpd = await updates.applyEventUpdate("ph1", { special_requests: "Extra limes" });
+await delivery.deliverEventUpdates("ph1", aUpd?.rows ?? []);
+const aHook = hooks.find((h) => h.url === "https://hooks.test/update");
+check("A2: the update webhook goes to the booking holder's contact, never the host's", !!aHook && aHook.body.email === "pat@bloom.test" && aHook.body.billed_to === "planner" && !JSON.stringify(aHook.body).includes("jordan@example.com"));
+check("A2: the intake webhook and list only payloads go through the same scrub", src("app/api/webhook/route.ts").includes("scrubHostContact(payload") && src("lib/update-delivery.ts").includes("scrubHostContact(listOnlyPayload"));
+// A4: an admin moves Lead to another planner.
+check("A4: no warning while the Lead is the original booking contact", aCard.leadMovedWarning === "");
+await actions.staffBookingAction(ADMIN as never, S("ph1"), { action: "lead", partnerId: aSam.partner.id });
+const aCard2 = await clientView.bookingCardData(S("ph1"), "admin");
+check("A4: moving Lead shows the GHL warning on the Booking card, word for word", aCard2.leadMovedWarning === "Payment reminders in GHL still go to the original booking contact. Update the contact in GHL." && src("app/team/admin/e/[id]/booking-card.tsx").includes("data.leadMovedWarning"));
+check("A4: ...and Billed to follows the new Lead", aCard2.billing?.billedTo === "Sam Second");
+check("A4: a client held event never shows it", !pdb.leadMoved(session("x") as never, { phone: PLANNER_PHONE }));
+
+// =====================================================================
+// 15. Part B: surprise events
+// =====================================================================
+// B1. The migration.
+const mig = src("supabase/migrations/20261226_surprise_events.sql");
+check(
+  "B1: the migration adds the surprise columns, safe to run twice",
+  ["is_surprise      boolean     not null default false", "honoree_name", "honoree_phone", "honoree_email", "surprise_set_by", "surprise_set_at"].every((c) => mig.includes(c)) &&
+    (mig.match(/add column if not exists/g) ?? []).length === 7 &&
+    mig.includes("drop constraint if exists") &&
+    mig.includes("create index if not exists") &&
+    !/create table (?!if not exists)/.test(mig)
+);
+
+// B2. The opening question: guest of honor.
+reset();
+db.sessions = [intakeRow("g1"), intakeRow("s1"), intakeRow("pl1"), intakeRow("hp1", { booking_holder: "planner", phone: "+19725550111" }), intakeRow("adm1", { is_surprise: true, honoree_name: "Rae Moss", surprise_set_by: "Isabel Jones", surprise_set_at: new Date().toISOString() }), session("old2", { status: "in_progress", version: 0, event_data: null, event_type: "Birthday", name: "Justin Reyes" })];
+ai.calls.length = 0;
+ai.script.reply = () => [{ type: "text", text: `Welcome! ${ROLE_Q}` }];
+let g: Msg[] = [CTX, { role: "user", content: "Hi" }];
+await clientTurn("g1", g);
+const firstSys = sysText(ai.calls.at(-1));
+check("B2: right after the greeting, one question with three answers, word for word", firstSys.includes(`right after your greeting and before any event question, ask exactly: "${ROLE_Q}"`) && !firstSys.includes("Are you planning this for yourself"));
+check("B2: the concierge can save the answer the moment it is given", toolNames(ai.calls.at(-1)).includes("save_planning_role"));
+g = [...g, { role: "assistant", content: `Welcome! ${ROLE_Q}` }, { role: "user", content: "I am the guest of honor" }];
+ai.script.reply = () => [{ type: "text", text: "Happy birthday! What is your full name?" }, ai.toolUse("save_planning_role", { role: "guest_of_honor" })];
+await clientTurn("g1", g);
+check("B2: guest of honor: saved, and the booking stays client held with no host", S("g1").planning_role === "guest_of_honor" && rules.bookingOf(S("g1")).holder === "client" && !S("g1").host_name);
+g = [...g, { role: "assistant", content: "Happy birthday! What is your full name?" }, { role: "user", content: "Justin Reyes" }];
+ai.script.reply = () => [{ type: "text", text: "Thanks Justin. What is the address?" }];
+await clientTurn("g1", g);
+check("B2: guest of honor: never asked the opening question again, and never the surprise question", !sysText(ai.calls.at(-1)).includes(ROLE_Q) && !sysText(ai.calls.at(-1)).includes(SURPRISE_Q));
+
+// Hosting for someone else (not a planner), a surprise.
+let h: Msg[] = [CTX, { role: "user", content: "Hi" }, { role: "assistant", content: `Welcome! ${ROLE_Q}` }, { role: "user", content: "I am hosting it for my sister" }];
+ai.script.reply = () => [{ type: "text", text: "How fun! Who is the party for?" }, ai.toolUse("save_planning_role", { role: "someone_else" })];
+await clientTurn("s1", h);
+check("B2: hosting for someone else: saved and still client held", S("s1").planning_role === "someone_else" && rules.bookingOf(S("s1")).holder === "client");
+check("B2: ...the concierge is told to ask only the name, never that person's phone or email", sysText(ai.calls.at(-1)).includes("never ask for that person's phone or email"));
+h = [...h, { role: "assistant", content: "How fun! Who is the party for?" }, { role: "user", content: "My sister Maya Fields" }];
+ai.script.reply = () => [{ type: "text", text: `Lovely. ${SURPRISE_Q}` }, ai.toolUse("save_planning_role", { host_name: "Maya Fields" })];
+await clientTurn("s1", h);
+check("B2: the person it is for is saved as the host by name only", S("s1").host_name === "Maya Fields" && !S("s1").host_phone && !S("s1").host_email);
+check("B2: the surprise follow up is asked right away (and the opening question is not asked again)", sysText(ai.calls.at(-1)).includes(`ask exactly: "${SURPRISE_Q}"`) && !sysText(ai.calls.at(-1)).includes(ROLE_Q));
+h = [...h, { role: "assistant", content: `Lovely. ${SURPRISE_Q}` }, { role: "user", content: "Yes! She has no idea" }];
+ai.script.reply = () => [{ type: "text", text: `We will never contact Maya about this event. ${PRIVATE_Q}` }, ai.toolUse("save_planning_role", { is_surprise: true, honoree_name: "Maya Fields" })];
+await clientTurn("s1", h);
+check("B2: a yes saves is_surprise and the guest of honor's name, by the concierge", S("s1").is_surprise === true && S("s1").honoree_name === "Maya Fields" && S("s1").surprise_set_by === "Concierge" && !!S("s1").surprise_set_at);
+check("B2: ...and the concierge is told to promise we never contact them, then ask for a private number, word for word", sysText(ai.calls.at(-1)).includes("tell them we will never contact the guest of honor") && sysText(ai.calls.at(-1)).includes(`ask exactly: "${PRIVATE_Q}"`));
+h = [...h, { role: "assistant", content: `We will never contact Maya about this event. ${PRIVATE_Q}` }, { role: "user", content: "214 555 0166" }];
+ai.script.reply = () => [{ type: "text", text: "Got it. What date is the party?" }, ai.toolUse("save_planning_role", { private_phone: "214 555 0166" })];
+await clientTurn("s1", h);
+const s1Sys = sysText(ai.calls.at(-1));
+check("B2: once answered, neither question is asked again", !s1Sys.includes(ROLE_Q) && !s1Sys.includes(SURPRISE_Q) && s1Sys.includes("SURPRISE EVENT: this is a surprise for Maya"));
+const again = await planning.savePlanningRole("s1", { role: "planner", is_surprise: false });
+check("B2: a second answer never overwrites the first", S("s1").planning_role === "someone_else" && S("s1").is_surprise === true && again.saved === false);
+h = [...h, { role: "assistant", content: "Got it. What date is the party?" }, { role: "user", content: "That is everything" }];
+ai.script.reply = () => [
+  { type: "text", text: "All set!" },
+  ai.toolUse("submit_event_data", { client_name: "Justin Reyes", email: "justin@example.com", event_type: "Birthday", event_date: DAY, bar_service_start: "6:00 PM", bar_service_end: "10:00 PM", event_address: "100 Main St, Dallas, TX 75201", guest_count: 80, package: "Full Bar", signature_drinks: [], booking_role: "someone_else", host_name: "Maya Fields", is_surprise: true, honoree_name: "Maya Fields", private_phone: "214 555 0166" }),
+];
+await clientTurn("s1", h);
+check("B2: submitted: still client held, host by name only, and the private number is the client phone", S("s1").status === "submitted" && rules.bookingOf(S("s1")).holder === "client" && S("s1").host_name === "Maya Fields" && !S("s1").host_phone && (S("s1").event_data as Record<string, unknown>).client_phone === PRIVATE_PHONE);
+check("B2: no planner is linked and no host welcome text goes out", !(db.event_planners ?? []).some((l) => l.session_id === "s1") && !allPartnerTexts().some((m) => m.includes("view your")));
+ai.script.reply = () => [{ type: "text", text: "What would you like to change?" }];
+await clientTurn("s1", [{ role: "user", content: "Hi" }]);
+check("B2: never asked on an event that is already submitted (update mode has neither question)", !sysText(ai.calls.at(-1)).includes(ROLE_Q) && !sysText(ai.calls.at(-1)).includes(SURPRISE_Q) && !toolNames(ai.calls.at(-1)).includes("save_planning_role"));
+const late2 = await planning.savePlanningRole("s1", { role: "guest_of_honor" });
+check("B2: ...and nothing about it can be saved on a submitted event", late2.saved === false && S("s1").planning_role === "someone_else");
+
+// A planner booking for a client: the surprise question, answered no, then the planner flow as today.
+let pm: Msg[] = [CTX, { role: "user", content: "Hi" }, { role: "assistant", content: `Welcome! ${ROLE_Q}` }, { role: "user", content: "I am a planner booking for my client Jordan Lee" }];
+ai.script.reply = () => [{ type: "text", text: `Great, planning Jordan's party. ${SURPRISE_Q}` }, ai.toolUse("save_planning_role", { role: "planner", host_name: "Jordan Lee" })];
+await clientTurn("pl1", pm);
+check("B2: planner: saved, and the booking is not moved to the planner until the planning is in", S("pl1").planning_role === "planner" && rules.bookingOf(S("pl1")).holder === "client" && S("pl1").host_name === "Jordan Lee");
+pm = [...pm, { role: "assistant", content: `Great, planning Jordan's party. ${SURPRISE_Q}` }, { role: "user", content: "No, Jordan knows" }];
+ai.script.reply = () => [{ type: "text", text: "Would you like Jordan to have access to view the plans?" }, ai.toolUse("save_planning_role", { is_surprise: false })];
+await clientTurn("pl1", pm);
+check("B2: planner: the surprise follow up is asked for the third answer too", sysText(ai.calls.at(-1)).includes(`ask exactly: "${SURPRISE_Q}"`) && sysText(ai.calls.at(-1)).includes("they are a planner booking for a client"));
+check("B2: a no is saved as answered and is not a surprise", S("pl1").is_surprise === false && !!S("pl1").surprise_set_at);
+pm = [...pm, { role: "assistant", content: "Would you like Jordan to have access to view the plans?" }, { role: "user", content: "Yes, 214 555 0144" }];
+ai.script.reply = () => [
+  { type: "text", text: "All set!" },
+  ai.toolUse("submit_event_data", { client_name: "Justin Reyes", email: "justin@example.com", event_type: "Birthday", event_date: DAY, bar_service_start: "6:00 PM", event_address: "100 Main St, Dallas, TX 75201", guest_count: 80, package: "Full Bar", signature_drinks: [], booking_role: "planner", host_name: "Jordan Lee", host_phone: "214 555 0144", is_surprise: false }),
+];
+await clientTurn("pl1", pm);
+check("B2: planner: neither question again on the next turn", !sysText(ai.calls.at(-1)).includes(ROLE_Q) && !sysText(ai.calls.at(-1)).includes(SURPRISE_Q));
+check("B2: planner: continues as the planner flow does today (held by the planner, linked as Lead, host with access)", S("pl1").booking_holder === "planner" && (db.event_planners ?? []).some((l) => l.session_id === "pl1" && l.is_lead) && S("pl1").host_phone === HOST_PHONE && !!textTo(HOST_PHONE, "plan.test/partners"));
+
+// The booking already tells us: skip.
+ai.script.reply = () => [{ type: "text", text: "Welcome!" }];
+await clientTurn("hp1", [CTX, { role: "user", content: "Hi" }]);
+check("B2: a planner already holds the booking: the opening question is skipped, the surprise one is still asked", !sysText(ai.calls.at(-1)).includes(ROLE_Q) && sysText(ai.calls.at(-1)).includes(SURPRISE_Q), sysText(ai.calls.at(-1)).slice(sysText(ai.calls.at(-1)).indexOf("WHO IS"), sysText(ai.calls.at(-1)).indexOf("WHO IS") + 600));
+await clientTurn("adm1", [CTX, { role: "user", content: "Hi" }]);
+check("B2: an admin already marked it a surprise: neither question is asked", !sysText(ai.calls.at(-1)).includes(ROLE_Q) && !sysText(ai.calls.at(-1)).includes(SURPRISE_Q) && sysText(ai.calls.at(-1)).includes("SURPRISE EVENT: this is a surprise for Rae"));
+check("B2: the surprise follow up is only for the second and third answers", pchat.bookingQuestionsSection({ askRole: true, askPlanner: false, canSave: true }).includes('Only for "someone_else" or "planner", and never for the guest of honor') && !pchat.bookingQuestionsSection({ askRole: false, askPlanner: true, askSurprise: false, role: "guest_of_honor", canSave: true }).includes(SURPRISE_Q));
+check("B2: the questions and the answers have no hyphens", [ROLE_Q, SURPRISE_Q, PRIVATE_Q].every(hyphenFree));
+// Before the surprise migration: the question is still asked once (by the chat), and nothing tries to save it.
+await clientTurn("old2", [CTX, { role: "user", content: "Hi" }]);
+check("B2: before the migration the chat still opens with the new question, with no save tool", sysText(ai.calls.at(-1)).includes(ROLE_Q) && !toolNames(ai.calls.at(-1)).includes("save_planning_role"));
+const tb = pchat.takeBookingAnswers({ booking_role: "planner", host_name: "Jordan Lee", host_phone: "2145550144", host_email: "j@x.test", is_surprise: true, honoree_name: "Jordan Lee" });
+check("B2: a planner's surprise: the host gets no phone or email, so no welcome text and no login", tb.answers.host?.name === "Jordan Lee" && tb.answers.host.phone === "" && tb.answers.host.email === "" && tb.answers.surprise?.on === true);
+const tb2 = pchat.takeBookingAnswers({ booking_role: "someone_else", host_name: "Maya", host_phone: "2145550144" });
+check("B2: hosting for someone else never saves the host's phone", tb2.answers.role === "someone_else" && tb2.answers.host?.phone === "" && !("is_surprise" in tb2.rest) && !("private_phone" in tb2.rest));
+
+// B3 to B8 on one submitted surprise event.
+reset();
+db.sessions = [session("sp1", { ...NEW_COLS, host_name: "Maya Fields" }, { client_name: "Justin Reyes" }), intakeRow("sp2")];
+await pdb.setHost(S("sp1"), { name: "Maya Fields", phone: "214 555 0160" }, staffActor(ADMIN));
+const spHostTok = await signInPartner(HOST2_PHONE);
+check("Before it is a surprise, the host can sign in", spHostTok.length > 20 && (await asPartner(spHostTok, () => pauth.getCurrentPrincipal()))?.kind === "host");
+const bartenderTry = await actions.staffBookingAction(BARTENDER as never, S("sp1"), { action: "surprise", on: true, name: "Maya Fields" });
+check("B6: a bartender cannot turn Surprise on", !bartenderTry.ok && !S("sp1").is_surprise);
+const clashClient = await actions.staffBookingAction(MANAGER as never, S("sp1"), { action: "surprise", on: true, name: "Maya Fields", phone: CLIENT_PHONE });
+check("B3: the client phone can never be saved as the guest of honor's either (texts to the client would stop)", !clashClient.ok && /client's contact/.test(clashClient.ok ? "" : clashClient.error) && !S("sp1").is_surprise);
+const spOn = await actions.staffBookingAction(MANAGER as never, S("sp1"), { action: "surprise", on: true, name: "Maya Fields", phone: "214 555 0155", email: "Maya@example.com" });
+check("B6: a manager turns Surprise on with the guest of honor", spOn.ok && S("sp1").is_surprise === true && S("sp1").honoree_phone === HONOREE_PHONE && S("sp1").honoree_email === "maya@example.com" && S("sp1").surprise_set_by === "Kenny Smith");
+check("B6: ...logged in partner activity", (db.partner_activity ?? []).some((a) => a.session_id === "sp1" && a.action === "Surprise turned on" && a.actor_name === "Kenny Smith" && String(a.detail).includes("Maya Fields")));
+const spCard = await clientView.bookingCardData(S("sp1"), "manager");
+check("B6: the Booking card shows it, with the honoree, for admins and managers", spCard.surprise.ready && spCard.surprise.on && spCard.surprise.active && spCard.surprise.name === "Maya Fields" && spCard.surprise.phone === HONOREE_PHONE && !!spCard.surprise.liftsAfter && src("app/team/admin/e/[id]/booking-card.tsx").includes('action: "surprise"'));
+await actions.staffBookingAction(ADMIN as never, S("sp1"), { action: "surprise", on: true, name: "Maya Fields", phone: "214 555 0155", email: "maya@example.com" });
+check("B6: editing the honoree is logged", (db.partner_activity ?? []).some((a) => a.session_id === "sp1" && a.action === "Guest of honor changed" && a.actor_name === "Isabel Jones"));
+
+// B3: the host on a surprise event.
+texts.length = 0;
+await pauth.requestPartnerCode(HOST2_PHONE);
+check("B3: the host on a surprise event cannot sign in at /partners (no code)", texts.length === 0);
+check("B3: ...and a session they already had stops working", (await asPartner(spHostTok, () => pauth.getCurrentPrincipal())) === null && (await pdb.eventAccess({ kind: "host", phone: HOST2_PHONE, name: "Maya" }, S("sp1").partner_key as string)) === null);
+const hostLogin = await pdb.setHost(S("sp1"), { name: "Maya Fields", phone: "(214) 555 0155" }, staffActor(ADMIN));
+check("B3: the honoree's number is refused as a host login, with a plain reason", !hostLogin.ok && !hostLogin.ok && hostLogin.error === surprise.honoreeRefusal("host login") && hyphenFree(hostLogin.error));
+texts.length = 0;
+db.partner_texts = [];
+const hostOther = await pdb.setHost(S("sp1"), { name: "Maya Fields", phone: "214 555 0177" }, staffActor(ADMIN));
+check("B3: the host gets no login and no welcome text on a surprise event", !hostOther.ok && !hostOther.ok && hostOther.error === surprise.HOST_SURPRISE_REFUSAL && !textTo("+12145550177", /./));
+// B3: never a planner.
+const plannerHonoree = await actions.staffBookingAction(ADMIN as never, S("sp1"), { action: "add", name: "Maya Fields", phone: "214 555 0155" });
+check("B3: the honoree's number is refused as a planner, and no account is made", !plannerHonoree.ok && !plannerHonoree.ok && plannerHonoree.error === surprise.honoreeRefusal("planner") && !(db.partners ?? []).some((p) => p.phone === HONOREE_PHONE));
+const plannerEmail = await actions.clientAddPlanner(S("sp1"), { name: "Maya", phone: "+14695550999", email: "maya@example.com" });
+check("B3: ...by email too", !plannerEmail.ok);
+const hostPlanner = await actions.clientAddPlanner(S("sp1"), { name: "Maya Fields", phone: "214 555 0160" });
+check("B3: the host on a surprise event cannot be added as a planner", !hostPlanner.ok && !hostPlanner.ok && hostPlanner.error === surprise.PLANNER_SURPRISE_REFUSAL);
+// B3: never the day of contact.
+const doc = await editDb.saveAdminEdit({ sessionId: "sp1", admin: ADMIN as never, changes: { day_of_contact_phone: "214 555 0155" }, price: { mode: "keep" }, expectedVersion: S("sp1").version, origin: "https://plan.test" });
+check("B3: the honoree's number is refused as the day of contact (admin edit)", !doc.ok && !doc.ok && doc.error === surprise.honoreeRefusal("day of contact") && (S("sp1").event_data as Record<string, unknown>).day_of_contact_phone === "2145550177");
+ai.calls.length = 0;
+ai.script.reply = (p) => (p.tool_choice?.type === "none" ? [{ type: "text", text: surprise.honoreeRefusal("day of contact") }] : [{ type: "text", text: "Saving that." }, ai.toolUse("update_event_data", { day_of_contact_phone: "2145550155" })]);
+const docChat = await clientTurn("sp1", [{ role: "user", content: "Make Maya the day of contact, 214 555 0155" }]);
+check("B3: ...and in the concierge's update mode, with the reason said", (S("sp1").event_data as Record<string, unknown>).day_of_contact_phone === "2145550177" && JSON.stringify(ai.calls.at(-1)?.messages ?? "").includes("cannot be saved as the day of contact") && docChat.includes("data:"));
+// B3: never the client phone (the private number question during planning).
+db.sessions.push(intakeRow("sp3", { is_surprise: true, honoree_name: "Maya Fields", honoree_phone: HONOREE_PHONE, surprise_set_at: new Date().toISOString(), planning_role: "someone_else", host_name: "Maya Fields" }));
+const cp = await planning.savePlanningRole("sp3", { private_phone: "214 555 0155" });
+check("B3: the honoree's number is refused as the client phone", cp.refused === surprise.honoreeRefusal("client phone"));
+ai.calls.length = 0;
+ai.script.reply = (p) => (p.tool_choice?.type === "none" ? [{ type: "text", text: surprise.honoreeRefusal("client phone") }] : [{ type: "text", text: "Thanks!" }, ai.toolUse("save_planning_role", { private_phone: "2145550155" })]);
+const cpChat = await clientTurn("sp3", [CTX, { role: "user", content: "Hi" }, { role: "assistant", content: PRIVATE_Q }, { role: "user", content: "214 555 0155" }]);
+const cpSaved = ((db.conversation_logs ?? []).find((c) => c.session_id === "sp3") as { messages: Msg[] }).messages.at(-1)?.content ?? "";
+check("B3: ...and the concierge says why", ai.calls.length === 2 && JSON.stringify(ai.calls[1].messages).includes("cannot be saved as the client phone") && cpChat.includes("data:") && cpSaved.includes("cannot be saved as the client phone"));
+
+// B4: one guard in the shared text path.
+texts.length = 0;
+const dropped = await sms.sendStaffText("(214) 555 0155", "Maya", "Your bar plans are ready");
+check("B4: a text to the honoree's number is dropped", dropped === false && texts.length === 0);
+check("B4: ...and logged on the event", (db.partner_activity ?? []).some((a) => a.session_id === "sp1" && a.action === "Text to the guest of honor blocked"));
+const viaPartner = await ptexts.sendPartnerText(S("sp1"), HONOREE_PHONE, "Maya", "Hi Maya", new Date());
+check("B4: whatever sent it: a partner text (sent now or held for quiet hours) is dropped too", viaPartner === false && !texts.some((t) => t.phone === HONOREE_PHONE) && !(db.partner_texts ?? []).some((t) => t.phone === HONOREE_PHONE));
+await sms.sendStaffText(CLIENT_PHONE, "Justin", "Hi Justin");
+check("B4: texts to anyone else still go out", texts.some((t) => t.phone === CLIENT_PHONE));
+check("B4: the guard is in the one shared text path every sender uses", src("lib/team/sms.ts").includes("if (await dropTextToHonoree(phone)) return false;"));
+
+// B5: the staff banner.
+const bText = banner.surpriseBannerText(S("sp1"));
+check("B5: staff see the banner, first name only, word for word", bText === "Surprise event. Do not contact Maya or mention the bar to them." && !bText.includes("Fields"));
+check("B5: on the staff event page, the admin event page, and its Day of tab (the header shows on every tab)", src("app/team/e/[id]/page.tsx").includes("<SurpriseBanner text={surprise} />") && src("app/team/admin/e/[id]/page.tsx").includes("<SurpriseBanner text={surprise} />") && src("app/team/admin/e/[id]/page.tsx").includes("header={header}"));
+check("B5: no banner on an event that is not a surprise", banner.surpriseBannerText(session("plain")) === null);
+
+// B8: the label for planners and the booking holder.
+const spPl = (await pdb.findOrCreatePlanner({ name: "Pat Planner", company: "Bloom Events", phone: PLANNER_PHONE }, "Isabel")) as { ok: true; partner: import("../lib/partners/rules.ts").Partner };
+await pdb.linkPlanner(S("sp1"), spPl.partner, { via: "staff", by: staffActor(ADMIN) });
+const spTok = await signInPartner(PLANNER_PHONE);
+const spView = await page.partnerEventView((await pdb.eventAccess(await asPartner(spTok, () => pauth.getCurrentPrincipal()), S("sp1").partner_key as string))!);
+check("B8: planners see a Surprise event label on their event page", spView.surprise === true && src("app/partners/e/[key]/page.tsx").includes("Surprise event"));
+check("B8: the booking holder sees it on their own event link", src("app/s/page.tsx").includes("SURPRISE_LABEL") && surprise.SURPRISE_LABEL === "Surprise event");
+
+// B7: the block lifts 30 days after the event date.
+const day30 = addDays(today, -30);
+const day31 = addDays(today, -31);
+db.sessions.push(session("lift30", { event_date: day30, ...NEW_COLS, is_surprise: true, honoree_phone: "+12145550190", honoree_name: "Ana Bell" }, { event_date: day30 }));
+db.sessions.push(session("lift31", { event_date: day31, ...NEW_COLS, is_surprise: true, honoree_phone: "+12145550191", honoree_name: "Bo Cole" }, { event_date: day31 }));
+texts.length = 0;
+await sms.sendStaffText("+12145550190", "Ana", "Thanks for coming");
+await sms.sendStaffText("+12145550191", "Bo", "Thanks for coming");
+check("B7: day 30 after the event: still blocked", !texts.some((t) => t.phone === "+12145550190") && surprise.surpriseActive(S("lift30")));
+check("B7: day 31: the block lifts and texts go out", texts.some((t) => t.phone === "+12145550191") && !surprise.surpriseActive(S("lift31")) && banner.surpriseBannerText(S("lift31")) === null);
+const at = (ymd: string) => new Date(`${ymd}T18:00:00Z`);
+check("B7: by the clock: in force through day 30, lifted on day 31", surprise.surpriseActive(S("sp1"), at(addDays(DAY, 30))) && !surprise.surpriseActive(S("sp1"), at(addDays(DAY, 31))) && (await guard.honoreeEventFor(HONOREE_PHONE, at(addDays(DAY, 31)))) === null);
+check("B7: the post event follow up and review request respect it (GHL is told, and never gets the honoree's email)", src("lib/team/closeout-db.ts").includes("surprise_block: blocked") && src("lib/team/closeout-db.ts").includes("isHonoree(sx, { email: base.client_email }) ? null"));
+
+// Turning it off, logged. (sp3 shares the number and is still a surprise.)
+db.sessions = db.sessions.filter((x) => x.id !== "sp3");
+await actions.staffBookingAction(MANAGER as never, S("sp1"), { action: "surprise", on: false });
+check("B6: a manager turns Surprise off, logged", S("sp1").is_surprise === false && (db.partner_activity ?? []).some((a) => a.session_id === "sp1" && a.action === "Surprise turned off"));
+texts.length = 0;
+await sms.sendStaffText(HONOREE_PHONE, "Maya", "hi");
+check("B6: ...and texts to that number go out again", texts.some((t) => t.phone === HONOREE_PHONE));
+check("Surprise wording has no hyphens", [surprise.honoreeRefusal("client phone"), surprise.honoreeRefusal("day of contact"), surprise.honoreeRefusal("planner"), surprise.honoreeRefusal("host login"), surprise.HOST_SURPRISE_REFUSAL, surprise.PLANNER_SURPRISE_REFUSAL, surprise.surpriseBanner("Maya"), rules.LEAD_MOVED_WARNING].every(hyphenFree));
+
+// =====================================================================
+// 16. Part C: the client and a planner in the planning chat at the same time
+// =====================================================================
+const m = (role: string, content: string) => ({ role, content });
+const merged1 = pchat.mergeChatTurns([m("user", "ctx"), m("user", "hi"), m("assistant", "A1"), m("user", "P1"), m("assistant", "R1")], [m("user", "ctx"), m("user", "hi"), m("assistant", "A1"), m("user", "C1"), m("assistant", "R2")]);
+check("C: a save keeps the other person's latest turns and appends only the new ones", merged1.map((x) => x.content).join() === "ctx,hi,A1,P1,R1,C1,R2");
+const merged2 = pchat.mergeChatTurns(merged1, [m("user", "ctx"), m("user", "hi"), m("assistant", "A1"), m("user", "C1"), m("assistant", "R2"), m("user", "C2")]);
+check("C: a stale view never duplicates a turn", merged2.map((x) => x.content).join() === "ctx,hi,A1,P1,R1,C1,R2,C2");
+
+reset();
+db.sessions = [session("cw1", { status: "in_progress", version: 0, event_data: null, event_type: "Wedding", name: "Justin Reyes" })];
+const cwP = (await pdb.findOrCreatePlanner({ name: "Lee Third", company: "Third Co", phone: PLANNER3_PHONE }, "Isabel")) as { ok: true; partner: import("../lib/partners/rules.ts").Partner };
+await pdb.linkPlanner(S("cw1"), cwP.partner, { via: "staff", by: staffActor(ADMIN) });
+const cwTok = await signInPartner(PLANNER3_PHONE);
+const base3: Msg[] = [CTX, { role: "user", content: "Hi" }, { role: "assistant", content: "Hello! Who is the wedding for?" }];
+db.conversation_logs = [{ id: "cl1", session_id: "cw1", messages: base3, updated_at: "2026-01-01T00:00:00.000Z" }];
+ai.script.reply = (p) => [{ type: "text", text: `Reply to: ${lastUser(p)}` }];
+const clientWrite = clientTurn("cw1", [...base3, { role: "user", content: "Client says tacos" }]);
+const plannerWrite = asPartner(cwTok, () => partnerChatRoute.POST(new Request("http://plan.test/api/partners/chat", { method: "POST", body: JSON.stringify({ key: S("cw1").partner_key, text: "Planner says mezcal" }) })).then((r) => r.text()));
+await Promise.all([clientWrite, plannerWrite]);
+const cwLog = () => ((db.conversation_logs ?? []).find((c) => c.session_id === "cw1") as { messages: { role: string; content: string; by?: { partnerId?: string } }[] }).messages;
+const cwText = cwLog().map((x) => x.content);
+check(
+  "C: two writers at once: every turn from both is kept",
+  ["Client says tacos", "Reply to: Client says tacos", "Planner says mezcal", "Reply to: Planner says mezcal"].every((t) => cwText.includes(t)) && cwText.length === base3.length + 4,
+  cwText.join(" | ")
+);
+check("C: ...and the planner's turn is still marked as theirs", cwLog().some((x) => x.content === "Planner says mezcal" && x.by?.partnerId === cwP.partner.id));
+await clientTurn("cw1", [...base3, { role: "user", content: "Client says tacos" }, { role: "assistant", content: "Reply to: Client says tacos" }, { role: "user", content: "Client again" }]);
+const cwText2 = cwLog().map((x) => x.content);
+check("C: the client saving from a view without the planner's turns drops nothing and repeats nothing", cwText2.includes("Planner says mezcal") && cwText2.includes("Reply to: Planner says mezcal") && cwText2.includes("Client again") && cwText2.length === base3.length + 6 && new Set(cwText2).size === cwText2.length);
+// A deterministic race: the planner's save lands between the client's read and the client's write.
+const { guards } = await import("./fake-supabase.mts");
+let raced = false;
+guards.push((table, op, rows) => {
+  if (raced || table !== "conversation_logs" || op !== "update" || rows[0]?.session_id !== "cw1") return null;
+  raced = true;
+  const row = rows[0] as { messages: Msg[]; updated_at: string };
+  row.messages = [...row.messages, { role: "user", content: "Planner sneaks in" }, { role: "assistant", content: "Reply to: Planner sneaks in" }];
+  row.updated_at = new Date(Date.now() + 5000).toISOString();
+  return null;
+});
+await clientTurn("cw1", [...cwLog().filter((x) => !x.content.includes("sneaks")), { role: "user", content: "Client last word" }]);
+guards.length = 0;
+const cwText3 = cwLog().map((x) => x.content);
+check("C: a save that races another save keeps both: the late writer reads again and appends", raced && cwText3.includes("Planner sneaks in") && cwText3.includes("Reply to: Planner sneaks in") && cwText3.includes("Client last word") && cwText3.includes("Reply to: Client last word") && new Set(cwText3).size === cwText3.length, cwText3.join(" | "));
+check("C: the save reads the stored messages again and only lands if nobody saved in between", src("app/api/chat/route.ts").includes("mergeChatTurns(row.messages, messages)") && src("app/api/chat/route.ts").includes('q.eq("updated_at", row.updated_at)'));
+
+// =====================================================================
+// 17. Existing events are unchanged before the surprise migration
+// =====================================================================
+reset();
+const pre = session("pre1", { host_name: "Jordan Lee", host_phone: HOST_PHONE, booking_holder: "planner", phone: PLANNER_PHONE }, { client_name: "Pat Planner", client_phone: PLANNER_PHONE });
+db.sessions = [pre];
+check("Before the migration: no surprise, no banner, no block", !surprise.surpriseActive(pre) && banner.surpriseBannerText(pre) === null && (await guard.honoreeEventFor(HOST_PHONE)) === null);
+texts.length = 0;
+await sms.sendStaffText(HOST_PHONE, "Jordan", "Hello");
+check("...every text goes out as before", texts.some((t) => t.phone === HOST_PHONE));
+const preTok = await signInPartner(HOST_PHONE);
+check("...the host still signs in", preTok.length > 20);
+check("...the Booking card loads and says surprise events are not set up yet", (await clientView.bookingCardData(S("pre1"), "admin")).surprise.ready === false && src("app/team/admin/e/[id]/booking-card.tsx").includes("Surprise events turn on once the surprise database update runs."));
+check("...the Booking card still loads with neither migration run", await (async () => {
+  for (const t of ["partners", "event_planners", "partner_activity", "price_approvals"]) missingTables.add(t);
+  const c = await clientView.bookingCardData(S("pre1"), "admin");
+  missingTables.clear();
+  return c.ready === false && c.surprise.ready === false;
+})());
+check("...the opening question still reads the booking (a planner holds it: skipped)", !(await (async () => {
+  db.sessions.push(session("pre2", { status: "in_progress", version: 0, event_data: null, booking_holder: "planner" }));
+  ai.script.reply = () => [{ type: "text", text: "Hi" }];
+  await clientTurn("pre2", [CTX, { role: "user", content: "Hi" }]);
+  return sysText(ai.calls.at(-1)).includes(ROLE_Q);
+})()));
 
 done("partner portal");

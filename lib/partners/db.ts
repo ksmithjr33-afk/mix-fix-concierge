@@ -12,7 +12,7 @@ import { hashToken, normalizePhone } from "@/lib/team/codes";
 import { siteOrigin } from "@/lib/team/clock-db";
 import { alertAdmins } from "@/lib/team/events";
 import { sendStaffText } from "@/lib/team/sms";
-import { eventData, isMarket } from "@/lib/team/markets";
+import { eventData, eventTimeZone, isMarket } from "@/lib/team/markets";
 import { adminEventTitle } from "@/lib/team/event-list";
 import { eventSchedule, shortDate } from "@/lib/team/time";
 import { managerHref } from "@/lib/team/manager-tabs";
@@ -38,6 +38,14 @@ import {
   type PlannerLink,
   type PricingSwitch,
 } from "@/lib/partners/rules";
+import {
+  HOST_SURPRISE_REFUSAL,
+  PLANNER_SURPRISE_REFUSAL,
+  honoreeRefusal,
+  isHonoree,
+  surpriseActive,
+  surpriseOf,
+} from "@/lib/partners/surprise";
 
 export type EventSession = SessionRow & BookingColumns & { phone?: string | null; team_market?: string | null };
 
@@ -61,6 +69,22 @@ export const clientEventLink = (sessionId: string) => `${siteOrigin()}/s?id=${en
 export function clientPhone(s: EventSession): string {
   const ed = s.event_data ?? {};
   return normalizePhone(ed.client_phone) ?? normalizePhone(s.phone) ?? "";
+}
+
+/** True while this event's guest of honor must not be contacted (see lib/partners/surprise.ts). */
+export const surpriseOn = (s: EventSession, now: Date = new Date()) => surpriseActive(s, now, eventTimeZone(s));
+
+/**
+ * Who may never be added as a planner on a surprise event: the guest of honor
+ * (by phone or email) and the host (the person the event is for). Null when
+ * this person may be added. Checked before an account is matched or made.
+ */
+export function plannerRefusal(s: EventSession, input: { phone?: unknown; email?: unknown }, now: Date = new Date()): string | null {
+  if (!surpriseOn(s, now)) return null;
+  if (isHonoree(s, input)) return honoreeRefusal("planner");
+  const phone = normalizePhone(input.phone);
+  if (phone && s.host_phone && normalizePhone(s.host_phone) === phone) return PLANNER_SURPRISE_REFUSAL;
+  return null;
 }
 
 // ----- Partners -----
@@ -317,6 +341,8 @@ export async function linkPlanner(
   opts: { via: LinkedVia; by: Actor; lead?: boolean; now?: Date }
 ): Promise<Result<{ linkId: string; fresh: boolean }>> {
   if (!partner.active) return fail("That planner's account is turned off.", 409);
+  const refused = plannerRefusal(s, partner, opts.now);
+  if (refused) return fail(refused, 409);
   const live = await liveLinks(s.id);
   const existing = live.find((l) => l.partner_id === partner.id);
   if (existing) {
@@ -433,13 +459,18 @@ export async function setHost(s: EventSession, input: { name?: unknown; phone?: 
   const phone = rawPhone ? normalizePhone(rawPhone) : null;
   if (rawPhone && !phone) return fail("Enter the host's phone number, or leave it blank.");
   const email = cleanEmail(input.email);
+  // A surprise event: the guest of honor's contact is never a host login, and the host gets no login (and no welcome text) at all.
+  if (name && surpriseOn(s)) {
+    if (isHonoree(s, { phone, email })) return fail(honoreeRefusal("host login"), 409);
+    if (phone) return fail(HOST_SURPRISE_REFUSAL, 409);
+  }
   const patch = name ? { host_name: name, host_phone: phone, host_email: email || null } : { host_name: null, host_phone: null, host_email: null };
   const hadPhone = s.host_phone ?? null;
   const { error } = await supabase.from("sessions").update(patch).eq("id", s.id);
   if (error) return fail("Could not save. The partners update may not be live yet.", 500);
   Object.assign(s, patch);
   await logActivity(s.id, by, name ? "Host set" : "Host cleared", name);
-  if (phone && phone !== hadPhone) {
+  if (phone && phone !== hadPhone && !surpriseOn(s)) {
     await ensurePartnerKey(s);
     await sendPartnerText(s, phone, name, hostWelcomeText({ hostName: name, eventType: str(s.event_data?.event_type), signInLink: signInLink() }));
   }
@@ -493,6 +524,7 @@ export async function eventAccess(principal: Principal | null, key: string): Pro
     };
   }
   if (!s.host_phone || s.host_phone !== principal.phone) return null;
+  if (surpriseOn(s)) return null; // a surprise event: the host has no access until the block lifts
   return { session: s, booking, viewer: { kind: "host", name: s.host_name ?? "" }, actor: { kind: "host", name: s.host_name ?? "Host" } };
 }
 
@@ -509,7 +541,7 @@ export async function eventsFor(principal: Principal): Promise<{ session: EventS
   }
   const { data, error } = await supabase.from("sessions").select("*").eq("host_phone", principal.phone);
   if (error || !data) return [];
-  return (data as EventSession[]).map((session) => ({ session, isLead: false }));
+  return (data as EventSession[]).filter((session) => !surpriseOn(session)).map((session) => ({ session, isLead: false }));
 }
 
 /** The booking holder's name and phone: the client, or the Lead planner on a planner held event. */
@@ -521,6 +553,79 @@ export async function holderContact(s: EventSession): Promise<{ name: string; ph
   }
   const lead = (await plannersOn(s.id)).find((p) => p.isLead);
   return lead ? { name: lead.partner.name, phone: lead.partner.phone, partnerId: lead.partner.id } : null;
+}
+
+/** The Lead planner on this event, or null. */
+export async function leadOn(sessionId: string): Promise<Partner | null> {
+  return (await plannersOn(sessionId)).find((p) => p.isLead)?.partner ?? null;
+}
+
+/**
+ * True when the Lead on a planner held event is no longer the booking contact
+ * (the phone the booking came in with), so GHL's payment reminders still go to
+ * the old contact until someone updates it there.
+ */
+export function leadMoved(s: EventSession, lead: Pick<Partner, "phone"> | null): boolean {
+  if (bookingOf(s).holder !== "planner" || !lead) return false;
+  const booked = clientPhone(s);
+  return !!booked && normalizePhone(lead.phone) !== booked;
+}
+
+/**
+ * Admins and managers: turn Surprise on or off and edit the guest of honor.
+ * The guest of honor's phone or email can never be a number this event
+ * already contacts (the client phone, the day of contact, a planner, or the
+ * host's login). Every change is logged in partner activity.
+ */
+export async function setSurprise(
+  s: EventSession,
+  input: { on?: unknown; name?: unknown; phone?: unknown; email?: unknown },
+  by: Actor,
+  now: Date = new Date()
+): Promise<Result> {
+  const on = input.on === true;
+  const before = surpriseOf(s);
+  const name = cleanField(input.name, 80) || (on ? before.name || str(s.host_name) : before.name);
+  const rawPhone = str(input.phone);
+  const phone = rawPhone ? normalizePhone(rawPhone) : null;
+  if (rawPhone && !phone) return fail("Enter the guest of honor's phone number, or leave it blank.");
+  const rawEmail = str(input.email);
+  const email = cleanEmail(rawEmail);
+  if (rawEmail && !email) return fail("Enter a valid email, or leave it blank.");
+  if (on && !name) return fail("Enter the guest of honor's name.");
+  if (on && (phone || email)) {
+    const clash = await contactClash(s, phone, email);
+    if (clash) return fail(clash, 409);
+  }
+  const patch = {
+    is_surprise: on,
+    honoree_name: name || null,
+    honoree_phone: phone,
+    honoree_email: email || null,
+    surprise_set_by: by.name,
+    surprise_set_at: now.toISOString(),
+  };
+  const { error } = await supabase.from("sessions").update(patch).eq("id", s.id);
+  if (error) return fail("Could not save. The surprise events update may not be live yet.", 500);
+  Object.assign(s, patch);
+  const who = name ? `Guest of honor: ${name}` : "";
+  if (on !== before.on) await logActivity(s.id, by, on ? "Surprise turned on" : "Surprise turned off", who);
+  else if (on) await logActivity(s.id, by, "Guest of honor changed", [who, phone ? "phone saved" : "", email ? "email saved" : ""].filter(Boolean).join(", "));
+  else await logActivity(s.id, by, "Surprise details changed", who);
+  return { ok: true };
+}
+
+/** Where this phone or email is already saved on the event, as a refusal, or null. */
+async function contactClash(s: EventSession, phone: string | null, email: string): Promise<string | null> {
+  const ed = s.event_data ?? {};
+  const same = (v: unknown) => !!phone && normalizePhone(v) === phone;
+  const sameEmail = (v: unknown) => !!email && str(v).toLowerCase() === email;
+  const msg = (where: string) => `That is already saved as ${where} on this event. The guest of honor is never contacted, so it cannot be theirs too. Change ${where} first.`;
+  if (same(clientPhone(s)) || sameEmail(ed.email) || sameEmail(ed.client_email) || sameEmail(s.email)) return msg("the client's contact");
+  if (same(ed.day_of_contact_phone)) return msg("the day of contact");
+  if (same(s.host_phone)) return msg("the host's login");
+  for (const p of await plannersOn(s.id)) if (same(p.partner.phone) || sameEmail(p.partner.email)) return msg("a planner");
+  return null;
 }
 
 // ----- The client's one tap remove link -----

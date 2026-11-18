@@ -18,6 +18,7 @@ export default function BookingCard({ sessionId, data }: { sessionId: string; da
   const [error, setError] = useState("");
   const [form, setForm] = useState<null | { mode: "add" | "replace" | "host"; partnerId?: string }>(null);
   const [v, setV] = useState({ name: "", company: "", phone: "", contactEmail: "", lead: false });
+  const [honoree, setHonoree] = useState<null | { name: string; phone: string; contactEmail: string }>(null);
 
   const act = async (body: Record<string, unknown>) => {
     setBusy(true);
@@ -56,6 +57,26 @@ export default function BookingCard({ sessionId, data }: { sessionId: string; da
   return (
     <section className="rounded-2xl border border-[#DDD5CC] bg-[#F5F0EB] px-4 py-3 space-y-3" aria-label="Booking">
       <h2 className="font-heading text-lg font-bold text-[#2C2420]">Booking</h2>
+      {data.leadMovedWarning && (
+        <p role="alert" className="rounded-xl border border-[#B3261E] bg-[#FDECEA] px-3 py-2 text-sm text-[#8C1D18]">
+          {data.leadMovedWarning}
+        </p>
+      )}
+      {data.billing && (
+        <div className="text-[15px] text-[#2C2420]">
+          <p>
+            <span className="text-[#6B5D52]">Billed to: </span>
+            {data.billing.billedTo}
+          </p>
+          {data.billing.eventFor && (
+            <p>
+              <span className="text-[#6B5D52]">Event for: </span>
+              {data.billing.eventFor}
+            </p>
+          )}
+          <p className="text-xs text-[#6B5D52]">The agreement, invoice, payment link, and balance reminders go to the booking holder only, never the host.</p>
+        </div>
+      )}
       <div className="space-y-1 text-[15px] text-[#2C2420]">
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-[#6B5D52]">Booking holder</span>
@@ -176,6 +197,73 @@ export default function BookingCard({ sessionId, data }: { sessionId: string; da
         )}
       </div>
 
+      <div className="space-y-1 text-[15px] text-[#2C2420]">
+        <p className="text-sm text-[#6B5D52]">Surprise</p>
+        {!data.surprise.ready ? (
+          <p className="text-sm text-[#6B5D52]">Surprise events turn on once the surprise database update runs.</p>
+        ) : (
+          <>
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={data.surprise.on}
+                disabled={busy}
+                onChange={(e) => {
+                  if (e.target.checked && !data.surprise.name && !data.host?.name) setHonoree({ name: "", phone: "", contactEmail: "" });
+                  else act({ action: "surprise", on: e.target.checked, name: data.surprise.name, phone: data.surprise.phone, email: data.surprise.contactEmail });
+                }}
+              />
+              Surprise event
+            </label>
+            {data.surprise.on && (
+              <>
+                <p>
+                  <span className="text-[#6B5D52]">Guest of honor </span>
+                  {[data.surprise.name, data.surprise.phone, data.surprise.contactEmail].filter(Boolean).join(" · ") || "Not named"}{" "}
+                  <button type="button" onClick={() => setHonoree({ name: data.surprise.name, phone: data.surprise.phone, contactEmail: data.surprise.contactEmail })} className="text-sm text-[#B5845A] underline">
+                    Edit
+                  </button>
+                </p>
+                <p className="text-xs text-[#6B5D52]">
+                  {data.surprise.active
+                    ? `We never text the guest of honor, the host cannot sign in, and they cannot be added as a planner.${data.surprise.liftsAfter ? ` This lifts after ${data.surprise.liftsAfter}.` : ""}`
+                    : "The 30 days after the event have passed, so the block has lifted."}
+                </p>
+              </>
+            )}
+            {data.surprise.setBy && (
+              <p className="text-xs text-[#6B5D52]">
+                Last set by {data.surprise.setBy}
+                {data.surprise.setAt ? `, ${data.surprise.setAt}` : ""}
+              </p>
+            )}
+            {honoree && (
+              <form
+                className="rounded-xl border border-[#DDD5CC] bg-white px-3 py-3 space-y-2"
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  if (await act({ action: "surprise", on: true, name: honoree.name, phone: honoree.phone, email: honoree.contactEmail })) setHonoree(null);
+                }}
+              >
+                <p className="text-sm font-medium text-[#2C2420]">Guest of honor</p>
+                <input className={input} placeholder="Name" value={honoree.name} onChange={(e) => setHonoree({ ...honoree, name: e.target.value })} required />
+                <input className={input} type="tel" placeholder="Phone (optional, never texted)" value={honoree.phone} onChange={(e) => setHonoree({ ...honoree, phone: e.target.value })} />
+                <input className={input} type="email" placeholder="Email (optional, never contacted)" value={honoree.contactEmail} onChange={(e) => setHonoree({ ...honoree, contactEmail: e.target.value })} />
+                <p className="text-xs text-[#6B5D52]">Saving their number blocks every text from us to it until 30 days after the event.</p>
+                <div className="flex gap-2">
+                  <button type="submit" disabled={busy} className="rounded-lg bg-[#B5845A] text-white px-4 py-2 text-sm font-medium disabled:opacity-40">
+                    {busy ? "Saving..." : "Save"}
+                  </button>
+                  <button type="button" onClick={() => setHonoree(null)} className="text-sm text-[#6B5D52] underline">
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            )}
+          </>
+        )}
+      </div>
+
       {data.approvals.length > 0 && (
         <div className="space-y-1">
           <p className="text-sm text-[#6B5D52]">Price changes from planners</p>
@@ -191,7 +279,7 @@ export default function BookingCard({ sessionId, data }: { sessionId: string; da
 
       {data.activity.length > 0 && (
         <details className="text-sm">
-          <summary className="cursor-pointer text-[#6B5D52]">Planner activity ({data.activity.length})</summary>
+          <summary className="cursor-pointer text-[#6B5D52]">Partner activity ({data.activity.length})</summary>
           <ul className="mt-2 space-y-1">
             {data.activity.map((a, i) => (
               <li key={i} className="text-[#2C2420]">

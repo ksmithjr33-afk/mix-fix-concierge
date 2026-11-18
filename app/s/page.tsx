@@ -7,6 +7,8 @@ import { recordClientOpen } from "@/lib/client-links";
 import { clientMenu } from "@/lib/team/approved-menu-db";
 import PlannersCard from "./planners-card";
 import { clientPlannersCard, clientLinkBlocked } from "@/lib/partners/client-view";
+import { surpriseOn, type EventSession } from "@/lib/partners/db";
+import { SURPRISE_LABEL } from "@/lib/partners/surprise";
 
 // The booking fields /chat takes as query params for intake.
 const INTAKE_PARAMS = [
@@ -126,7 +128,15 @@ export default async function ShortRedirectPage({
         showList={showList}
         listPending={pending.some((h) => h.kind === "change")}
         menu={menu}
-        extra={planners ? <PlannersCard sessionId={sessionId} planners={planners.planners} pricingOn={planners.pricingOn} activity={planners.activity} /> : null}
+        extra={
+          <>
+            {/* The booking holder sees that it is a surprise. */}
+            {surpriseOn(data as EventSession) && (
+              <p className="inline-block text-[11px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-[#EDE3F5] text-[#5B3F7A]">{SURPRISE_LABEL}</p>
+            )}
+            {planners ? <PlannersCard sessionId={sessionId} planners={planners.planners} pricingOn={planners.pricingOn} activity={planners.activity} /> : null}
+          </>
+        }
       />
     );
   }

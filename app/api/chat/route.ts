@@ -42,8 +42,10 @@ import {
   APPROVAL_FAILED_TOOL_RESULT,
   bookingQuestionsSection,
   hideMoney,
-  keepAuthors,
+  mergeChatTurns,
   plannerIntakeSection,
+  planningRoleToolResult,
+  savePlanningRoleTool,
   plannerUpdateSection,
   sentForApprovalToolResult,
   takeBookingAnswers,
@@ -51,7 +53,9 @@ import {
   type MessageAuthor,
 } from "@/lib/partners/chat";
 import { askForApproval, changedPriced, splitPriced } from "@/lib/partners/approvals";
-import { applyBookingAnswers, plannerChanged, requestGuestCountApproval } from "@/lib/partners/planning";
+import { applyBookingAnswers, plannerChanged, requestGuestCountApproval, savePlanningRole } from "@/lib/partners/planning";
+import { honoreeRefusal, isHonoree, planningRoleOf, surpriseActive, surpriseOf } from "@/lib/partners/surprise";
+import { normalizePhone } from "@/lib/team/codes";
 import { sentForApprovalLine } from "@/lib/partners/rules";
 import { savePartnerChat } from "@/lib/partners/event-page";
 import { clientLinkBlocked } from "@/lib/partners/client-view";
@@ -130,42 +134,59 @@ const quotePriceChangeTool: Anthropic.Tool = {
   },
 };
 
+/**
+ * Save the planning chat. The client and a planner can be in it at the same
+ * time, each sending back their own view of the chat, so the stored messages
+ * are read again right before every save and only the new turns are appended
+ * (mergeChatTurns). The save only lands if nobody saved in between (the
+ * updated_at it read); otherwise it reads again and merges again. No turn is
+ * ever dropped.
+ */
 async function upsertConversationLog(
   sessionId: string,
   clientName: string | null,
   email: string | null,
   messages: ChatMessage[]
 ) {
-  const { data: existing, error: selectError } = await supabase
-    .from("conversation_logs")
-    .select("id, messages")
-    .eq("session_id", sessionId)
-    .maybeSingle();
-
-  if (selectError) {
-    console.error("conversation_logs select error:", selectError);
-    return;
-  }
-
-  const nowIso = new Date().toISOString();
-
-  if (existing) {
-    // A planner's answers stay marked as theirs when the client's browser sends the chat back without the marks.
-    messages = keepAuthors((existing as { messages?: ChatMessage[] }).messages, messages);
-    const { error } = await supabase
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const { data: existing, error: selectError } = await supabase
       .from("conversation_logs")
-      .update({ messages, updated_at: nowIso })
-      .eq("session_id", sessionId);
-    if (error) console.error("conversation_logs update error:", error);
-  } else {
+      .select("id, messages, updated_at")
+      .eq("session_id", sessionId)
+      .maybeSingle();
+
+    if (selectError) {
+      console.error("conversation_logs select error:", selectError);
+      return;
+    }
+
+    const nowIso = new Date().toISOString();
+
+    if (existing) {
+      const row = existing as { messages?: ChatMessage[]; updated_at?: string | null };
+      const merged = mergeChatTurns(row.messages, messages);
+      let q = supabase.from("conversation_logs").update({ messages: merged, updated_at: nowIso }).eq("session_id", sessionId);
+      q = row.updated_at ? q.eq("updated_at", row.updated_at) : q.is("updated_at", null);
+      const { data: saved, error } = await q.select("id");
+      if (error) {
+        console.error("conversation_logs update error:", error);
+        return;
+      }
+      if (saved && (saved as unknown[]).length > 0) return;
+      continue; // someone else saved in between: read again and merge again
+    }
     const { error } = await supabase.from("conversation_logs").insert({
       session_id: sessionId,
       client_name: clientName,
       email,
       messages,
+      updated_at: nowIso,
     });
-    if (error) console.error("conversation_logs insert error:", error);
+    if (!error) return;
+    // The other person's first save landed first: merge into it.
+    console.error("conversation_logs insert error, merging instead:", error);
   }
+  console.error(`conversation_logs: ${sessionId} could not be saved after retries`);
 }
 
 function buildTranscript(messages: ChatMessage[]): string {
@@ -495,6 +516,16 @@ async function updateModeResponse(session: SessionRow, messages: ChatMessage[], 
                 continue;
               }
             }
+            // A surprise event: the guest of honor's number is never the day of contact.
+            let honoreeLine = "";
+            if (surpriseActive(session as EventSession) && isHonoree(session as EventSession, { phone: partial.day_of_contact_phone })) {
+              honoreeLine = honoreeRefusal("day of contact");
+              partial = Object.fromEntries(Object.entries(partial).filter(([k]) => k !== "day_of_contact_phone"));
+              if (Object.keys(partial).length === 0) {
+                toolResults.push({ type: "tool_result", tool_use_id: toolUse.id, content: `TOOL RESULT: NOT SAVED. Say exactly: "${honoreeLine}" Then ask for a different day of contact number.` });
+                continue;
+              }
+            }
             const result = await applyEventUpdate(session.id, partial, {
               managerRequest: typeof managerRequest === "string" ? managerRequest : null,
               changeApprovalNeeded: changeApprovalNeeded === true,
@@ -504,7 +535,8 @@ async function updateModeResponse(session: SessionRow, messages: ChatMessage[], 
             });
             lastApply = result;
             await afterApply(result);
-            const recorded = updateToolResult(result);
+            let recorded = updateToolResult(result);
+            if (honoreeLine) recorded += `\n\nNOT SAVED: the day of contact number. Say exactly: "${honoreeLine}"`;
             toolResults.push({ type: "tool_result", tool_use_id: toolUse.id, content: approvalLine ? `${recorded}\n\nALSO SENT FOR APPROVAL, NOT SAVED: the part of this change that affects the price. Say exactly: "${approvalLine}"` : recorded });
           }
 
@@ -602,6 +634,38 @@ async function updateModeResponse(session: SessionRow, messages: ChatMessage[], 
   });
 }
 
+/**
+ * The opening question, the surprise question, and the planner question, each
+ * asked once. A question is skipped once it is answered (saved on the session
+ * by save_planning_role or at submit) or when the booking already tells us:
+ * a planner holds it, a host is named, or it is already a surprise. Before the
+ * surprise migration the answers cannot be saved mid chat, so the chat itself
+ * is what keeps it to once.
+ */
+function whoIsPlanning(s: EventSession): { text: string; canSave: boolean } {
+  const ready = "is_surprise" in s; // the surprise migration ran
+  const holderPlanner = s.booking_holder === "planner";
+  const plannerAsked = s.planner_asked === true;
+  if (!ready) {
+    const ask = !holderPlanner && !plannerAsked;
+    return { text: bookingQuestionsSection({ askRole: ask, askPlanner: ask }), canSave: false };
+  }
+  const surprise = surpriseOf(s);
+  const known = planningRoleOf(s) ?? (holderPlanner ? "planner" : s.host_name ? "someone_else" : surprise.on ? "someone_else" : null);
+  const askRole = !known && !plannerAsked;
+  const askSurprise = !surprise.answered && (askRole || known === "someone_else" || known === "planner");
+  const askPlanner = !holderPlanner && !plannerAsked && known !== "planner";
+  return { text: bookingQuestionsSection({ askRole, askSurprise, askPlanner, role: known, canSave: true }), canSave: true };
+}
+
+/** On a surprise event, the concierge never suggests contacting the guest of honor. */
+function surpriseReminder(s: EventSession, askPrivate: boolean): string {
+  if (!surpriseActive(s)) return "";
+  const first = surpriseOf(s).firstName || "the guest of honor";
+  const ask = askPrivate ? ` If you have not asked yet, ask once, exactly: "What is the best private number to reach you about this event?" and send it as private_phone in submit_event_data.` : "";
+  return `SURPRISE EVENT: this is a surprise for ${first}. Never suggest contacting ${first}, never ask for their phone or email, and never offer them access.${ask}`;
+}
+
 export async function POST(request: Request) {
   const { messages, sessionId, clientName, email, chatStartVersion } = await request.json();
   // A planner, checked by /api/partners/chat and attached in process. Null for every browser request here.
@@ -635,6 +699,7 @@ export async function POST(request: Request) {
   // priced with quote_guest_count. Only with a session row to price from.
   // A planner who cannot approve price changes never gets it: a different count goes to the holder.
   const guestTool = session !== null && !!facts.guests && !approvalOnly;
+  const people = partner ? plannerIntakeSection(partner.ctx) : session ? whoIsPlanning(session as EventSession) : { text: "", canSave: false };
   // Cached (with the tools before it): the ~18k token prompt is the same on
   // every turn, so later turns read it from the cache. Same words to the model.
   const system: Anthropic.TextBlockParam[] = [
@@ -644,21 +709,16 @@ export async function POST(request: Request) {
         booked: guestTool || approvalOnly ? facts : { ...facts, guests: null },
         popular: popular ? popularForPrompt(popular) : null,
         // Who is planning: a planner, or the client asked once (only for a session we can record the answer on).
-        people: partner
-          ? plannerIntakeSection(partner.ctx)
-          : session
-            ? bookingQuestionsSection({
-                askRole: (session as { booking_holder?: string | null }).booking_holder !== "planner" && !(session as { planner_asked?: boolean | null }).planner_asked,
-                askPlanner: (session as { booking_holder?: string | null }).booking_holder !== "planner" && !(session as { planner_asked?: boolean | null }).planner_asked,
-              })
-            : "",
+        people: [typeof people === "string" ? people : people.text, session ? surpriseReminder(session as EventSession, !partner) : ""].filter(Boolean).join("\n"),
         noPayment: approvalOnly,
       }),
       cache_control: { type: "ephemeral" },
     },
   ];
   const submitTool = session ? withBookingFields(submitEventDataTool) : submitEventDataTool;
-  const tools = guestTool ? [quoteGuestCountTool, submitTool] : [submitTool];
+  // save_planning_role: the opening and surprise answers are saved the moment they are given (after the surprise migration).
+  const roleTool = typeof people !== "string" && people.canSave;
+  const tools = [...(guestTool ? [quoteGuestCountTool] : []), ...(roleTool ? [savePlanningRoleTool] : []), submitTool];
   const history: Anthropic.MessageParam[] = messages.map((m: ChatMessage) => ({
     role: m.role as "user" | "assistant",
     content: partner && !partner.money.total ? hideMoney(m.content) : m.content,
@@ -711,6 +771,34 @@ export async function POST(request: Request) {
         const quoteUse = finalMessage.content.find(
           (block): block is Anthropic.ToolUseBlock => block.type === "tool_use" && block.name === "quote_guest_count"
         );
+        // Who is planning, saved the moment it is answered, so it is never asked again.
+        const roleResults: Anthropic.ToolResultBlockParam[] = [];
+        let roleRefused = false;
+        for (const block of finalMessage.content) {
+          if (block.type !== "tool_use" || block.name !== "save_planning_role" || !sessionId) continue;
+          const r = await savePlanningRole(sessionId, block.input as Record<string, unknown>);
+          if (r.refused) roleRefused = true;
+          roleResults.push({ type: "tool_result", tool_use_id: block.id, content: planningRoleToolResult(r) });
+        }
+        // A save with no words, or a refused number: a second turn where the bot says what the TOOL RESULT says.
+        if (roleResults.length > 0 && !quoteUse && !toolUse && (roleRefused || !fullText.trim())) {
+          const followUp = anthropic.messages.stream({
+            model: "claude-sonnet-4-6",
+            max_tokens: 1024,
+            system,
+            tools,
+            tool_choice: { type: "none" },
+            messages: [...history, { role: "assistant", content: finalMessage.content }, { role: "user", content: roleResults }],
+          });
+          let separated = !fullText.trim();
+          for await (const event of followUp) {
+            if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
+              invite.push(separated ? event.delta.text : `\n\n${event.delta.text}`);
+              separated = true;
+            }
+          }
+          invite.finish();
+        }
 
         // A different guest count: price it, then a second turn where the bot
         // says what the TOOL RESULT says, the same way update mode quotes.
@@ -726,7 +814,7 @@ export async function POST(request: Request) {
             messages: [
               ...history,
               { role: "assistant", content: finalMessage.content },
-              { role: "user", content: [{ type: "tool_result", tool_use_id: quoteUse.id, content: guestQuoteToolResult(quote, asked) }] },
+              { role: "user", content: [{ type: "tool_result", tool_use_id: quoteUse.id, content: guestQuoteToolResult(quote, asked) }, ...roleResults] },
             ],
           });
           let separated = !fullText.trim();
@@ -772,6 +860,15 @@ export async function POST(request: Request) {
             const { guest_count_quoted_total: quotedTotal, ...submitted } = toolUse.input as Record<string, unknown>;
             // Who is planning (and a planner's guest count ask) never goes in the event itself.
             const { answers: bookingAnswers, rest: input } = takeBookingAnswers(submitted);
+            // A surprise: the booker's private number is the client phone. The guest of honor's number is never saved as the client phone or the day of contact.
+            const sx = ((await getSession(sessionId)) ?? session) as EventSession | null;
+            const privatePhone = normalizePhone(bookingAnswers.privatePhone);
+            const isSurprise = bookingAnswers.surprise?.on === true || (sx ? surpriseOf(sx).on : false);
+            if (privatePhone && isSurprise && !partner && !(sx && isHonoree(sx, { phone: privatePhone }))) input.client_phone = privatePhone;
+            if (sx && isHonoree(sx, { phone: input.day_of_contact_phone })) {
+              console.warn(`[surprise] ${sessionId}: the guest of honor's number was not saved as the day of contact`);
+              delete input.day_of_contact_phone;
+            }
             const filled = { ...input, ...bookingFill(input, factsAsSession(facts)) };
             // Dive Bar: record the five set menu drinks as the event's menu.
             const eventData = applyDiveSetMenu(filled);

@@ -8,13 +8,14 @@
 // never throws, so neither can block a save.
 
 import { supabase } from "@/lib/supabase";
+import { isHonoree, surpriseActive, surpriseLastDay, type SurpriseColumns } from "@/lib/partners/surprise";
 import type { SessionRow } from "@/lib/event-updates";
 import { firstName, type StaffMember } from "@/lib/team/event-view";
 import { eventTitle, adminEventTitle, clientEventTitle } from "@/lib/team/event-list";
 import { alertAdmins, getSubmittedSession } from "@/lib/team/events";
 import { assignmentRef, claimNotice, punchesFor, siteOrigin } from "@/lib/team/clock-db";
 import { sendStaffText } from "@/lib/team/sms";
-import { eventData } from "@/lib/team/markets";
+import { eventData, eventTimeZone } from "@/lib/team/markets";
 import { eventDay, eventTz } from "@/lib/team/time";
 import { BAR_PHOTO_BUCKET, PHOTO_TYPES, MAX_PHOTO_BYTES, photoExtension, SIGNED_URL_SECONDS } from "@/lib/team/bar-ready";
 import {
@@ -223,13 +224,23 @@ export async function sendCloseoutWebhook(session: SessionRow, rating: Rating, c
   }
   if (!(await claimNotice(`closeout_webhook:${session.id}`, "closeout_webhook"))) return "skipped";
   const ed = eventData(session);
-  const payload = closeoutWebhookPayload({
+  const base = closeoutWebhookPayload({
     clientEmail: ed.client_email ?? (session as { email?: string | null }).email,
     eventDate: eventDay(ed.event_date ?? session.event_date),
     eventTitle: clientEventTitle(ed), // to GHL: the title the client side has always used
     rating,
     closeouts,
   });
+  // The follow up and review request respect a surprise event: never to the
+  // guest of honor while the block is on (30 days after the event), and GHL is told.
+  const sx = session as SessionRow & SurpriseColumns;
+  const blocked = surpriseActive(sx, new Date(), eventTimeZone(session));
+  const payload = {
+    ...base,
+    client_email: blocked && isHonoree(sx, { email: base.client_email }) ? null : base.client_email,
+    surprise_block: blocked,
+    surprise_block_until: blocked ? surpriseLastDay(sx) : null,
+  };
   try {
     const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
     if (!res.ok) {

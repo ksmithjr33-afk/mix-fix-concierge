@@ -6,6 +6,8 @@
 // pricing switches. Who sees money and who approves a price change is decided
 // here, and every page and route asks these functions on the server.
 
+import type { SurpriseColumns } from "@/lib/partners/surprise";
+
 export const PARTNER_TYPES = ["planner", "venue"] as const;
 export type PartnerType = (typeof PARTNER_TYPES)[number];
 export type BookingHolder = "client" | "planner";
@@ -42,7 +44,7 @@ export interface PlannerLink {
 }
 
 /** The booking columns on a sessions row. Every one is missing before the migration, which reads as a client held event. */
-export interface BookingColumns {
+export interface BookingColumns extends SurpriseColumns {
   booking_holder?: string | null;
   booking_holder_set_by?: string | null;
   booking_holder_set_at?: string | null;
@@ -107,10 +109,10 @@ const NONE: MoneyAccess = { total: false, balance: false, payments: false, agree
  * Client held: planners see nothing unless "Planner can see pricing" is on,
  * and then only the total and the remaining balance. They never approve.
  * A host sees nothing unless the Lead turned on "Host can see pricing", and
- * then only the total and the remaining balance.
+ * then the total and nothing else: never the agreement, payments, or balance.
  */
 export function moneyAccess(b: Booking, v: EventViewer): MoneyAccess {
-  if (v.kind === "host") return b.hostCanSeePricing ? { ...NONE, total: true, balance: true } : NONE;
+  if (v.kind === "host") return b.hostCanSeePricing ? { ...NONE, total: true } : NONE;
   if (b.holder === "planner") {
     if (v.isLead) return { total: true, balance: true, payments: true, agreement: true, approve: true };
     return b.othersCanSeePricing ? { ...NONE, total: true, balance: true, payments: true } : NONE;
@@ -126,6 +128,46 @@ export function holdsBooking(b: Booking, v: EventViewer): boolean {
 /** The person the event is for: the host when one is named, otherwise the client (on a client held event) or the booking contact. */
 export function eventForName(b: Booking, clientName: unknown): string {
   return b.host?.name || str(clientName);
+}
+
+/**
+ * "Billed to" and "Event for" on a planner held event: the Lead is the party on
+ * the agreement and the invoice, the host is who the event is for. Null on a
+ * client held event.
+ */
+export function billingLines(b: Booking, lead: Pick<Partner, "name" | "company"> | null): { billedTo: string; eventFor: string } | null {
+  if (b.holder !== "planner") return null;
+  const billedTo = lead ? [str(lead.name), str(lead.company)].filter(Boolean).join(", ") : "No Lead planner yet";
+  return { billedTo, eventFor: b.host?.name ?? "" };
+}
+
+/** Shown on the Booking card when the Lead is no longer the booking contact GHL knows. */
+export const LEAD_MOVED_WARNING = "Payment reminders in GHL still go to the original booking contact. Update the contact in GHL.";
+
+/**
+ * A GHL payload carries the agreement, invoice, payment link, and balance
+ * reminders to its contact: that contact is the booking holder, never the
+ * host. A host phone or email that ended up in a payload (and is not also the
+ * holder's) is replaced with the holder's, or blanked, and the billing fields
+ * say who is billed and who the event is for.
+ */
+export function scrubHostContact(
+  payload: Record<string, unknown>,
+  s: BookingColumns & { email?: string | null; phone?: string | null }
+): Record<string, unknown> {
+  const b = bookingOf(s);
+  const out: Record<string, unknown> = { ...payload, billed_to: b.holder, billed_to_label: b.holder === "planner" ? b.plannerLabel : "", event_for_name: b.host?.name ?? "" };
+  if (!b.host) return out;
+  const digits = (v: unknown) => String(v ?? "").replace(/\D/g, "").slice(-10);
+  const hostEmail = b.host.email.toLowerCase();
+  const hostPhone = digits(b.host.phone);
+  for (const k of ["email", "client_email"]) {
+    if (hostEmail && typeof out[k] === "string" && (out[k] as string).trim().toLowerCase() === hostEmail) out[k] = str(s.email).toLowerCase() === hostEmail ? "" : str(s.email);
+  }
+  for (const k of ["client_phone", "phone"]) {
+    if (hostPhone.length === 10 && digits(out[k]) === hostPhone) out[k] = digits(s.phone) === hostPhone ? "" : str(s.phone);
+  }
+  return out;
 }
 
 // ----- Planning status in plain words -----

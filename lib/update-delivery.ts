@@ -17,6 +17,7 @@ import { deliveryFields, type DeliveryListOptions } from "@/lib/client-list-db";
 import { computeDeadlines } from "@/lib/event-diff";
 import { syncOrderSheet } from "@/lib/order-sheet-db";
 import { isCalendarOnly, CALENDAR_ONLY_SKIP } from "@/lib/calendar-only";
+import { scrubHostContact } from "@/lib/partners/rules";
 
 export interface DeliveryResult {
   id: string;
@@ -69,7 +70,8 @@ export async function postListOnly(session: SessionRow, extra: Record<string, un
   if (isCalendarOnly(session)) return "This event is calendar only, so nothing is sent to the client. Turn on client messages first.";
   const url = process.env.GHL_UPDATE_WEBHOOK_URL;
   if (!url) return "GHL_UPDATE_WEBHOOK_URL is not set in this environment, payload NOT sent";
-  return postWebhook(url, listOnlyPayload(session, extra));
+  // The agreement, invoice, payment link, and balance reminders go to the booking holder, never the host.
+  return postWebhook(url, scrubHostContact(listOnlyPayload(session, extra), session));
 }
 
 async function deliverRow(
@@ -106,7 +108,8 @@ async function deliverRow(
   if (!webhookUrl) {
     errors.push("GHL_UPDATE_WEBHOOK_URL is not set in this environment, payload NOT sent");
   } else {
-    const webhookError = await postWebhook(webhookUrl, buildUpdatePayload(session, row, extra));
+    // GHL's payment link and balance reminders follow this contact: the booking holder, never the host.
+    const webhookError = await postWebhook(webhookUrl, scrubHostContact(buildUpdatePayload(session, row, extra), session));
     webhookSent = webhookError === null;
     if (webhookError) errors.push(webhookError);
   }

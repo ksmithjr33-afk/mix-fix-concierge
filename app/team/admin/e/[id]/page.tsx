@@ -77,6 +77,9 @@ import { venuePhotosFor } from "@/lib/team/venue-photos-db";
 import VenuePhotos from "../../../e/[id]/venue-photos";
 import Receipts from "../../../e/[id]/receipts";
 import { adminReceiptsView, pendingReceiptCount } from "@/lib/team/receipts-db";
+import SurpriseBanner from "../../../surprise-banner";
+import { surpriseBannerText } from "@/lib/partners/surprise-banner";
+import { billingFor } from "@/lib/partners/client-view";
 
 export const dynamic = "force-dynamic";
 
@@ -238,6 +241,8 @@ async function AdminEventPage({
       : null,
   ]);
   const repeat = repeatLabel(eventNumber);
+  // Business tab: on a planner held event, the Lead is billed and the host is who it is for.
+  const billing = on("business") && business ? await billingFor(session as EventSession).catch(() => null) : null;
   if (tab === "chat") await markThreadRead(id, me.id);
   const v = { ...view, drinks: withDrinkEdits(view.drinks, supplies.recipes) };
   const addedBy = (session as { created_by?: string | null; created_by_name?: string | null }).created_by === "admin" ? (session as { created_by_name?: string | null }).created_by_name || "an admin" : null;
@@ -270,7 +275,11 @@ async function AdminEventPage({
   const guestFlag = guestCountFlag(session);
   const sheetFlags = sheet.sheet.sections.flatMap((s) => s.lines).filter((l) => l.conflict || l.gone).length;
 
+  // A surprise event: at the top of every tab (Day of included), first name only.
+  const surprise = surpriseBannerText(session, now);
   const header = (
+    <>
+    {surprise && <div className="mb-2"><SurpriseBanner text={surprise} /></div>}
     <div className="px-1 flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
       <div className="min-w-0">
         <h1 className="font-heading text-2xl font-bold text-[#2C2420] break-words">{adminEventTitle(titled)}</h1>
@@ -286,6 +295,7 @@ async function AdminEventPage({
         Bartender view of this event
       </Link>
     </div>
+    </>
   );
 
   const panels: Record<ManagerTab, () => React.ReactNode> = {
@@ -455,7 +465,7 @@ async function AdminEventPage({
       receipts ? (
         <Receipts sessionId={id} mode="admin" initial={receipts.receipts} ready={receipts.ready} canApprove={receipts.canApprove} people={receipts.people} timeZone={v.timeZone} />
       ) : null,
-    business: () => (business ? <BusinessTab view={business} /> : null),
+    business: () => (business ? <BusinessTab view={business} billing={billing} /> : null),
     chat: () => <ManagerChat sessionId={id} initial={messages} unread={chatUnread} timeZone={v.timeZone} muted={muted.has(id)} isAdmin gifSearch={giphyEnabled()} />,
   };
 

@@ -21,8 +21,8 @@ import { AGREEMENT_BUCKET, AGREEMENT_LINK_SECONDS, type AgreementRow } from "@/l
 import { hideMoney, type TaggedMessage } from "@/lib/partners/chat";
 import { UPDATE_OPENER } from "@/lib/update-mode-shared";
 import { approvalsFor, type ApprovalRow } from "@/lib/partners/approvals";
-import { bookingOf, eventForName, holdsBooking, moneyAccess, planningStatus, type EventViewer, type MoneyAccess, type PlanningStatus } from "@/lib/partners/rules";
-import { clientPhone, eventsFor, plannersOn, type EventAccess } from "@/lib/partners/db";
+import { billingLines, bookingOf, eventForName, holdsBooking, moneyAccess, planningStatus, type EventViewer, type MoneyAccess, type PlanningStatus } from "@/lib/partners/rules";
+import { clientPhone, eventsFor, plannersOn, surpriseOn, type EventAccess } from "@/lib/partners/db";
 import type { Principal } from "@/lib/partners/auth";
 
 const str = (v: unknown) => (typeof v === "string" ? v.replace(/\s+/g, " ").trim() : typeof v === "number" ? String(v) : "");
@@ -117,6 +117,8 @@ export interface PartnerEventView {
   switches: { others: boolean; host: boolean; planner: boolean };
   approvals: { id: string; summary: string; priceText: string; askedBy: string; status: ApprovalRow["status"]; createdAt: string }[];
   hostOnEvent: boolean;
+  billing: { billedTo: string; eventFor: string } | null; // planner held: the Lead is billed, the host is who it is for
+  surprise: boolean; // planners see the "Surprise event" label
 }
 
 function stillNeeded(ed: Record<string, unknown>, submitted: boolean, drinkCount: number, needsDrinks: boolean): string[] {
@@ -227,6 +229,8 @@ export async function partnerEventView(a: EventAccess, now: Date = new Date()): 
     },
     approvals: approvals.map((x) => ({ id: x.id, summary: x.summary, priceText: x.price_text, askedBy: x.asked_by_name, status: x.status, createdAt: x.created_at })),
     hostOnEvent: !!host,
+    billing: a.viewer.kind === "planner" ? billingLines(a.booking, planners.find((p) => p.isLead)?.partner ?? null) : null,
+    surprise: a.viewer.kind === "planner" && surpriseOn(s, now),
   };
 }
 
