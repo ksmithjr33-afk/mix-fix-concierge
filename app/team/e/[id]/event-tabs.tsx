@@ -26,6 +26,8 @@ import type { MyPickup } from "@/lib/team/menu-pickup-db";
 import type { StaffMenuSection } from "@/lib/team/approved-menu-db";
 import MenuSection from "./menu-section";
 import { card, Details } from "./event-details";
+import VenuePhotos from "./venue-photos";
+import type { VenuePhotoView } from "@/lib/team/venue-photos-db";
 import PackageCard from "../../package-card";
 import PayEstimateCard from "../../pay-estimate-card";
 import { money, type StaffEstimate } from "@/lib/team/pay";
@@ -523,7 +525,9 @@ export default function EventTabs({
   menuSection = null,
   ice = null,
   runningLow = null,
+  venuePhotos = null,
 }: {
+  venuePhotos?: VenuePhotoView | null; // Bar and venue photos on the Location card, read only, for staff on the event
   runningLow?: { items: string[] } | null; // the Running low button, from setup through the end of breakdown
   ice?: IceView | null; // the ice pickup card on the Details tab, for people on the event
   menuSection?: StaffMenuSection | null; // the menu on the Details tab, for staff on the event
@@ -632,7 +636,7 @@ export default function EventTabs({
       <div hidden={tab !== "details"} className="space-y-4">
         {ice && <IcePickupCard initial={ice} />}
         {menuSection && <MenuSection menu={menuSection} />}
-        <Details v={view} />
+        <Details v={view} locationExtra={venuePhotos ? <VenuePhotos sessionId={view.sessionId} initial={venuePhotos} timeZone={view.timeZone} /> : null} />
         {pay && <PayEstimateCard estimate={pay} />}
         <PackageCard packageName={view.package} />
         {giveUp && !giveUp.handoff && giveUp.canStart && (

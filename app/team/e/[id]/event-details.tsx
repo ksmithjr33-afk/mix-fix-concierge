@@ -29,7 +29,8 @@ export function telHref(phone: string): string {
   return `tel:${phone.replace(/[^\d+]/g, "")}`;
 }
 
-export function Details({ v }: { v: StaffEventView }) {
+/** locationExtra: the Bar and venue photos row, under Bar details, for people who may see it. */
+export function Details({ v, locationExtra }: { v: StaffEventView; locationExtra?: React.ReactNode }) {
   return (
     <div className="space-y-3">
       <WhatChanged v={v} />
@@ -63,6 +64,7 @@ export function Details({ v }: { v: StaffEventView }) {
         <Row label="Bar on site" value={v.barOnSite} />
         <Row label="Bar floor access" value={v.barFloorAccess} />
         <Row label="Bar details" value={v.barDetails} />
+        {locationExtra}
         <Row label="Parking" value={v.parking} />
       </Section>
 

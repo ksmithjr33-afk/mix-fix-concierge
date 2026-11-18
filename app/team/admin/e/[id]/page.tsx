@@ -70,6 +70,8 @@ import PayoutCard from "../../payout-card";
 import { timePageHref } from "@/lib/team/clock-card";
 import { rateTeamCard, tierBadges } from "@/lib/team/scorecard-db";
 import RateTeamCard from "./rate-team-card";
+import { venuePhotosFor } from "@/lib/team/venue-photos-db";
+import VenuePhotos from "../../../e/[id]/venue-photos";
 
 export const dynamic = "force-dynamic";
 
@@ -168,7 +170,7 @@ async function AdminEventPage({
           {} as Record<string, string>,
         ];
   // Details, Client list and Chat only.
-  const [links, autoSend, listEntries, messages, muted, history, eventNumber, agreements, clockRows, payout, business, supplyCosts, lowStock, rateCard] = await Promise.all([
+  const [links, autoSend, listEntries, messages, muted, history, eventNumber, agreements, clockRows, payout, business, supplyCosts, lowStock, rateCard, venue] = await Promise.all([
     on("details") ? clientLinks(session, me) : null, // admins only: null for anyone else
     on("client") ? autoSendOn() : false,
     on("client") ? listLog(id) : [],
@@ -206,6 +208,13 @@ async function AdminEventPage({
     on("dayof") ? listReports(me, { open: true, sessionId: id }) : [],
     // Rate the team: admins and managers, after the event ends, never the viewer.
     on("dayof") ? rateTeamCard(me, session, people.map((p) => ({ staffId: p.staffId, name: p.name, status: p.status }))).catch(() => null) : null,
+    // Bar and venue photos on the Location card. Never blocks the card: before the migration it loads empty.
+    on("details")
+      ? venuePhotosFor(session, me, null).catch((err) => {
+          console.error("[venue photos] could not load:", err);
+          return null;
+        })
+      : null,
   ]);
   const repeat = repeatLabel(eventNumber);
   if (tab === "chat") await markThreadRead(id, me.id);
@@ -273,6 +282,14 @@ async function AdminEventPage({
         day_of_contact_phone: fv("day_of_contact_phone"),
         special_requests: fv("special_requests"),
       };
+      const venuePhotos = venue ? (
+        <VenuePhotos
+          sessionId={id}
+          initial={venue}
+          timeZone={v.timeZone}
+          barSetup={bar.flatMap((e) => e.photos.map((p) => ({ id: p.id, url: p.url, who: e.staffFirstName, at: p.createdAt })))}
+        />
+      ) : null;
       const packages = PACKAGE_CHOICES.includes(editValues.package) || !editValues.package ? PACKAGE_CHOICES : [editValues.package, ...PACKAGE_CHOICES];
       return (
         <>
@@ -315,11 +332,11 @@ async function AdminEventPage({
           {isAdminRole(me.role) && bookingSummary(session) && <BookingSummaryCard summary={bookingSummary(session)!} />}
           {hidden ? (
             // Hidden events are not edited: the cards are read only until it is unhidden.
-            <Details v={v} />
+            <Details v={v} locationExtra={venuePhotos} />
           ) : (
             <div className="space-y-3">
               <WhatChanged v={v} />
-              <EditableDetails sessionId={id} version={session.version} cards={editCards(v, ed, session)} packages={packages} />
+              <EditableDetails sessionId={id} version={session.version} cards={editCards(v, ed, session)} packages={packages} locationExtra={venuePhotos} />
               <DrinkSections v={v} />
               {v.lastUpdated && <p className="text-xs text-[#A39585] px-1">Last updated {v.lastUpdated}</p>}
             </div>

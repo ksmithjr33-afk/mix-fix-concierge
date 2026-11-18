@@ -52,7 +52,7 @@ export interface BarReadyEntry {
 
 const COLUMNS = "*"; // removed_at is read once the column exists
 
-async function signedUrls(paths: string[]): Promise<Map<string, string>> {
+export async function signedUrls(paths: string[]): Promise<Map<string, string>> {
   if (paths.length === 0) return new Map();
   const { data, error } = await supabase.storage.from(BAR_PHOTO_BUCKET).createSignedUrls(paths, SIGNED_URL_SECONDS);
   if (error || !data) {

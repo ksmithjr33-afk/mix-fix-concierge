@@ -10,7 +10,7 @@
 // a confirm first; a change the engine cannot price can be left price pending.
 // Admins and managers only: the page runs requireAdmin, and so does the route.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { EditCardData, EditRow } from "@/lib/team/edit-cards";
 import type { AdminEditField } from "@/lib/team/admin-edit";
@@ -81,7 +81,19 @@ function FieldInput({ row, value, onChange, packages }: { row: EditRow; value: s
   }
 }
 
-export default function EditableDetails({ sessionId, version, cards, packages }: { sessionId: string; version: number; cards: EditCardData[]; packages: string[] }) {
+export default function EditableDetails({
+  sessionId,
+  version,
+  cards,
+  packages,
+  locationExtra,
+}: {
+  sessionId: string;
+  version: number;
+  cards: EditCardData[];
+  packages: string[];
+  locationExtra?: React.ReactNode; // Bar and venue photos, under Bar details on the Location card
+}) {
   const router = useRouter();
   const [ver, setVer] = useState(version);
   const [open, setOpen] = useState<AdminEditField | null>(null);
@@ -227,7 +239,8 @@ export default function EditableDetails({ sessionId, version, cards, packages }:
               const isOpen = !!r.field && r.field === open;
               if (!r.field && !r.display) return null;
               return (
-                <div key={r.field ?? `${r.label}-${i}`} className="py-1.5 border-b border-[#DDD5CC] last:border-0">
+                <Fragment key={r.field ?? `${r.label}-${i}`}>
+                <div className="py-1.5 border-b border-[#DDD5CC] last:border-0">
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0 flex-1 py-1">
                       <dt className="text-xs text-[#A39585] uppercase tracking-wide mb-0.5">{r.label}</dt>
@@ -298,6 +311,8 @@ export default function EditableDetails({ sessionId, version, cards, packages }:
                     </dd>
                   )}
                 </div>
+                {r.field === "bar_details" && locationExtra}
+                </Fragment>
               );
             })}
           </dl>

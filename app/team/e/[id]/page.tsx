@@ -24,6 +24,7 @@ import EventTabs, { type Tab } from "./event-tabs";
 import { isAdminRole } from "@/lib/team/roles";
 import { itemChoices, lowStockOpen } from "@/lib/team/low-stock";
 import { allSupplies } from "@/lib/team/supplies";
+import { venuePhotosFor } from "@/lib/team/venue-photos-db";
 
 export const dynamic = "force-dynamic";
 
@@ -72,6 +73,15 @@ async function TeamEventPage({
   const ed = eventData(access.session);
   // What depends on this person's assignment starts as soon as it is read.
   const assignmentP = assignmentRef(id, staff.id);
+  // Bar and venue photos, read only here (admins manage them on the manager view):
+  // staff on the event who have not declined, null for anyone else.
+  const venueP = assignmentP
+    .then((a) => venuePhotosFor(access.session, staff, a))
+    .then((v) => (v ? { ...v, canManage: false, hidden: [], keptBarReports: [] } : null))
+    .catch((err) => {
+      console.error("[venue photos] could not load:", err);
+      return null;
+    });
   const [data, entries, assignment, messages, unread, closeout, menuPickup, menuSection, punches, pay, [handoff, teammates], ice] = await Promise.all([
     eventPageData(access.session, staff),
     barReadyEntries(id, staff),
@@ -88,6 +98,7 @@ async function TeamEventPage({
     // The ice pickup card: everyone on the event sees who is picking up and each status.
     staffIceView(access.session, staff),
   ]);
+  const venuePhotos = await venueP;
   if (chatTab) await markThreadRead(id, staff.id);
   const accepted = assignment?.status === "accepted";
   const renderedAt = serverNow();
@@ -145,6 +156,7 @@ async function TeamEventPage({
         menuSection={menuSection}
         ice={ice}
         runningLow={runningLow}
+        venuePhotos={venuePhotos}
       />
     </>
   );
