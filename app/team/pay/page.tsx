@@ -2,6 +2,7 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import { requireStaff } from "@/lib/team/auth";
 import { myPayRows } from "@/lib/team/pay-db";
+import { myPaidDates } from "@/lib/team/payroll-db";
 import { hoursText, money, payTotals, rateText, PAY_LABEL, PAY_NOTE } from "@/lib/team/pay";
 import { todayFor } from "@/lib/team/availability-db";
 import { shortDate } from "@/lib/team/time";
@@ -30,6 +31,8 @@ export default async function MyPayPage({ searchParams }: { searchParams: Promis
   const month = typeof m === "string" && /^\d{4}-(0[1-9]|1[0-2])$/.test(m) ? m : today.slice(0, 7);
   const b = monthBounds(month);
   const { rate, rows } = await myPayRows(staff.id, b.from, b.to);
+  // Only the signed in person's own paid dates: no amounts, notes, or anyone else.
+  const paidDates = await myPaidDates(staff.id, rows.map((r) => r.sessionId));
   const totals = payTotals(rows);
   const monthTotal = totals.months.find((t) => t.month === month)?.cents ?? 0;
   return (
@@ -88,6 +91,9 @@ export default async function MyPayPage({ searchParams }: { searchParams: Promis
                       <p className="text-xs text-[#6B5D52]">
                         Scheduled {r.scheduledMinutes === null ? "--" : `${hoursText(r.scheduledMinutes)} h`} · Approved {r.approvedMinutes === null ? "not yet" : `${hoursText(r.approvedMinutes)} h`}
                         {r.fromApproved ? " · from approved hours" : " · from scheduled hours"}
+                      </p>
+                      <p className={`text-xs font-medium ${paidDates.has(r.sessionId) ? "text-[#55684A]" : "text-[#9A7049]"}`}>
+                        {paidDates.has(r.sessionId) ? `Paid ${shortDate(paidDates.get(r.sessionId)!)}` : "Not paid yet"}
                       </p>
                     </li>
                   ))}
