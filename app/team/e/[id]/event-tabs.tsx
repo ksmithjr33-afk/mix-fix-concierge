@@ -29,6 +29,7 @@ import { card, Details } from "./event-details";
 import PackageCard from "../../package-card";
 import PayEstimateCard from "../../pay-estimate-card";
 import { money, type StaffEstimate } from "@/lib/team/pay";
+import RunningLowButton from "../../running-low";
 
 export { Details };
 
@@ -521,7 +522,9 @@ export default function EventTabs({
   menuPickup = null,
   menuSection = null,
   ice = null,
+  runningLow = null,
 }: {
+  runningLow?: { items: string[] } | null; // the Running low button, from setup through the end of breakdown
   ice?: IceView | null; // the ice pickup card on the Details tab, for people on the event
   menuSection?: StaffMenuSection | null; // the menu on the Details tab, for staff on the event
   chat: ChatProps;
@@ -595,6 +598,8 @@ export default function EventTabs({
       )}
 
       <PrepStrip tools={!!toolsAt} supplies={!!suppliesAt} onOpen={setTab} />
+
+      {runningLow && <RunningLowButton sessionId={view.sessionId} items={runningLow.items} />}
 
       {photoReminder && tab !== "checklist" && (
         <section className="bg-[#FFF8EC] rounded-2xl border border-[#E3C9A0] px-4 py-3 flex flex-wrap items-center justify-between gap-2">

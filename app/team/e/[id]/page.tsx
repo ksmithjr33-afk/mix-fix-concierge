@@ -22,6 +22,8 @@ import { giphyEnabled } from "@/lib/team/media";
 import TeamHeader from "../../team-header";
 import EventTabs, { type Tab } from "./event-tabs";
 import { isAdminRole } from "@/lib/team/roles";
+import { itemChoices, lowStockOpen } from "@/lib/team/low-stock";
+import { allSupplies } from "@/lib/team/supplies";
 
 export const dynamic = "force-dynamic";
 
@@ -93,6 +95,11 @@ async function TeamEventPage({
   const photoCount = entries.reduce((n, e) => n + e.photos.length, 0);
   const onEvent = isAdminRole(staff.role) || (!!assignment && assignment.status !== "declined");
   const opensAt = barReadyOpensAt(ed);
+  // Running low: from setup through the end of breakdown, for people on the event.
+  const runningLow =
+    onEvent && lowStockOpen(ed, new Date(renderedAt))
+      ? { items: itemChoices(data.checklist.flatMap((g) => g.sections.flatMap((s) => s.lines.filter((l) => !l.info).map((l) => l.label))), allSupplies(data.shopping).map((i) => i.item)) }
+      : null;
   return (
     <>
       <TeamHeader signedIn admin={isAdminRole(staff.role)} back={back} />
@@ -137,6 +144,7 @@ async function TeamEventPage({
         menuPickup={menuPickup}
         menuSection={menuSection}
         ice={ice}
+        runningLow={runningLow}
       />
     </>
   );

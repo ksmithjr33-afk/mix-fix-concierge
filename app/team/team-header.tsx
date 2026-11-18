@@ -5,6 +5,8 @@ import { firstName } from "@/lib/team/event-view";
 import { headerLinks } from "@/lib/team/header-nav";
 import HeaderNav from "./header-nav";
 import { isAdminRole, isFullAdmin } from "@/lib/team/roles";
+import { openReportCount } from "@/lib/team/low-stock-db";
+import RunningLowAlert from "./running-low-alert";
 
 /**
  * Header shared by the team pages: logo, admin links for admins, the
@@ -31,7 +33,9 @@ export default async function TeamHeader({
   const showAdmin = admin && !bartenderView && isAdminRole(viewed?.role);
   const canSwitch = isAdminRole(real?.role) && !bartenderView;
   const canSwitchBack = isAdminRole(real?.role) && bartenderView;
-  const [unread, training] = viewed ? await Promise.all([unreadAnnouncements(viewed.id).catch(() => 0), trainingUnreadFor(viewed.id).catch(() => 0)]) : [0, 0];
+  const [unread, training, lowOpen] = viewed
+    ? await Promise.all([unreadAnnouncements(viewed.id).catch(() => 0), trainingUnreadFor(viewed.id).catch(() => 0), showAdmin ? openReportCount(viewed).catch(() => 0) : 0])
+    : [0, 0, 0];
   // Business: admins only, never managers.
   const showBusiness = showAdmin && isFullAdmin(viewed?.role);
   const links = headerLinks(showAdmin, { unreadNews: unread, training }, showBusiness);
@@ -59,7 +63,8 @@ export default async function TeamHeader({
         canSwitch={canSwitch}
         canSwitchBack={canSwitchBack}
         showChat={!!viewed}
-        // alert={<RunningLowAlert />} goes here next: the open slot beside the chat icon.
+        // Running low, admins and managers: the open slot beside the chat icon.
+        alert={showAdmin ? <RunningLowAlert open={lowOpen} /> : undefined}
       />
     </>
   );

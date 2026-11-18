@@ -58,6 +58,8 @@ import { repeatLabel } from "@/lib/client-history";
 import ClientHistoryCard from "./client-history-card";
 import BookingSummaryCard from "./booking-summary-card";
 import { bookingSummary } from "@/lib/booking-summary";
+import { listReports } from "@/lib/team/low-stock-db";
+import LowStockList from "../../running-low/report-list";
 import { isAdminRole } from "@/lib/team/roles";
 import PriceNeededCard from "./price-needed-card";
 import { guestCountFlag } from "@/lib/intake-guests";
@@ -161,7 +163,7 @@ async function AdminEventPage({
           new Set<string>() as Awaited<ReturnType<typeof unavailableOn>>,
         ];
   // Details, Client list and Chat only.
-  const [links, autoSend, listEntries, messages, muted, history, eventNumber, agreements, clockRows, payout, business, supplyCosts] = await Promise.all([
+  const [links, autoSend, listEntries, messages, muted, history, eventNumber, agreements, clockRows, payout, business, supplyCosts, lowStock] = await Promise.all([
     on("details") ? clientLinks(session, me) : null, // admins only: null for anyone else
     on("client") ? autoSendOn() : false,
     on("client") ? listLog(id) : [],
@@ -195,6 +197,8 @@ async function AdminEventPage({
     on("business") ? eventBusinessFor(me, session) : null,
     // Costs on the Shopping list: admins only (null for managers).
     on("order") ? sheetP.then((s) => supplyCostFor(me, session, s)).then((c) => (c && !c.catalogEmpty ? c : null)) : null,
+    // Running low: the open reports for this event, at the top of Day of.
+    on("dayof") ? listReports(me, { open: true, sessionId: id }) : [],
   ]);
   const repeat = repeatLabel(eventNumber);
   if (tab === "chat") await markThreadRead(id, me.id);
@@ -380,6 +384,12 @@ async function AdminEventPage({
     ),
     dayof: () => (
       <>
+        {lowStock.length > 0 && (
+          <section className="space-y-2">
+            <h2 className="px-1 font-heading text-base font-bold text-[#A0412D]">Running low</h2>
+            <LowStockList initial={lowStock} showEvent={false} />
+          </section>
+        )}
         <section className="space-y-2">
           <h2 className="px-1 font-heading text-base font-bold text-[#2C2420]">Bar setup photos</h2>
           <BarReadyCard sessionId={id} canSubmit={false} isAdmin entries={bar} timeZone={v.timeZone} reminder={accepted.length > 0 && barPhotoMissing(edNow, now, photoCount) ? "Bar service has started and no bar setup photo is in yet." : undefined} />

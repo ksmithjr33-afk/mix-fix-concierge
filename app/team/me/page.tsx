@@ -2,6 +2,10 @@ import Link from "next/link";
 import { requireStaff } from "@/lib/team/auth";
 import TeamHeader from "../team-header";
 import { isAdminRole } from "@/lib/team/roles";
+import { kitItemChoices, listReports } from "@/lib/team/low-stock-db";
+import { LEVEL_LABEL, STATUS_LABEL } from "@/lib/team/low-stock";
+import { timeLabel } from "@/lib/team/clock-label";
+import RunningLowButton from "../running-low";
 
 export const dynamic = "force-dynamic";
 
@@ -17,6 +21,8 @@ const PAGES: { href: string; title: string; detail: string }[] = [
 
 export default async function MePage() {
   const staff = await requireStaff("/team/me");
+  // Only this person's own reports, whatever their role: the admin list is on the admin side.
+  const mine = (await listReports({ ...staff, role: "bartender" }, { limit: 10 })).filter((r) => r.staffId === staff.id);
   return (
     <>
       <TeamHeader signedIn admin={isAdminRole(staff.role)} back={{ href: "/team/events", label: "Events" }} />
@@ -35,6 +41,26 @@ export default async function MePage() {
             </li>
           ))}
         </ul>
+        <section className="bg-[#F5F0EB] rounded-2xl border border-[#DDD5CC] px-4 py-3 space-y-3">
+          <div>
+            <h2 className="font-heading text-base font-bold text-[#2C2420]">Running low on your kit?</h2>
+            <p className="text-sm text-[#6B5D52]">Your own tools, or stock for a future event. At an event today, use the Running low button on the event instead.</p>
+          </div>
+          <RunningLowButton sessionId={null} items={kitItemChoices()} kit />
+          {mine.length > 0 && (
+            <ul className="divide-y divide-[#DDD5CC]">
+              {mine.map((r) => (
+                <li key={r.id} className="py-2 text-[15px] text-[#2C2420]">
+                  <span className="font-medium">{r.item}</span>, {LEVEL_LABEL[r.level].toLowerCase()}
+                  {r.eventTitle && <span className="text-[#6B5D52]"> · {r.eventTitle}</span>}
+                  <span className="block text-sm text-[#6B5D52]">
+                    {timeLabel(r.createdAt)} · {r.status === "on_it" ? `${r.takenBy} is on it` : STATUS_LABEL[r.status]}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
       </main>
     </>
   );
