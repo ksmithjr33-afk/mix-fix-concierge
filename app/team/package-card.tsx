@@ -1,28 +1,14 @@
 import Link from "next/link";
-import { ALL_PACKAGES, LEGACY_LABEL, LEGACY_NOTE, NO_GUIDE, packageGuide, trainingHref } from "@/lib/packages-info";
+import { LEGACY_LABEL, LEGACY_NOTE, MAX_PACKAGE_BULLETS, NO_GUIDE, packageGuide, trainingHref } from "@/lib/packages-info";
 
 const card = "rounded-2xl border border-[#DDD5CC] bg-[#F5F0EB] px-4 py-3 sm:px-5 sm:py-4";
 
-function List({ title, items }: { title: string; items: string[] }) {
-  if (items.length === 0) return null;
-  return (
-    <div>
-      <h3 className="text-xs text-[#A39585] uppercase tracking-wide">{title}</h3>
-      <ul className="mt-0.5 space-y-0.5">
-        {items.map((i) => (
-          <li key={i} className="text-[15px] text-[#2C2420]">
-            {i}
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
 /**
  * The Package card on the event's Details tab, manager and bartender views,
- * built from lib/packages-info.ts. No prices: the guide has none, and the
- * manager view's price lives in its own header. A legacy package says so and
+ * built from lib/packages-info.ts: one short line, at most five bullets, and
+ * what the client provides; the full guide is on the Training page. No
+ * prices: the guide has none, and the manager view's price lives in its own
+ * header. A legacy package says so and
  * asks staff to confirm with a manager; an unknown one shows its name and
  * "No package guide yet".
  */
@@ -44,11 +30,15 @@ export default function PackageCard({ packageName }: { packageName: string }) {
         {g.note && <span className="text-sm text-[#6B5D52]">{g.note}</span>}
       </div>
       {g.legacy && <p className="text-[15px] font-medium text-[#8A4B12]">{LEGACY_NOTE}</p>}
-      <p className="text-[15px] text-[#2C2420]">{g.summary}</p>
-      <List title="We bring" items={g.weBring} />
-      <List title="Client provides" items={g.clientProvides} />
-      <List title="Not included" items={g.notIncluded} />
-      <List title="Every package" items={ALL_PACKAGES} />
+      <p className="text-[15px] text-[#2C2420]">{g.short.line}</p>
+      {g.short.bullets.length > 0 && (
+        <ul className="list-disc pl-5 space-y-0.5 text-[15px] text-[#2C2420]">
+          {g.short.bullets.slice(0, MAX_PACKAGE_BULLETS).map((b) => (
+            <li key={b}>{b}</li>
+          ))}
+        </ul>
+      )}
+      {g.short.provides && <p className="text-[15px] text-[#6B5D52]">{g.short.provides}</p>}
       <Link href={trainingHref(g.key)} className="inline-block text-sm font-medium text-[#B5845A] underline">
         Full package guide
       </Link>

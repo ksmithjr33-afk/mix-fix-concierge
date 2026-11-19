@@ -247,4 +247,42 @@ check("Empty puts the default back", (await cldb.setTeamText(admin, cldb.ICE_RUL
 check("The editor is on the Staff page with the other team settings", src("app/team/admin/staff/page.tsx").includes("settingKey={ICE_RULE_KEY}") && src("app/api/team/admin/settings/route.ts").includes("setTeamText(staff, body.key, body.text)"));
 check("The text keeps no client details", noClient(textsTo(taylor)[0]?.message ?? ""));
 
+// ----- Ice machine onsite -----
+reset();
+const notAdmin = await iceDb.setIceMachine("s1", taylor, true, noon);
+check("Ice machine onsite: a bartender cannot set it", !notAdmin.ok && !(await iceDb.iceMachine("s1")));
+const mOn = await iceDb.setIceMachine("s1", admin, true, noon);
+check("Ice machine onsite: an admin sets it, with no one assigned, no store, no bags", mOn.ok && mOn.view.machineOnsite && mOn.view.people.length === 0 && mOn.view.location === "" && src("app/team/admin/e/[id]/ice-pickup-panel.tsx").indexOf("if (view.machineOnsite)") < src("app/team/admin/e/[id]/ice-pickup-panel.tsx").indexOf("Recommended location"));
+check("...the card status says Ice machine onsite, with who set it and when", mOn.ok && mOn.view.machineLine === "Set by Kenneth, Dec 3, 12:00 PM" && src("app/team/ice-pickup-card.tsx").includes("view.machineOnsite\n      ? [ICE_MACHINE_ONSITE") && ice.ICE_MACHINE_ONSITE === "Ice machine onsite");
+check("...logged with who and when", db.event_ice_pickup_log.some((l) => l.session_id === "s1" && l.action === "machine_on" && l.by_name === "Kenneth" && l.created_at === noon.toISOString()));
+const mView = await iceDb.iceView(session(), admin, { now: at(DAY, 10) });
+check("...it never counts as unfinished, even inside 24 hours with nobody assigned", !mView.outstanding);
+check("...and never shows Ice not assigned inside 48 hours", !(await iceDb.iceUnassignedIds([session()], at(DAY, 10))).has("s1") && (await iceDb.iceUnassignedIds([session("s2")], at("2026-12-06", 10))).has("s2"));
+const tryAssign = await iceDb.assignIce("s1", admin, "b1", "", noon);
+check("...no one can be assigned while it is on (so no ice texts)", !tryAssign.ok && texts.length === 0);
+const staffSees = await iceDb.staffIceView(session(), sam, noon);
+check("Staff on the event see Ice machine onsite on their event page", !!staffSees && staffSees.machineOnsite && src("app/team/ice-pickup-card.tsx").includes("if (view.machineOnsite)") && src("app/team/e/[id]/event-tabs.tsx").includes("<IcePickupCard initial={ice} />"));
+check("...the staff note says nobody needs to buy ice, and has no hyphens", /Nobody needs to buy ice/.test(src("app/team/ice-pickup-card.tsx")) && !/[-‐-―]/.test("The venue has an ice machine. Nobody needs to buy ice for this event. Ice machine onsite. Set by Kenneth, Dec 3, 12:00 PM"));
+// Set with someone already assigned (and a text held for quiet hours): nothing goes out.
+reset();
+const night = at("2026-12-03", 22);
+await iceDb.saveIce("s1", admin, { location_name: "Ice House on Elm", total_bags: "8" }, night);
+await iceDb.assignIce("s1", admin, "b1", "", night);
+check("(held for quiet hours before it was set)", !!personRow("b1")!.notify_after && textsTo(taylor).length === 0);
+await iceDb.setIceMachine("s1", admin, true, at("2026-12-03", 23));
+await iceDb.sendIcePickupNotices(at("2026-12-04", 8, 5));
+await iceDb.saveIce("s1", admin, { location_name: "Somewhere else", total_bags: "9" }, at("2026-12-04", 9));
+check("Ice machine onsite: the held text is dropped and no ice texts or reminders go out", textsTo(taylor).length === 0 && !personRow("b1")!.notify_after);
+check("...and it is off the person's home screen", (await iceDb.myIcePickups(taylor, at("2026-12-04", 9))).length === 0);
+await iceDb.markIce("s1", taylor, { location: "Ice House on Elm", bags: "8" }, at(DAY, 14));
+const reimb = await import("../lib/team/reimbursements-db.ts");
+check("...and no ice reimbursement is suggested for it", (await reimb.pickupsDone(["s1"])).get("s1")!.ice.size === 0);
+// Switched back.
+const mOff = await iceDb.setIceMachine("s1", admin, false, at("2026-12-04", 10));
+check("It can be switched back: logged, and the card is the ice pickup again", mOff.ok && !mOff.view.machineOnsite && db.event_ice_pickup_log.some((l) => l.action === "machine_off" && l.by_name === "Kenneth") && !(await iceDb.iceMachine("s1")));
+check("...the pickup counts again once switched back", (await reimb.pickupsDone(["s1"])).get("s1")!.ice.has("b1"));
+check("Setting it twice logs it once", (await iceDb.setIceMachine("s1", admin, false, at("2026-12-04", 11))).ok && db.event_ice_pickup_log.filter((l) => l.action === "machine_off").length === 1);
+check("The latest entry wins", ice.iceMachineFrom([{ action: "machine_on", by_name: "A", created_at: "2026-12-01T00:00:00Z" }, { action: "machine_off", by_name: "B", created_at: "2026-12-02T00:00:00Z" }]) === null && ice.iceMachineFrom([{ action: "machine_off", by_name: "A", created_at: "2026-12-01T00:00:00Z" }, { action: "machine_on", by_name: "B", created_at: "2026-12-02T00:00:00Z" }])?.byName === "B");
+check("The route takes it, admins only", src("app/api/team/ice-pickup/route.ts").includes('action === "machine" ? await setIceMachine(sessionId, staff, body.on)') && src("app/api/team/ice-pickup/route.ts").includes('"machine"]);'));
+
 done("ice pickup");

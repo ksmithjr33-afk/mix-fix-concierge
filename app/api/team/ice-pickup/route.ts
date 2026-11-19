@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getCurrentStaff } from "@/lib/team/auth";
-import { assignIce, iceInstead, markIce, removeIce, saveIce, undoIce } from "@/lib/team/ice-pickup-db";
+import { assignIce, iceInstead, markIce, removeIce, saveIce, setIceMachine, undoIce } from "@/lib/team/ice-pickup-db";
 import { isAdminRole } from "@/lib/team/roles";
 
 // The ice pickup. POST { sessionId, action }:
@@ -8,12 +8,13 @@ import { isAdminRole } from "@/lib/team/roles";
 //   "assign" (admins): staffId, bags (adds the person, or changes their bags)
 //   "remove" (admins): staffId
 //   "undo" (admins): staffId
+//   "machine" (admins): on (true or false), "Ice machine onsite"
 //   "picked_up": location, bags; the person themselves, or an admin with staffId
 //   "instead": location, bags, coveringFor (a staff id still not picked up, or
 //     blank for "Nobody, this is extra"); someone on the event who is not
 //     picking up ice
 // Every rule is checked on the server; Bartender view counts as a bartender.
-const ADMIN_ACTIONS = new Set(["save", "assign", "remove", "undo"]);
+const ADMIN_ACTIONS = new Set(["save", "assign", "remove", "undo", "machine"]);
 
 export async function POST(request: Request) {
   const staff = await getCurrentStaff();
@@ -29,6 +30,7 @@ export async function POST(request: Request) {
       : action === "assign" ? await assignIce(sessionId, staff, body.staffId, body.bags)
       : action === "remove" ? await removeIce(sessionId, staff, body.staffId)
       : action === "undo" ? await undoIce(sessionId, staff, body.staffId)
+      : action === "machine" ? await setIceMachine(sessionId, staff, body.on)
       : action === "picked_up" ? await markIce(sessionId, staff, body)
       : action === "instead" ? await iceInstead(sessionId, staff, body)
       : null;

@@ -84,7 +84,8 @@ import { billingFor } from "@/lib/partners/client-view";
 export const dynamic = "force-dynamic";
 
 // The manager view of one event, admins only: every admin section of the
-// event under tabs (Details, Team, Shopping list, Client list, Day of, Receipts, Chat).
+// event under tabs (Details, Team, Pickups, Shopping list, Client list, Day of,
+// Receipts, Chat, Agreement, and Business for admins).
 // requireAdmin runs first, so bartenders (and admins in Bartender view) never
 // get past it, and every route behind each tab checks admin again on the server.
 async function AdminEventPage({
@@ -123,13 +124,13 @@ async function AdminEventPage({
   const suppliesP = staffSupplies(session); // the bartenders' list, read from the Shopping list
   const peopleP = suppliesP.then((s) => assigneeProgress(session, s.list));
   const listsP = Promise.all([peopleP, suppliesP]).then(([people, s]) => teamLists(session, people.filter((p) => p.status !== "declined").map((p) => p.staffId), s.list));
-  const staffP = on("team") || on("details") ? listStaff() : none<Awaited<ReturnType<typeof listStaff>>>([]);
+  const staffP = on("team") || on("pickups") ? listStaff() : none<Awaited<ReturnType<typeof listStaff>>>([]);
   const panelP = on("team") ? postPanel(session) : null;
   const handoffsP = handoffPanel(session);
   const sheetP = getSheetView(session);
-  // Ice: the Shopping list's ice prefills the total bags. Used before locations only with Details open.
+  // Ice: the Shopping list's ice prefills the total bags. Used before locations only with Pickups open.
   const iceP = sheetP.then((s) => iceView(session, me, { listBags: sheetIceBags(session, s.sheet.sections) }));
-  const placesP = on("details") ? pastPlaces() : none<Awaited<ReturnType<typeof pastPlaces>>>([]);
+  const placesP = on("pickups") ? pastPlaces() : none<Awaited<ReturnType<typeof pastPlaces>>>([]);
   const lookIdsP = panelP
     ? early(Promise.all([staffP, handoffsP, panelP]).then(([staff, handoffs, panel]) => [
         ...staff.filter((s) => s.active).map((s) => s.id),
@@ -195,7 +196,7 @@ async function AdminEventPage({
       : null,
     eventNumberFor(session, me).catch(() => null),
     // Agreements have pricing: admins and managers only (null for anyone else).
-    on("details") ? agreementsFor(id, me, eventSchedule(session.event_data ?? {}).tz).catch(() => null) : null,
+    on("agreement") ? agreementsFor(id, me, eventSchedule(session.event_data ?? {}).tz).catch(() => null) : null,
     // The Time clock card: the same rows the Time page and the payroll CSV build.
     on("details")
       ? eventTimesheetRows(id).catch((err) => {
@@ -341,26 +342,15 @@ async function AdminEventPage({
             timeZone={v.timeZone}
             title={[adminEventTitle(ed), v.date].filter(Boolean).join(", ")}
             timeHref={timePageHref(id, eventSchedule(ed).day)}
+            times={{ arrival: eventSchedule(ed).arrival, end: eventSchedule(ed).end, now }}
           />
           {addedBy && (
             <p className="px-1 text-sm text-[#6B5D52]">Added by {addedBy}</p>
           )}
-          <MenuPickupPanel
-            initial={pickup}
-            people={staff.filter((s) => s.active).map((s) => ({ id: s.id, name: s.name || s.phone, role: s.role }))}
-            menu={menuFile}
-            today={todayIn(eventSchedule(edNow).tz, now)}
-          />
-          <IcePickupPanel
-            initial={ice}
-            people={staff.filter((s) => s.active).map((s) => ({ id: s.id, name: s.name || s.phone, role: s.role }))}
-            places={places}
-          />
           {links && (
             <ClientLinksCard conciergeUrl={links.conciergeUrl} eventUrl={links.eventUrl} openConcierge={links.openConcierge} openEvent={links.openEvent} status={clientStatusLine(links, v.timeZone)} />
           )}
           {booking && <BookingCard sessionId={id} data={booking} />}
-          {agreements && <AgreementCard sessionId={id} initial={agreements} />}
           {history && <ClientHistoryCard history={history} clientKey={history.matchedOn} />}
           {/* Discount and gratuity amounts: admins and managers only. */}
           {isAdminRole(me.role) && bookingSummary(session) && <BookingSummaryCard summary={bookingSummary(session)!} />}
@@ -382,6 +372,18 @@ async function AdminEventPage({
         </>
       );
     },
+    // The Menu pickup and Ice pickup cards, as they were on Details.
+    pickups: () => {
+      const choices = staff.filter((s) => s.active).map((s) => ({ id: s.id, name: s.name || s.phone, role: s.role }));
+      return (
+        <>
+          <MenuPickupPanel initial={pickup} people={choices} menu={menuFile} today={todayIn(eventSchedule(edNow).tz, now)} />
+          <IcePickupPanel initial={ice} people={choices} places={places} />
+        </>
+      );
+    },
+    // Agreements have pricing: admins and managers only (agreementsFor is null for anyone else).
+    agreement: () => (agreements ? <AgreementCard sessionId={id} initial={agreements} /> : <p className="px-1 text-[15px] text-[#6B5D52]">Agreements could not load.</p>),
     team: () => {
       if (!panel) return null;
       if (hidden) return <p className="text-sm text-[#6B5D52] px-1">Market: {marketLabel(panel.market)}. Hidden events cannot be posted or staffed. Unhide it on Details.</p>;
@@ -479,8 +481,9 @@ async function AdminEventPage({
         header={header}
         panel={panels[tab]()}
         counts={{
-          // The menu is not picked up (or nobody is assigned) inside 48 hours, and no approved menu inside 72 hours.
-          details: (pickup.outstanding ? 1 : 0) + (menuFile.missing ? 1 : 0) + (session.price_pending ? 1 : 0) + (guestFlag ? 1 : 0) + (ice.outstanding ? 1 : 0),
+          details: (session.price_pending ? 1 : 0) + (guestFlag ? 1 : 0),
+          // The menu is not picked up (or nobody is assigned) inside 48 hours, no approved menu inside 72 hours, and the ice not done inside 24 hours.
+          pickups: (pickup.outstanding ? 1 : 0) + (menuFile.missing ? 1 : 0) + (ice.outstanding ? 1 : 0),
           team: hidden ? 0 : counts.stillNeeded + handoffs.length,
           order: sheetFlags,
           client: pendingHolds.length,

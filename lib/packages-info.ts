@@ -30,7 +30,17 @@ export interface PackageGuide {
   guestAsks: { ask: string; say: string }[]; // what to say when a guest asks for something not included
   setup: PackageSetup;
   note?: string; // "Weddings only"
+  short: PackageShort; // the event pages (admin, staff, planner): one line, at most five bullets
 }
+
+/** The short package section on the event pages. The full guide stays on the Training page. */
+export interface PackageShort {
+  line: string;
+  bullets: string[]; // at most five
+  provides: string; // what the client provides, one short line ("" when nothing)
+}
+
+export const MAX_PACKAGE_BULLETS = 5;
 
 export const LEGACY_LABEL = "Legacy package";
 export const LEGACY_NOTE = "Confirm details with a manager";
@@ -64,6 +74,11 @@ export const PACKAGE_GUIDES: PackageGuide[] = [
       { ask: "A soda or a mixer", say: "We are serving beer and wine only tonight. The host may have other drinks out for guests." },
     ],
     setup: { bar: "A bar table if needed", menu: "No menu card", barback: "No barback" },
+    short: {
+      line: "Beer and wine service only.",
+      bullets: ["We bring the bartender, ice, and one cooler per bartender, plus a bar table if needed."],
+      provides: "The client provides the beer, wine, and cups.",
+    },
   },
   {
     key: "dive",
@@ -93,6 +108,15 @@ export const PACKAGE_GUIDES: PackageGuide[] = [
       { ask: "A mocktail", say: "We do not have mocktails on tonight's menu. I can get you a soda, a juice or a bottled water." },
     ],
     setup: { bar: "Our bar", menu: "Printed menu only if the client asked for one", barback: "No barback" },
+    short: {
+      line: "The dive bar experience.",
+      bullets: [
+        "A set menu of five classics (margarita, old fashioned, cosmo, lemon drop, Moscow mule).",
+        "Plus just about any classic a guest asks for.",
+        "We bring the bartender, bar tables, tools, mixers, garnishes, cups, napkins, straws, ice, and coolers.",
+      ],
+      provides: "The client provides the alcohol, and beer and wine if they want them served.",
+    },
   },
   {
     key: "full",
@@ -100,7 +124,7 @@ export const PACKAGE_GUIDES: PackageGuide[] = [
     legacy: false,
     summary: "Three specialty cocktails designed for the event, classics on request, and mocktails.",
     weBring: [
-      "The steel bar",
+      "Bar tables",
       "A printed menu card",
       "A full stock of mixers, garnishes, syrups, purees and juices",
       "Sodas and water for kids and guests who do not drink",
@@ -118,7 +142,12 @@ export const PACKAGE_GUIDES: PackageGuide[] = [
     guestAsks: [
       { ask: "A drink that is not on the menu", say: "Happy to make a classic. What do you like? If it is something we do not have the ingredients for tonight, I will suggest the closest thing." },
     ],
-    setup: { bar: "The steel bar", menu: "Printed menu card", barback: "Barback at weddings" },
+    setup: { bar: "Bar tables", menu: "Printed menu card", barback: "Barback at weddings" },
+    short: {
+      line: "Three specialty cocktails designed for the event, just about any classic, and mocktails, sodas, and water for kids and guests who do not drink.",
+      bullets: ["We bring the full stock, bar tables, and a printed menu card.", "Custom cups over 100 guests.", "A barback at weddings."],
+      provides: "The client provides the alcohol.",
+    },
   },
   {
     key: "premium",
@@ -144,6 +173,11 @@ export const PACKAGE_GUIDES: PackageGuide[] = [
       { ask: "A drink that is not on the menu", say: "Happy to make a classic. What do you like? If it is something we do not have the ingredients for tonight, I will suggest the closest thing." },
     ],
     setup: { bar: "The handcrafted wooden bar", menu: "Printed menus on the cocktail tables", barback: "Dedicated barback" },
+    short: {
+      line: "Everything in Full Bar, plus:",
+      bullets: ["The wooden bar", "Decor styled to the theme", "Custom cups and napkins", "Cocktail tables", "A dedicated barback"],
+      provides: "The client provides the alcohol.",
+    },
   },
   {
     key: "big-day",
@@ -165,6 +199,11 @@ export const PACKAGE_GUIDES: PackageGuide[] = [
       { ask: "A drink that is not on the menu", say: "The couple picked these two for tonight, and I can make you a classic too. What do you like?" },
     ],
     setup: { bar: "Our bar", menu: "Confirm with a manager", barback: "Barback through cocktail hour" },
+    short: {
+      line: "Weddings only.",
+      bullets: ["Two specialty cocktails for the couple", "The classics", "Bottled water", "A dedicated barback through cocktail hour"],
+      provides: "The client provides the alcohol, beer, and wine.",
+    },
   },
   {
     key: "essentials",
@@ -177,6 +216,7 @@ export const PACKAGE_GUIDES: PackageGuide[] = [
     service: ["Serve the specialty menu only. No classics."],
     guestAsks: [{ ask: "A classic", say: "Tonight's bar is the specialty menu the host picked. Can I make you one of these?" }],
     setup: { bar: "Two draped tables", menu: "Specialty menu", barback: "Confirm with a manager" },
+    short: { line: "Specialty menu only, no classics, two draped tables.", bullets: [], provides: "The client provides the alcohol." },
   },
   {
     key: "tailored",
@@ -189,6 +229,7 @@ export const PACKAGE_GUIDES: PackageGuide[] = [
     service: ["Serve the specialty menu with what the client bought from the shopping list."],
     guestAsks: [{ ask: "Something the client did not buy", say: "We are working with what the host stocked tonight. Here is what I can make." }],
     setup: { bar: "Bar setup", menu: "Specialty menu", barback: "Confirm with a manager" },
+    short: { line: "Bartender, bar setup, tools, specialty menu and shopping list. No ice from us.", bullets: [], provides: "The client provides everything on the shopping list, and the ice." },
   },
   {
     key: "bartender-only",
@@ -201,6 +242,7 @@ export const PACKAGE_GUIDES: PackageGuide[] = [
     service: ["Make drinks with what the client supplies."],
     guestAsks: [{ ask: "Something the client did not supply", say: "We are working with what the host stocked tonight. Here is what I can make." }],
     setup: { bar: "The client's bar surface", menu: "Confirm with a manager", barback: "No barback" },
+    short: { line: "Just the bartender.", bullets: [], provides: "The client provides everything else." },
   },
 ];
 

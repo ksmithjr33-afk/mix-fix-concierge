@@ -10,7 +10,7 @@ import { buildStaffEventView, firstName, type StaffEventView } from "@/lib/team/
 import { eventData, eventTimeZone } from "@/lib/team/markets";
 import { eventSchedule, formatClock, longDate, todayIn } from "@/lib/team/time";
 import { cityFrom } from "@/lib/team/event-list";
-import { packageGuide } from "@/lib/packages-info";
+import { MAX_PACKAGE_BULLETS, packageGuide } from "@/lib/packages-info";
 import { clientList } from "@/lib/client-list";
 import { currentMenu, clientMenuLink } from "@/lib/team/approved-menu-db";
 import { venuePhotosFor, type VenuePhoto } from "@/lib/team/venue-photos-db";
@@ -97,8 +97,9 @@ export interface PartnerEventView {
   address: string;
   mapsUrl: string | null;
   package: string;
-  packageIncludes: string[]; // what we bring
-  clientProvides: string[];
+  packageLine: string; // the short package section: one line, at most five bullets, what the client provides
+  packageBullets: string[];
+  packageProvides: string;
   guestCount: string;
   drinks: StaffEventView["drinks"];
   setMenu: boolean;
@@ -205,8 +206,9 @@ export async function partnerEventView(a: EventAccess, now: Date = new Date()): 
     address: v.address,
     mapsUrl: v.mapsUrl,
     package: v.package,
-    packageIncludes: guide ? guide.weBring : [],
-    clientProvides: guide ? guide.clientProvides : [],
+    packageLine: guide ? guide.short.line : "",
+    packageBullets: guide ? guide.short.bullets.slice(0, MAX_PACKAGE_BULLETS) : [],
+    packageProvides: guide ? guide.short.provides : "",
     guestCount: v.guestCount,
     drinks: v.drinks,
     setMenu: v.setMenu,

@@ -70,7 +70,7 @@ async function ClientPage({ params }: { params: Promise<{ key: string }> }) {
         <section className="rounded-2xl border border-[#DDD5CC] bg-[#F5F0EB] px-4 py-3 sm:px-5 sm:py-4 space-y-2" aria-label="Agreements">
           <h2 className="font-heading text-lg font-bold text-[#2C2420]">Agreements</h2>
           {agreements.length === 0 ? (
-            <p className="text-[15px] text-[#6B5D52]">No agreements uploaded for this client yet. Upload them on each event&apos;s Details tab.</p>
+            <p className="text-[15px] text-[#6B5D52]">No agreements uploaded for this client yet. Upload them on each event&apos;s Agreement tab.</p>
           ) : (
             <ul className="divide-y divide-[#DDD5CC]">
               {agreements.map((a) => (

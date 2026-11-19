@@ -189,3 +189,29 @@ export function iceText(o: { firstName: string; title: string; date: string; bag
   const rule = o.rule?.trim() ? ` ${o.rule.trim().replace(/([^.!?])$/, "$1.")}` : "";
   return `${lead} ${bagsPhrase(o.bags)}. Where: ${o.location || "ask the office"}.${rule} Mark it picked up here: ${o.link}`;
 }
+
+// ----- Ice machine onsite -----
+//
+// An admin can mark that the venue has an ice machine: nobody is assigned, no
+// store or bags are asked for, it never counts as unfinished, and no ice texts
+// go out. Stored as entries in event_ice_pickup_log ("machine_on" and
+// "machine_off", with who and when), so no new column: the latest entry wins.
+
+export const ICE_MACHINE_ONSITE = "Ice machine onsite";
+export const ICE_MACHINE_ACTIONS = ["machine_on", "machine_off"] as const;
+
+export interface IceMachine {
+  byName: string;
+  at: string; // ISO
+}
+
+/** The latest machine entry decides. Null when it is off (or was never set). */
+export function iceMachineFrom(log: { action: string; by_name: string | null; created_at: string }[]): IceMachine | null {
+  const last = log.filter((l) => (ICE_MACHINE_ACTIONS as readonly string[]).includes(l.action)).reduce<(typeof log)[number] | null>((a, l) => (!a || l.created_at >= a.created_at ? l : a), null);
+  return last?.action === "machine_on" ? { byName: last.by_name || "an admin", at: last.created_at } : null;
+}
+
+/** "Set by Kenny, Dec 4, 3:40 PM". */
+export function iceMachineLine(m: IceMachine | null, tz: string): string {
+  return m ? `Set by ${m.byName}, ${pickupStamp(m.at, tz)}` : "";
+}

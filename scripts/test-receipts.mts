@@ -399,7 +399,7 @@ check("The staff route answers staff with only their own view", staffRoute.inclu
 
 // ----- 13. Tabs and badge -----
 const tabs = await import("../lib/team/manager-tabs.ts");
-check("Admin Receipts tab sits between Day of and Chat", tabs.MANAGER_TABS.map(([k]) => k).join() === "details,team,order,client,dayof,receipts,chat");
+check("Admin Receipts tab sits between Day of and Chat", tabs.MANAGER_TABS.map(([k]) => k).join() === "details,team,pickups,order,client,dayof,receipts,chat,agreement");
 check("Managers get it too", tabs.managerTabsFor("manager").some(([k]) => k === "receipts"));
 check("Badge: receipts waiting on review", (await rdb.pendingReceiptCount("next")) === 2 && (await rdb.pendingReceiptCount("dec")) === 0 && src("app/team/admin/e/[id]/page.tsx").includes("receipts: receiptsWaiting"));
 check("The staff event page has a Receipts tab", src("app/team/e/[id]/event-tabs.tsx").includes('["receipts", RECEIPTS_TAB]') && src("app/team/e/[id]/page.tsx").includes("staffReceiptsView(access.session, staff, a)"));

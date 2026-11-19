@@ -72,6 +72,6 @@ check("The clock status is the first thing on the Details tab", details.indexOf(
 const dayof = page.slice(page.indexOf("    dayof: "), page.indexOf("    chat: "));
 check("The full punch list stays on Day of", dayof.includes("<TimePunches people={people} timeZone={v.timeZone} />") && !details.includes("<TimePunches"));
 const dayOfSrc = src("app/team/admin/e/[id]/day-of.tsx");
-check("Each person on the event gets a line, declined people left off", dayOfSrc.includes("export function ClockStatus") && dayOfSrc.includes("clockPeople(people, rows, timeZone)") && src("lib/team/clock-card.ts").includes('.filter((p) => p.status !== "declined")'));
+check("Each person on the event gets a line, declined people left off", dayOfSrc.includes("export function ClockStatus") && dayOfSrc.includes("clockPeople(people, rows, timeZone, times)") && src("lib/team/clock-card.ts").includes('.filter((p) => p.status !== "declined")'));
 
 done("client links and clock status");

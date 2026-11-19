@@ -39,11 +39,15 @@ import {
   iceOutstanding,
   iceText,
   iceUnassignedFlag,
+  iceMachineFrom,
+  iceMachineLine,
+  ICE_MACHINE_ACTIONS,
   locationText,
   needsText,
   shoppingIceBags,
   type IcePersonRow,
   type IceRow,
+  type IceMachine,
   type IceState,
 } from "@/lib/team/ice-pickup";
 import { isAdminRole } from "@/lib/team/roles";
@@ -79,7 +83,9 @@ export interface IceView {
   state: IceState;
   bagLine: string; // "6 of 12 bags assigned"
   bagWarning: string;
-  outstanding: boolean; // the Details count: inside 24 hours, not complete
+  outstanding: boolean; // the Pickups count: inside 24 hours, not complete (never with an ice machine onsite)
+  machineOnsite: boolean; // "Ice machine onsite": nobody needs to pick up ice
+  machineLine: string; // "Set by Kenny, Dec 4, 3:40 PM"
   canEdit: boolean; // admins
   canInstead: boolean; // on the event and not picking up ice yet
   eventHref: string | null; // for the home screen card
@@ -108,6 +114,29 @@ export async function icePeople(sessionId: string): Promise<IcePersonRow[]> {
   const { data, error } = await supabase.from("event_ice_pickup_people").select("*").eq("session_id", sessionId).order("created_at", { ascending: true });
   if (error || !data) return [];
   return data as IcePersonRow[];
+}
+
+/** Events with an ice machine onsite, by session id, with who set it and when. Empty before the table exists. */
+export async function iceMachines(sessionIds: string[]): Promise<Map<string, IceMachine>> {
+  const ids = [...new Set(sessionIds)];
+  const out = new Map<string, IceMachine>();
+  if (ids.length === 0) return out;
+  const { data, error } = await supabase
+    .from("event_ice_pickup_log")
+    .select("session_id, action, by_name, created_at")
+    .in("session_id", ids)
+    .in("action", [...ICE_MACHINE_ACTIONS]);
+  if (error || !data) return out;
+  const rows = data as { session_id: string; action: string; by_name: string | null; created_at: string }[];
+  for (const id of ids) {
+    const m = iceMachineFrom(rows.filter((r) => r.session_id === id));
+    if (m) out.set(id, m);
+  }
+  return out;
+}
+
+export async function iceMachine(sessionId: string): Promise<IceMachine | null> {
+  return (await iceMachines([sessionId])).get(sessionId) ?? null;
 }
 
 async function person(id: string | null): Promise<Person | null> {
@@ -165,7 +194,7 @@ export async function iceView(
   opts: { now?: Date; listBags?: number | null; eventHref?: string | null } = {}
 ): Promise<IceView> {
   const now = opts.now ?? new Date();
-  const [row, people, rule] = await Promise.all([getIce(session.id), icePeople(session.id), teamText(ICE_RULE_KEY)]);
+  const [row, people, rule, machine] = await Promise.all([getIce(session.id), icePeople(session.id), teamText(ICE_RULE_KEY), iceMachine(session.id)]);
   const listBags = opts.listBags !== undefined ? opts.listBags : row?.total_bags !== null && row?.total_bags !== undefined ? null : await listIceBags(session);
   const ed = eventData(session);
   const tz = eventSchedule(ed).tz;
@@ -199,7 +228,9 @@ export async function iceView(
     state: iceState(people),
     bagLine: summary.line,
     bagWarning: summary.warning,
-    outstanding: iceOutstanding(people, ed, now),
+    outstanding: !machine && iceOutstanding(people, ed, now),
+    machineOnsite: !!machine,
+    machineLine: iceMachineLine(machine, tz),
     canEdit: isAdminRole(viewer.role),
     canInstead: !mine && (await onEvent(session.id, viewer)),
     eventHref: opts.eventHref ?? null,
@@ -262,6 +293,7 @@ async function textPerson(session: SessionRow, p: IcePersonRow, bags: number | n
  */
 async function notifyPeople(session: SessionRow, now: Date, listBags?: number | null): Promise<void> {
   try {
+    if (await iceMachine(session.id)) return; // an ice machine onsite: no ice texts
     const [row, people] = await Promise.all([getIce(session.id), icePeople(session.id)]);
     const total = row?.total_bags ?? (listBags !== undefined ? listBags : await listIceBags(session));
     const location = locationText(row);
@@ -287,6 +319,26 @@ async function adminOnly(sessionId: string, admin: StaffMember): Promise<Result<
   return { ok: true, session };
 }
 
+/**
+ * Admin: "Ice machine onsite" on or off. Logged with who and when (the log is
+ * where it is kept). On: held ice texts are dropped. Off: the people still on
+ * the card get their texts as usual.
+ */
+export async function setIceMachine(sessionId: string, admin: StaffMember, on: unknown, now: Date = new Date()): Promise<Result<{ view: IceView }>> {
+  const a = await adminOnly(sessionId, admin);
+  if (!a.ok) return a;
+  if (typeof on !== "boolean") return { ok: false, error: "Bad request", status: 400 };
+  if (!!(await iceMachine(sessionId)) !== on) {
+    const { error } = await supabase
+      .from("event_ice_pickup_log")
+      .insert({ session_id: sessionId, action: on ? "machine_on" : "machine_off", detail: null, by_id: admin.id, by_name: firstName(admin.name) || admin.name, created_at: now.toISOString() });
+    if (error) return { ok: false, error: "Could not save. Try again.", status: 500 };
+    if (on) await supabase.from("event_ice_pickup_people").update({ notify_after: null }).eq("session_id", sessionId);
+    else await notifyPeople(a.session, now);
+  }
+  return { ok: true, view: await iceView(a.session, admin, { now }) };
+}
+
 /** Admin: the recommended location, address, total bags and notes. */
 export async function saveIce(sessionId: string, admin: StaffMember, raw: Record<string, unknown>, now: Date = new Date()): Promise<Result<{ view: IceView }>> {
   const a = await adminOnly(sessionId, admin);
@@ -306,6 +358,7 @@ export async function saveIce(sessionId: string, admin: StaffMember, raw: Record
 export async function assignIce(sessionId: string, admin: StaffMember, staffId: unknown, rawBags: unknown, now: Date = new Date()): Promise<Result<{ view: IceView }>> {
   const a = await adminOnly(sessionId, admin);
   if (!a.ok) return a;
+  if (await iceMachine(sessionId)) return { ok: false, error: "Ice machine onsite is on. Switch it back to assign someone.", status: 409 };
   const bags = cleanBags(rawBags);
   if (!bags.ok) return { ok: false, error: "Bags must be a whole number.", status: 400 };
   const who = typeof staffId === "string" ? await person(staffId) : null;
@@ -470,6 +523,7 @@ export async function iceUnassignedIds(sessions: SessionRow[], now: Date = new D
   const { data, error } = await supabase.from("event_ice_pickup_people").select("session_id").in("session_id", near.map((s) => s.id));
   if (error) return new Set(); // before the table exists: no flag rather than a wrong one
   const has = new Set(((data as { session_id: string }[]) ?? []).map((r) => r.session_id));
+  for (const id of (await iceMachines(near.map((s) => s.id))).keys()) has.add(id); // an ice machine onsite is never "not assigned"
   return new Set(near.filter((s) => !has.has(s.id)).map((s) => s.id));
 }
 
@@ -489,16 +543,16 @@ export async function myIcePickups(staff: StaffMember, now: Date = new Date()): 
   if (error || !data) return [];
   const open = (data as IcePersonRow[]).filter((r) => !r.picked_up_at);
   if (open.length === 0) return [];
-  const hidden = await hiddenEventIds();
+  const [hidden, machines] = await Promise.all([hiddenEventIds(), iceMachines(open.map((r) => r.session_id))]);
   const out: { view: IceView; day: string }[] = [];
   for (const r of open) {
-    if (hidden.has(r.session_id)) continue;
+    if (hidden.has(r.session_id) || machines.has(r.session_id)) continue;
     const session = await getSubmittedSession(r.session_id);
     if (!session) continue;
     const s = eventSchedule(eventData(session));
     if (!s.day || s.day < todayIn(s.tz, now)) continue;
     const a = isAdminRole(staff.role) ? null : await getAssignment(r.session_id, staff.id);
-    const href = isAdminRole(staff.role) ? `/team/admin/e/${encodeURIComponent(r.session_id)}` : a && a.status !== "declined" ? `/team/e/${encodeURIComponent(r.session_id)}` : null;
+    const href = isAdminRole(staff.role) ? `/team/admin/e/${encodeURIComponent(r.session_id)}?tab=pickups` : a && a.status !== "declined" ? `/team/e/${encodeURIComponent(r.session_id)}` : null;
     out.push({ view: await iceView(session, staff, { now, eventHref: href }), day: s.day });
   }
   return out.sort((a, b) => a.day.localeCompare(b.day)).map((o) => o.view);
@@ -510,13 +564,13 @@ export async function sendIcePickupNotices(now: Date = new Date()): Promise<numb
   if (error || !data) return 0; // before the table exists
   const due = (data as IcePersonRow[]).filter((r) => r.notify_after && !r.picked_up_at && new Date(r.notify_after).getTime() <= now.getTime());
   if (due.length === 0) return 0;
-  const hidden = await hiddenEventIds();
+  const [hidden, machines] = await Promise.all([hiddenEventIds(), iceMachines(due.map((r) => r.session_id))]);
   let sent = 0;
   for (const r of due) {
     // Claim it so two cron runs never both send.
     const { data: claimed } = await supabase.from("event_ice_pickup_people").update({ notify_after: null }).eq("id", r.id).eq("notify_after", r.notify_after).select("id");
     if (((claimed as unknown[]) ?? []).length === 0) continue;
-    if (hidden.has(r.session_id)) continue;
+    if (hidden.has(r.session_id) || machines.has(r.session_id)) continue; // an ice machine onsite: never texted
     const session = await getSubmittedSession(r.session_id);
     if (!session) continue;
     const [row, people] = await Promise.all([getIce(r.session_id), icePeople(r.session_id)]);

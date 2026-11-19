@@ -69,7 +69,7 @@ check("Manage staff for this event is gone", !src("app/team/e/[id]/event-tabs.ts
 check("Admin event lists open the manager view", src("lib/team/my-events.ts").includes("href: `/team/admin/e/${r.id}`") && src("app/team/admin/events/page.tsx").includes("href: `/team/admin/e/${s.id}`"));
 
 // ----- Tabs and their links -----
-check("Seven tabs in order, Receipts between Day of and Chat", tabs.MANAGER_TABS.map(([, l]) => l).join(" | ") === "Details | Team | Shopping list | Client list | Day of | Receipts | Chat");
+check("Nine tabs in order: Pickups after Team, Receipts between Day of and Chat, Agreement last", tabs.MANAGER_TABS.map(([, l]) => l).join(" | ") === "Details | Team | Pickups | Shopping list | Client list | Day of | Receipts | Chat | Agreement");
 check("Tab links", tabs.managerHref("s1") === "/team/admin/e/s1" && tabs.managerHref("s1", "order") === "/team/admin/e/s1?tab=order" && tabs.managerHref("a b", "team") === "/team/admin/e/a%20b?tab=team");
 const page = src("app/team/admin/e/[id]/page.tsx");
 const bar = src("app/team/admin/e/[id]/manager-tabs.tsx");
@@ -156,5 +156,29 @@ const uiFiles = [
 check("No admin facing text says order sheet", uiFiles.every((p) => !/order sheets?\b/i.test(visible(p))), uiFiles.filter((p) => /order sheets?\b/i.test(visible(p))).join(", "));
 check("Near the team's list, the client's list is the Client's list", src("app/team/admin/e/[id]/order/order-sheet.tsx").includes("the Client&apos;s list") && src("app/team/admin/e/[id]/order/order-sheet.tsx").includes('"On the Client\'s list"'));
 check("Routes, tables and the payload field keep their names", src("lib/client-list.ts").includes("/order`") && existsSync(new URL("../app/api/team/admin/order-sheet/route.ts", import.meta.url)) && src("lib/order-sheet-db.ts").includes('from("order_sheet_lines")'));
+
+// ----- Pickups and Agreement tabs, the badge counts, the tab bar -----
+{
+  const page = src("app/team/admin/e/[id]/page.tsx");
+  const between = (from: string, to: string) => page.slice(page.indexOf(from), page.indexOf(to, page.indexOf(from)));
+  const details = between("    details: () => {", "    // The Menu pickup and Ice pickup cards");
+  const pickups = between("    pickups: () => {", "    // Agreements have pricing");
+  const labels = (role: string) => tabs.managerTabsFor(role).map(([, l]) => l);
+  check("Pickups sits right after Team", labels("manager").indexOf("Pickups") === labels("manager").indexOf("Team") + 1);
+  check("Agreement sits right before Business for admins, and last for managers", labels("admin").slice(-2).join() === "Agreement,Business" && labels("manager").at(-1) === "Agreement");
+  check("Admins have ten tabs, managers nine", labels("admin").length === 10 && labels("manager").length === 9);
+  check("Admins and managers can open Pickups and Agreement", ["admin", "manager"].every((r) => tabs.allowedTab(r, "pickups") === "pickups" && tabs.allowedTab(r, "agreement") === "agreement"));
+  check("Staff never see them: the page is admins and managers only, and staff are sent to the bartender view", page.includes("const me = await requireAdmin(") && tabs.eventLanding({ role: "bartender" }, "s1", { tab: "agreement" }) === null);
+  check("The Menu pickup and Ice pickup cards are on Pickups, not Details", pickups.includes("<MenuPickupPanel") && pickups.includes("<IcePickupPanel") && !details.includes("MenuPickupPanel") && !details.includes("IcePickupPanel"));
+  check("The Agreement card is on Agreement, not Details, and its data loads only there", page.includes("agreement: () => (agreements ? <AgreementCard") && !details.includes("AgreementCard") && page.includes('on("agreement") ? agreementsFor(id, me'));
+  check("The pickups badge counts the menu pickup, the approved menu and the ice", page.includes("pickups: (pickup.outstanding ? 1 : 0) + (menuFile.missing ? 1 : 0) + (ice.outstanding ? 1 : 0),"));
+  check("...and Details no longer counts them", page.includes("details: (session.price_pending ? 1 : 0) + (guestFlag ? 1 : 0),") && !/details: [^\n]*(pickup|menuFile|ice)\./.test(page));
+  check("Pickup links go to the Pickups tab, agreement links to the Agreement tab", src("lib/team/menu-pickup-db.ts").includes("?tab=pickups") && src("lib/team/ice-pickup-db.ts").includes("?tab=pickups") && src("lib/team/agreements-db.ts").includes("?tab=agreement"));
+  const bar = src("app/team/admin/e/[id]/manager-tabs.tsx");
+  check("The tab bar is one row that scrolls sideways at every width", bar.includes("overflow-x-auto") && bar.includes('className="flex w-max gap-1.5') && !/grid-cols/.test(bar));
+  check("...every label on one line, with space between labels", bar.includes("shrink-0 whitespace-nowrap px-3.5") && bar.includes("gap-1.5"));
+  check("...and the open tab is scrolled into view on load", bar.includes("ref={tab === key ? activeRef : undefined}") && bar.includes("bar.scrollTo(") && bar.includes("}, [tab]);"));
+  check("Tab labels have no hyphens", labels("admin").every((l) => !/[-‐-―]/.test(l)));
+}
 
 done("manager view");

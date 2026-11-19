@@ -125,7 +125,7 @@ check("1. The Record deposit paid link is gone, Edit deposit is there", !src("ap
 check("4, 5. Renamed: Remaining balance, Balance due date", src("app/team/admin/e/[id]/business-tab.tsx").includes(">Remaining balance<") && src("app/team/admin/e/[id]/business-tab.tsx").includes(">Balance due date<"));
 
 // ----- Tabs: Business is admins only -----
-check("Admins get a Business tab after Chat", tabs.managerTabsFor("admin").map(([, l]) => l).slice(-2).join(",") === "Chat,Business");
+check("Admins get a Business tab last, right after Agreement", tabs.managerTabsFor("admin").map(([, l]) => l).slice(-2).join(",") === "Agreement,Business");
 check("Managers do not", !tabs.managerTabsFor("manager").some(([k]) => k === "business"));
 check("A manager asking for Business gets Details", tabs.allowedTab("manager", "business") === "details" && tabs.allowedTab("admin", "business") === "business");
 

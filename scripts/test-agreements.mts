@@ -92,13 +92,13 @@ check("Nothing on the bartender event page loads agreements", !src("app/team/e/[
 
 // ----- The manager view and the Clients page -----
 const mgr = src("app/team/admin/e/[id]/page.tsx");
-check("The Agreement card is on the manager Details tab", mgr.includes("{agreements && <AgreementCard sessionId={id} initial={agreements} />}") && mgr.includes('on("details") ? agreementsFor(id, me'));
+check("The Agreement card is on the manager Agreement tab", mgr.includes("agreements ? <AgreementCard sessionId={id} initial={agreements} />") && mgr.includes('on("agreement") ? agreementsFor(id, me'));
 const card = src("app/team/admin/e/[id]/agreement-card.tsx");
 check("The card has upload with a label, replace and remove", card.includes("Replace") && card.includes("Yes, remove") && card.includes('placeholder="Label (optional)"'));
 await upload(admin, "s2", pdf, { label: "Anniversary agreement" });
 const all = await agDb.clientAgreements(["s1", "s2"], admin);
 check("A client's Clients page lists agreements across all their events", !!all && all.length === 3 && all.some((a) => a.eventTitle === "Justin Reyes · Anniversary" && a.label === "Anniversary agreement") && all.some((a) => a.eventTitle === "Justin Reyes · Birthday"));
-check("Each entry links to its event", !!all && all.every((a) => a.eventHref === `/team/admin/e/${a.sessionId}`));
+check("Each entry links to its event", !!all && all.every((a) => a.eventHref === `/team/admin/e/${a.sessionId}?tab=agreement`));
 check("The Clients page shows them", src("app/team/admin/clients/[key]/page.tsx").includes("clientAgreements(page.rows.map((r) => r.id), admin)") && src("app/team/admin/clients/[key]/page.tsx").includes(">Agreements</h2>"));
 
 // ----- The migration -----

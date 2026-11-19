@@ -38,7 +38,7 @@ check("The guide has no prices anywhere", !/\$\s?\d/.test(JSON.stringify(pk.PACK
 const g = (k: string) => pk.guideByKey(k)!;
 check("Beer and Wine: beer and wine only, no cocktails, no mixers; client brings beer, wine, cups and napkins", g("beer-wine").notIncluded.includes("Cocktails") && g("beer-wine").notIncluded.includes("Mixers") && ["The beer", "The wine", "Cups", "Napkins"].every((x) => g("beer-wine").clientProvides.includes(x)) && g("beer-wine").weBring.includes("One cooler per bartender"));
 check("Dive Bar: the five, classics on request, no espresso martini, no mocktails or tasting", ["Margarita", "Old Fashioned", "Cosmopolitan", "Lemon Drop", "Moscow Mule"].every((d) => g("dive").summary.includes(d)) && g("dive").notIncluded.some((x) => /Espresso martinis/.test(x)) && g("dive").notIncluded.includes("Mocktails") && g("dive").notIncluded.includes("A menu tasting"));
-check("Full: three specialty cocktails, steel bar, menu card, custom cups over 100, barback at weddings", /Three specialty cocktails/.test(g("full").summary) && g("full").setup.bar === "The steel bar" && g("full").weBring.includes("Custom cups over 100 guests") && g("full").setup.barback === "Barback at weddings");
+check("Full: three specialty cocktails, bar tables, menu card, custom cups over 100, barback at weddings", /Three specialty cocktails/.test(g("full").summary) && g("full").setup.bar === "Bar tables" && g("full").weBring.includes("Custom cups over 100 guests") && g("full").setup.barback === "Barback at weddings");
 check("Premium: the wooden bar, cocktail tables, dedicated barback", g("premium").setup.bar === "The handcrafted wooden bar" && g("premium").weBring.includes("Cocktail tables with printed menus") && g("premium").setup.barback === "Dedicated barback");
 check("The Big Day Bar: weddings only, two specialty cocktails or two mocktails, barback through cocktail hour", g("big-day").note === "Weddings only" && g("big-day").summary.startsWith("Two specialty cocktails or two mocktails") && g("big-day").setup.barback === "Barback through cocktail hour");
 check("Every package: champagne tower, no frozen drinks, ice is for the bar", pk.ALL_PACKAGES.some((l) => /Champagne tower/.test(l)) && pk.ALL_PACKAGES.some((l) => /pina coladas and daiquiris are served on the rocks/i.test(l)) && pk.ALL_PACKAGES.some((l) => /client chills their own beer and wine, except on Beer and Wine/.test(l)));
@@ -132,5 +132,32 @@ check("Legacy packages are their own group at the bottom", entries.indexOf("curr
 check("The route is signed in only and saves for the person themselves", src("app/api/team/training/route.ts").includes("acknowledgeTraining(staff, ackId)") && src("app/api/team/training/route.ts").includes("status: 401"));
 check("The staff list shows Training for everyone", src("app/team/admin/staff/page.tsx").includes("add(s.id, `Training: ${progressLine(onboard.get(s.id) ?? [])}`);"));
 check("Each staff profile shows both sections item by item", src("app/team/admin/staff/[id]/page.tsx").includes('aria-label="Training"') && src("app/team/admin/staff/[id]/page.tsx").includes("TRAINING_SECTIONS.map((s) =>"));
+
+// ----- The short package section (admin, staff and planner event pages) -----
+{
+  const sh = (k: string) => g(k).short;
+  const all = (k: string) => [sh(k).line, ...sh(k).bullets, sh(k).provides].join(" ");
+  check("Beer and Wine: the new wording", sh("beer-wine").line === "Beer and wine service only." && all("beer-wine").includes("We bring the bartender, ice, and one cooler per bartender, plus a bar table if needed.") && sh("beer-wine").provides === "The client provides the beer, wine, and cups.");
+  check("Dive Bar: the new wording", sh("dive").line === "The dive bar experience." && all("dive").includes("A set menu of five classics (margarita, old fashioned, cosmo, lemon drop, Moscow mule)") && all("dive").includes("Plus just about any classic a guest asks for.") && all("dive").includes("We bring the bartender, bar tables, tools, mixers, garnishes, cups, napkins, straws, ice, and coolers."));
+  check("Full Bar: the new wording", sh("full").line === "Three specialty cocktails designed for the event, just about any classic, and mocktails, sodas, and water for kids and guests who do not drink." && sh("full").bullets.join("|") === "We bring the full stock, bar tables, and a printed menu card.|Custom cups over 100 guests.|A barback at weddings.");
+  check("Premium: the new wording, the wooden bar kept", sh("premium").line === "Everything in Full Bar, plus:" && sh("premium").bullets.join("|") === "The wooden bar|Decor styled to the theme|Custom cups and napkins|Cocktail tables|A dedicated barback");
+  check("The Big Day Bar: the new wording", sh("big-day").line === "Weddings only." && sh("big-day").bullets.join("|") === "Two specialty cocktails for the couple|The classics|Bottled water|A dedicated barback through cocktail hour");
+  check("Bartender Only: the new wording", sh("bartender-only").line === "Just the bartender." && sh("bartender-only").bullets.length === 0 && sh("bartender-only").provides === "The client provides everything else.");
+  check("Every package: one short line and at most five short bullets", pk.PACKAGE_GUIDES.every((x) => !!x.short.line && x.short.bullets.length <= pk.MAX_PACKAGE_BULLETS && x.short.bullets.every((b) => b.length <= 110)));
+  check("What the client provides stays its own short line", pk.PACKAGE_GUIDES.every((x) => x.short.provides.startsWith("The client provides")));
+  check("The short wording has no hyphens", pk.PACKAGE_GUIDES.every((x) => !/[-‐-―]/.test([x.short.line, ...x.short.bullets, x.short.provides].join(" "))));
+  const cardNow = src("app/team/package-card.tsx");
+  check("The admin and staff Package card shows only the short section", cardNow.includes("{g.short.line}") && cardNow.includes("g.short.bullets.slice(0, MAX_PACKAGE_BULLETS)") && cardNow.includes("{g.short.provides}") && !cardNow.includes("g.weBring") && !cardNow.includes("ALL_PACKAGES") && !cardNow.includes("notIncluded"));
+  const plannerPage = src("app/partners/e/[key]/page.tsx");
+  check("The planner event page shows the same short section", src("lib/partners/event-page.ts").includes("packageLine: guide ? guide.short.line") && plannerPage.includes("{v.packageLine}") && plannerPage.includes("v.packageBullets.map") && plannerPage.includes("{v.packageProvides}") && !plannerPage.includes("packageIncludes"));
+}
+
+// ----- Bar tables, not steel bar -----
+{
+  const { execSync } = await import("node:child_process");
+  const hits = execSync("grep -rIil 'steel bar' app lib || true", { encoding: "utf8" }).trim();
+  check('No "steel bar" anywhere in app or lib', hits === "", hits);
+  check("Full Bar brings bar tables; the Premium wooden bar stays", g("full").weBring.includes("Bar tables") && g("full").setup.bar === "Bar tables" && g("premium").setup.bar === "The handcrafted wooden bar");
+}
 
 done("training and package");

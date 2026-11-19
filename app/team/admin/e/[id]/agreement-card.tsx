@@ -17,7 +17,7 @@ async function post(body: Record<string, unknown>) {
 const fileError = (f: File) => (!TYPES.includes(f.type) ? "Upload a PDF, PNG or JPG." : f.size > 15 * MB ? "That file is too large. The limit is 15 MB." : "");
 
 /**
- * The Agreement card on the manager view's Details tab, admins and managers
+ * The Agreement card on the manager view's Agreement tab, admins and managers
  * only (it has pricing). The original agreement and any change orders: PDF,
  * PNG or JPG, each with an optional label, who uploaded it and when, and
  * Replace and Remove.

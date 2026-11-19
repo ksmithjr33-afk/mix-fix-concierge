@@ -228,7 +228,7 @@ db.staff_pay = [{ session_id: "e1", staff_id: BARTENDER.id, cents: 18750 }];
 const acc1 = (await pdb.eventAccess(principal, S("e1").partner_key as string))!;
 const view1 = await page.partnerEventView(acc1);
 const viewText = JSON.stringify(view1);
-check("The event page has the client and contact, times, venue, package, guests, drinks and deadlines", view1.eventFor.name === "Justin Reyes" && view1.eventFor.phone === CLIENT_PHONE && view1.serviceTimes === "6:00 PM to 10:00 PM" && view1.arrival === "3:00 PM" && view1.breakdown === "11:00 PM" && view1.package === "Full Bar" && view1.guestCount === "80" && view1.drinks.length === 1 && !!view1.deadlines.lastDrinkChange && view1.packageIncludes.length > 0);
+check("The event page has the client and contact, times, venue, package, guests, drinks and deadlines", view1.eventFor.name === "Justin Reyes" && view1.eventFor.phone === CLIENT_PHONE && view1.serviceTimes === "6:00 PM to 10:00 PM" && view1.arrival === "3:00 PM" && view1.breakdown === "11:00 PM" && view1.package === "Full Bar" && view1.guestCount === "80" && view1.drinks.length === 1 && !!view1.deadlines.lastDrinkChange && view1.packageLine.startsWith("Three specialty cocktails") && view1.packageBullets.length > 0 && view1.packageProvides === "The client provides the alcohol.");
 check("Accepted bartenders by first name only, never phones or last names", view1.bartenders.join() === "Taylor" && !viewText.includes("Brooks") && !viewText.includes(BARTENDER.phone) && !viewText.includes("Kenny"));
 check("A client held event shows a planner no money at all", view1.pricing === null && !viewText.includes("2,400") && !viewText.includes("2400") && !view1.money.approve);
 check("Never staff pay, notes, the team chat, the Scorecard or receipts", !/187\.50|18750|internal_notes|scorecard|receipt|chat_messages/i.test(viewText));
@@ -409,7 +409,9 @@ const before = (db.partners ?? []).length;
 await actions.staffBookingAction(ADMIN as never, S("d1"), { action: "add", name: "Someone Else", phone: "(469) 555 0111" });
 check("A phone that matches an existing partner links that account", (db.partners ?? []).length === before && (db.event_planners ?? []).some((l) => l.session_id === "d1" && db.partners.find((p) => p.id === l.partner_id)?.phone === PLANNER_PHONE));
 // (c) The client adds their planner in update mode, and the Lead adds others on a planner held event.
+// Clear both: from 9 PM to 8 AM the client's text from (b) is held in partner_texts, not sent.
 texts.length = 0;
+db.partner_texts = [];
 const byClient = await actions.clientAddPlanner(S("c1"), { name: "Sam Second", phone: PLANNER2_PHONE });
 const scLink = (db.event_planners ?? []).find((l) => l.session_id === "c1" && db.partners.find((p) => p.id === l.partner_id)?.phone === PLANNER2_PHONE)!;
 check("(c) The client adds a planner: linked as Added by the client, with no remove text to themselves", byClient.ok && scLink.linked_via === "client" && scLink.linked_by_name === "Maria Lopez" && !textTo("+19725550188", "now has access"));

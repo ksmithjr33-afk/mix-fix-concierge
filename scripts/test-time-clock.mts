@@ -117,4 +117,19 @@ check("The Time page link opens that event's week, just that event", card.timePa
 const timePage = src("app/team/admin/timesheets/page.tsx");
 check("The Time page filters to the event and offers the whole week", timePage.includes("all.filter((r) => r.sessionId === eventId)") && timePage.includes("Show the whole week"));
 
+// ----- No red before the shift -----
+const T = (now: string) => ({ arrival: new Date("2026-11-11T22:00:00Z"), end: new Date("2026-11-12T04:00:00Z"), now: new Date(now) });
+const early = card.clockPeople(people, rows, "America/Chicago", T("2026-11-10T18:00:00Z"));
+const kaiEarly = early.find((p) => p.staffId === "b3")!;
+check("Before the shift: nothing under the name of someone not clocked in (no In missing, no Out missing)", kaiEarly.pairs.length === 0 && kaiEarly.stateText === "Not clocked in" && !card.clockCopyText("T", early, "America/Chicago").includes("missing"));
+check("...people with punches still show them", early.find((p) => p.staffId === "b1")!.pairs.length === 1);
+const during = card.clockPeople(people, rows, "America/Chicago", T("2026-11-11T23:00:00Z"));
+const kaiDuring = during.find((p) => p.staffId === "b3")!;
+check("After their arrival time with no clock in: In missing only, no Out missing yet", kaiDuring.pairs.length === 1 && kaiDuring.pairs[0].inMissing && !kaiDuring.pairs[0].outMissing && card.pairText(kaiDuring.pairs[0], "America/Chicago") === "In missing");
+const after = card.clockPeople(people, rows, "America/Chicago", T("2026-11-12T05:00:00Z"));
+const kaiAfter = after.find((p) => p.staffId === "b3")!;
+check("After the event ends: In missing and Out missing", card.pairText(kaiAfter.pairs[0], "America/Chicago") === "In missing · Out missing");
+check("Clocked in with no clock out during the event: Still clocked in, never Out missing", card.pairText(during.find((p) => p.staffId === "b2")!.pairs[0], "America/Chicago") === "In Nov 11, 5:05 PM · Still clocked in");
+check("The card only draws a missing label when it is due", dayOf.includes("(x.inAt || x.inMissing) && <PunchSpan") && dayOf.includes("(x.outAt || x.outMissing) &&") && src("app/team/admin/e/[id]/page.tsx").includes("times={{ arrival: eventSchedule(ed).arrival, end: eventSchedule(ed).end, now }}"));
+
 done("time clock card");

@@ -105,26 +105,15 @@ export default async function PartnerEventPage({ params }: { params: Promise<{ k
 
         <Card title="Package">
           <Row label="Package" value={v.package} />
-          {v.packageIncludes.length > 0 && (
-            <div className="text-[15px]">
-              <p className="text-[#6B5D52]">What we bring</p>
-              <ul className="list-disc pl-5 text-[#2C2420]">
-                {v.packageIncludes.map((i) => (
-                  <li key={i}>{i}</li>
-                ))}
-              </ul>
-            </div>
+          {v.packageLine && <p className="text-[15px] text-[#2C2420]">{v.packageLine}</p>}
+          {v.packageBullets.length > 0 && (
+            <ul className="list-disc pl-5 text-[15px] text-[#2C2420]">
+              {v.packageBullets.map((b) => (
+                <li key={b}>{b}</li>
+              ))}
+            </ul>
           )}
-          {v.clientProvides.length > 0 && (
-            <div className="text-[15px]">
-              <p className="text-[#6B5D52]">What the host provides</p>
-              <ul className="list-disc pl-5 text-[#2C2420]">
-                {v.clientProvides.map((i) => (
-                  <li key={i}>{i}</li>
-                ))}
-              </ul>
-            </div>
-          )}
+          {v.packageProvides && <p className="text-[15px] text-[#6B5D52]">{v.packageProvides}</p>}
         </Card>
 
         {v.pricing && (

@@ -4,6 +4,7 @@ import { useState } from "react";
 import type { IceView, Place } from "@/lib/team/ice-pickup-db";
 import { field, IceStateBadge, PersonStatus, PickedUpForm, postIce } from "../../../ice-pickup-card";
 import { roleSuffix } from "@/lib/team/roles";
+import { ICE_MACHINE_ONSITE } from "@/lib/team/ice-pickup";
 
 const card = "bg-[#F5F0EB] rounded-2xl border border-[#DDD5CC] px-4 py-3 sm:px-5 sm:py-4";
 const small = "w-20 rounded-lg border border-[#DDD5CC] bg-white px-2 py-1.5 text-[16px] text-[#2C2420] focus:outline-none focus:ring-2 focus:ring-[#B5845A]/30 focus:border-[#B5845A]";
@@ -14,7 +15,8 @@ const small = "w-20 rounded-lg border border-[#DDD5CC] bg-white px-2 py-1.5 text
  * bags (from the Shopping list's ice when it is calculated, editable), notes,
  * and who is picking up with optional bag counts. Each person's status, with
  * Mark picked up and Undo for anyone. Any active staff member or admin can be
- * picked, on the event or not.
+ * picked, on the event or not. "Ice machine onsite" replaces all of it with
+ * one status line (who set it and when) until it is switched back.
  */
 export default function IcePickupPanel({ initial, people, places }: { initial: IceView; people: { id: string; name: string; role: string }[]; places: Place[] }) {
   const [view, setView] = useState(initial);
@@ -54,11 +56,44 @@ export default function IcePickupPanel({ initial, people, places }: { initial: I
   const nameOf = (id: string) => people.find((p) => p.id === id)?.name ?? "";
   const reuse = places.filter((p) => p.name.toLowerCase() !== name.trim().toLowerCase());
 
+  const machineToggle = (on: boolean) => (
+    <button
+      type="button"
+      onClick={() => run("machine", { action: "machine", on }, on ? "Saved. No ice pickup texts go out for this event." : "Switched back to ice pickup.")}
+      disabled={!!busy}
+      className={on ? "rounded-lg border border-[#DDD5CC] bg-white px-3 py-1.5 text-sm font-medium text-[#2C2420] hover:border-[#B5845A] disabled:opacity-40" : "text-sm font-medium text-[#9A7049] underline disabled:opacity-40"}
+    >
+      {busy === "machine" ? "Saving..." : on ? ICE_MACHINE_ONSITE : "Switch back to ice pickup"}
+    </button>
+  );
+
+  if (view.machineOnsite) {
+    return (
+      <section className={`${card} space-y-2`} aria-label="Ice pickup" data-ice-machine>
+        <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+          <h3 className="font-heading text-base font-bold text-[#2C2420]">Ice pickup</h3>
+          <IceStateBadge view={view} />
+        </div>
+        <p className="text-[15px] text-[#2C2420]">{ICE_MACHINE_ONSITE}. No one needs to pick up ice, and no ice texts go out.</p>
+        {view.machineLine && <p className="text-sm text-[#6B5D52]">{view.machineLine}</p>}
+        <div className="flex flex-wrap items-center gap-3">
+          {machineToggle(false)}
+          {saved && <span className="text-sm text-[#55684A]">{saved}</span>}
+        </div>
+        {error && <p className="text-sm text-[#A0412D]">{error}</p>}
+      </section>
+    );
+  }
+
   return (
     <section className={`${card} space-y-3`} aria-label="Ice pickup">
       <div className="flex flex-wrap items-baseline justify-between gap-x-3">
         <h3 className="font-heading text-base font-bold text-[#2C2420]">Ice pickup</h3>
         <IceStateBadge view={view} />
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        {machineToggle(true)}
+        <span className="text-sm text-[#6B5D52]">The venue has one, so nobody picks up ice.</span>
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2">

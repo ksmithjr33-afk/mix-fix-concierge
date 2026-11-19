@@ -20,6 +20,19 @@ export interface ClockPair {
   inEditedBy: string | null; // the admin who last added or corrected the clock in
   outEditedBy: string | null;
   approvedBy: string | null;
+  inMissing: boolean; // no clock in once their arrival time has passed
+  outMissing: boolean; // no clock out once the event has ended
+}
+
+/**
+ * When a missing punch counts as missing: a clock in once the arrival time
+ * has passed, a clock out once the event has ended. Before that nothing shows.
+ * Without times (no schedule passed, or no date) both count, as before.
+ */
+export interface ClockTimes {
+  arrival: Date | null;
+  end: Date | null;
+  now: Date;
 }
 
 export interface ClockPerson {
@@ -55,7 +68,11 @@ function lastEditor(edits: EditSummary[], type: "in" | "out"): string | null {
   return mine.length ? mine[mine.length - 1].byName : null;
 }
 
-export function pairOf(row: TimesheetRow): ClockPair {
+const passed = (at: Date | null, times?: ClockTimes) => !times || !at || times.now.getTime() >= at.getTime();
+
+export function pairOf(row: TimesheetRow, times?: ClockTimes): ClockPair {
+  const inAt = row.clockIn?.at ?? null;
+  const outAt = row.clockOut?.at ?? null;
   return {
     assignmentId: row.assignmentId,
     inAt: row.clockIn?.at ?? null,
@@ -64,6 +81,8 @@ export function pairOf(row: TimesheetRow): ClockPair {
     inEditedBy: lastEditor(row.edits, "in"),
     outEditedBy: lastEditor(row.edits, "out"),
     approvedBy: row.approved?.byName ?? null,
+    inMissing: !inAt && passed(times?.arrival ?? times?.end ?? null, times),
+    outMissing: !outAt && passed(times?.end ?? null, times),
   };
 }
 
@@ -74,14 +93,17 @@ export function pairOf(row: TimesheetRow): ClockPair {
 export function clockPeople(
   people: { staffId: string; name: string; role: string; status: string }[],
   rows: TimesheetRow[],
-  tz: string = TZ
+  tz: string = TZ,
+  times?: ClockTimes
 ): ClockPerson[] {
   return people
     .filter((p) => p.status !== "declined")
     .map((p) => {
       const pairs = rows
         .filter((r) => r.staffId === p.staffId)
-        .map(pairOf)
+        .map((r) => pairOf(r, times))
+        // Nothing under their name before their shift: a pair with no punches shows once a punch is missing.
+        .filter((x) => x.inAt || x.outAt || x.inMissing)
         .sort((a, b) => String(a.inAt ?? a.outAt ?? "").localeCompare(String(b.inAt ?? b.outAt ?? "")));
       const openPair = pairs.find((x) => x.inAt && !x.outAt);
       const state: ClockState = openPair ? "in" : pairs.some((x) => x.outAt) ? "out" : "not_in";
@@ -99,16 +121,16 @@ export function clockPeople(
     });
 }
 
-function punchText(label: "In" | "Out", at: string | null, editedBy: string | null, tz: string): string {
-  if (!at) return `${label} missing`;
+function punchText(label: "In" | "Out", at: string | null, editedBy: string | null, tz: string, missing = true): string {
+  if (!at) return missing ? `${label} missing` : "";
   return `${label} ${dateTimeLabel(at, tz)}${editedBy ? ` (edited by ${editedBy})` : ""}`;
 }
 
 /** One pair as a line: "In Nov 11, 4:32 PM · Out Nov 11, 10:14 PM (edited by Isabel) · 5 h 42 m · 5.70". */
 export function pairText(pair: ClockPair, tz: string = TZ): string {
   return [
-    punchText("In", pair.inAt, pair.inEditedBy, tz),
-    pair.inAt && !pair.outAt ? "Still clocked in" : punchText("Out", pair.outAt, pair.outEditedBy, tz),
+    punchText("In", pair.inAt, pair.inEditedBy, tz, pair.inMissing),
+    pair.inAt && !pair.outAt ? "Still clocked in" : punchText("Out", pair.outAt, pair.outEditedBy, tz, pair.outMissing),
     pair.minutes !== null ? hoursLabel(pair.minutes) : "",
     pair.approvedBy ? `approved by ${pair.approvedBy}` : "",
   ]

@@ -9,6 +9,7 @@
 // only while that person's line on the event is not marked paid. A staff
 // member reads only their own (myReimbursements).
 
+import { iceMachines } from "@/lib/team/ice-pickup-db";
 import { supabase } from "@/lib/supabase";
 import type { StaffMember } from "@/lib/team/event-view";
 import { isFullAdmin } from "@/lib/team/roles";
@@ -70,9 +71,10 @@ export async function pickupsDone(sessionIds: string[]): Promise<Map<string, { i
     supabase.from("event_ice_pickup_people").select("session_id, staff_id, picked_up_at, covered_by").in("session_id", ids),
     supabase.from("event_menu_pickups").select("session_id, assignee_id, picked_up_at, not_needed").in("session_id", ids),
   ]);
-  // Ice: the person on the row, or whoever covered for them ("I picked up the ice instead").
+  // Ice: the person on the row, or whoever covered for them ("I picked up the ice instead"). Never with an ice machine onsite.
+  const machines = await iceMachines(ids);
   for (const r of (ice.error ? [] : (ice.data as { session_id: string; staff_id: string; picked_up_at: string | null; covered_by?: string | null }[]) ?? [])) {
-    if (r.picked_up_at) out.get(r.session_id)?.ice.add(r.covered_by || r.staff_id);
+    if (r.picked_up_at && !machines.has(r.session_id)) out.get(r.session_id)?.ice.add(r.covered_by || r.staff_id);
   }
   // Menus: the person assigned, once it is checked picked up (an admin may check it for them).
   for (const r of (menu.error ? [] : (menu.data as { session_id: string; assignee_id: string | null; picked_up_at: string | null; not_needed: boolean }[]) ?? [])) {

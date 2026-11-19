@@ -1,12 +1,12 @@
 "use client";
 
-import { createContext, useCallback, useContext, useState, useTransition } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { useLiveUnread, useOpenChat } from "../../../chat-focus";
 import { MANAGER_TABS, type ManagerTab } from "@/lib/team/manager-tabs";
 
-// The manager view's tab bar: the same look and spacing as the bartender
-// view's, scrolling sideways on a phone. The selected tab is in the address
+// The manager view's tab bar: one row that scrolls sideways at every width,
+// each label on one line, with the open tab scrolled into view. The selected tab is in the address
 // (?tab=team) so a link can open a specific tab.
 //
 // The server sends only the open tab's panel. Opening another tab asks the
@@ -58,22 +58,33 @@ export default function ManagerTabs({
     [router]
   );
   useOpenChat(sessionId, useCallback(() => pick("chat"), [pick]));
+  // The open tab is scrolled into view in the bar: on load, and when a tab is picked.
+  const activeRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    const b = activeRef.current;
+    const bar = b?.closest("nav");
+    if (!b || !bar) return;
+    const left = b.offsetLeft - bar.clientWidth / 2 + b.offsetWidth / 2;
+    bar.scrollTo({ left: Math.max(0, left), behavior: "auto" });
+  }, [tab]);
 
   return (
     <main className={`${tab === "order" ? "max-w-[52rem]" : "max-w-2xl"} mx-auto px-4 py-4 sm:py-6 space-y-4 print:max-w-none print:p-0`}>
       <div className="print:hidden">{header}</div>
-      <nav className="-mx-4 px-4 overflow-x-auto print:hidden" aria-label="Manager view">
-        <div className={`flex ${tabs.length > 7 ? "md:grid md:grid-cols-8" : tabs.length > 6 ? "sm:grid sm:grid-cols-7" : "sm:grid sm:grid-cols-6"} gap-1 bg-[#DDD5CC] p-1 rounded-xl min-w-max sm:min-w-0`} role="tablist">
+      {/* One row that scrolls sideways at every width: each label on one line, never wrapped or squeezed. */}
+      <nav className="relative -mx-4 px-4 overflow-x-auto overscroll-x-contain print:hidden [scrollbar-width:thin]" aria-label="Manager view" data-tab-bar>
+        <div className="flex w-max gap-1.5 bg-[#DDD5CC] p-1 rounded-xl" role="tablist">
           {tabs.map(([key, label]) => {
             const n = key === "chat" ? chatUnread : (counts[key] ?? 0);
             return (
               <button
                 key={key}
+                ref={tab === key ? activeRef : undefined}
                 type="button"
                 role="tab"
                 aria-selected={tab === key}
                 onClick={() => pick(key)}
-                className={`shrink-0 whitespace-nowrap px-3 sm:px-1 py-2 rounded-lg text-sm font-medium transition-colors ${
+                className={`shrink-0 whitespace-nowrap px-3.5 py-2 rounded-lg text-sm font-medium transition-colors ${
                   tab === key ? "bg-[#F5F0EB] text-[#2C2420] shadow-sm" : "text-[#6B5D52]"
                 }`}
               >

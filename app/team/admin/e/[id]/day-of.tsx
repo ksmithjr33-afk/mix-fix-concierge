@@ -5,7 +5,7 @@ import type { ListDetail } from "@/lib/team/supplies";
 import { SUPPLIES_PROGRESS } from "@/lib/team/supplies";
 import { prepSteps, TOOLS_TAB } from "@/lib/team/prep";
 import { timeLabel } from "@/lib/team/clock-label";
-import { clockCopyText, clockPeople, dateTimeLabel, hoursLabel, totalText } from "@/lib/team/clock-card";
+import { clockCopyText, clockPeople, dateTimeLabel, hoursLabel, totalText, type ClockTimes } from "@/lib/team/clock-card";
 import type { TimesheetRow } from "@/lib/team/timesheet";
 import CopyButton from "../../copy-button";
 import { FLAG_LABELS, formatWorked, type PunchFlag } from "@/lib/team/clock";
@@ -185,8 +185,9 @@ export function MissingReports({ reports, timeZone }: { reports: MissingReport[]
  * zone), who edited or approved it, and hours to the minute and as a decimal.
  * The numbers are the Time page's and the payroll CSV's (lib/team/clock-card.ts).
  */
-export function ClockStatus({ people, rows, timeZone, title, timeHref }: { people: AssigneeProgress[]; rows: TimesheetRow[]; timeZone: string; title: string; timeHref: string }) {
-  const list = clockPeople(people, rows, timeZone);
+export function ClockStatus({ people, rows, timeZone, title, timeHref, times }: { people: AssigneeProgress[]; rows: TimesheetRow[]; timeZone: string; title: string; timeHref: string; times?: ClockTimes }) {
+  // "In missing" only after the arrival time, "Out missing" only after the event ends: nothing in red before the shift.
+  const list = clockPeople(people, rows, timeZone, times);
   return (
     <section className={card} aria-label="Time clock">
       <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
@@ -217,9 +218,12 @@ export function ClockStatus({ people, rows, timeZone, title, timeHref }: { peopl
                     {p.pairs.map((x, i) => (
                       <li key={x.assignmentId} className="break-words">
                         {p.pairs.length > 1 && <span className="text-[#6B5D52]">{i + 1}. </span>}
-                        <PunchSpan label="In" at={x.inAt} by={x.inEditedBy} timeZone={timeZone} />
-                        {" · "}
-                        {x.inAt && !x.outAt ? <span className="text-[#55684A]">Still clocked in</span> : <PunchSpan label="Out" at={x.outAt} by={x.outEditedBy} timeZone={timeZone} />}
+                        {(x.inAt || x.inMissing) && <PunchSpan label="In" at={x.inAt} by={x.inEditedBy} timeZone={timeZone} />}
+                        {x.inAt && !x.outAt ? (
+                          <>{" · "}<span className="text-[#55684A]">Still clocked in</span></>
+                        ) : (
+                          (x.outAt || x.outMissing) && <>{(x.inAt || x.inMissing) && " · "}<PunchSpan label="Out" at={x.outAt} by={x.outEditedBy} timeZone={timeZone} /></>
+                        )}
                         {x.minutes !== null && <span className="tabular-nums"> · {hoursLabel(x.minutes)}</span>}
                         {x.approvedBy && <span className="text-xs text-[#55684A]"> · approved by {x.approvedBy}</span>}
                       </li>

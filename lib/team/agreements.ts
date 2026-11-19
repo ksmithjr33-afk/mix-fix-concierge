@@ -1,5 +1,5 @@
 // Client agreements: the signed agreement and any change orders, uploaded by
-// an admin or manager on the manager view's Details tab. Pure, no database.
+// an admin or manager on the manager view's Agreement tab. Pure, no database.
 //
 // Agreements carry pricing, so only admins and managers ever see them:
 // bartenders, bar backs, servers and event helpers never do (and neither does

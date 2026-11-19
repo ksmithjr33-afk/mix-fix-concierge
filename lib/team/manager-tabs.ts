@@ -2,16 +2,21 @@ import { isAdminRole, isFullAdmin } from "@/lib/team/roles";
 // The admin manager view's tabs, in order. The selected tab is in the address
 // (/team/admin/e/<id>?tab=order) so a link can open a specific tab.
 
+// Pickups: the Menu pickup and Ice pickup cards. Agreement: the Agreement card,
+// admins and managers (the only roles that get past requireAdmin), right before
+// Business. Staff never reach this page, so they never see either tab.
 export const MANAGER_TABS = [
   ["details", "Details"],
   ["team", "Team"],
+  ["pickups", "Pickups"],
   ["order", "Shopping list"],
   ["client", "Client list"],
   ["dayof", "Day of"],
   ["receipts", "Receipts"],
   ["chat", "Chat"],
+  ["agreement", "Agreement"],
 ] as const;
-/** Business, after Chat: admins only (role admin, never managers). */
+/** Business, last (after Agreement): admins only (role admin, never managers). */
 export const BUSINESS_TAB = ["business", "Business"] as const;
 export type ManagerTab = (typeof MANAGER_TABS)[number][0] | (typeof BUSINESS_TAB)[0];
 

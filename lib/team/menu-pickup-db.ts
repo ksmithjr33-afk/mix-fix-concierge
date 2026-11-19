@@ -269,7 +269,7 @@ export async function myPickups(staff: StaffMember, now: Date = new Date()): Pro
       store: f.store,
       note: f.note,
       order: f.order,
-      eventHref: onEvent ? (isAdminRole(staff.role) ? `/team/admin/e/${encodeURIComponent(r.session_id)}` : `/team/e/${encodeURIComponent(r.session_id)}`) : null,
+      eventHref: onEvent ? (isAdminRole(staff.role) ? `/team/admin/e/${encodeURIComponent(r.session_id)}?tab=pickups` : `/team/e/${encodeURIComponent(r.session_id)}`) : null,
       printFileHref: withFile.has(r.session_id) ? `/api/team/menu-file?sessionId=${encodeURIComponent(r.session_id)}&download=1` : null,
       day: s.day,
     });
@@ -328,7 +328,7 @@ export async function sendMenuPickupNotices(now: Date = new Date()): Promise<num
       if (await sendStaffText(p.phone, p.name, morningText({ firstName: firstName(p.name), title: f.title, store: f.store, note: f.note, order: f.order, link: f.link }))) sent++;
     } else if (unassignedAlertDue(row, ed, now)) {
       if (!(await claimNotice(`menu_pickup_unassigned:${session.id}:${eventSchedule(ed).day}`, "menu_pickup_unassigned"))) continue;
-      const message = unassignedText({ title: adminEventTitle(ed), date: shortDate(eventSchedule(ed).day), link: `${siteOrigin()}/team/admin/e/${encodeURIComponent(session.id)}` });
+      const message = unassignedText({ title: adminEventTitle(ed), date: shortDate(eventSchedule(ed).day), link: `${siteOrigin()}/team/admin/e/${encodeURIComponent(session.id)}?tab=pickups` });
       const admins = await alertAdmins();
       const results = await Promise.all(admins.map((a) => sendStaffText(a.phone, a.name, message)));
       sent += results.filter(Boolean).length;

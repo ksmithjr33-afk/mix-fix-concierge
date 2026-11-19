@@ -90,7 +90,7 @@ export async function clientAgreements(sessionIds: string[], viewer: { role: unk
     if (!sessions.has(r.session_id)) sessions.set(r.session_id, await getSubmittedSession(r.session_id));
     const s = sessions.get(r.session_id);
     const ed = s ? eventData(s) : {};
-    out.push({ ...toView(r, eventSchedule(ed).tz), sessionId: r.session_id, eventTitle: s ? adminEventTitle(ed) : "Event", eventHref: `/team/admin/e/${encodeURIComponent(r.session_id)}` });
+    out.push({ ...toView(r, eventSchedule(ed).tz), sessionId: r.session_id, eventTitle: s ? adminEventTitle(ed) : "Event", eventHref: `/team/admin/e/${encodeURIComponent(r.session_id)}?tab=agreement` });
   }
   return out;
 }
