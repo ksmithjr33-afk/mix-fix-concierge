@@ -642,20 +642,28 @@ async function updateModeResponse(session: SessionRow, messages: ChatMessage[], 
  * surprise migration the answers cannot be saved mid chat, so the chat itself
  * is what keeps it to once.
  */
-function whoIsPlanning(s: EventSession): { text: string; canSave: boolean } {
+function whoIsPlanning(s: EventSession, bookedType: string | null): { text: string; canSave: boolean } {
   const ready = "is_surprise" in s; // the surprise migration ran
   const holderPlanner = s.booking_holder === "planner";
   const plannerAsked = s.planner_asked === true;
+  // The surprise question is only for SURPRISE_EVENT_TYPES. The booking's type first; with none, the chat waits until the client says.
+  const eventType = bookingEventType(s) || bookedType;
   if (!ready) {
     const ask = !holderPlanner && !plannerAsked;
-    return { text: bookingQuestionsSection({ askRole: ask, askPlanner: ask }), canSave: false };
+    return { text: bookingQuestionsSection({ askRole: ask, askPlanner: ask, eventType }), canSave: false };
   }
   const surprise = surpriseOf(s);
   const known = planningRoleOf(s) ?? (holderPlanner ? "planner" : s.host_name ? "someone_else" : surprise.on ? "someone_else" : null);
   const askRole = !known && !plannerAsked;
   const askSurprise = !surprise.answered && (askRole || known === "someone_else" || known === "planner");
   const askPlanner = !holderPlanner && !plannerAsked && known !== "planner";
-  return { text: bookingQuestionsSection({ askRole, askSurprise, askPlanner, role: known, canSave: true }), canSave: true };
+  return { text: bookingQuestionsSection({ askRole, askSurprise, askPlanner, role: known, canSave: true, eventType }), canSave: true };
+}
+
+/** The booking's event type: the session's event_type, then event_data.event_type. */
+function bookingEventType(s: EventSession): string | null {
+  const t = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : null);
+  return t((s as { event_type?: unknown }).event_type) ?? t(s.event_data?.event_type);
 }
 
 /** On a surprise event, the concierge never suggests contacting the guest of honor. */
@@ -699,7 +707,7 @@ export async function POST(request: Request) {
   // priced with quote_guest_count. Only with a session row to price from.
   // A planner who cannot approve price changes never gets it: a different count goes to the holder.
   const guestTool = session !== null && !!facts.guests && !approvalOnly;
-  const people = partner ? plannerIntakeSection(partner.ctx) : session ? whoIsPlanning(session as EventSession) : { text: "", canSave: false };
+  const people = partner ? plannerIntakeSection(partner.ctx) : session ? whoIsPlanning(session as EventSession, facts.eventType) : { text: "", canSave: false };
   // Cached (with the tools before it): the ~18k token prompt is the same on
   // every turn, so later turns read it from the cache. Same words to the model.
   const system: Anthropic.TextBlockParam[] = [

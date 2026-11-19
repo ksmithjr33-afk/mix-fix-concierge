@@ -137,6 +137,36 @@ export const savePlanningRoleTool: Anthropic.Tool = {
   },
 };
 
+/**
+ * The event types the concierge asks "Is this a surprise for them?" on. Add a
+ * type here (with its short forms) to ask on it too. Matched loosely, ignoring
+ * case, spaces, and punctuation: "Birthday Party", "40th birthday", and "bday"
+ * all count as a birthday.
+ */
+export const SURPRISE_EVENT_TYPES: readonly { type: string; alsoCalled: readonly string[] }[] = [{ type: "birthday", alsoCalled: ["bday"] }];
+
+const squash = (v: string) => v.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+/** True when this event type gets the surprise question (see SURPRISE_EVENT_TYPES). */
+export function isSurpriseEventType(eventType: unknown): boolean {
+  const t = typeof eventType === "string" ? squash(eventType) : "";
+  if (!t) return false;
+  return SURPRISE_EVENT_TYPES.some((e) => [e.type, ...e.alsoCalled].some((w) => t.includes(squash(w))));
+}
+
+/** ask: a surprise type; skip: any other type; unknown: the booking does not say yet. */
+export type SurpriseFit = "ask" | "skip" | "unknown";
+export function surpriseFit(eventType: unknown): SurpriseFit {
+  const t = typeof eventType === "string" ? eventType.trim() : "";
+  if (!t) return "unknown";
+  return isSurpriseEventType(t) ? "ask" : "skip";
+}
+
+/** "a birthday", or "a birthday or a graduation" once more types are added. */
+function surpriseTypesWords(): string {
+  return SURPRISE_EVENT_TYPES.map((e) => `a ${e.type}`).join(" or ");
+}
+
 export const ROLE_QUESTION = "Are you the guest of honor, hosting this for someone else, or a planner booking for a client?";
 export const SURPRISE_QUESTION = "Is this a surprise for them?";
 export const PRIVATE_NUMBER_QUESTION = "What is the best private number to reach you about this event?";
@@ -149,9 +179,11 @@ export const PRIVATE_NUMBER_QUESTION = "What is the best private number to reach
  * askRole false once it is answered or the booking already tells us; role is
  * the saved answer when there is one; askSurprise false once answered.
  */
-export function bookingQuestionsSection(o: { askRole: boolean; askPlanner: boolean; askSurprise?: boolean; role?: "guest_of_honor" | "someone_else" | "planner" | null; canSave?: boolean }): string {
-  const askSurprise = o.askSurprise ?? o.askRole;
-  if (!o.askRole && !o.askPlanner && !askSurprise) return "";
+export function bookingQuestionsSection(o: { askRole: boolean; askPlanner: boolean; askSurprise?: boolean; role?: "guest_of_honor" | "someone_else" | "planner" | null; canSave?: boolean; eventType?: string | null }): string {
+  // Eligible: someone hosting for someone else or a planner (or not known yet), and not answered yet.
+  const eligible = o.askSurprise ?? o.askRole;
+  const fit = surpriseFit(o.eventType);
+  if (!o.askRole && !o.askPlanner && !eligible) return "";
   const save = o.canSave ? " Call save_planning_role with" : " Remember";
   const lines: string[] = ["WHO IS PLANNING:"];
   if (o.askRole) {
@@ -162,13 +194,35 @@ export function bookingQuestionsSection(o: { askRole: boolean; askPlanner: boole
       'If they are a planner: role "planner". Ask who the event is for (the host\'s full name). From then on speak to them as the planner and talk about the event as the host\'s event (for example "Jordan\'s wedding"). Send booking_role "planner" and host_name in submit_event_data. Do not ask the working with a planner question.'
     );
   }
-  if (askSurprise) {
-    const who = o.role === "someone_else" ? "Right after your greeting (they are hosting for someone else)" : o.role === "planner" ? "Right after your greeting (they are a planner booking for a client)" : 'Only for "someone_else" or "planner", and never for the guest of honor: right after you have the name of the person the event is for';
+  const yesSteps = `${o.canSave ? " call save_planning_role with is_surprise true and honoree_name," : ""} tell them we will never contact the guest of honor (by first name) about this event, then ask exactly: "${PRIVATE_NUMBER_QUESTION}"${o.canSave ? " Call save_planning_role with private_phone." : ""} Send is_surprise true, honoree_name, and private_phone in submit_event_data. Never ask for the guest of honor's phone or email, never offer them access, and never suggest anyone contact them.`;
+  const plannerMayAsk = o.role === "planner" || o.askRole;
+  const hostAccess = "ask once whether they would like the host to have access to view the plans, and if yes, the host's mobile number, sent as host_phone.";
+  const volunteered = `If, on any kind of event, they tell you on their own that it is a surprise (and they are not the guest of honor):${yesSteps}`;
+  if (eligible && fit !== "skip") {
+    const only = 'Only for "someone_else" or "planner", and never for the guest of honor';
+    const types = surpriseTypesWords();
+    const who =
+      fit === "unknown"
+        ? `${only}. Never ask it before you know what kind of event it is. Wait until they have told you what kind of event it is; if it is ${types} (any ${SURPRISE_EVENT_TYPES[0].type}, for example a 40th ${SURPRISE_EVENT_TYPES[0].type} or a party for one), then, once you also have the name of the person the event is for, ask it at that point. For any other kind of event never ask it`
+        : o.role === "someone_else"
+          ? "Right after your greeting (they are hosting for someone else)"
+          : o.role === "planner"
+            ? "Right after your greeting (they are a planner booking for a client)"
+            : `${only}: right after you have the name of the person the event is for`;
     lines.push(
       `SURPRISE: ${who}, ask exactly: "${SURPRISE_QUESTION}" Ask it only once, and never again once answered.${save} is_surprise as soon as they answer.`,
-      `If yes:${o.canSave ? " call save_planning_role with is_surprise true and honoree_name," : ""} tell them we will never contact the guest of honor (by first name) about this event, then ask exactly: "${PRIVATE_NUMBER_QUESTION}"${o.canSave ? " Call save_planning_role with private_phone." : ""} Send is_surprise true, honoree_name, and private_phone in submit_event_data. Never ask for the guest of honor's phone or email, never offer them access, and never suggest anyone contact them.`,
-      `If no: send is_surprise false.${o.role === "planner" || o.askRole ? " A planner who said no: then ask once whether they would like the host to have access to view the plans, and if yes, the host's mobile number, sent as host_phone." : ""}`
+      `If yes:${yesSteps}`,
+      `If no: send is_surprise false.${plannerMayAsk ? ` A planner who said no: then ${hostAccess}` : ""}`
     );
+    if (fit === "unknown") {
+      lines.push(volunteered);
+      if (plannerMayAsk) lines.push(`A planner on any other kind of event (the surprise question is not asked): ${hostAccess} Skip this if they said it is a surprise.`);
+    }
+  } else if (eligible) {
+    // Any other event type: never asked, but a surprise the client mentions is still saved.
+    lines.push(`SURPRISE: this is not ${surpriseTypesWords()}, so never ask whether it is a surprise.`, volunteered);
+    if (plannerMayAsk) lines.push(`A planner (unless they said it is a surprise): ${hostAccess}`);
+    if (o.role === "planner") lines.push("They are a planner booking for a client. Speak to them as the planner, and do not ask the working with a planner question.");
   } else if (o.role === "planner") {
     lines.push("They are a planner booking for a client. Speak to them as the planner, and do not ask the working with a planner question.");
   }

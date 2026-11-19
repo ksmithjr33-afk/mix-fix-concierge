@@ -710,6 +710,78 @@ check("B2: a planner's surprise: the host gets no phone or email, so no welcome 
 const tb2 = pchat.takeBookingAnswers({ booking_role: "someone_else", host_name: "Maya", host_phone: "2145550144" });
 check("B2: hosting for someone else never saves the host's phone", tb2.answers.role === "someone_else" && tb2.answers.host?.phone === "" && !("is_surprise" in tb2.rest) && !("private_phone" in tb2.rest));
 
+// B9. The surprise question is only for SURPRISE_EVENT_TYPES (a birthday for now).
+reset();
+const asks = (sys: string) => sys.includes(`ask exactly: "${SURPRISE_Q}"`);
+const waits = (sys: string) => sys.includes("Never ask it before you know what kind of event it is");
+const SE = { planning_role: "someone_else", host_name: "Maya Fields" };
+const PL = { planning_role: "planner", host_name: "Jordan Lee" };
+db.sessions = [
+  intakeRow("bd2", SE), intakeRow("bd3", PL),
+  intakeRow("wd2", { ...SE, event_type: "Wedding" }), intakeRow("wd3", { ...PL, event_type: "Wedding" }),
+  intakeRow("co2", { ...SE, event_type: "Corporate Event" }), intakeRow("co3", { ...PL, event_type: "Corporate Event" }),
+  intakeRow("an2", { ...SE, event_type: "Anniversary" }), intakeRow("an3", { ...PL, event_type: "Anniversary" }),
+  intakeRow("lz1", { ...SE, event_type: "40th birthday" }), intakeRow("lz2", { ...PL, event_type: "bday" }), intakeRow("lz3", { ...SE, event_type: "Birthday Party" }),
+  intakeRow("ed1", { ...SE, event_type: null, event_data: { event_type: "Birthday" } }), intakeRow("ed2", { ...SE, event_type: null, event_data: { event_type: "Wedding" } }), intakeRow("ed3", { ...SE, event_type: "Birthday", event_data: { event_type: "Wedding" } }),
+  intakeRow("nt1", { event_type: null }), intakeRow("nt2", { ...SE, event_type: null }),
+  intakeRow("ws1", { ...SE, event_type: "Wedding Shower" }),
+  session("wad", { ...NEW_COLS, host_name: "Maya Fields" }, { event_type: "Wedding" }),
+];
+ai.script.reply = () => [{ type: "text", text: "Welcome!" }];
+const sysFor = async (id: string, msgs: Msg[] = [CTX, { role: "user", content: "Hi" }]) => { await clientTurn(id, msgs); return sysText(ai.calls.at(-1)); };
+const bd2Sys = await sysFor("bd2");
+const bd3Sys = await sysFor("bd3");
+check("B9: a birthday: asked for hosting for someone else (the second answer)", asks(bd2Sys) && bd2Sys.includes("they are hosting for someone else") && !waits(bd2Sys));
+check("B9: a birthday: asked for a planner (the third answer)", asks(bd3Sys) && bd3Sys.includes("they are a planner booking for a client") && !waits(bd3Sys));
+for (const [id, type] of [["wd2", "a wedding"], ["wd3", "a wedding"], ["co2", "a corporate event"], ["co3", "a corporate event"], ["an2", "an anniversary"], ["an3", "an anniversary"]] as const) {
+  const sys = await sysFor(id);
+  check(`B9: ${type} (${id.endsWith("2") ? "hosting for someone else" : "planner"}): never asked`, !sys.includes(SURPRISE_Q) && sys.includes("never ask whether it is a surprise"));
+}
+const wd3Sys = await sysFor("wd3");
+check("B9: a planner on a wedding is still asked about host access (that used to follow a no to the surprise question)", wd3Sys.includes("ask once whether they would like the host to have access to view the plans"));
+check(
+  "B9: loose matches, ignoring case: Birthday, Birthday Party, 40th birthday, bday all count",
+  ["Birthday", "Birthday Party", "40th birthday", "bday", "BDAY", "b day", "B-Day", "Surprise 30th Birthday!"].every(pchat.isSurpriseEventType) &&
+    !["Wedding", "Corporate Event", "Anniversary", "Wedding Shower", "", "Baby Shower"].some(pchat.isSurpriseEventType) &&
+    pchat.isSurpriseEventType(null) === false
+);
+check("B9: one list in code, starting with birthday only", pchat.SURPRISE_EVENT_TYPES.length === 1 && pchat.SURPRISE_EVENT_TYPES[0].type === "birthday");
+for (const id of ["lz1", "lz2", "lz3"]) check(`B9: the concierge asks on "${S(id).event_type}"`, asks(await sysFor(id)));
+check("B9: no session event type: event_data.event_type is read (a birthday there is asked)", asks(await sysFor("ed1")));
+check("B9: ...and a wedding there is not", !(await sysFor("ed2")).includes(SURPRISE_Q));
+check("B9: the session's event_type comes first", asks(await sysFor("ed3")));
+// The booking gives no event type: never before the client says what kind of event it is.
+const nt1Sys = await sysFor("nt1");
+check("B9: no event type on the booking: the concierge waits until the client says (never right after the greeting)", waits(nt1Sys) && !nt1Sys.includes("Right after your greeting (they are"));
+const nt2Sys = await sysFor("nt2");
+check("B9: ...even for someone already known to host for someone else", waits(nt2Sys) && !nt2Sys.includes("Right after your greeting (they are"));
+check("B9: ...then asks at that point only on a birthday, never on any other kind of event", nt2Sys.includes("if it is a birthday") && nt2Sys.includes("For any other kind of event never ask it"));
+let nt: Msg[] = [CTX, { role: "user", content: "Hi" }, { role: "assistant", content: "Welcome! What kind of event is it?" }, { role: "user", content: "A 40th birthday for my sister Maya" }];
+ai.script.reply = () => [{ type: "text", text: `Fun! ${SURPRISE_Q}` }];
+const nt2b = await sysFor("nt2", nt);
+check("B9: once the client says, the same rule still holds for that turn, and the answer saves", waits(nt2b) && toolNames(ai.calls.at(-1)).includes("save_planning_role"));
+nt = [...nt, { role: "assistant", content: `Fun! ${SURPRISE_Q}` }, { role: "user", content: "Yes" }];
+ai.script.reply = () => [{ type: "text", text: `We will never contact Maya about this event. ${PRIVATE_Q}` }, ai.toolUse("save_planning_role", { is_surprise: true, honoree_name: "Maya Fields" })];
+await clientTurn("nt2", nt);
+check("B9: ...and a yes is saved", S("nt2").is_surprise === true && S("nt2").honoree_name === "Maya Fields");
+check("B9: the guest of honor is never asked, whatever the event type", !pchat.bookingQuestionsSection({ askRole: false, askPlanner: true, askSurprise: false, role: "guest_of_honor", canSave: true, eventType: "Birthday" }).includes(SURPRISE_Q));
+// A client who volunteers that a wedding shower is a surprise.
+const ws: Msg[] = [CTX, { role: "user", content: "Hi" }, { role: "assistant", content: "Welcome! What date is the shower?" }, { role: "user", content: "June 5. And it is a surprise for Maya, she has no idea!" }];
+ai.script.reply = () => [{ type: "text", text: `We will never contact Maya about this event. ${PRIVATE_Q}` }, ai.toolUse("save_planning_role", { is_surprise: true, honoree_name: "Maya Fields" })];
+const wsSys = await sysFor("ws1", ws);
+check("B9: a wedding shower: the concierge never asks, but is told to save a surprise the client mentions and ask for the private number", !wsSys.includes(SURPRISE_Q) && wsSys.includes("tell you on their own that it is a surprise") && wsSys.includes(`ask exactly: "${PRIVATE_Q}"`));
+check("B9: ...and the volunteered surprise is saved the same way", S("ws1").is_surprise === true && S("ws1").honoree_name === "Maya Fields" && S("ws1").surprise_set_by === "Concierge");
+ai.script.reply = () => [
+  { type: "text", text: "All set!" },
+  ai.toolUse("submit_event_data", { client_name: "Justin Reyes", email: "justin@example.com", event_type: "Wedding Shower", event_date: DAY, bar_service_start: "6:00 PM", event_address: "100 Main St, Dallas, TX 75201", guest_count: 80, package: "Full Bar", signature_drinks: [], booking_role: "someone_else", host_name: "Maya Fields", is_surprise: true, honoree_name: "Maya Fields", private_phone: "214 555 0166" }),
+];
+await clientTurn("ws1", [...ws, { role: "assistant", content: PRIVATE_Q }, { role: "user", content: "214 555 0166" }]);
+check("B9: ...and the private number becomes the client phone at submit", (S("ws1").event_data as Record<string, unknown>).client_phone === PRIVATE_PHONE);
+// Admins and managers: Surprise on any event type, as before.
+const wad = await actions.staffBookingAction(ADMIN as never, S("wad"), { action: "surprise", on: true, name: "Maya Fields" });
+check("B9: an admin can still turn Surprise on for a wedding", wad.ok && S("wad").is_surprise === true && S("wad").surprise_set_by === "Isabel Jones");
+check("B9: the new wording has no hyphens", [pchat.bookingQuestionsSection({ askRole: true, askPlanner: true, canSave: true }), pchat.bookingQuestionsSection({ askRole: false, askPlanner: true, askSurprise: true, role: "planner", canSave: true, eventType: "Wedding" })].every((t) => hyphenFree(t.replace(/guest_of_honor|someone_else/g, ""))));
+
 // B3 to B8 on one submitted surprise event.
 reset();
 db.sessions = [session("sp1", { ...NEW_COLS, host_name: "Maya Fields" }, { client_name: "Justin Reyes" }), intakeRow("sp2")];
