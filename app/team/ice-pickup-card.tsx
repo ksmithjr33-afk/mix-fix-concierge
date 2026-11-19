@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import type { IcePersonView, IceView } from "@/lib/team/ice-pickup-db";
-import { ICE_MACHINE_ONSITE } from "@/lib/team/ice-pickup";
+import { ICE_BACKUP_LINE, ICE_MACHINE_ONSITE } from "@/lib/team/ice-pickup";
 
 /** What staff read when the venue has an ice machine. */
 export const ICE_MACHINE_STAFF_NOTE = "The venue has an ice machine. Nobody needs to buy ice for this event.";
@@ -160,6 +160,11 @@ export default function IcePickupCard({ initial, showEvent = false }: { initial:
           <IceStateBadge view={view} />
         )}
       </div>
+      {view.machineBackup && (
+        <p className="text-[15px] font-medium text-[#2C2420]" data-ice-backup>
+          {ICE_BACKUP_LINE}
+        </p>
+      )}
       <dl className="text-[15px] text-[#2C2420] space-y-0.5">
         <div>
           <dt className="inline text-[#6B5D52]">Recommended location: </dt>

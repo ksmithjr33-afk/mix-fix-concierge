@@ -563,6 +563,15 @@ export async function applyEventUpdate(
       rows = (data as EventUpdateRow[]) ?? [];
     }
 
+    // The Full Bar wedding barback removed or added back: who and when, for the Team tab.
+    // Before supabase/migrations/20261227_package_extras.sql this fails quietly.
+    if (applied?.changes.some((c) => c.field === "barback")) {
+      const by = options.editor?.name || (source === "manager" ? "an admin" : "client");
+      const extras = ((session as { package_extras?: unknown }).package_extras ?? {}) as Record<string, unknown>;
+      const { error: xErr } = await supabase.from("sessions").update({ package_extras: { ...extras, barback_by: by, barback_at: nowIso } }).eq("id", sessionId);
+      if (xErr) console.warn(`[barback] ${sessionId}: who changed the barback was not saved: ${xErr.message}`);
+    }
+
     // Saved but not priced (rule: save it anyway, price later): mark the event
     // price pending. The admin's own total (priceOverride) is never pending.
     if (applied && rows.length > 0 && unpriced(price) && !options.priceOverride) {

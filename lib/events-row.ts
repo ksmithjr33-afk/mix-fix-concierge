@@ -23,7 +23,7 @@ export const EVENTS_COLUMNS = [
 ] as const;
 
 /** Event fields that are kept on the session (event_data) only, with no events column. */
-export const SESSION_ONLY_FIELDS = ["payment_preference", "change_approval_needed", "hours_booked"] as const;
+export const SESSION_ONLY_FIELDS = ["payment_preference", "change_approval_needed", "hours_booked", "barback"] as const;
 
 const COLUMNS = new Set<string>(EVENTS_COLUMNS);
 

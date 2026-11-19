@@ -84,7 +84,8 @@ export interface IceView {
   bagLine: string; // "6 of 12 bags assigned"
   bagWarning: string;
   outstanding: boolean; // the Pickups count: inside 24 hours, not complete (never with an ice machine onsite)
-  machineOnsite: boolean; // "Ice machine onsite": nobody needs to pick up ice
+  machineOnsite: boolean; // "Ice machine onsite, no pickup": nobody needs to pick up ice
+  machineBackup: boolean; // "Ice machine onsite, bring backup bags": a normal pickup, with the backup line on top
   machineLine: string; // "Set by Kenny, Dec 4, 3:40 PM"
   canEdit: boolean; // admins
   canInstead: boolean; // on the event and not picking up ice yet
@@ -116,8 +117,12 @@ export async function icePeople(sessionId: string): Promise<IcePersonRow[]> {
   return data as IcePersonRow[];
 }
 
-/** Events with an ice machine onsite, by session id, with who set it and when. Empty before the table exists. */
-export async function iceMachines(sessionIds: string[]): Promise<Map<string, IceMachine>> {
+/**
+ * Events with an ice machine onsite and no pickup, by session id, with who set
+ * it and when. Every "no ice pickup" guard uses this, so backup bags mode
+ * (a normal pickup) is left out unless asked for. Empty before the table exists.
+ */
+export async function iceMachines(sessionIds: string[], opts: { withBackup?: boolean } = {}): Promise<Map<string, IceMachine>> {
   const ids = [...new Set(sessionIds)];
   const out = new Map<string, IceMachine>();
   if (ids.length === 0) return out;
@@ -130,13 +135,13 @@ export async function iceMachines(sessionIds: string[]): Promise<Map<string, Ice
   const rows = data as { session_id: string; action: string; by_name: string | null; created_at: string }[];
   for (const id of ids) {
     const m = iceMachineFrom(rows.filter((r) => r.session_id === id));
-    if (m) out.set(id, m);
+    if (m && (m.mode === "no_pickup" || opts.withBackup)) out.set(id, m);
   }
   return out;
 }
 
-export async function iceMachine(sessionId: string): Promise<IceMachine | null> {
-  return (await iceMachines([sessionId])).get(sessionId) ?? null;
+export async function iceMachine(sessionId: string, opts: { withBackup?: boolean } = {}): Promise<IceMachine | null> {
+  return (await iceMachines([sessionId], opts)).get(sessionId) ?? null;
 }
 
 async function person(id: string | null): Promise<Person | null> {
@@ -194,7 +199,8 @@ export async function iceView(
   opts: { now?: Date; listBags?: number | null; eventHref?: string | null } = {}
 ): Promise<IceView> {
   const now = opts.now ?? new Date();
-  const [row, people, rule, machine] = await Promise.all([getIce(session.id), icePeople(session.id), teamText(ICE_RULE_KEY), iceMachine(session.id)]);
+  const [row, people, rule, anyMachine] = await Promise.all([getIce(session.id), icePeople(session.id), teamText(ICE_RULE_KEY), iceMachine(session.id, { withBackup: true })]);
+  const machine = anyMachine?.mode === "no_pickup" ? anyMachine : null;
   const listBags = opts.listBags !== undefined ? opts.listBags : row?.total_bags !== null && row?.total_bags !== undefined ? null : await listIceBags(session);
   const ed = eventData(session);
   const tz = eventSchedule(ed).tz;
@@ -230,7 +236,8 @@ export async function iceView(
     bagWarning: summary.warning,
     outstanding: !machine && iceOutstanding(people, ed, now),
     machineOnsite: !!machine,
-    machineLine: iceMachineLine(machine, tz),
+    machineBackup: anyMachine?.mode === "backup",
+    machineLine: iceMachineLine(anyMachine, tz),
     canEdit: isAdminRole(viewer.role),
     canInstead: !mine && (await onEvent(session.id, viewer)),
     eventHref: opts.eventHref ?? null,
@@ -324,17 +331,22 @@ async function adminOnly(sessionId: string, admin: StaffMember): Promise<Result<
  * where it is kept). On: held ice texts are dropped. Off: the people still on
  * the card get their texts as usual.
  */
-export async function setIceMachine(sessionId: string, admin: StaffMember, on: unknown, now: Date = new Date()): Promise<Result<{ view: IceView }>> {
+export async function setIceMachine(sessionId: string, admin: StaffMember, on: unknown, now: Date = new Date(), rawMode?: unknown): Promise<Result<{ view: IceView }>> {
   const a = await adminOnly(sessionId, admin);
   if (!a.ok) return a;
-  if (typeof on !== "boolean") return { ok: false, error: "Bad request", status: 400 };
-  if (!!(await iceMachine(sessionId)) !== on) {
+  // mode: "no_pickup", "backup", or "off". The older { on } still works (true is no pickup).
+  const mode = rawMode === "no_pickup" || rawMode === "backup" || rawMode === "off" ? rawMode : typeof on === "boolean" ? (on ? "no_pickup" : "off") : null;
+  if (!mode) return { ok: false, error: "Bad request", status: 400 };
+  const current = (await iceMachine(sessionId, { withBackup: true }))?.mode ?? "off";
+  if (current !== mode) {
+    const action = mode === "no_pickup" ? "machine_on" : mode === "backup" ? "machine_backup" : "machine_off";
     const { error } = await supabase
       .from("event_ice_pickup_log")
-      .insert({ session_id: sessionId, action: on ? "machine_on" : "machine_off", detail: null, by_id: admin.id, by_name: firstName(admin.name) || admin.name, created_at: now.toISOString() });
+      .insert({ session_id: sessionId, action, detail: null, by_id: admin.id, by_name: firstName(admin.name) || admin.name, created_at: now.toISOString() });
     if (error) return { ok: false, error: "Could not save. Try again.", status: 500 };
-    if (on) await supabase.from("event_ice_pickup_people").update({ notify_after: null }).eq("session_id", sessionId);
-    else await notifyPeople(a.session, now);
+    // No pickup: held ice texts are dropped. Back to a pickup (backup bags or off): the people on the card get their texts.
+    if (mode === "no_pickup") await supabase.from("event_ice_pickup_people").update({ notify_after: null }).eq("session_id", sessionId);
+    else if (current === "no_pickup") await notifyPeople(a.session, now);
   }
   return { ok: true, view: await iceView(a.session, admin, { now }) };
 }

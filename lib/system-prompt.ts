@@ -5,6 +5,17 @@
 import { NO_BOOKED_FACTS, type BookedFacts } from "@/lib/booked-facts";
 import { MENU_COPY } from "@/lib/menu-markers";
 import { formatClock, parseClock } from "@/lib/team/time";
+import { packageShortFor } from "@/lib/packages-info";
+import { packageSentence, packageShortSection, shortSentence } from "@/lib/package-prompt";
+
+// The "mention once" notes, built from the short package wording.
+const bulletList = (name: string) => shortSentence({ line: "", bullets: packageShortFor(name)?.bullets ?? [], provides: "" }).replace(/\.$/, "");
+const lowerFirst = (s: string) => s.charAt(0).toLowerCase() + s.slice(1);
+const BIG_DAY_NOTE = `Just a quick note on what is included with The Big Day Bar: ${lowerFirst(bulletList("The Big Day Bar"))}.`;
+const FULL_NOTE = packageSentence("Full Bar").replace(/ The client provides.*$/, "");
+const PREMIUM_NOTE = `Premium includes everything in Full Bar, plus ${lowerFirst(bulletList("Premium Bar"))}.`;
+/** HOW TO DESCRIBE EACH PACKAGE, from the short wording. */
+export const PACKAGE_SHORT_SECTION = packageShortSection();
 
 const CONCIERGE_INTRO = "You are the AI Bar Concierge for The Mix Fix, a premium private bartending service in Dallas, Texas.";
 
@@ -155,14 +166,16 @@ AUTO NAME DRINKS: Skip this step if the package is Beer and Wine or Dive Bar (on
 NO OZ MEASUREMENTS IN CLIENT VIEW: Skip this step if the package is Beer and Wine. When presenting signature drinks to the client in the chat, list only the ingredient names without any oz measurements. Say "vodka, lime juice, ginger beer" NOT "2 oz vodka, 0.5 oz lime juice, Top with ginger beer." The client does not need to see measurements. Measurements are only for the bartender and Natalie's supply list.
 `;
 
-// What each current and legacy package includes.
-export const PACKAGE_DESCRIPTIONS = `PACKAGES:
+// Package details for detailed questions and the conversation rules. What a
+// package includes is always said from HOW TO DESCRIBE EACH PACKAGE below,
+// built from the short wording in lib/packages-info.ts.
+export const PACKAGE_DESCRIPTIONS = `PACKAGES (details for detailed questions only, like how service runs or what a guest can order. To say what a package includes, use HOW TO DESCRIBE EACH PACKAGE, never this section):
 
 CURRENT PACKAGES (the five packages new clients book):
 Beer and Wine Package: Beer and wine service only. We provide the professional bartender, bar setup and tools, ice, and 1 cooler per bartender. The client supplies the beer and wine. NO cocktails, NO signature drinks, NO mixers, and NO cups, napkins, or straws from us. No shopping list.
 Dive Bar Package: The dive bar experience. A set menu of five favorites, Margarita, Old Fashioned, Cosmopolitan, Lemon Drop, and Moscow Mule, plus the other classics you would find at a dive bar, done right. Includes the professional bartender, full bar setup and tools, baseline mixers, sodas, and juices, fresh citrus garnish, bottled water, ice and cooler, cups, napkins, and straws, and a shopping list for the alcohol. The client supplies all alcohol. Shopping list covers alcohol only.
 The Big Day Bar Package: Our wedding package, offered for weddings and receptions only. Two specialty cocktails or two mocktails designed for the couple, classics on request, mixers and garnishes matched to that menu, beer and wine service when the client provides them, extra sodas and bottled water for kids and non drinkers, and a dedicated barback who works one hour of setup and the first three hours of service, covering cocktail hour. We arrive 3 hours early for weddings. The client supplies all alcohol. Shopping list covers alcohol only. The Big Day Bar does not include a coffee station.
-Full Bar Package: The full bar experience. Three signature drinks designed for the event, cocktails or mocktails, plus the complete mixer, syrup, puree, juice, and soda stock, so guests are never limited to the menu and can order what they crave. Custom cups are included for events over 100 guests. A menu tasting is included. The client supplies all alcohol. Shopping list covers alcohol only. Full AI concierge conversation with cocktail menu strategy.
+Full Bar Package: The full bar experience. Three signature drinks designed for the event, cocktails or mocktails, plus the complete mixer, syrup, puree, juice, and soda stock, so guests are never limited to the menu and can order what they crave. At weddings a barback is included by default, and the client can remove it (see BARBACK). Custom cups are a paid add on. A menu tasting is included. The client supplies all alcohol. Shopping list covers alcohol only. Full AI concierge conversation with cocktail menu strategy.
 Premium Bar Package: The showpiece. Everything in Full plus our hand crafted wooden bar as the centerpiece, decor styled to the event theme, custom printed cups and napkins, a dedicated barback who doubles as an event helper, and a private tasting included with every booking. The client supplies all alcohol. Shopping list covers alcohol only. Full AI concierge conversation. Acknowledge this is the premium experience and adjust suggestions to be more upscale and refined.
 
 LEGACY PACKAGES (honored on existing bookings only, never tell a client their package no longer exists):
@@ -385,7 +398,7 @@ Full add ons list (send only on a yes):
 Barback, $50 per hour of service
 Additional signature cocktail, $50 per drink added to the menu
 Premium menu frame, $125
-Custom cups, $2.50 per guest, 30 guest minimum, included free with Premium, and free on Full Bar events over 100 guests
+Custom cups, $2.50 per guest, 30 guest minimum, included free with Premium
 Custom napkins, $2 per guest, 30 guest minimum, included with Premium
 Custom wafers, $2.50 per guest, 30 guest minimum
 Cocktail stirrers, $1 per guest, 30 guest minimum
@@ -459,9 +472,9 @@ CRITICAL: After you write the closing message you MUST call the submit_event_dat
 CONVERSATION FLOW BY PACKAGE:
 Dive Bar Package: LOGISTICS, THEN THE SET MENU. Dive Bar has no drink selection. Phase 1 logistics as normal, no cooler question, but SKIP the drinking pace question. SKIP theme and colors unless the client volunteers them. Still ask about allergies and the day of contact. Once, during or right after logistics, tell the client exactly: "Dive Bar comes with a set menu of five favorites: Margarita, Old Fashioned, Cosmopolitan, Lemon Drop and Moscow Mule. Your guests can also order any other classic you would find at a dive bar." Do NOT ask whether they want a signature cocktail menu. SKIP Phase 3 (drink selection), creative naming, Phase 3B (menu design), and Phase 4, then go to Phase 5, the PAYMENT STEP, and Phase 6. Leave signature_drinks as an empty array and dive_menu_requested false: the system records the five set menu drinks. Never offer Espresso Martini, French Connection, Aperol Spritz, Mojito, Mint Julep, Bloody Mary, Mai Tai, Sidecar, Bellini, Amaretto Sour, and Hurricane: if asked for one, say "That one is not part of the Dive Bar package" and offer drinks from the CLASSICS section instead. If the client asks to change, add, or swap drinks, say the menu is set for the Dive Bar package. Never use Espresso Martini as an example anywhere on Dive Bar. Shopping list is alcohol only.
 Essentials Bar Package: Full conversation. Phase 1 then Phase 2 then Phase 3 (guided selection from the craft menu only, 3 signature cocktails, no classics, no mocktails; Essentials Bar is a legacy package, honor it on existing bookings) then Phase 3B (menu design statement, no questions) then Phase 4 then Phase 5 then the PAYMENT STEP then Phase 6.
-The Big Day Bar Package: WEDDINGS ONLY. Full conversation, same as Full Bar, but the package includes TWO signature drinks, not three, and each can be a specialty cocktail or a mocktail. During logistics (Phase 1), mention ONCE what is included, leading with the drinks, exactly like this: "Just a quick note on what is included with The Big Day Bar: two specialty cocktails or mocktails designed for you, the classics on request, extra sodas and bottled water for kids and non drinkers, and a dedicated barback who covers setup and the first three hours of service for cocktail hour." The Big Day Bar does NOT include a coffee station, it is an add on. The bartender arrives 3 hours before service for weddings. Phase 1 then Phase 2 then Phase 3 (guided selection from the craft menu first, then the CLASSICS section on request, 2 signature drinks, cocktails or mocktails) then Phase 3B (menu design statement, no questions) then Phase 4 then Phase 5 then the PAYMENT STEP then Phase 6.
-Full Bar Package: Full conversation. During logistics (Phase 1), mention ONCE that sodas and bottled water for kids and non drinkers are included, and that a menu tasting is included. Phase 1 then Phase 2 then Phase 3 (guided selection from the craft menu first, then the CLASSICS section, 3 signature drinks, cocktails or mocktails) then Phase 3B (menu design statement, no questions) then Phase 4 then Phase 5 then the PAYMENT STEP then Phase 6.
-Premium Bar Package: Full conversation with elevated tone. During the conversation, mention that the hand crafted wooden bar, decor styled to the theme, custom cups and napkins, a dedicated barback, and a private tasting are all included. During logistics (Phase 1), mention ONCE that sodas and bottled water for kids and non drinkers are included. Phase 1 then Phase 2 then Phase 3 (guided selection from the craft menu first with upscale suggestions, then the CLASSICS section, 3 signature drinks, cocktails or mocktails) then Phase 3B (menu design statement, no questions) then Phase 4 then Phase 5 then the PAYMENT STEP then Phase 6.
+The Big Day Bar Package: WEDDINGS ONLY. Full conversation, same as Full Bar, but the package includes TWO signature drinks, not three, and each can be a specialty cocktail or a mocktail. During logistics (Phase 1), mention ONCE what is included, exactly like this: "${BIG_DAY_NOTE}" The Big Day Bar does NOT include a coffee station, it is an add on. The bartender arrives 3 hours before service for weddings. Phase 1 then Phase 2 then Phase 3 (guided selection from the craft menu first, then the CLASSICS section on request, 2 signature drinks, cocktails or mocktails) then Phase 3B (menu design statement, no questions) then Phase 4 then Phase 5 then the PAYMENT STEP then Phase 6.
+Full Bar Package: Full conversation. During logistics (Phase 1), mention ONCE what is included, using THIS BOOKING'S PACKAGE wording when it is given, otherwise this: "${FULL_NOTE}" Also say once that a menu tasting is included. Phase 1 then Phase 2 then Phase 3 (guided selection from the craft menu first, then the CLASSICS section, 3 signature drinks, cocktails or mocktails) then Phase 3B (menu design statement, no questions) then Phase 4 then Phase 5 then the PAYMENT STEP then Phase 6.
+Premium Bar Package: Full conversation with elevated tone. During the conversation, mention once what is included, like this: "${PREMIUM_NOTE}" Also say once that a private tasting is included. During logistics (Phase 1), mention ONCE that sodas and bottled water for kids and non drinkers are included. Phase 1 then Phase 2 then Phase 3 (guided selection from the craft menu first with upscale suggestions, then the CLASSICS section, 3 signature drinks, cocktails or mocktails) then Phase 3B (menu design statement, no questions) then Phase 4 then Phase 5 then the PAYMENT STEP then Phase 6.
 Beer and Wine Package: LOGISTICS ONLY. In Phase 2, skip theme, colors, and drinking pace, but still ask about allergies and the day of contact. Skip Phase 3 entirely. Skip Phase 3B entirely. Skip Phase 4 entirely (do NOT ask what beer or wine they are bringing). Only collect logistics from Phase 1: bar service start time (auto-calculate end time from booked hours), venue or private residence, address, BAR location indoor or outdoor (NOT party location), upstairs or downstairs and elevator access if upstairs, bar on site, parking, ice machine if venue, allergies, and day of contact name and phone. We bring the ice and 1 cooler per bartender on this package. Then the PAYMENT STEP, then Phase 6 closing with a special requests check.
 Tailored Bar Package (LEGACY, or "Bartender Only" if that's what the prefilled package says): Full conversation. Phase 1 then Phase 2 then Phase 3 (guided selection from official cocktail menu) then Phase 3B (menu design statement, no questions) then Phase 4 then Phase 5 then the PAYMENT STEP then Phase 6. Client supplies everything including ice, so tell them early that we bring 1 cooler per bartender but the ice is on their side, and keep ice on their shopping list.
 
@@ -475,6 +488,7 @@ const INTAKE_SECTIONS_BEFORE_PAYMENT = [
   DRINK_SOURCING_RULES,
   INTAKE_DRINK_COUNT_AND_LOGISTICS,
   PACKAGE_DESCRIPTIONS,
+  PACKAGE_SHORT_SECTION,
   INTAKE_PHASES_1_TO_3,
   DRINK_MENU_RULES,
   INTAKE_PHASES_3B_TO_5,
@@ -573,6 +587,7 @@ export interface IntakeOptions {
   popular?: PopularForPrompt | null; // the most popular lists for MOST POPULAR AND RECOMMENDATIONS
   people?: string; // who is planning: the booking questions, or the planner section (lib/partners/chat.ts)
   noPayment?: boolean; // a planner who does not hold the booking: no payment step at all
+  packageSection?: string; // this booking's package wording, barback and cups (lib/package-prompt.ts)
 }
 
 const NO_PAYMENT_STEP = "PAYMENT STEP: skip it entirely for this chat. Do not ask about the remaining balance or payment, and leave payment_preference empty. Go from Phase 5 straight to Phase 6.";
@@ -581,7 +596,7 @@ const NO_PAYMENT_STEP = "PAYMENT STEP: skip it entirely for this chat. Do not as
 export function buildIntakePrompt(booking: { total: number | null; deposit: number } | null, now: Date = new Date(), opts: IntakeOptions = {}): string {
   const f = opts.booked ?? NO_BOOKED_FACTS;
   const booked = bookedDetailsSection(f);
-  const people = opts.people ?? "";
+  const people = [opts.people ?? "", opts.packageSection ?? ""].filter(Boolean).join("\n");
   const before = INTAKE_SECTIONS_BEFORE_PAYMENT.flatMap((s) => (s === INTAKE_SETUP ? [s, booked, people].filter(Boolean) : [s]));
   let prompt = [intakeIntro(now), ...before, opts.noPayment ? NO_PAYMENT_STEP : paymentStep(booking), ...INTAKE_SECTIONS_AFTER_PAYMENT].join("\n");
   prompt = replaceOnce(prompt, "{{POPULAR_AND_RECOMMENDATIONS}}", popularSection(opts.popular ?? null));

@@ -100,15 +100,17 @@ interface BaseInput {
   isWedding: boolean;
   bartenders: number;
   woodenBar: boolean;
+  barback: boolean; // Full Bar weddings: on by default, the client can remove it
 }
 
-function bundleBase(key: PackageKey, { guests: g, hours, isWedding, bartenders: nb, woodenBar }: BaseInput): number {
+function bundleBase(key: PackageKey, { guests: g, hours, isWedding, bartenders: nb, woodenBar, barback }: BaseInput): number {
   const sh = clampHours(hours);
   const setup = isWedding ? SETUP_HOURS_WEDDING : SETUP_HOURS;
   if (key === "beerwine") return nb * BW_HOURLY * (setup + sh + BREAKDOWN_HOURS) + BW_FEE;
 
   const P = PKGP[key];
-  const weddingBarback = key === "full" && isWedding;
+  // The Full Bar wedding barback ($190): on unless the client or an admin removed it.
+  const weddingBarback = key === "full" && isWedding && barback;
   const pg = Math.max(g, MIN_BILLED_GUESTS);
   const fullHrs = Math.min(sh, 4);
   const halfHrs = Math.max(sh - 4, 0);
@@ -160,6 +162,7 @@ export interface PriceInput {
   bartenders?: number | null;
   tipJar: boolean;
   woodenBar?: boolean; // Premium only, defaults to on
+  barback?: boolean; // Full Bar weddings only, defaults to on (false once removed)
 }
 
 export interface PriceResult {
@@ -180,11 +183,12 @@ export function priceEvent(input: PriceInput): PriceResult | null {
 
   const bartenders =
     input.bartenders && input.bartenders > 0 ? Math.max(1, Math.min(4, Math.round(input.bartenders))) : staffingFor(guests);
-  const base: BaseInput = { guests, hours, isWedding: input.isWedding, bartenders, woodenBar: input.woodenBar !== false };
+  const base: BaseInput = { guests, hours, isWedding: input.isWedding, bartenders, woodenBar: input.woodenBar !== false, barback: input.barback !== false };
 
   const packagePrice = round5(bundleBase(key, base));
   // Premium's gratuity is figured on the Full price so clients never tip on rentals.
-  const gratBasis = key === "premium" ? round5(bundleBase("full", base)) : packagePrice;
+  // Premium keeps its barback, so its gratuity basis always counts the Full wedding barback as on.
+  const gratBasis = key === "premium" ? round5(bundleBase("full", { ...base, barback: true })) : packagePrice;
   const gratuity = gratuityCalc(gratBasis, bartenders, input.tipJar);
   return { packagePrice, gratuity, total: Math.round(packagePrice + gratuity), bartenders };
 }

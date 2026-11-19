@@ -283,6 +283,26 @@ check("It can be switched back: logged, and the card is the ice pickup again", m
 check("...the pickup counts again once switched back", (await reimb.pickupsDone(["s1"])).get("s1")!.ice.has("b1"));
 check("Setting it twice logs it once", (await iceDb.setIceMachine("s1", admin, false, at("2026-12-04", 11))).ok && db.event_ice_pickup_log.filter((l) => l.action === "machine_off").length === 1);
 check("The latest entry wins", ice.iceMachineFrom([{ action: "machine_on", by_name: "A", created_at: "2026-12-01T00:00:00Z" }, { action: "machine_off", by_name: "B", created_at: "2026-12-02T00:00:00Z" }]) === null && ice.iceMachineFrom([{ action: "machine_off", by_name: "A", created_at: "2026-12-01T00:00:00Z" }, { action: "machine_on", by_name: "B", created_at: "2026-12-02T00:00:00Z" }])?.byName === "B");
-check("The route takes it, admins only", src("app/api/team/ice-pickup/route.ts").includes('action === "machine" ? await setIceMachine(sessionId, staff, body.on)') && src("app/api/team/ice-pickup/route.ts").includes('"machine"]);'));
+check("The route takes it, admins only", src("app/api/team/ice-pickup/route.ts").includes('action === "machine" ? await setIceMachine(sessionId, staff, body.on, undefined, body.mode)') && src("app/api/team/ice-pickup/route.ts").includes('"machine"]);'));
+
+// ----- Ice machine onsite: the two choices -----
+reset();
+await iceDb.saveIce("s1", admin, { location_name: "Ice House on Elm", total_bags: "4" }, noon);
+const bOn = await iceDb.setIceMachine("s1", admin, undefined, noon, "backup");
+check("Backup bags: an admin picks Ice machine onsite, bring backup bags, logged with who and when", bOn.ok && bOn.view.machineBackup && !bOn.view.machineOnsite && db.event_ice_pickup_log.some((l) => l.action === "machine_backup" && l.by_name === "Kenneth" && l.created_at === noon.toISOString()));
+check("...the full card stays, with the backup line at the top for admins and staff", bOn.ok && bOn.view.location === "Ice House on Elm" && ice.ICE_BACKUP_LINE === "Ice machine onsite. Backup bags only." && src("app/team/ice-pickup-card.tsx").includes("{view.machineBackup && (") && src("app/team/admin/e/[id]/ice-pickup-panel.tsx").includes("{ICE_BACKUP_LINE}"));
+const bAssign = await iceDb.assignIce("s1", admin, "b1", "", noon);
+check("...someone can be assigned, and gets the ice text", bAssign.ok && textsTo(taylor).length === 1);
+const bView = await iceDb.iceView(session(), admin, { now: at(DAY, 10) });
+check("...it counts as unfinished like a normal pickup", bView.outstanding);
+check("...it is on the person's home screen", (await iceDb.myIcePickups(taylor, at(DAY, 9))).length === 1);
+check("...and the reminder cron still covers it", !(await iceDb.iceMachines(["s1"])).has("s1") && (await iceDb.iceMachines(["s1"], { withBackup: true })).get("s1")?.mode === "backup");
+const nOn = await iceDb.setIceMachine("s1", admin, undefined, at("2026-12-03", 13), "no_pickup");
+const nView = await iceDb.iceView(session(), admin, { now: at(DAY, 10) });
+check("No pickup: switching to it stops the count, assignment, and texts", nOn.ok && nOn.view.machineOnsite && !nView.outstanding && !(await iceDb.assignIce("s1", admin, "b2", "", at("2026-12-03", 13))).ok && (await iceDb.myIcePickups(taylor, at(DAY, 9))).length === 0);
+const back = await iceDb.setIceMachine("s1", admin, undefined, at("2026-12-03", 14), "off");
+check("Either can be switched back, and each switch is logged", back.ok && !back.view.machineOnsite && !back.view.machineBackup && ["machine_backup", "machine_on", "machine_off"].every((a) => db.event_ice_pickup_log.some((l) => l.action === a)));
+check("The latest entry decides the mode", ice.iceMachineFrom([{ action: "machine_on", by_name: "A", created_at: "2026-12-01T00:00:00Z" }, { action: "machine_backup", by_name: "B", created_at: "2026-12-02T00:00:00Z" }])?.mode === "backup");
+check("Both choices are on the admin card", src("app/team/admin/e/[id]/ice-pickup-panel.tsx").includes('machineToggle("no_pickup")') && src("app/team/admin/e/[id]/ice-pickup-panel.tsx").includes('machineToggle("backup")') && ice.ICE_MACHINE_NO_PICKUP === "Ice machine onsite, no pickup" && ice.ICE_MACHINE_BACKUP === "Ice machine onsite, bring backup bags");
 
 done("ice pickup");

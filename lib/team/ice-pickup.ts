@@ -197,18 +197,33 @@ export function iceText(o: { firstName: string; title: string; date: string; bag
 // go out. Stored as entries in event_ice_pickup_log ("machine_on" and
 // "machine_off", with who and when), so no new column: the latest entry wins.
 
+//
+// Two choices:
+//   "Ice machine onsite, no pickup" (machine_on): as above.
+//   "Ice machine onsite, bring backup bags" (machine_backup): the full pickup
+//     card stays (assignment, texts, and it counts as unfinished like a normal
+//     pickup), with "Ice machine onsite. Backup bags only." at the top.
+// Either one is switched back with machine_off.
+
 export const ICE_MACHINE_ONSITE = "Ice machine onsite";
-export const ICE_MACHINE_ACTIONS = ["machine_on", "machine_off"] as const;
+export const ICE_MACHINE_NO_PICKUP = "Ice machine onsite, no pickup";
+export const ICE_MACHINE_BACKUP = "Ice machine onsite, bring backup bags";
+export const ICE_BACKUP_LINE = "Ice machine onsite. Backup bags only.";
+export const ICE_MACHINE_ACTIONS = ["machine_on", "machine_off", "machine_backup"] as const;
+export type IceMachineMode = "no_pickup" | "backup";
 
 export interface IceMachine {
   byName: string;
   at: string; // ISO
+  mode: IceMachineMode;
 }
 
 /** The latest machine entry decides. Null when it is off (or was never set). */
 export function iceMachineFrom(log: { action: string; by_name: string | null; created_at: string }[]): IceMachine | null {
   const last = log.filter((l) => (ICE_MACHINE_ACTIONS as readonly string[]).includes(l.action)).reduce<(typeof log)[number] | null>((a, l) => (!a || l.created_at >= a.created_at ? l : a), null);
-  return last?.action === "machine_on" ? { byName: last.by_name || "an admin", at: last.created_at } : null;
+  if (last?.action === "machine_on") return { byName: last.by_name || "an admin", at: last.created_at, mode: "no_pickup" };
+  if (last?.action === "machine_backup") return { byName: last.by_name || "an admin", at: last.created_at, mode: "backup" };
+  return null;
 }
 
 /** "Set by Kenny, Dec 4, 3:40 PM". */

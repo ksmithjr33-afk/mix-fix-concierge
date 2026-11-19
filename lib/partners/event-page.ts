@@ -10,7 +10,8 @@ import { buildStaffEventView, firstName, type StaffEventView } from "@/lib/team/
 import { eventData, eventTimeZone } from "@/lib/team/markets";
 import { eventSchedule, formatClock, longDate, todayIn } from "@/lib/team/time";
 import { cityFrom } from "@/lib/team/event-list";
-import { MAX_PACKAGE_BULLETS, packageGuide } from "@/lib/packages-info";
+import { packageShortFor } from "@/lib/packages-info";
+import { bookingShortOf } from "@/lib/package-extras";
 import { clientList } from "@/lib/client-list";
 import { currentMenu, clientMenuLink } from "@/lib/team/approved-menu-db";
 import { venuePhotosFor, type VenuePhoto } from "@/lib/team/venue-photos-db";
@@ -167,7 +168,7 @@ export async function partnerEventView(a: EventAccess, now: Date = new Date()): 
   ]);
   const photosView = submitted ? await venuePhotosFor(s, { id: "partner", role: "bartender", active: true }, { status: "accepted" }).catch(() => null) : null;
   const photos = [...(photosView?.own ?? []), ...(photosView?.past ?? [])].filter((p: VenuePhoto) => p.url).map((p) => ({ url: p.url!, caption: p.caption }));
-  const guide = packageGuide(v.package);
+  const short = packageShortFor(v.package, bookingShortOf(s));
   const deadlines = computeDeadlines(ed.event_date ?? s.event_date, now, eventTimeZone(s));
   const host = a.booking.host;
   const eventFor = host
@@ -206,9 +207,9 @@ export async function partnerEventView(a: EventAccess, now: Date = new Date()): 
     address: v.address,
     mapsUrl: v.mapsUrl,
     package: v.package,
-    packageLine: guide ? guide.short.line : "",
-    packageBullets: guide ? guide.short.bullets.slice(0, MAX_PACKAGE_BULLETS) : [],
-    packageProvides: guide ? guide.short.provides : "",
+    packageLine: short ? short.line : "",
+    packageBullets: short ? short.bullets : [],
+    packageProvides: short ? short.provides : "",
     guestCount: v.guestCount,
     drinks: v.drinks,
     setMenu: v.setMenu,

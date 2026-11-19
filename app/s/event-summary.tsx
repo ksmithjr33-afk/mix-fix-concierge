@@ -1,6 +1,8 @@
 // Read only summary of a submitted event, shown under the update mode chat.
 // Same sections the client saw at the end of intake. No oz amounts.
 
+import { packageShortFor } from "@/lib/packages-info";
+
 type EventData = Record<string, unknown>;
 
 interface Drink {
@@ -57,7 +59,13 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-export default function EventSummary({ data }: { data: EventData }) {
+export default function EventSummary({ data, cups = false }: { data: EventData; cups?: boolean }) {
+  // What the package includes, in the same short wording every page and the concierge use.
+  const short = packageShortFor(data.package, {
+    wedding: String(data.event_type ?? "").toLowerCase().includes("wedding"),
+    barback: String(data.barback ?? "").trim().toLowerCase() === "removed" ? "removed" : "on",
+    cups,
+  });
   const drinks = (Array.isArray(data.signature_drinks) ? data.signature_drinks : []) as Drink[];
   const start = text(data.bar_service_start);
   const end = text(data.bar_service_end);
@@ -92,6 +100,22 @@ export default function EventSummary({ data }: { data: EventData }) {
 
       <Section title="Package">
         <Row label="Package" value={text(data.package)} />
+        {short && (
+          <div className="py-2.5 border-b border-[#DDD5CC] last:border-0" data-package-short>
+            <dt className="text-xs text-[#A39585] uppercase tracking-wide mb-0.5">What is included</dt>
+            <dd className="text-[15px] text-[#2C2420] space-y-1">
+              <p>{short.line}</p>
+              {short.bullets.length > 0 && (
+                <ul className="list-disc pl-5 space-y-0.5">
+                  {short.bullets.map((b) => (
+                    <li key={b}>{b}</li>
+                  ))}
+                </ul>
+              )}
+              {short.provides && <p className="text-[#6B5D52]">{short.provides}</p>}
+            </dd>
+          </div>
+        )}
         <Row label="Allergies" value={allergies.join(", ")} />
       </Section>
 

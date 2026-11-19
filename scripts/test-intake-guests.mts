@@ -204,7 +204,7 @@ check("...and no guest count flag while the price is pending", (await flagged())
 
 // ---------- 5. The basis on the booked price ----------
 
-check("5. A booking records what its total was priced for", JSON.stringify(bookedPrice.basis) === JSON.stringify({ package: "Full Bar", guests: 18, hours: 4, isWedding: false, bartenders: 1, tipJar: true, woodenBar: true }));
+check("5. A booking records what its total was priced for", JSON.stringify(bookedPrice.basis) === JSON.stringify({ package: "Full Bar", guests: 18, hours: 4, isWedding: false, bartenders: 1, tipJar: true, woodenBar: true, barback: true }));
 const ranged = bwdb.bookedPriceFrom(bw.readBooking({ name: "A", package_type: "Premium Bar", guest_count: "50-75", hours_booked: "5", total_price: "$3000" }), NOW.toISOString())!;
 check("...a range is its higher end, and bartenders follow the guests when none were sent", ranged.basis?.guests === 75 && ranged.basis?.hours === 5 && ranged.basis?.bartenders === 1);
 check("...a retired package has no basis", bwdb.bookedPriceFrom(bw.readBooking({ name: "A", package_type: "Essentials Bar", guest_count: "50", hours_booked: "4", total_price: "$900" }), NOW.toISOString())!.basis === null);

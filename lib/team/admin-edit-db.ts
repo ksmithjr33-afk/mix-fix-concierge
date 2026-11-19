@@ -19,6 +19,7 @@ import { autoSendOn, listWouldChange } from "@/lib/client-list-db";
 import { firstName, type StaffMember } from "@/lib/team/event-view";
 import { adminPrice, cleanAdminEdit, cleanPriceChoice } from "@/lib/team/admin-edit";
 import { unpriced } from "@/lib/price-pending";
+import { barbackStatus } from "@/lib/package-extras";
 import { textPricePending } from "@/lib/price-pending-db";
 
 export interface AdminPreview {
@@ -78,6 +79,8 @@ export async function saveAdminEdit(opts: {
   if (surpriseActive(sx, new Date(), eventTimeZone(session)) && isHonoree(sx, { phone: clean.partial.day_of_contact_phone })) {
     return { ok: false, error: honoreeRefusal("day of contact"), status: 409 };
   }
+  // The barback can only be removed on a Full Bar wedding. The Big Day Bar and Premium always keep theirs.
+  if ("barback" in clean.partial && !barbackStatus(session).removable) return { ok: false, error: "The barback is part of this package and cannot be removed.", status: 400 };
   const choice = cleanPriceChoice(opts.price);
   if (!choice.ok) return { ok: false, error: choice.error, status: 400 };
   const expectedVersion = typeof opts.expectedVersion === "number" ? opts.expectedVersion : undefined;

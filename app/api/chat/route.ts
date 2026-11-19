@@ -1,5 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { buildIntakePrompt } from "@/lib/system-prompt";
+import { bookingPackageSection } from "@/lib/package-prompt";
+import { applyIntakeBarback, intakeBarbackQuote, splitBarback } from "@/lib/intake-barback";
 import { supabase } from "@/lib/supabase";
 import { buildUpdatePrompt } from "@/lib/update-prompt";
 import {
@@ -14,6 +16,7 @@ import {
 import {
   applyEventUpdate,
   type ApplyResult,
+  bookedEventFrom,
   changesSince,
   getSession,
   quoteEventUpdate,
@@ -87,7 +90,7 @@ const submitProperties = submitEventDataTool.input_schema.properties as Record<s
 const updateEventDataTool: Anthropic.Tool = {
   name: "update_event_data",
   description:
-    "Save a change to this already submitted event. It applies right away. Call it only after the client clearly said yes. Include ONLY the fields that changed. When any drink changes, send the complete signature_drinks array. Anything the client tells you that no other field covers (for example 'I will provide the cups') goes in special_requests as the complete existing text plus the new note. A change to guest count, service times or hours, bartenders, or package must be quoted with quote_price_change first, and quoted_new_total must be the new total you quoted. Use manager_request only for drinks beyond the package count. Set change_approval_needed when you passed something along to management under the CONDUCT RULE.",
+    "Save a change to this already submitted event. It applies right away. Call it only after the client clearly said yes. Include ONLY the fields that changed. When any drink changes, send the complete signature_drinks array. Anything the client tells you that no other field covers (for example 'I will provide the cups') goes in special_requests as the complete existing text plus the new note. A change to guest count, service times or hours, bartenders, package, or the barback must be quoted with quote_price_change first, and quoted_new_total must be the new total you quoted. Use manager_request only for drinks beyond the package count. Set change_approval_needed when you passed something along to management under the CONDUCT RULE.",
   input_schema: {
     type: "object",
     additionalProperties: false,
@@ -124,7 +127,7 @@ const updateEventDataTool: Anthropic.Tool = {
 const quotePriceChangeTool: Anthropic.Tool = {
   name: "quote_price_change",
   description:
-    "Price a proposed change to guest count, service times or hours, bartenders, or package with our pricing engine. Saves nothing. Call it before confirming any such change, with ONLY the new values, then state the difference and new total from the result and ask the client for a clear yes.",
+    "Price a proposed change to guest count, service times or hours, bartenders, package, or the Full Bar wedding barback with our pricing engine. Saves nothing. Call it before confirming any such change, with ONLY the new values, then state the difference and new total from the result and ask the client for a clear yes.",
   input_schema: {
     type: "object",
     additionalProperties: false,
@@ -358,6 +361,7 @@ async function updateModeResponse(session: SessionRow, messages: ChatMessage[], 
     planner: partner ? plannerUpdateSection(partner.ctx) : undefined,
     recap: since ? { lines: recapLines(since.changes), totalBefore: since.totalBefore, totalAfter: since.totalAfter } : null,
     pricePending: session.price_pending ? (session.price_pending_info ?? null) : null,
+    packageSection: bookingPackageSection(session, String(eventData.package ?? ""), messages, approvalOnly ? "approval" : "update"),
   });
   // A price the client mentions while one is pending goes on the admins' summary.
   const lastUser = [...messages].reverse().find((m) => m.role === "user")?.content ?? "";
@@ -719,6 +723,9 @@ export async function POST(request: Request) {
         // Who is planning: a planner, or the client asked once (only for a session we can record the answer on).
         people: [typeof people === "string" ? people : people.text, session ? surpriseReminder(session as EventSession, !partner) : ""].filter(Boolean).join("\n"),
         noPayment: approvalOnly,
+        packageSection: session
+          ? bookingPackageSection({ ...session, event_data: session.event_data ?? bookedEventFrom(session) }, String(session.package_type ?? ""), messages, approvalOnly ? "approval" : "intake", approvalOnly ? null : intakeBarbackQuote(session))
+          : "",
       }),
       cache_control: { type: "ephemeral" },
     },
@@ -879,7 +886,9 @@ export async function POST(request: Request) {
             }
             const filled = { ...input, ...bookingFill(input, factsAsSession(facts)) };
             // Dive Bar: record the five set menu drinks as the event's menu.
-            const eventData = applyDiveSetMenu(filled);
+            // The barback asked for (Full Bar weddings) is applied after the save as a priced update.
+            const split = splitBarback(approvalOnly ? null : session, applyDiveSetMenu(filled) as EventData);
+            const eventData = split.data;
             const transcript = buildTranscript(updatedMessages);
             const origin = new URL(request.url).origin;
 
@@ -909,6 +918,11 @@ export async function POST(request: Request) {
               const fresh = await getSession(sessionId);
               if (sub.apply.pricePending?.fresh) await textPricePending(fresh ?? session!, sub.apply.pricePending.info);
               if (sub.apply.rows.length > 0) await deliverEventUpdates(sessionId, sub.apply.rows, { staffOrigin: origin });
+            }
+            if (split.barback && sub.saved !== "failed") {
+              const bb = await applyIntakeBarback(sessionId, split.barback);
+              if (bb?.pricePending?.fresh) await textPricePending((await getSession(sessionId)) ?? session!, bb.pricePending.info);
+              if (bb && bb.rows.length > 0) await deliverEventUpdates(sessionId, bb.rows, { staffOrigin: origin });
             }
             // The safety net: a guest count that differs from the booking with no price change applied or pending.
             const after = await getSession(sessionId);

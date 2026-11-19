@@ -8,7 +8,7 @@ import { isAdminRole } from "@/lib/team/roles";
 //   "assign" (admins): staffId, bags (adds the person, or changes their bags)
 //   "remove" (admins): staffId
 //   "undo" (admins): staffId
-//   "machine" (admins): on (true or false), "Ice machine onsite"
+//   "machine" (admins): mode "no_pickup", "backup" or "off" (or the older on, true or false)
 //   "picked_up": location, bags; the person themselves, or an admin with staffId
 //   "instead": location, bags, coveringFor (a staff id still not picked up, or
 //     blank for "Nobody, this is extra"); someone on the event who is not
@@ -30,7 +30,7 @@ export async function POST(request: Request) {
       : action === "assign" ? await assignIce(sessionId, staff, body.staffId, body.bags)
       : action === "remove" ? await removeIce(sessionId, staff, body.staffId)
       : action === "undo" ? await undoIce(sessionId, staff, body.staffId)
-      : action === "machine" ? await setIceMachine(sessionId, staff, body.on)
+      : action === "machine" ? await setIceMachine(sessionId, staff, body.on, undefined, body.mode)
       : action === "picked_up" ? await markIce(sessionId, staff, body)
       : action === "instead" ? await iceInstead(sessionId, staff, body)
       : null;

@@ -402,7 +402,7 @@ const tabs = await import("../lib/team/manager-tabs.ts");
 check("Admin Receipts tab sits between Day of and Chat", tabs.MANAGER_TABS.map(([k]) => k).join() === "details,team,pickups,order,client,dayof,receipts,chat,agreement");
 check("Managers get it too", tabs.managerTabsFor("manager").some(([k]) => k === "receipts"));
 check("Badge: receipts waiting on review", (await rdb.pendingReceiptCount("next")) === 2 && (await rdb.pendingReceiptCount("dec")) === 0 && src("app/team/admin/e/[id]/page.tsx").includes("receipts: receiptsWaiting"));
-check("The staff event page has a Receipts tab", src("app/team/e/[id]/event-tabs.tsx").includes('["receipts", RECEIPTS_TAB]') && src("app/team/e/[id]/page.tsx").includes("staffReceiptsView(access.session, staff, a)"));
+check("The staff event page has a Receipts tab", src("app/team/e/[id]/event-tabs.tsx").includes('["receipts", RECEIPTS_TAB]') && src("app/team/e/[id]/page.tsx").includes("staffReceiptsView(access.session, staff, a, undefined, { adminPreview:"));
 
 // ----- 14. Before the migration -----
 reset();
@@ -437,5 +437,51 @@ const jsxText = (s: string) => [...s.matchAll(/>([^<>{}]*[A-Za-z][^<>{}]*)</g)].
 const files = ["app/team/e/[id]/receipts.tsx", "app/team/admin/receipts/page.tsx"].map(src);
 const hyphenated = files.flatMap(jsxText).filter((t) => /[A-Za-z]-[A-Za-z]|\s-\s/.test(t) && !/^[a-z-]+$/.test(t) && t !== "Content-Type");
 check("No hyphens in the receipts screens", hyphenated.length === 0, hyphenated.join(" | "));
+
+// ----- The Receipts tab window, every role, and the admin in Bartender view -----
+{
+  reset();
+  const day = addDays(today, 5);
+  db.sessions = [event("win", day, "123 Main St, Dallas, TX")];
+  const people = [
+    { id: "r1", name: "Bri Bartender", role: "bartender" },
+    { id: "r2", name: "Bo Barback", role: "bar_back" },
+    { id: "r3", name: "Sue Server", role: "server" },
+    { id: "r4", name: "Hal Helper", role: "event_helper" },
+  ].map((p) => ({ ...p, phone: "+1214555" + p.id.slice(1).padStart(4, "0"), active: true }));
+  db.staff = [admin, ...people, { ...lee, id: "r5", name: "Ollie Offered" }].map((s) => ({ ...s }));
+  db.event_assignments = [
+    ...people.map((p, i) => ({ id: `w${i}`, session_id: "win", staff_id: p.id, status: "accepted" })),
+    { id: "w9", session_id: "win", staff_id: "r5", status: "offered" },
+  ];
+  const at = (ymd: string) => new Date(`${ymd}T18:00:00Z`);
+  const bri = db.staff.find((s) => s.id === "r1") as unknown as typeof sam;
+  const view = (who: typeof sam, ymd: string) => rdb.staffReceiptsView(ev("win"), who, asg("win", who.id), at(ymd));
+  check("Receipts window: open before the event, from acceptance", !!(await view(bri, today)));
+  check("Receipts window: open on the event day", !!(await view(bri, day)));
+  check("Receipts window: open through day 14 after the event", !!(await view(bri, addDays(day, 14))));
+  check("Receipts window: gone on day 15", (await view(bri, addDays(day, 15))) === null);
+  check("Rule: accepted only, never offered or declined", rules.staffCanUseReceipts({ active: true }, { status: "accepted" }, day, today) && !rules.staffCanUseReceipts({ active: true }, { status: "offered" }, day, today) && !rules.staffCanUseReceipts({ active: true }, { status: "declined" }, day, today));
+  const ollie = db.staff.find((s) => s.id === "r5") as unknown as typeof sam;
+  check("Someone only offered the shift does not see the tab", (await view(ollie, today)) === null);
+  for (const p of people) {
+    const who = db.staff.find((s) => s.id === p.id) as unknown as typeof sam;
+    const v = await view(who, today);
+    const up = await rdb.uploadReceiptPhoto(ev("win"), who, asg("win", who.id), jpeg());
+    const saved = up.ok ? await rdb.saveReceipt(ev("win"), who, asg("win", who.id), { kind: "supplies", amount: "12", photos: [up.path] }) : { ok: false };
+    check(`Every role: a ${p.role.replace("_", " ")} assigned and accepted sees the tab and uploads, like a bartender`, !!v && v.ready && !v.preview && up.ok && saved.ok, JSON.stringify(saved));
+  }
+  // An admin in Bartender view comes back with role bartender and bartenderView set.
+  const asBartender = { ...admin, role: "bartender" as const, bartenderView: true };
+  const pv = await rdb.staffReceiptsView(ev("win"), asBartender, null, at(today), { adminPreview: true });
+  check("Admin in Bartender view, not assigned: the tab shows with uploading off and a note to the manager view", !!pv && pv.preview === rules.RECEIPTS_ADMIN_PREVIEW && /manager view/.test(pv.preview!) && pv.receipts.length === 0);
+  check("...and the server refuses an upload from them", !(await rdb.uploadReceiptPhoto(ev("win"), asBartender, null, jpeg(), at(today))).ok);
+  check("...without the preview flag nobody unassigned sees it", (await rdb.staffReceiptsView(ev("win"), asBartender, null, at(today))) === null);
+  check("The staff page asks for the preview for admins in Bartender view", src("app/team/e/[id]/page.tsx").includes("adminPreview: !!staff.bartenderView || isAdminRole(staff.role)") && src("app/team/e/[id]/receipts.tsx").includes("data-receipts-preview"));
+  missingTables.add("event_receipts");
+  const nr = await view(bri, today);
+  check("Before the receipts table exists the tab says Receipts are not set up yet.", !!nr && nr.ready === false && rules.RECEIPTS_NOT_SET_UP === "Receipts are not set up yet." && src("app/team/e/[id]/receipts.tsx").includes('mode === "staff" ? RECEIPTS_NOT_SET_UP'));
+  missingTables.clear();
+}
 
 done("receipts");

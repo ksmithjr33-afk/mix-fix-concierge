@@ -19,6 +19,7 @@ export interface FieldChange {
 /** Fields a client can change in update mode. Everything else is ignored. */
 export const UPDATABLE_FIELDS = [
   "guest_count",
+  "barback",
   "bar_service_start",
   "bar_service_end",
   "venue_type",
@@ -82,6 +83,7 @@ export const PRICED_FIELDS = [
   "guest_count",
   "bartenders",
   "package",
+  "barback", // Full Bar weddings: "Included" or "Removed"
 ] as const;
 
 export function isPricedField(field: string): boolean {
@@ -100,6 +102,7 @@ export const DRINK_CUTOFF_DAYS = 6;
 
 const FIELD_LABELS: Record<string, string> = {
   guest_count: "Guest count",
+  barback: "Barback",
   bar_service_start: "Bar service start",
   bar_service_end: "Bar service end",
   venue_type: "Venue type",

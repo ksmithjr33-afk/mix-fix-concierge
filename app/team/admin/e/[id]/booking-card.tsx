@@ -1,5 +1,6 @@
 "use client";
 
+import BarbackControl, { type BarbackControlData } from "./barback-control";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
@@ -12,7 +13,7 @@ const input = "w-full rounded-lg border border-[#DDD5CC] bg-white px-3 py-2 text
  * each was linked, the pricing switches, and Add, Replace, and Remove.
  * Admins and managers; every action is checked again on the server.
  */
-export default function BookingCard({ sessionId, data }: { sessionId: string; data: BookingCardData }) {
+export default function BookingCard({ sessionId, data, barback }: { sessionId: string; data: BookingCardData; barback?: BarbackControlData | null }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -45,6 +46,7 @@ export default function BookingCard({ sessionId, data }: { sessionId: string; da
       <section className="rounded-2xl border border-[#DDD5CC] bg-[#F5F0EB] px-4 py-3">
         <h2 className="font-heading text-lg font-bold text-[#2C2420]">Booking</h2>
         <p className="text-sm text-[#6B5D52]">The client holds the booking. Planners turn on once the partners database update runs.</p>
+        {barback && <BarbackControl sessionId={sessionId} data={barback} />}
       </section>
     );
   }
@@ -289,6 +291,7 @@ export default function BookingCard({ sessionId, data }: { sessionId: string; da
           </ul>
         </details>
       )}
+      {barback && <BarbackControl sessionId={sessionId} data={barback} />}
       {error && <p className="text-sm text-[#A0412D]">{error}</p>}
     </section>
   );

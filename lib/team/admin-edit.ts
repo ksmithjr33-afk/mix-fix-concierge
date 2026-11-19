@@ -18,6 +18,7 @@ export const ADMIN_EDIT_FIELDS = [
   "guest_count",
   "bartenders",
   "package",
+  "barback", // Full Bar weddings: the Booking card removes it or adds it back
   "event_address",
   "parking_info",
   "day_of_contact_name",
@@ -226,6 +227,12 @@ export function cleanAdminEdit(raw: unknown, currentPackage: unknown): CleanEdit
         const b = v === true || /^(yes|true)$/i.test(String(v ?? "").trim()) ? true : v === false || /^(no|false)$/i.test(String(v ?? "").trim()) ? false : null;
         if (b === null) return { ok: false, error: "Pick yes or no." };
         partial[field] = b;
+        break;
+      }
+      case "barback": {
+        const t = String(v ?? "").trim().toLowerCase();
+        if (t !== "included" && t !== "removed") return { ok: false, error: "Pick Included or Removed for the barback." };
+        partial[field] = t === "removed" ? "Removed" : "Included";
         break;
       }
       case "venue_type": {

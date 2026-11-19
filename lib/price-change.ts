@@ -24,6 +24,17 @@ import {
 
 export const DEFAULT_DEPOSIT = 150;
 
+/**
+ * The barback on a Full Bar wedding, as event_data.barback: "Included" (the
+ * default, also when the field is missing) or "Removed". A priced field, so
+ * removing it or adding it back goes through the normal price change flow.
+ */
+export const BARBACK_INCLUDED = "Included";
+export const BARBACK_REMOVED = "Removed";
+export function barbackOnIn(ed: { barback?: unknown } | null | undefined): boolean {
+  return String(ed?.barback ?? "").trim().toLowerCase() !== "removed";
+}
+
 export interface PriceBasis {
   package: string;
   guests: number;
@@ -32,6 +43,7 @@ export interface PriceBasis {
   bartenders: number;
   tipJar: boolean;
   woodenBar: boolean;
+  barback?: boolean; // Full Bar weddings: on unless removed (missing on older saved bases, which means on)
 }
 
 /** What the client booked, stored on sessions.booked_price. */
@@ -234,6 +246,7 @@ export function basisFromEvent(
     bartenders,
     tipJar: opts.tipJar,
     woodenBar: ed.premium_wooden_bar === undefined ? true : toBool(ed.premium_wooden_bar, true),
+    barback: barbackOnIn(ed),
   };
 }
 

@@ -39,6 +39,9 @@ export const COMPANY_LABEL = "Company";
 export const RECEIPTS_TAB = "Receipts";
 export const RECEIPTS_PATH = "/team/admin/receipts";
 export const RECEIPTS_NOT_READY = "Receipts are not set up yet. Run the receipts migration first.";
+export const RECEIPTS_NOT_SET_UP = "Receipts are not set up yet.";
+/** An admin in Bartender view on an event they are not assigned to: a look at the tab, with uploading off. */
+export const RECEIPTS_ADMIN_PREVIEW = "You are not assigned to this event, so uploading is off here. To add or review receipts, switch to the manager view of this event.";
 export const OPEN_DAYS_AFTER = 14;
 export const MAX_RECEIPT_PHOTOS = 6;
 export const MAX_STAFF_RECEIPT_CENTS = MAX_REIMBURSEMENT_CENTS; // it becomes a reimbursement
@@ -58,9 +61,14 @@ const addDays = (ymd: string, n: number) => {
 /** The last day staff can add receipts: 14 days after the event. Null with no event day (always open). */
 export const receiptsOpenUntil = (eventDay: string | null) => (eventDay ? addDays(eventDay, OPEN_DAYS_AFTER) : null);
 
-/** Staff on the event who have not declined, until 14 days after it. */
+/**
+ * Anyone on the event in any role (bartender, bar back, server, event helper)
+ * who has accepted, from acceptance through 14 days after the event (gone on
+ * day 15). There is no lower bound: they can add one before the event. Offered
+ * and declined people never see it.
+ */
 export function staffCanUseReceipts(staff: { active: boolean } | null, assignment: { status: string } | null, eventDay: string | null, today: string): boolean {
-  if (!staff || !staff.active || !assignment || assignment.status === "declined") return false;
+  if (!staff || !staff.active || !assignment || assignment.status !== "accepted") return false;
   const until = receiptsOpenUntil(eventDay);
   return !until || today <= until;
 }

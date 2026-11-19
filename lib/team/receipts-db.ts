@@ -36,6 +36,7 @@ import {
   findDuplicate,
   MANAGERS_CANNOT_APPROVE,
   ONLY_SUBMITTED,
+  RECEIPTS_ADMIN_PREVIEW,
   RECEIPTS_NOT_READY,
   receiptPhotoPath,
   receiptPhotoPrefix,
@@ -194,6 +195,7 @@ export interface StaffReceiptsView {
   ready: boolean; // false until the migration runs
   openUntil: string | null; // YYYY-MM-DD, the last day to add one
   receipts: Receipt[]; // only this person's own, newest first
+  preview?: string; // an admin in Bartender view who is not assigned: the tab shows, uploading is off, with this note
 }
 
 /**
@@ -201,10 +203,20 @@ export interface StaffReceiptsView {
  * event. Null (no tab) for anyone not on the event, declined, or past 14
  * days after it.
  */
-export async function staffReceiptsView(session: SessionLike, staff: Viewer, assignment: Assignment | null, now: Date = new Date()): Promise<StaffReceiptsView | null> {
+export async function staffReceiptsView(
+  session: SessionLike,
+  staff: Viewer,
+  assignment: Assignment | null,
+  now: Date = new Date(),
+  opts: { adminPreview?: boolean } = {}
+): Promise<StaffReceiptsView | null> {
   const day = dayOf(session);
-  if (!staffCanUseReceipts(staff, assignment, day, chicagoToday(now))) return null;
   const openUntil = receiptsOpenUntil(day);
+  if (!staffCanUseReceipts(staff, assignment, day, chicagoToday(now))) {
+    // An admin in Bartender view who is not on the event sees the tab, read only.
+    if (opts.adminPreview && !assignment) return { ready: await tableReady(), openUntil, receipts: [], preview: RECEIPTS_ADMIN_PREVIEW };
+    return null;
+  }
   const { data, error } = await supabase.from(RECEIPTS_TABLE).select("*").eq("session_id", session.id).eq("staff_id", staff.id).order("created_at", { ascending: false });
   if (error) return { ready: false, openUntil, receipts: [] };
   return { ready: true, openUntil, receipts: await shape(live((data as ReceiptRow[]) ?? []), staff) };

@@ -21,6 +21,7 @@ import {
   RECEIPT_KINDS,
   RECEIPT_STATUS_LABEL,
   RECEIPTS_NOT_READY,
+  RECEIPTS_NOT_SET_UP,
   type ReceiptKind,
 } from "@/lib/team/receipts";
 import { money } from "@/lib/team/pay";
@@ -384,7 +385,9 @@ export default function Receipts({
   people = [],
   openUntil = null,
   timeZone,
+  preview = "",
 }: {
+  preview?: string; // an admin in Bartender view who is not assigned: uploading is off, with this note
   sessionId: string;
   mode: "staff" | "admin";
   initial: Receipt[];
@@ -431,7 +434,11 @@ export default function Receipts({
         </p>
       </div>
       {!ready ? (
-        <p className={`${card} text-[15px] text-[#9A7049]`}>{RECEIPTS_NOT_READY}</p>
+        <p className={`${card} text-[15px] text-[#9A7049]`}>{mode === "staff" ? RECEIPTS_NOT_SET_UP : RECEIPTS_NOT_READY}</p>
+      ) : preview ? (
+        <p className={`${card} text-[15px] text-[#6B5D52]`} data-receipts-preview>
+          {preview}
+        </p>
       ) : (
         <button type="button" onClick={() => setForm({ editing: null })} className={`w-full ${primary} py-3`}>
           Add a receipt

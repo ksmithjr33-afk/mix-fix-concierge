@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import type { SessionRow } from "@/lib/event-updates";
 import UpdateMode from "./update-mode";
+import { extrasOf } from "@/lib/package-extras";
 import { clientCanSeeList, holdsFor } from "@/lib/client-list-db";
 import { recordClientOpen } from "@/lib/client-links";
 import { clientMenu } from "@/lib/team/approved-menu-db";
@@ -128,6 +129,7 @@ export default async function ShortRedirectPage({
         showList={showList}
         listPending={pending.some((h) => h.kind === "change")}
         menu={menu}
+        cups={extrasOf(data).cups_included === true}
         extra={
           <>
             {/* The booking holder sees that it is a surprise. */}

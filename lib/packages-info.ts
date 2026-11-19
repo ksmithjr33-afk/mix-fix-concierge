@@ -42,6 +42,38 @@ export interface PackageShort {
 
 export const MAX_PACKAGE_BULLETS = 5;
 
+/** The Full Bar barback line: on by default at weddings, and the client can remove it. */
+export const BARBACK_AT_WEDDINGS = "A barback at weddings (optional, you can remove it).";
+export const CUPS_WITH_BOOKING = "Custom cups (included with your booking).";
+export const BARBACK_REMOVED_LINE = "No barback (removed from this booking).";
+
+/** What one booking adds to or takes from the package's short wording. */
+export interface BookingShort {
+  wedding?: boolean; // the event is a wedding (the Full Bar barback line only shows at weddings)
+  barback?: "on" | "removed"; // Full Bar weddings
+  cups?: boolean; // custom cups promised on an older Full Bar booking
+}
+
+/**
+ * The short package wording for one booking: the package's line, bullets and
+ * client provides line, with this booking's barback and cups. With no booking
+ * (a package described in general) it is the package's own wording. Every
+ * page and both concierge prompts describe a package with this, so a package
+ * reads the same everywhere. Never more than five bullets.
+ */
+export function packageShortFor(name: unknown, booking?: BookingShort): PackageShort | null {
+  const g = packageGuide(name);
+  if (!g) return null;
+  if (!booking) return { ...g.short, bullets: g.short.bullets.slice(0, MAX_PACKAGE_BULLETS) };
+  let bullets = [...g.short.bullets];
+  if (g.key === "full") {
+    bullets = bullets.filter((b) => b !== BARBACK_AT_WEDDINGS);
+    if (booking.wedding) bullets.push(booking.barback === "removed" ? BARBACK_REMOVED_LINE : BARBACK_AT_WEDDINGS);
+    if (booking.cups) bullets.push(CUPS_WITH_BOOKING);
+  }
+  return { ...g.short, bullets: bullets.slice(0, MAX_PACKAGE_BULLETS) };
+}
+
 export const LEGACY_LABEL = "Legacy package";
 export const LEGACY_NOTE = "Confirm details with a manager";
 export const NO_GUIDE = "No package guide yet";
@@ -128,8 +160,7 @@ export const PACKAGE_GUIDES: PackageGuide[] = [
       "A printed menu card",
       "A full stock of mixers, garnishes, syrups, purees and juices",
       "Sodas and water for kids and guests who do not drink",
-      "Custom cups over 100 guests",
-      "A barback at weddings",
+      "A barback at weddings (optional, you can remove it)",
     ],
     clientProvides: ["The alcohol"],
     notIncluded: [],
@@ -142,10 +173,10 @@ export const PACKAGE_GUIDES: PackageGuide[] = [
     guestAsks: [
       { ask: "A drink that is not on the menu", say: "Happy to make a classic. What do you like? If it is something we do not have the ingredients for tonight, I will suggest the closest thing." },
     ],
-    setup: { bar: "Bar tables", menu: "Printed menu card", barback: "Barback at weddings" },
+    setup: { bar: "Bar tables", menu: "Printed menu card", barback: "Barback at weddings (optional, the client can remove it)" },
     short: {
       line: "Three specialty cocktails designed for the event, just about any classic, and mocktails, sodas, and water for kids and guests who do not drink.",
-      bullets: ["We bring the full stock, bar tables, and a printed menu card.", "Custom cups over 100 guests.", "A barback at weddings."],
+      bullets: ["We bring the full stock, bar tables, and a printed menu card.", BARBACK_AT_WEDDINGS],
       provides: "The client provides the alcohol.",
     },
   },

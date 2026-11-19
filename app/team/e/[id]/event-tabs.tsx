@@ -29,6 +29,7 @@ import { card, Details } from "./event-details";
 import VenuePhotos from "./venue-photos";
 import type { VenuePhotoView } from "@/lib/team/venue-photos-db";
 import PackageCard from "../../package-card";
+import type { BookingShort } from "@/lib/packages-info";
 import PayEstimateCard from "../../pay-estimate-card";
 import { money, type StaffEstimate } from "@/lib/team/pay";
 import RunningLowButton from "../../running-low";
@@ -530,7 +531,9 @@ export default function EventTabs({
   runningLow = null,
   venuePhotos = null,
   receipts = null,
+  packageBooking = null,
 }: {
+  packageBooking?: BookingShort | null; // this booking's barback and cups, for the Package card
   receipts?: StaffReceiptsView | null; // the Receipts tab: on the event, not declined, until 14 days after it
   venuePhotos?: VenuePhotoView | null; // Bar and venue photos on the Location card, read only, for staff on the event
   runningLow?: { items: string[] } | null; // the Running low button, from setup through the end of breakdown
@@ -644,7 +647,7 @@ export default function EventTabs({
         {menuSection && <MenuSection menu={menuSection} />}
         <Details v={view} locationExtra={venuePhotos ? <VenuePhotos sessionId={view.sessionId} initial={venuePhotos} timeZone={view.timeZone} /> : null} />
         {pay && <PayEstimateCard estimate={pay} />}
-        <PackageCard packageName={view.package} />
+        <PackageCard packageName={view.package} booking={packageBooking ?? undefined} />
         {giveUp && !giveUp.handoff && giveUp.canStart && (
           <div className="mt-4">
             <GiveUp {...giveUp} />
@@ -686,7 +689,7 @@ export default function EventTabs({
       )}
       {receipts && (
         <div hidden={tab !== "receipts"}>
-          <Receipts sessionId={view.sessionId} mode="staff" initial={receipts.receipts} ready={receipts.ready} openUntil={receipts.openUntil} timeZone={view.timeZone} />
+          <Receipts sessionId={view.sessionId} mode="staff" initial={receipts.receipts} ready={receipts.ready} openUntil={receipts.openUntil} timeZone={view.timeZone} preview={receipts.preview} />
         </div>
       )}
       <div hidden={tab !== "chat"}>

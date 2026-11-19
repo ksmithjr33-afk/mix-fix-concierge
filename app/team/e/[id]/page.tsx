@@ -25,6 +25,7 @@ import { isAdminRole } from "@/lib/team/roles";
 import { itemChoices, lowStockOpen } from "@/lib/team/low-stock";
 import { allSupplies } from "@/lib/team/supplies";
 import { venuePhotosFor } from "@/lib/team/venue-photos-db";
+import { bookingShortOf } from "@/lib/package-extras";
 import { staffReceiptsView } from "@/lib/team/receipts-db";
 import SurpriseBanner from "../../surprise-banner";
 import { surpriseBannerText } from "@/lib/partners/surprise-banner";
@@ -85,9 +86,10 @@ async function TeamEventPage({
       console.error("[venue photos] could not load:", err);
       return null;
     });
-  // Receipts: only this person's own, on an event they are on (not declined), until 14 days after it.
+  // Receipts: only this person's own, on an event they accepted (any role), until 14 days after it.
+  // An admin in Bartender view who is not assigned sees the tab with uploading off.
   const receiptsP = assignmentP
-    .then((a) => staffReceiptsView(access.session, staff, a))
+    .then((a) => staffReceiptsView(access.session, staff, a, undefined, { adminPreview: !!staff.bartenderView || isAdminRole(staff.role) }))
     .catch((err) => {
       console.error("[receipts] could not load:", err);
       return null;
@@ -175,6 +177,7 @@ async function TeamEventPage({
         runningLow={runningLow}
         venuePhotos={venuePhotos}
         receipts={receipts}
+        packageBooking={bookingShortOf(access.session)}
       />
     </>
   );

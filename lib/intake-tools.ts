@@ -30,6 +30,11 @@ export const submitEventDataTool: Anthropic.Tool = {
       bar_details: { type: "string" },
       parking_info: { type: "string" },
       guest_count: { type: "number" },
+      barback: {
+        type: "string",
+        enum: ["Included", "Removed"],
+        description: 'Full Bar weddings only. "Removed" only when the client asked to remove the barback and clearly said yes to the price you stated. "Included" only when they asked to add it back. Otherwise leave it out.',
+      },
       guest_count_quoted_total: {
         type: "number",
         description: "Only when quote_guest_count gave a new total for a different guest count and the client clearly said yes: that new total. The server checks it against the pricing engine before applying the change.",

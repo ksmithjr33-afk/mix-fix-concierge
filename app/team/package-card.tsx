@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { LEGACY_LABEL, LEGACY_NOTE, MAX_PACKAGE_BULLETS, NO_GUIDE, packageGuide, trainingHref } from "@/lib/packages-info";
+import { LEGACY_LABEL, LEGACY_NOTE, NO_GUIDE, packageGuide, packageShortFor, trainingHref, type BookingShort } from "@/lib/packages-info";
 
 const card = "rounded-2xl border border-[#DDD5CC] bg-[#F5F0EB] px-4 py-3 sm:px-5 sm:py-4";
 
@@ -12,8 +12,10 @@ const card = "rounded-2xl border border-[#DDD5CC] bg-[#F5F0EB] px-4 py-3 sm:px-5
  * asks staff to confirm with a manager; an unknown one shows its name and
  * "No package guide yet".
  */
-export default function PackageCard({ packageName }: { packageName: string }) {
+export default function PackageCard({ packageName, booking }: { packageName: string; booking?: BookingShort }) {
   const g = packageGuide(packageName);
+  // This booking's wording: its barback (on or removed) and any cups it was promised.
+  const short = packageShortFor(packageName, booking ?? {}) ?? g?.short;
   if (!g) {
     return (
       <section className={card} aria-label="Package">
@@ -30,15 +32,15 @@ export default function PackageCard({ packageName }: { packageName: string }) {
         {g.note && <span className="text-sm text-[#6B5D52]">{g.note}</span>}
       </div>
       {g.legacy && <p className="text-[15px] font-medium text-[#8A4B12]">{LEGACY_NOTE}</p>}
-      <p className="text-[15px] text-[#2C2420]">{g.short.line}</p>
-      {g.short.bullets.length > 0 && (
+      <p className="text-[15px] text-[#2C2420]">{short!.line}</p>
+      {short!.bullets.length > 0 && (
         <ul className="list-disc pl-5 space-y-0.5 text-[15px] text-[#2C2420]">
-          {g.short.bullets.slice(0, MAX_PACKAGE_BULLETS).map((b) => (
+          {short!.bullets.map((b) => (
             <li key={b}>{b}</li>
           ))}
         </ul>
       )}
-      {g.short.provides && <p className="text-[15px] text-[#6B5D52]">{g.short.provides}</p>}
+      {short!.provides && <p className="text-[15px] text-[#6B5D52]">{short!.provides}</p>}
       <Link href={trainingHref(g.key)} className="inline-block text-sm font-medium text-[#B5845A] underline">
         Full package guide
       </Link>

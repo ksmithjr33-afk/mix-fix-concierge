@@ -6,6 +6,7 @@ import {
   FORMATTING_RULES,
   DRINK_SOURCING_RULES,
   PACKAGE_DESCRIPTIONS,
+  PACKAGE_SHORT_SECTION,
   DRINK_MENU_RULES,
   ADD_ONS_RULES,
   CHANGE_DEADLINES,
@@ -63,7 +64,7 @@ export function buildUpdatePrompt(
   eventData: EventData,
   version: number,
   deadlines: Deadlines,
-  extra: { booked?: BookedPrice | null; recap?: ChatRecap | null; pricePending?: PricePendingInfo | null; planner?: string } = {}
+  extra: { booked?: BookedPrice | null; recap?: ChatRecap | null; pricePending?: PricePendingInfo | null; planner?: string; packageSection?: string } = {}
 ): string {
   const paymentPreference = String(eventData.payment_preference ?? "").trim();
   // While a price is pending no total is ever shown to the client.
@@ -91,7 +92,7 @@ ${FORMATTING_RULES}
 ${CONDUCT_RULE}
 In update mode the CONDUCT RULE is recorded with update_event_data: send the COMPLETE special_requests text with the new item added, and set change_approval_needed to true in the same call. Never say the phrase before or instead of the tool call, say it after the TOOL RESULT comes back. The CONDUCT RULE never applies to a drink change inside 6 days, see REQUESTS INSIDE 6 DAYS.
 
-${extra.planner ? `${extra.planner}\n\n` : ""}UPDATE MODE: This client already finished planning and submitted their event. Their current event details are at the bottom of this prompt and they are the source of truth. Your only job is to help them change details. Every change you save applies right away: the event details, their lists, and their total update the moment the TOOL RESULT confirms it.
+${extra.planner ? `${extra.planner}\n\n` : ""}${extra.packageSection ? `${extra.packageSection}\n\n` : ""}UPDATE MODE: This client already finished planning and submitted their event. Their current event details are at the bottom of this prompt and they are the source of truth. Your only job is to help them change details. Every change you save applies right away: the event details, their lists, and their total update the moment the TOOL RESULT confirms it.
 1. NEVER re-ask intake questions and never walk them through the planning flow again. Do not ask about anything they did not bring up.
 2. When the client says what they want to change, confirm the specific change back in ONE message as a single yes or no question. Example: "Just to confirm, you want to change your day of contact from Sam to Jordan?" If the change affects the price, follow PRICE CHANGES instead so the price is in that same question.
 3. When the client says yes, call the update_event_data tool with ONLY the changed fields and write NO text in that reply. Nothing is saved until the tool returns, so before the tool result comes back NEVER say "locking that in", "updating now", "done", "saved", "all set", "updated", or anything else that claims or announces the change. After the tool returns you get a message starting with TOOL RESULT that lists exactly what was recorded. Only then reply: confirm exactly what that result lists, in plain words, nothing more and nothing less, then ask if there is anything else they would like to change. If the result says nothing was recorded or something failed, say so honestly and never claim it was saved.
@@ -134,6 +135,8 @@ ${isDiveBarPackage(eventData.package) ? `DIVE BAR SET MENU: This client is on Di
 The sections below come from the intake planning flow. Use them only for the package rules, drink sourcing, recipes, add ons, and deadlines. In update mode, ignore any instruction in them to walk through steps or phases, to ask cocktail or mocktail drink by drink, to offer the add ons list unprompted, to quote additional drink pricing, to hand off extending hours (hours are a PRICE CHANGE here), or to call submit_event_data.
 
 ${PACKAGE_DESCRIPTIONS}
+
+${PACKAGE_SHORT_SECTION}
 
 ${DRINK_SOURCING_RULES}
 

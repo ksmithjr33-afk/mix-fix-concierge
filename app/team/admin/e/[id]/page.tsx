@@ -43,6 +43,7 @@ import { Details, DrinkSections, WhatChanged } from "../../../e/[id]/event-detai
 import EditableDetails from "./editable-details";
 import { editCards } from "@/lib/team/edit-cards";
 import PackageCard from "../../../package-card";
+import { barbackStatus, bookingShortOf } from "@/lib/package-extras";
 import { AssignPanel, BarReadyCard, ClientListPanel, Closeouts, ManagerChat, OrderSheet, ShiftPanel } from "./lazy-panels";
 import ManagerTabs from "./manager-tabs";
 import { BartenderLists, ClockStatus, MissingReports, TimePunches } from "./day-of";
@@ -269,6 +270,9 @@ async function AdminEventPage({
   const chatUnread = on("chat") ? 0 : (unread.get(id) ?? 0);
   const marketSource = (session as { team_market_source?: string | null }).team_market_source ?? null;
   const counts = staffingCounts(bartendersNeeded(session), people.map((p) => p.status));
+  // The barback: needed whenever it is on (Big Day Bar, Premium, a Full Bar wedding unless removed).
+  const barback = barbackStatus(session);
+  const barbackNeeded = barback.on && !hidden && !people.some((p) => p.role === "bar_back" && p.status !== "declined");
   const ed = session.event_data ?? {};
   // The title follows the planner title rule (host's name, "via" the planner) once the partners migration runs.
   const titled = eventData(session);
@@ -350,7 +354,7 @@ async function AdminEventPage({
           {links && (
             <ClientLinksCard conciergeUrl={links.conciergeUrl} eventUrl={links.eventUrl} openConcierge={links.openConcierge} openEvent={links.openEvent} status={clientStatusLine(links, v.timeZone)} />
           )}
-          {booking && <BookingCard sessionId={id} data={booking} />}
+          {booking && <BookingCard sessionId={id} data={booking} barback={{ ...barbackStatus(session), version: session.version }} />}
           {history && <ClientHistoryCard history={history} clientKey={history.matchedOn} />}
           {/* Discount and gratuity amounts: admins and managers only. */}
           {isAdminRole(me.role) && bookingSummary(session) && <BookingSummaryCard summary={bookingSummary(session)!} />}
@@ -365,7 +369,7 @@ async function AdminEventPage({
               {v.lastUpdated && <p className="text-xs text-[#A39585] px-1">Last updated {v.lastUpdated}</p>}
             </div>
           )}
-          <PackageCard packageName={v.package} />
+          <PackageCard packageName={v.package} booking={bookingShortOf(session)} />
           {!hidden && <EditEvent sessionId={id} version={session.version} initial={editValues} packages={packages} />}
           <HideAction sessionId={id} hidden={hidden} />
           {session.calendar_only && <CalendarOnlyCard sessionId={id} />}
@@ -393,6 +397,12 @@ async function AdminEventPage({
         .map((s) => ({ id: s.id, name: s.name || s.phone, role: s.role, declined: people.some((p) => p.staffId === s.id), markets: s.markets, unavailable: away.has(s.id), record: records[s.id], cert: certs[s.id], distance: distances.get(s.id) }));
       return (
         <>
+          {barback.applies && (
+            <p className="px-1 text-[15px] text-[#2C2420]" data-barback-line>
+              {barback.line}
+              {barbackNeeded && <span className="text-[#A0412D]"> · no bar back assigned yet</span>}
+            </p>
+          )}
           <AssignPanel
             sessionId={id}
             summary={`${staffingLabel(counts)}${counts.accepted ? `, ${counts.accepted} accepted` : ""}${counts.stillNeeded ? ` · ${counts.stillNeeded} still needed` : ""}`}
@@ -484,7 +494,7 @@ async function AdminEventPage({
           details: (session.price_pending ? 1 : 0) + (guestFlag ? 1 : 0),
           // The menu is not picked up (or nobody is assigned) inside 48 hours, no approved menu inside 72 hours, and the ice not done inside 24 hours.
           pickups: (pickup.outstanding ? 1 : 0) + (menuFile.missing ? 1 : 0) + (ice.outstanding ? 1 : 0),
-          team: hidden ? 0 : counts.stillNeeded + handoffs.length,
+          team: hidden ? 0 : counts.stillNeeded + handoffs.length + (barbackNeeded ? 1 : 0),
           order: sheetFlags,
           client: pendingHolds.length,
           dayof: dayofCount,
