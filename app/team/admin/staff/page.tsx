@@ -18,6 +18,7 @@ import { rateText } from "@/lib/team/pay";
 import { rangeLabel } from "@/lib/team/availability";
 import { chicagoToday } from "@/lib/team/time";
 import { staffOverview } from "@/lib/team/profile-db";
+import { inviteStatuses } from "@/lib/team/invites-db";
 
 export const dynamic = "force-dynamic";
 
@@ -26,7 +27,7 @@ async function AdminStaffPage() {
   // The staff list first; everything about each person is then read together, with the settings alongside.
   const staffP = listStaff();
   const ids = staffP.then((staff) => staff.map((s) => s.id));
-  const [staff, away, records, onboard, enforced, autoSend, suggestStores, rates, overview, iceRule, popularCocktails, popularMocktails, popular] = await Promise.all([
+  const [staff, away, records, onboard, enforced, autoSend, suggestStores, rates, overview, iceRule, popularCocktails, popularMocktails, popular, invites] = await Promise.all([
     staffP,
     upcomingUnavailableByStaff(chicagoToday()),
     ids.then(compactLines),
@@ -40,6 +41,8 @@ async function AdminStaffPage() {
     teamText(POPULAR_COCKTAILS_KEY),
     teamText(POPULAR_MOCKTAILS_KEY),
     currentPopularDrinks(),
+    // Last sign in and last invite, for Resend invite.
+    staffP.then((list) => inviteStatuses(list.filter((s) => s.active))),
   ]);
   // One line per person per topic, shown under their name.
   const notes: Record<string, string[]> = {};
@@ -108,7 +111,7 @@ async function AdminStaffPage() {
             Download CSV
           </a>
         </div>
-        <StaffManager initial={staff} meId={me.id} viewerRole={me.role} notes={notes} overview={overview} />
+        <StaffManager initial={staff} meId={me.id} viewerRole={me.role} notes={notes} overview={overview} invites={invites} />
       </main>
     </>
   );

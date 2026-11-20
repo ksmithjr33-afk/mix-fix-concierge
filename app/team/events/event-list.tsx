@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import type { EventListItem, ListSection } from "@/lib/team/event-list";
+import type { TeamLine } from "@/lib/team/team-line";
 import { matchesSearch } from "@/lib/team/search";
 
 const BADGE = {
@@ -61,6 +62,31 @@ function Respond({ e, onDone }: { e: EventListItem; onDone: (status: "accepted" 
   );
 }
 
+/**
+ * Who is on it, one line under the event details: accepted names, then the
+ * ones not answered yet in a lighter color, then any open spots in red. Wraps
+ * on a narrow phone; the Chat link sits in the row's bottom padding, below it.
+ */
+export function TeamLineView({ team, className = "text-sm" }: { team: TeamLine; className?: string }) {
+  const names = [...team.accepted.map((n) => ({ n, pending: false })), ...team.pending.map((n) => ({ n, pending: true }))];
+  return (
+    <span data-team-line className={`block break-words text-[#2C2420] ${className}`}>
+      {names.map(({ n, pending }, i) => (
+        <span key={`${i}-${n}`} className={pending ? "text-[#A39585]" : undefined}>
+          {i > 0 ? ", " : ""}
+          {n}
+        </span>
+      ))}
+      {team.needed && (
+        <span className="font-medium text-[#A0412D]">
+          {names.length > 0 ? " · " : ""}
+          {team.needed}
+        </span>
+      )}
+    </span>
+  );
+}
+
 /** Select mode on the staffing page: checkboxes on events that can be posted, a short reason on the rest. */
 export interface ListSelect {
   selected: Set<string>;
@@ -113,6 +139,7 @@ export function EventRow({ e, offered = false, select, onResponded }: { e: Event
           </span>
           {e.subtitle && <span className="block text-sm text-[#2C2420] break-words">{e.subtitle}</span>}
           <span className="block text-sm text-[#6B5D52] break-words">{e.detail}</span>
+          {e.team && <TeamLineView team={e.team} />}
           {e.calendarOnly && <span className="mt-0.5 mr-1 inline-block text-[11px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-[#E3E8EE] text-[#3F5468]">Calendar only</span>}
           {e.repeat && <span className="mt-0.5 mr-1 inline-block text-[11px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-[#EDE3F5] text-[#5B3F7A]">{e.repeat}</span>}
           {e.noMenu && <span className="mt-0.5 inline-block text-[11px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-[#F6E3DC] text-[#A0412D]">No approved menu</span>}

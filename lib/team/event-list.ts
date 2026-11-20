@@ -4,6 +4,7 @@
 import { firstName, scrub } from "@/lib/team/event-view";
 import { chicagoToday, eventDay, eventSchedule, formatClock, longDate } from "@/lib/team/time";
 import { eventData, marketLabel, sessionMarket, type Market } from "@/lib/team/markets";
+import type { TeamLine } from "@/lib/team/team-line";
 
 export interface EventRowSource {
   id: string;
@@ -38,6 +39,7 @@ export interface EventListItem {
   noIce?: boolean; // admins: inside 48 hours of service start and nobody picking up ice
   repeat?: string; // admins: "Repeat client, 3rd event"
   calendarOnly?: boolean; // admins: added to our calendar only, nothing goes to GHL or the client
+  team?: TeamLine; // who is on it: every event for admins, only their own for staff (lib/team/team-line.ts)
 }
 
 // Planner held events: eventData() in lib/team/markets.ts copies the booking

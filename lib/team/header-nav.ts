@@ -3,6 +3,9 @@
 // can check it. The header (app/team/team-header.tsx) reads the counts and the
 // links render in app/team/header-nav.tsx.
 //
+// Everyone starts with Home: the same place the logo goes (HOME_HREF), the
+// current page there. Staff keep Events too; on the home page Home is the
+// current one, on an event, shift, or handoff page Events is.
 // Admins and managers: Staffing, Staff, Clients, Partners, Time, Scorecard, News, Training, Me.
 // Admins (role admin, never managers) also get Business and Payroll, after Time (before Scorecard).
 // Everyone else, and admins in Bartender view: Events, Training, News, Me.
@@ -24,6 +27,9 @@ export interface NavCounts {
   unreadNews: number;
   training?: number; // Training items not yet read or acknowledged
 }
+
+/** Where the logo and Home go, for every role: the events home screen. */
+export const HOME_HREF = "/team/events";
 
 const prefixMatch = (pathname: string, prefix: string) => pathname === prefix || pathname.startsWith(`${prefix}/`);
 
@@ -55,8 +61,10 @@ export function headerLinks(showAdmin: boolean, counts: NavCounts, showBusiness 
     match: ["/team/training", "/team/onboarding"],
     inline: true,
   };
+  const home: NavLink = { href: HOME_HREF, label: "Home", badge: 0, match: [HOME_HREF], inline: true };
   if (showAdmin) {
     return [
+      home,
       { href: "/team/admin/events", label: "Staffing", badge: 0, match: ["/team/admin/events", "/team/admin/e", "/team/admin/preview", "/team/admin/stores", "/team/admin/leftovers"], inline: true },
       { href: "/team/admin/staff", label: "Staff", badge: 0, match: ["/team/admin/staff", "/team/admin/syrups"], inline: true },
       { href: "/team/admin/clients", label: "Clients", badge: 0, match: ["/team/admin/clients"], inline: true },
@@ -74,19 +82,29 @@ export function headerLinks(showAdmin: boolean, counts: NavCounts, showBusiness 
       me,
     ];
   }
-  return [{ href: "/team/events", label: "Events", badge: 0, match: ["/team/events", "/team/e", "/team/shifts", "/team/handoff"], inline: true }, training, news, me];
+  return [home, { href: "/team/events", label: "Events", badge: 0, match: ["/team/events", "/team/e", "/team/shifts", "/team/handoff"], inline: true }, training, news, me];
 }
 
-/** The link for the page being viewed: the longest matching prefix wins. Null when none matches. */
+/** The link for the page being viewed: the longest matching prefix wins, the earlier link on a tie (Home over Events). Null when none matches. */
 export function currentHref(links: NavLink[], pathname: string | null): string | null {
+  const label = currentLabel(links, pathname);
+  return links.find((l) => l.label === label)?.href ?? null;
+}
+
+/**
+ * The label of the link for the page being viewed, the same rule as
+ * currentHref. The header marks by label because Home and Events share an
+ * address for staff and only one of them is the current page.
+ */
+export function currentLabel(links: NavLink[], pathname: string | null): string | null {
   if (!pathname) return null;
-  let best: { href: string; len: number } | null = null;
+  let best: { label: string; len: number } | null = null;
   for (const l of links) {
     for (const m of l.match) {
-      if (prefixMatch(pathname, m) && (!best || m.length > best.len)) best = { href: l.href, len: m.length };
+      if (prefixMatch(pathname, m) && (!best || m.length > best.len)) best = { label: l.label, len: m.length };
     }
   }
-  return best?.href ?? null;
+  return best?.label ?? null;
 }
 
 /** The dot on the Menu button: any row in the panel has a badge. */

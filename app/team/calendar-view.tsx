@@ -14,6 +14,8 @@ import {
   type ChipTone,
 } from "@/lib/team/calendar";
 import type { EventListItem } from "@/lib/team/event-list";
+import { teamLineText } from "@/lib/team/team-line";
+import { TeamLineView } from "./events/event-list";
 
 // The team calendar: Month, Week and List views with Today, back and forward,
 // and a market filter. Each person's last view and filter are remembered (the
@@ -79,7 +81,7 @@ function Chip({ e, big, select, marketLabel }: { e: EventListItem; big: boolean;
   const on = !!select?.selected.has(e.id);
   const unread = e.chat?.unread ?? 0;
   const market = marketLabel(e.market);
-  const title = [e.arrival || "Time TBD", e.title, e.subtitle, market, tone.label, e.menu?.text, e.request ? "Change request waiting" : "", e.noMenu ? "No approved menu" : "", e.noIce ? "Ice not assigned" : "", e.calendarOnly ? "Calendar only" : "", e.repeat ?? "", unread ? `${unread} unread messages` : ""].filter(Boolean).join(" · ");
+  const title = [e.arrival || "Time TBD", e.title, e.subtitle, market, tone.label, e.menu?.text, e.request ? "Change request waiting" : "", e.noMenu ? "No approved menu" : "", e.noIce ? "Ice not assigned" : "", e.calendarOnly ? "Calendar only" : "", e.repeat ?? "", teamLineText(e.team), unread ? `${unread} unread messages` : ""].filter(Boolean).join(" · ");
   return (
     <div className={`relative rounded-lg border border-l-4 ${tone.chip} ${on ? "ring-2 ring-[#B5845A]" : ""} hover:brightness-[0.97] transition`}>
       {select && <Pick e={e} select={select} />}
@@ -98,6 +100,7 @@ function Chip({ e, big, select, marketLabel }: { e: EventListItem; big: boolean;
         {e.calendarOnly && <span className={`block font-semibold text-[#3F5468] ${big ? "text-sm" : "text-[11px] truncate"}`}>Calendar only</span>}
         {e.repeat && <span className={`block font-semibold text-[#5B3F7A] ${big ? "text-sm" : "text-[11px] truncate"}`}>{e.repeat}</span>}
         {big && e.badge && <span className="block text-sm text-[#6B5D52] break-words">{e.badge.text}</span>}
+        {big && e.team && <TeamLineView team={e.team} />}
       </Link>
       {unread > 0 && <span className="absolute right-1.5 top-1.5 h-2.5 w-2.5 rounded-full bg-[#A0412D] ring-2 ring-white" aria-hidden="true" />}
       {e.request && <span className={`absolute ${unread > 0 ? "right-5" : "right-1.5"} top-1.5 h-2.5 w-2.5 rotate-45 bg-[#D9902F] ring-2 ring-white`} aria-hidden="true" />}

@@ -228,6 +228,6 @@ const manager = src("app/team/admin/e/[id]/page.tsx");
 check("The manager view loads history only with Details open, after the admin check", manager.includes('on("details")\n      ? historyFor(session, me)') && manager.indexOf("await requireAdmin(") < manager.indexOf("historyFor(session, me)"));
 const bartenderFiles = ["app/team/e/[id]/page.tsx", "app/team/e/[id]/event-tabs.tsx", "app/team/e/[id]/event-details.tsx", "app/team/events/page.tsx", "lib/team/my-events.ts", "lib/team/events.ts"];
 check("No bartender page or loader reads client history", bartenderFiles.every((f) => !/client-history/.test(src(f))));
-check("The Clients link is in the admin menu only", (() => { const s = src("lib/team/header-nav.ts"); const i = s.indexOf('href: "/team/admin/clients"'); return i > s.indexOf("if (showAdmin) {") && i < s.indexOf('return [{ href: "/team/events"'); })());
+check("The Clients link is in the admin menu only", (() => { const s = src("lib/team/header-nav.ts"); const i = s.indexOf('href: "/team/admin/clients"'); return i > s.indexOf("if (showAdmin) {") && i < s.indexOf('return [home, { href: "/team/events"'); })());
 
 done("client history");

@@ -29,7 +29,10 @@ export const missingTables = new Set<string>();
 /** Tests can stand in for database constraints and triggers: return an error message to refuse a write. */
 export const guards: ((table: string, op: string, rows: Record<string, unknown>[]) => string | null)[] = [];
 
-const JOIN_TABLES: Record<string, string> = { staff: "staff", session: "sessions" };
+const JOIN_TABLES: Record<string, string> = { staff: "staff", session: "sessions", sender: "staff" };
+
+/** Every query run, "table op", so a test can count the queries a page makes. Tests clear it. */
+export const queryLog: string[] = [];
 
 type Result = { data: unknown; error: { message: string } | null; count?: number };
 
@@ -160,6 +163,7 @@ class Query implements PromiseLike<Result> {
   }
 
   private run(): Result {
+    queryLog.push(`${this.table} ${this.op}`);
     if (missingTables.has(this.table)) return { data: null, error: { message: `relation "public.${this.table}" does not exist` } };
     const rows = db[this.table];
     if (this.op !== "select") {

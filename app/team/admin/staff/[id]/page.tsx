@@ -20,6 +20,8 @@ import { PAY_LABEL } from "@/lib/team/pay";
 import { viewProfile } from "@/lib/team/profile-db";
 import ProfileForm from "../../../me/profile/profile-form";
 import { roleLabel } from "@/lib/team/roles";
+import { inviteStatuses } from "@/lib/team/invites-db";
+import ResendInvite from "../resend-invite";
 
 export const dynamic = "force-dynamic";
 
@@ -31,7 +33,7 @@ export default async function StaffDetailPage({ params }: { params: Promise<{ id
   const me = await requireAdmin(`/team/admin/staff/${encodeURIComponent(id)}`);
   const back = { href: "/team/admin/staff", label: "Staff" };
   const { data } = await supabase.from("staff").select("*").eq("id", id).maybeSingle();
-  const person = data as { id: string; name: string; role: string; active: boolean; markets?: unknown } | null;
+  const person = data as { id: string; name: string; phone: string; role: string; active: boolean; markets?: unknown } | null;
   if (!person) {
     return (
       <>
@@ -41,7 +43,15 @@ export default async function StaffDetailPage({ params }: { params: Promise<{ id
     );
   }
   const today = await todayFor(id);
-  const [away, record, certs, standings, onboard] = await Promise.all([upcomingUnavailable(id, today), staffRecord(id), certRows([id]), myStandings(id), onboardingDone(id)]);
+  const [away, record, certs, standings, onboard, invites] = await Promise.all([
+    upcomingUnavailable(id, today),
+    staffRecord(id),
+    certRows([id]),
+    myStandings(id),
+    onboardingDone(id),
+    person.active && person.id !== me.id ? inviteStatuses([person]) : {},
+  ]);
+  const invite = (invites as Awaited<ReturnType<typeof inviteStatuses>>)[id];
   const needed = [...new Set(standings.map((s) => s.standing.certType))];
   const rate = await rateOnFile(id); // admins only: this page is behind requireAdmin
   const profile = await viewProfile(me, id);
@@ -57,6 +67,11 @@ export default async function StaffDetailPage({ params }: { params: Promise<{ id
           <Link href={`/team/admin/preview/${id}`} className="text-sm text-[#B5845A] underline">
             Preview as
           </Link>
+          {invite && (
+            <div className="mt-2">
+              <ResendInvite staffId={id} signIn={invite.signIn} lastInvite={invite.lastInvite} />
+            </div>
+          )}
         </div>
 
         {profile && (

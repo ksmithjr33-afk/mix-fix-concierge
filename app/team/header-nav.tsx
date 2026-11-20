@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
-import { badgeText, currentHref, menuHasBadge, type NavLink } from "@/lib/team/header-nav";
+import { badgeText, currentLabel, HOME_HREF, menuHasBadge, type NavLink } from "@/lib/team/header-nav";
 import ChatAlerts from "./chat-alerts";
 
 // The header row, for everyone signed in or not.
@@ -100,7 +100,7 @@ function lockScroll(): () => void {
 
 export default function HeaderNav({ signedIn, firstName, links, back, canSwitch, canSwitchBack, showChat, alert }: HeaderNavProps) {
   const pathname = usePathname();
-  const current = currentHref(links, pathname);
+  const current = currentLabel(links, pathname);
   const panelId = useId();
   const accountId = useId();
   // Each remembers the page it was opened on, so navigating (Back and Forward
@@ -178,7 +178,7 @@ export default function HeaderNav({ signedIn, firstName, links, back, canSwitch,
       {menuOpen && <div data-menu-backdrop="1" aria-hidden="true" className="fixed inset-0 -z-10 bg-[#2C2420]/25 md:hidden" onClick={() => closeMenu()} />}
       <header className="relative flex items-center justify-between gap-3 px-3 md:px-4 py-2 md:py-3 bg-[#F5F0EB] border-b border-[#DDD5CC]">
         <div className="flex min-w-0 flex-1 items-center gap-3">
-          <Link href="/team/events" className="shrink-0" aria-label="The Mix Fix, home">
+          <Link href={HOME_HREF} className="shrink-0" aria-label="The Mix Fix, home">
             <img src="/logo.png" alt="The Mix Fix" className="h-8 md:h-10 w-auto" />
           </Link>
           {back && (
@@ -192,10 +192,10 @@ export default function HeaderNav({ signedIn, firstName, links, back, canSwitch,
           <nav aria-label="Team" className="hidden md:flex shrink-0 items-center gap-x-4 lg:gap-x-5">
             {inline.map((l) => (
               <Link
-                key={l.href}
+                key={l.label}
                 href={l.href}
-                aria-current={current === l.href ? "page" : undefined}
-                className={`whitespace-nowrap text-sm font-medium ${BRAND} ${current === l.href ? "underline underline-offset-4 decoration-2" : ""}`}
+                aria-current={current === l.label ? "page" : undefined}
+                className={`whitespace-nowrap text-sm font-medium ${BRAND} ${current === l.label ? "underline underline-offset-4 decoration-2" : ""}`}
               >
                 {l.wideLabel ? (
                   <>
@@ -253,12 +253,12 @@ export default function HeaderNav({ signedIn, firstName, links, back, canSwitch,
               )}
               <ul className="py-1">
                 {links.map((l) => (
-                  <li key={l.href}>
+                  <li key={l.label}>
                     <Link
                       href={l.href}
                       onClick={() => closeMenu(false)}
-                      aria-current={current === l.href ? "page" : undefined}
-                      className={`${row} font-medium ${current === l.href ? "bg-[#E8DDD5] text-[#2C2420] border-l-4 border-[#B5845A] pl-3" : "text-[#9A7049]"}`}
+                      aria-current={current === l.label ? "page" : undefined}
+                      className={`${row} font-medium ${current === l.label ? "bg-[#E8DDD5] text-[#2C2420] border-l-4 border-[#B5845A] pl-3" : "text-[#9A7049]"}`}
                     >
                       <span>{l.label}</span>
                       <Badge n={l.badge} label={l.badgeLabel} />
@@ -285,7 +285,7 @@ export default function HeaderNav({ signedIn, firstName, links, back, canSwitch,
                 aria-expanded={accountOpen}
                 aria-controls={accountId}
                 aria-haspopup="true"
-                className={`inline-flex items-center gap-1 whitespace-nowrap rounded-lg px-2 py-1.5 text-sm font-medium ${BRAND} ${me && current === me.href ? "underline underline-offset-4 decoration-2" : ""}`}
+                className={`inline-flex items-center gap-1 whitespace-nowrap rounded-lg px-2 py-1.5 text-sm font-medium ${BRAND} ${me && current === me.label ? "underline underline-offset-4 decoration-2" : ""}`}
               >
                 {firstName || "Account"}
                 <Caret />
@@ -299,8 +299,8 @@ export default function HeaderNav({ signedIn, firstName, links, back, canSwitch,
                   <Link
                     href={me.href}
                     onClick={() => closeAccount(false)}
-                    aria-current={current === me.href ? "page" : undefined}
-                    className={`flex items-center justify-between px-4 py-2.5 text-[15px] font-medium ${current === me.href ? "bg-[#E8DDD5] text-[#2C2420]" : "text-[#9A7049] hover:bg-[#E8DDD5]"}`}
+                    aria-current={current === me.label ? "page" : undefined}
+                    className={`flex items-center justify-between px-4 py-2.5 text-[15px] font-medium ${current === me.label ? "bg-[#E8DDD5] text-[#2C2420]" : "text-[#9A7049] hover:bg-[#E8DDD5]"}`}
                   >
                     {me.label}
                     <Badge n={me.badge} label={me.badgeLabel} />

@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import ResendInvite from "./resend-invite";
+import type { InviteStatus } from "@/lib/team/invites";
 import type { StaffRecord } from "@/lib/team/assignments";
 import type { StaffOverview } from "@/lib/team/profile-db";
 import { roleLabel, isAdminRole, isFullAdmin, ROLES, ROLE_LABEL, type Role } from "@/lib/team/roles";
@@ -184,6 +186,7 @@ function StaffRow({
   onSaved,
   notes,
   overview,
+  invite,
 }: {
   s: StaffRecord;
   meId: string;
@@ -191,6 +194,7 @@ function StaffRow({
   onSaved: (s: StaffRecord) => void;
   notes?: string[];
   overview?: StaffOverview;
+  invite?: InviteStatus;
 }) {
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -270,6 +274,7 @@ function StaffRow({
           </button>
         )}
       </div>
+      {s.active && !me && <ResendInvite staffId={s.id} signIn={invite?.signIn ?? "Never signed in"} lastInvite={invite?.lastInvite} />}
       {error && <p className="text-sm text-[#A0412D]">{error}</p>}
     </li>
   );
@@ -283,12 +288,14 @@ export default function StaffManager({
   viewerRole = "admin",
   notes = {},
   overview = {},
+  invites = {},
 }: {
   initial: StaffRecord[];
   meId: string;
   viewerRole?: Role;
   notes?: Record<string, string[]>;
   overview?: Record<string, StaffOverview>;
+  invites?: Record<string, InviteStatus>;
 }) {
   const [staff, setStaff] = useState(initial);
   const [adding, setAdding] = useState(false);
@@ -321,7 +328,7 @@ export default function StaffManager({
                 setAdding(false);
               }}
             />
-            <p className="text-xs text-[#A39585] mt-2">They sign in at /team with this phone number.</p>
+            <p className="text-xs text-[#A39585] mt-2">They sign in at /team with this phone number. Use Resend invite on their row to text them the sign in link.</p>
           </>
         ) : (
           <button type="button" onClick={() => setAdding(true)} className="w-full rounded-xl bg-[#B5845A] text-white py-2.5 font-medium">
@@ -365,7 +372,7 @@ export default function StaffManager({
         {active.length === 0 && filter !== "all" && <p className="text-sm text-[#6B5D52] py-2">Nobody matches.</p>}
         <ul className="divide-y divide-[#DDD5CC]">
           {active.map((s) => (
-            <StaffRow key={s.id} s={s} meId={meId} viewerRole={viewerRole} onSaved={upsert} notes={notes[s.id]} overview={overview[s.id]} />
+            <StaffRow key={s.id} s={s} meId={meId} viewerRole={viewerRole} onSaved={upsert} notes={notes[s.id]} overview={overview[s.id]} invite={invites[s.id]} />
           ))}
         </ul>
       </section>
@@ -374,7 +381,7 @@ export default function StaffManager({
           <h2 className="font-heading text-base font-bold text-[#2C2420]">Inactive ({inactive.length})</h2>
           <ul className="divide-y divide-[#DDD5CC]">
             {inactive.map((s) => (
-              <StaffRow key={s.id} s={s} meId={meId} viewerRole={viewerRole} onSaved={upsert} notes={notes[s.id]} overview={overview[s.id]} />
+              <StaffRow key={s.id} s={s} meId={meId} viewerRole={viewerRole} onSaved={upsert} notes={notes[s.id]} overview={overview[s.id]} invite={invites[s.id]} />
             ))}
           </ul>
         </section>

@@ -7,8 +7,11 @@ import { hiddenEventIds } from "@/lib/team/hidden";
 import { withoutHidden } from "@/lib/team/assignments";
 import type { StaffMember } from "@/lib/team/event-view";
 import type { OpenShiftItem } from "@/lib/team/shifts-db";
-import { staffingByEvent } from "@/lib/team/assignments-db";
-import { staffingTone } from "@/lib/team/assignments";
+import { staffingCounts, staffingTone, type AssignmentStatus } from "@/lib/team/assignments";
+import { bartendersNeeded } from "@/lib/team/event-view";
+import { needsOf, teamsByEvent, withTeams } from "@/lib/team/team-db";
+import type { TeamNeeds } from "@/lib/team/team-line";
+import { chicagoToday } from "@/lib/team/time";
 import { unreadByEvent } from "@/lib/team/chat-db";
 import { pickupBadges } from "@/lib/team/menu-pickup-db";
 import { iceUnassignedIds } from "@/lib/team/ice-pickup-db";
@@ -19,16 +22,24 @@ import type { SessionRow } from "@/lib/event-updates";
 import { isAdminRole } from "@/lib/team/roles";
 
 export async function assignedEventItems(staffId: string): Promise<EventListItem[]> {
+  return (await assignedEventRows(staffId)).items;
+}
+
+/** Their events as rows, with what each one still needs filled (for the who is on it line). */
+export async function assignedEventRows(staffId: string): Promise<{ items: EventListItem[]; needs: Map<string, TeamNeeds> }> {
+  const needs = new Map<string, TeamNeeds>();
   const [{ data, error }, hidden] = await Promise.all([
     supabase.from("event_assignments").select("status, session:session_id (*)").eq("staff_id", staffId).neq("status", "declined"),
     hiddenEventIds(),
   ]);
-  if (error || !data) return [];
+  if (error || !data) return { items: [], needs };
   const items = data.flatMap((a) => {
-    const s = (Array.isArray(a.session) ? a.session[0] : a.session) as (EventRowSource & { status: string }) | null;
-    return s && s.status === "submitted" ? [eventListItem(s, a.status as string)] : [];
+    const s = (Array.isArray(a.session) ? a.session[0] : a.session) as (SessionRow & EventRowSource & { status: string }) | null;
+    if (!s || s.status !== "submitted") return [];
+    needs.set(s.id, needsOf(s));
+    return [eventListItem(s, a.status as string)];
   });
-  return withoutHidden(items, hidden);
+  return { items: withoutHidden(items, hidden), needs };
 }
 
 // ----- What each role sees on /team/events and its calendar -----
@@ -50,9 +61,11 @@ export async function eventsForViewer(staff: StaffMember): Promise<EventListItem
     const rows = withoutHidden((data as (SessionRow & EventRowSource)[]) ?? [], hidden);
     const own = new Map(((mine as { session_id: string; status: string }[]) ?? []).map((a) => [a.session_id, a.status]));
     const ids = rows.map((r) => r.id);
-    const [counts, unread, menus, noIce] = await Promise.all([staffingByEvent(rows), unreadByEvent(staff.id, ids), pickupBadges(ids), iceUnassignedIds(rows)]);
-    return rows.map((r) => {
-      const c = counts.get(r.id);
+    // One query gives both the staffing color and the who is on it line.
+    const [teams, unread, menus, noIce] = await Promise.all([teamsByEvent(ids), unreadByEvent(staff.id, ids), pickupBadges(ids), iceUnassignedIds(rows)]);
+    const needs = new Map(rows.map((r) => [r.id, needsOf(r)]));
+    const items = rows.map((r) => {
+      const c = staffingCounts(bartendersNeeded(r), (teams.get(r.id) ?? []).map((p) => p.status as AssignmentStatus));
       const menu = menus.get(r.id);
       return {
         ...eventListItem(r, own.get(r.id), { admin: true }),
@@ -63,10 +76,14 @@ export async function eventsForViewer(staff: StaffMember): Promise<EventListItem
         ...(noIce.has(r.id) ? { noIce: true } : {}),
       };
     });
+    return withTeams(items, teams, needs, chicagoToday());
   }
-  const items = await assignedEventItems(staff.id);
-  const unread = await unreadByEvent(staff.id, items.map((i) => i.id));
-  return items.map((i) => ({ ...i, chat: { href: `/team/e/${i.id}?tab=chat`, unread: unread.get(i.id) ?? 0 } }));
+  const { items, needs } = await assignedEventRows(staff.id);
+  const ids = items.map((i) => i.id);
+  // Their teammates: first names, never their own, only on their own events.
+  const [unread, teams] = await Promise.all([unreadByEvent(staff.id, ids), teamsByEvent(ids)]);
+  const withChat = items.map((i) => ({ ...i, chat: { href: `/team/e/${i.id}?tab=chat`, unread: unread.get(i.id) ?? 0 } }));
+  return withTeams(withChat, teams, needs, chicagoToday(), staff.id);
 }
 
 /** Open shifts (already shown on the Open shifts tab) as calendar chips. Never a client name. */

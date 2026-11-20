@@ -114,8 +114,8 @@ check("Progress for the staff list and profile, both sections", tr.progressLine(
 // The header.
 const bar = nav.headerLinks(false, { unreadNews: 0, training: 4 });
 const adm = nav.headerLinks(true, { unreadNews: 0, training: 0 });
-check("Everyone else: Events, Training, News, Me", bar.map((l) => l.label).join() === "Events,Training,News,Me");
-check("Admins and managers: Training after News", adm.map((l) => l.label).join() === "Staffing,Staff,Clients,Partners,Time,Scorecard,News,Training,Me");
+check("Everyone else: Home, Events, Training, News, Me", bar.map((l) => l.label).join() === "Home,Events,Training,News,Me");
+check("Admins and managers: Training after News", adm.map((l) => l.label).join() === "Home,Staffing,Staff,Clients,Partners,Time,Scorecard,News,Training,Me");
 check("The Training row has a count badge for anything unread", bar.find((l) => l.label === "Training")!.badge === 4 && nav.menuHasBadge(bar) && adm.find((l) => l.label === "Training")!.badge === 0);
 check("Training is the current page on the Training page and on old onboarding pages", nav.currentHref(bar, "/team/training") === "/team/training" && nav.currentHref(bar, "/team/onboarding/tabc") === "/team/training");
 check("The header reads the Training count", src("app/team/team-header.tsx").includes("trainingUnreadFor(viewed.id)"));
