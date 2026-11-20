@@ -50,8 +50,8 @@ async function TeamEventPage({
   const { id } = await params;
   const query = await searchParams;
   const chatTab = query.tab === "chat";
-  // Links from texts can open a tab: the chat, or the wrap up reminder.
-  const askedTab: Tab = (["chat", "wrapup", "shopping", "checklist", "receipts"] as const).find((t) => t === query.tab) ?? "details";
+  // Links from texts can open a tab: the chat, the wrap up reminder, or the Shopping list.
+  const askedTab: Tab = (["chat", "wrapup", "shopping", "list", "checklist", "receipts"] as const).find((t) => t === query.tab) ?? "details";
   const asBartender = query.as === "bartender";
   const staff = await requireStaff(`/team/e/${encodeURIComponent(id)}${askedTab !== "details" ? `?tab=${askedTab}` : asBartender ? "?as=bartender" : ""}`);
   // Admins land on the manager view of the event from any link (texts, lists,
@@ -111,7 +111,7 @@ async function TeamEventPage({
     // The ice pickup card: everyone on the event sees who is picking up and each status.
     staffIceView(access.session, staff),
   ]);
-  // The staff Shopping list: accepted (any role) or an admin in Bartender view. Null for anyone else.
+  // The Shopping list tab: accepted (any role) or an admin in Bartender view. Null for anyone else.
   const shoppingListP = staffListFor(access.session, staff).catch((err) => {
     console.error("[shopping list] could not load:", err);
     return null;
@@ -140,7 +140,7 @@ async function TeamEventPage({
         </div>
       )}
       <EventTabs
-        initialTab={(askedTab === "wrapup" && !closeout.open) || (askedTab === "receipts" && !receipts) ? "details" : askedTab}
+        initialTab={(askedTab === "wrapup" && !closeout.open) || (askedTab === "receipts" && !receipts) || (askedTab === "list" && !shoppingList) ? "details" : askedTab}
         chat={{ sessionId: id, initial: messages, unread: unread.get(id) ?? 0, timeZone: data.view.timeZone, isAdmin: isAdminRole(staff.role), gifSearch: giphyEnabled() }}
         offered={assignment?.status === "offered"}
         giveUp={accepted ? { sessionId: id, handoff, teammates, canStart: punches.length === 0 } : null}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { StaffEventView } from "@/lib/team/event-view";
 import { CHECKLIST_INTRO, CHECKLIST_TITLE, CONFIRM_LABEL, type ResolvedGroup } from "@/lib/team/checklist-config";
 import type { ShopItem, ShoppingGroup } from "@/lib/team/shopping";
@@ -8,7 +8,7 @@ import type { SyrupView } from "@/lib/syrups";
 import { SyrupCard } from "../../syrup-recipes";
 import { SUPPLIES_INTRO, SUPPLIES_TAB, SUPPLIES_TITLE, UPDATED_TITLE } from "@/lib/team/supplies";
 import { WRAP_UP_TAB } from "@/lib/team/wrapup";
-import { prepSteps, SUPPLIES_CONFIRM_LABEL, SUPPLIES_LOCKED, SUPPLIES_LOCKED_NOTE, TOOLS_TAB } from "@/lib/team/prep";
+import { prepSteps, SUPPLIES_CONFIRM_LABEL, TOOLS_TAB } from "@/lib/team/prep";
 import { canConfirm, type CheckState, type ListName } from "@/lib/team/checks";
 import { timeLabel } from "@/lib/team/clock-label";
 import BarReadyCard, { type BarReadyProps } from "./bar-ready";
@@ -28,7 +28,7 @@ import MenuSection from "./menu-section";
 import { card, Details } from "./event-details";
 import VenuePhotos from "./venue-photos";
 import ShoppingList from "./shopping-list";
-import type { StaffListView } from "@/lib/team/staff-list";
+import { LIST_MOVED, LIST_MOVED_BUTTON, LIST_TAB, type StaffListView } from "@/lib/team/staff-list";
 import type { VenuePhotoView } from "@/lib/team/venue-photos-db";
 import PackageCard from "../../package-card";
 import type { BookingShort } from "@/lib/packages-info";
@@ -42,7 +42,7 @@ import { RECEIPTS_TAB } from "@/lib/team/receipts";
 export { Details };
 
 
-export type Tab = "details" | "checklist" | "shopping" | "wrapup" | "receipts" | "chat";
+export type Tab = "details" | "checklist" | "shopping" | "list" | "wrapup" | "receipts" | "chat";
 
 function Progress({ state }: { state: Record<string, CheckState> }) {
   const values = Object.values(state);
@@ -151,7 +151,7 @@ function Checklist({
   footer: string;
   initialConfirmedAt: string | null;
   timeZone: string;
-  onConfirmed: (at: string | null) => void; // step 1 done or undone, for the strip and the Supplies lock
+  onConfirmed: (at: string | null) => void; // step 1 done or undone, for the strip
 }) {
   const [confirmedAt, setConfirmedAtState] = useState(initialConfirmedAt);
   const setConfirmedAt = (at: string | null) => {
@@ -353,14 +353,13 @@ function UpdatedNote({ sessionId, changes }: { sessionId: string; changes: strin
   );
 }
 
-/** Step 2 is locked until Tools is done. */
-function SuppliesLocked({ onTools }: { onTools: () => void }) {
+/** Top of Supplies, for people who see the Shopping list tab: older texts link here. */
+function ListMovedCard({ onOpen }: { onOpen: () => void }) {
   return (
-    <section className={`${card} text-center space-y-2`} aria-label="Supplies locked">
-      <h2 className="font-heading text-xl font-bold text-[#2C2420]">{SUPPLIES_LOCKED}</h2>
-      <p className="text-[15px] text-[#6B5D52]">{SUPPLIES_LOCKED_NOTE}</p>
-      <button type="button" onClick={onTools} className="rounded-xl bg-[#B5845A] text-white px-6 py-2.5 font-medium">
-        Go to {TOOLS_TAB}
+    <section className="bg-[#FFF8EC] rounded-2xl border border-[#E3C9A0] px-4 py-3 flex flex-wrap items-center justify-between gap-2" aria-label="Shopping list moved" data-list-moved>
+      <p className="text-[15px] text-[#2C2420]">{LIST_MOVED}</p>
+      <button type="button" onClick={onOpen} className="rounded-xl bg-[#B5845A] text-white px-4 py-2 text-sm font-medium">
+        {LIST_MOVED_BUTTON}
       </button>
     </section>
   );
@@ -537,7 +536,7 @@ export default function EventTabs({
   shoppingList = null,
 }: {
   packageBooking?: BookingShort | null; // this booking's barback and cups, for the Package card
-  shoppingList?: StaffListView | null; // "Shopping list for this event": accepted staff and admins in Bartender view only
+  shoppingList?: StaffListView | null; // the Shopping list tab: accepted staff and admins in Bartender view only
   receipts?: StaffReceiptsView | null; // the Receipts tab: on the event, not declined, until 14 days after it
   venuePhotos?: VenuePhotoView | null; // Bar and venue photos on the Location card, read only, for staff on the event
   runningLow?: { items: string[] } | null; // the Running low button, from setup through the end of breakdown
@@ -571,17 +570,28 @@ export default function EventTabs({
   const chatUnread = useLiveUnread(chat.sessionId, initialTab === "chat" ? 0 : chat.unread, tab === "chat");
   useOpenChat(chat.sessionId, useCallback(() => setTab("chat"), []));
   const [wrapped, setWrapped] = useState(wrapUpDone);
-  // 1 Tools, 2 Supplies. Neither blocks clock in.
+  // 1 Tools, 2 Supplies. Neither locks a tab or blocks clock in: every tab opens any time.
   const [toolsAt, setToolsAt] = useState(confirmedAt);
   const [suppliesAt, setSuppliesAt] = useState(suppliesConfirmedAt);
   const tabs: [Tab, string][] = [
     ["details", "Details"],
     ["checklist", TOOLS_TAB],
     ["shopping", SUPPLIES_TAB],
+    ...(shoppingList ? ([["list", LIST_TAB]] as [Tab, string][]) : []),
     ...(closeout ? ([["wrapup", WRAP_UP_TAB]] as [Tab, string][]) : []),
     ...(receipts ? ([["receipts", RECEIPTS_TAB]] as [Tab, string][]) : []),
     ["chat", `Chat${chatUnread ? ` (${chatUnread})` : ""}`],
   ];
+  // One row that swipes sideways on a phone. Opened from a link (?tab=list),
+  // the selected tab scrolls into view so it shows highlighted without swiping.
+  const navRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const nav = navRef.current;
+    const el = nav?.querySelector<HTMLElement>('[aria-selected="true"]');
+    if (!nav || !el) return;
+    const left = el.offsetLeft - (nav.clientWidth - el.offsetWidth) / 2;
+    nav.scrollTo({ left: Math.max(0, left), behavior: "auto" });
+  }, [tab]);
 
   return (
     <main className="max-w-2xl mx-auto px-4 py-4 sm:py-6 space-y-4">
@@ -627,7 +637,7 @@ export default function EventTabs({
         </section>
       )}
 
-      <nav className={`grid ${tabs.length === 6 ? "grid-cols-6" : tabs.length === 5 ? "grid-cols-5" : "grid-cols-4"} gap-1 bg-[#DDD5CC] p-1 rounded-xl`} role="tablist">
+      <nav ref={navRef} className="flex flex-nowrap gap-1 overflow-x-auto overscroll-x-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden bg-[#DDD5CC] p-1 rounded-xl" role="tablist">
         {tabs.map(([key, label]) => (
           <button
             key={key}
@@ -637,7 +647,7 @@ export default function EventTabs({
             onClick={() => {
               setTab(key);
             }}
-            className={`py-2 px-0.5 rounded-lg text-[13px] sm:text-sm font-medium leading-tight transition-colors ${
+            className={`flex-1 shrink-0 whitespace-nowrap py-2 px-3 rounded-lg text-[13px] sm:text-sm font-medium leading-tight transition-colors ${
               tab === key ? "bg-[#F5F0EB] text-[#2C2420] shadow-sm" : "text-[#6B5D52]"
             }`}
           >
@@ -670,24 +680,24 @@ export default function EventTabs({
           onConfirmed={setToolsAt}
         />
       </div>
-      <div hidden={tab !== "shopping"} className="space-y-6">
-        {/* Before the event: the order sheet by source, to mark what you already have. Not behind the Tools step. */}
-        {shoppingList && <ShoppingList initial={shoppingList} />}
-        {toolsAt || suppliesAt ? (
-          <Supplies
-            sessionId={view.sessionId}
-            shopping={shopping}
-            initial={shoppingState}
-            updates={supplyUpdates}
-            syrups={syrups}
-            confirmedAt={suppliesAt}
-            onConfirmed={setSuppliesAt}
-            timeZone={view.timeZone}
-          />
-        ) : (
-          <SuppliesLocked onTools={() => setTab("checklist")} />
-        )}
+      <div hidden={tab !== "shopping"} className="space-y-4">
+        {shoppingList && <ListMovedCard onOpen={() => setTab("list")} />}
+        <Supplies
+          sessionId={view.sessionId}
+          shopping={shopping}
+          initial={shoppingState}
+          updates={supplyUpdates}
+          syrups={syrups}
+          confirmedAt={suppliesAt}
+          onConfirmed={setSuppliesAt}
+          timeZone={view.timeZone}
+        />
       </div>
+      {shoppingList && (
+        <div hidden={tab !== "list"}>
+          <ShoppingList initial={shoppingList} />
+        </div>
+      )}
       {closeout && (
         <div hidden={tab !== "wrapup"}>
           <CloseoutCard sessionId={view.sessionId} {...closeout} onSent={() => setWrapped(true)} />

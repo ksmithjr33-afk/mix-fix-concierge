@@ -27,6 +27,7 @@ import {
   groupOf,
   LIST_PREVIEW,
   LIST_READ_ONLY,
+  listLink,
   listReady,
   readyText,
   staffList,
@@ -79,7 +80,7 @@ export async function staffListFor(session: SessionLike, staff: ViewedStaff, now
   const status = await assignmentStatus(session.id, staff.id);
   const accepted = status === "accepted";
   if (!accepted && !staff.bartenderView) return null;
-  const [{ sheet, stores }, answers] = await Promise.all([staffSheet(session), answersFor(session.id)]);
+  const [{ sheet, stores }, answers, textSent] = await Promise.all([staffSheet(session), answersFor(session.id), readyTextSent(session.id)]);
   const over = eventOver(session, now);
   const names = await staffNames(answers.map((a) => a.staff_id));
   return staffList({
@@ -91,7 +92,14 @@ export async function staffListFor(session: SessionLike, staff: ViewedStaff, now
     viewerId: staff.id,
     canAnswer: accepted && !over,
     readOnlyNote: over ? LIST_READ_ONLY : accepted ? "" : LIST_PREVIEW,
+    textSent,
   });
+}
+
+/** A "list is ready" text already went out to someone on this event (by the cron or Text the team the list). */
+async function readyTextSent(sessionId: string): Promise<boolean> {
+  const { data, error } = await supabase.from("order_sheet_ready_texts").select("id").eq("session_id", sessionId).eq("status", "sent").limit(1);
+  return !error && ((data as unknown[] | null) ?? []).length > 0;
 }
 
 export type SaveResult = { ok: true; view: StaffListView } | { ok: false; error: string; status: number };
@@ -197,7 +205,7 @@ export async function deliverReadyTexts(now: Date, only?: string): Promise<numbe
       continue;
     }
     const ed = eventData(session as SessionRow);
-    const message = readyText({ title: eventTitle(ed), date: shortDate(eventSchedule(ed).day), link: `${siteOrigin()}/team/e/${encodeURIComponent(r.session_id)}?tab=shopping` });
+    const message = readyText({ title: eventTitle(ed), date: shortDate(eventSchedule(ed).day), link: listLink(siteOrigin(), r.session_id) });
     if (await sendStaffText(person.phone, person.name, message)) sent++;
     else await supabase.from("order_sheet_ready_texts").update({ status: "failed" }).eq("id", r.id);
   }

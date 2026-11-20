@@ -41,13 +41,12 @@ export async function prepTimes(session: SessionRow, staffId: string): Promise<P
 export type ConfirmSuppliesResult = { ok: true; confirmedAt: string; missing: string[] } | { ok: false; error: string; status: number };
 
 /**
- * "I have gone through the supplies list". Only once Tools is done. Anything
+ * "I have gone through the supplies list". Any time, Tools done or not. Anything
  * still unchecked is reported missing to admins and managers. Saved once:
  * a second tap keeps the first time and reports nothing again.
  */
 export async function confirmSupplies(session: SessionRow, staff: StaffMember, origin: string, now: Date = new Date()): Promise<ConfirmSuppliesResult> {
   const t = await prepTimes(session, staff.id);
-  if (!t.toolsAt) return { ok: false, error: "Finish Tools first.", status: 409 };
   if (t.suppliesAt) return { ok: true, confirmedAt: t.suppliesAt, missing: [] };
   const [{ list }, rows] = await Promise.all([staffSupplies(session), checkRows(staff.id, session.id, "shopping")]);
   const state = supplyState(list, rows);

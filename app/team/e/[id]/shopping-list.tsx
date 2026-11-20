@@ -1,9 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { BUTTONS, LIST_INTRO, LIST_TITLE, NOTE_MAX, type StaffGroup, type StaffLineView, type StaffListView } from "@/lib/team/staff-list";
+import { BUTTONS, LIST_INTRO, LIST_NOT_READY, LIST_TITLE, NOTE_MAX, type StaffGroup, type StaffLineView, type StaffListView } from "@/lib/team/staff-list";
 
-// "Shopping list for this event" on the Supplies tab: the admin Shopping list's
+// "Shopping list for this event" on its own Shopping list tab: the admin Shopping list's
 // own lines, under plain headings by source, with a small swatch so it matches
 // the admin sheet. Item and amount only. People who accepted the event say what
 // they already have; everything else about a line is the admin's.
@@ -141,6 +141,14 @@ export default function ShoppingList({ initial }: { initial: StaffListView }) {
       setBusy(false);
     }
   };
+  if (!view.ready) {
+    return (
+      <div className="space-y-3" aria-label={LIST_TITLE} data-staff-shopping-list data-not-ready>
+        <h2 className="font-heading text-xl font-bold text-[#2C2420] px-1">{LIST_TITLE}</h2>
+        <p className={`${card} text-[15px] text-[#2C2420]`}>{LIST_NOT_READY}</p>
+      </div>
+    );
+  }
   return (
     <div className="space-y-3" aria-label={LIST_TITLE} data-staff-shopping-list>
       <div className="px-1">

@@ -1,5 +1,8 @@
-// The staff "Shopping list for this event" on the Supplies tab, and what staff
-// tell us about each line. Pure, no database.
+// The staff "Shopping list for this event" on its own Shopping list tab (right
+// after Supplies), and what staff tell us about each line. Pure, no database.
+//
+// Ready: more than half our lines have a source (listReady), or a ready text
+// already went out for the event. Before then the tab says it is not ready yet.
 //
 // One list, never a copy: the lines are the admin Shopping list's own lines
 // (lib/order-sheet.ts buildSheet, read through staffSheet), grouped by each
@@ -29,6 +32,15 @@ export const LIST_INTRO = "Mark what you already have so we do not buy it twice.
 export const LIST_READ_ONLY = "This event is over, so the list is read only.";
 export const LIST_PREVIEW = "You are viewing this as a bartender. Only people who accepted the event can answer.";
 export const NOTE_MAX = 80;
+export const LIST_TAB = "Shopping list";
+export const LIST_NOT_READY = "The shopping list is not ready yet. You will get a text when it is.";
+export const LIST_MOVED = "Looking for the shopping list? It has its own tab now.";
+export const LIST_MOVED_BUTTON = "Open the Shopping list";
+
+/** The staff event page on the Shopping list tab: the link in the ready text. */
+export function listLink(origin: string, sessionId: string): string {
+  return `${origin}/team/e/${encodeURIComponent(sessionId)}?tab=list`;
+}
 
 export type GroupId = "supply" | "delivery" | "pickup" | "client" | "undecided";
 export type Answer = "have" | "out";
@@ -121,6 +133,7 @@ export interface StaffListView {
   total: number;
   canAnswer: boolean;
   readOnlyNote: string; // "" when they can answer
+  ready: boolean; // false: the tab shows LIST_NOT_READY instead of the lines
 }
 
 function staffLine(l: SheetLine, group: GroupId, rows: AnswerRow[], viewerId: string, names: Map<string, string>): StaffLineView {
@@ -152,6 +165,7 @@ export function staffList(o: {
   viewerId: string;
   canAnswer: boolean;
   readOnlyNote: string;
+  textSent?: boolean; // a ready text already went out for this event
 }): StaffListView {
   const lines = o.sheet.sections.flatMap((s) => s.lines);
   const byRef = new Map<string, AnswerRow[]>();
@@ -178,7 +192,7 @@ export function staffList(o: {
       lines: split ? [] : mine.map(view),
     });
   }
-  return { sessionId: o.sessionId, groups, total: lines.length, canAnswer: o.canAnswer, readOnlyNote: o.readOnlyNote };
+  return { sessionId: o.sessionId, groups, total: lines.length, canAnswer: o.canAnswer, readOnlyNote: o.readOnlyNote, ready: !!o.textSent || listReady(o.sheet) };
 }
 
 /** Every line in the staff list, in order, for checking it matches the sheet. */

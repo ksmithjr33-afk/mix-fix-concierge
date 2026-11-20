@@ -3,7 +3,8 @@
 // (the event's supplies list, confirmed with "I have gone through the
 // supplies list"). Pure, no database.
 //
-// Supplies stays locked until Tools is done. Neither step ever blocks clock in.
+// The steps can be done in any order: Supplies is never locked behind Tools,
+// and neither step ever blocks clock in or any other tab.
 // Anyone on the event with a step left gets one text 2 hours before service;
 // admins and managers get one text 30 minutes before service naming who has
 // not finished which step.
@@ -15,8 +16,6 @@ import { eventSchedule, formatClock } from "@/lib/team/time";
 
 export const TOOLS_TAB = "Tools";
 export const SUPPLIES_STEP = "Supplies";
-export const SUPPLIES_LOCKED = "Finish Tools first";
-export const SUPPLIES_LOCKED_NOTE = "Check off your Tools and tap I have everything. Then the supplies list opens here.";
 export const SUPPLIES_CONFIRM_LABEL = "I have gone through the supplies list";
 
 export const STAFF_REMINDER_MIN = 120; // the text to the person, before service
@@ -48,9 +47,6 @@ export function stepsLeft(s: PrepStatus): string {
     .map((p) => p.label)
     .join(" and ");
 }
-
-/** Supplies can be confirmed only once Tools is done. */
-export const suppliesUnlocked = (s: Pick<PrepStatus, "tools">): boolean => s.tools;
 
 /** Inside the window from `lead` minutes before service up to service start. */
 function inWindow(ed: Record<string, unknown>, now: Date, lead: number): boolean {

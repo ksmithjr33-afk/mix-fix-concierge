@@ -1,4 +1,4 @@
-// The staff "Shopping list for this event" on the Supplies tab: the admin
+// The staff "Shopping list for this event" on its own Shopping list tab: the admin
 // Shopping list's own lines under plain headings by source, what staff say
 // they already have, the answers on the admin sheet and its badge, and the
 // "list is ready" text. Real code against the in-memory database.
@@ -119,11 +119,15 @@ async function source() {
 
 // ===== 1. Where it shows, and who sees it =====
 reset();
+// Not ready: no sources yet and no ready text sent. The tab still shows, with the plain line.
+const early = await viewFor(jayde);
+check("Before most lines have a source, the list is not ready (but the tab still shows)", !!early && early.ready === false);
 check("Store kinds: names give pick up, delivery, or supply until an admin sets one", shared.storeKind({ name: "Spec's pickup" }) === "pickup" && shared.storeKind({ name: "Sam's Club delivery" }) === "delivery" && shared.storeKind({ name: "Amazon" }) === "delivery" && shared.storeKind({ name: "Walmart Delivery" }) === "delivery" && shared.storeKind({ name: "Bring from your supply" }) === "supply" && shared.storeKind({ name: "Amazon", kind: "pickup" }) === "pickup");
 const ours = await source();
 const jv = await viewFor(jayde);
 const mv = await viewFor(marcus);
 check("An accepted bartender sees the list", !!jv && jv.canAnswer);
+check("Once most lines have a source, the list is ready", jv!.ready === true);
 check("An accepted bar back sees it too (any role)", !!mv && mv.canAnswer);
 check("Someone only offered the shift sees nothing", (await viewFor(sam)) === null);
 check("Someone who declined sees nothing", (await viewFor(dee)) === null);
@@ -162,8 +166,15 @@ check("Delivery lines say Ordered or Not ordered yet", dLines.find((l) => l.ref 
 check("Other lines say nothing about ordering", sl.staffListLines(v2).filter((l) => !dLines.some((d) => d.ref === l.ref)).every((l) => l.ordered === null));
 
 // ===== No prices, links, suppliers, or who ordered in anything staff receive =====
-db.order_sheet_lines.forEach((r) => Object.assign(r, { ordered_by_name: (r as { ordered: boolean }).ordered ? "Isabel" : null }));
-const sent = JSON.stringify(v2);
+// Plant prices, costs, and supplier links everywhere the admin side could hold them.
+db.order_sheet_lines.forEach((r) => Object.assign(r, { ordered_by_name: (r as { ordered: boolean }).ordered ? "Isabel" : null, price: 24.99, price_cents: 2499, unit_cost: 12.5, cost_cents: 1250, total_cents: 9999, supplier: "Southern Glazer's", supplier_url: "https://supplier.example/item/1", url: "https://supplier.example/x", link: "https://supplier.example/y", detail: "Titos $24.99 https://supplier.example/titos" }));
+db.order_sheet_stores.forEach((st) => Object.assign(st, { url: "https://store.example", order_link: "https://store.example/order", account: "acct 4411" }));
+const planted = (await viewFor(jayde))!;
+const sent = JSON.stringify(v2) + JSON.stringify(planted);
+const keysIn = (x: unknown): string[] => (Array.isArray(x) ? x.flatMap(keysIn) : x && typeof x === "object" ? Object.entries(x).flatMap(([k, val]) => [k, ...keysIn(val)]) : []);
+check("No price, cost, total, supplier, url, or link field anywhere in the staff list", !keysIn(planted).some((k) => /price|cost|cents|total_|supplier|url|link|account|detail|brand/i.test(k)), [...new Set(keysIn(planted))].join(","));
+check("The staff list's top level is only what the tab needs", Object.keys(planted).sort().join() === "canAnswer,groups,readOnlyNote,ready,sessionId,total", Object.keys(planted).sort().join());
+check("The Shopping list tab's page code never shows a price or a link", !/price|cost|cents|supplier|href=|https?:/i.test(src("app/team/e/[id]/shopping-list.tsx")));
 check("No price, cost, link, supplier, or who ordered in the staff list", !/\$|https?:|www\.|ordered_?by|orderedBy|Isabel|cost|price|store_item|storeBy|editedBy|Justin|Reyes|9725550199/i.test(sent), sent.slice(0, 200));
 check("No brand or note field either: item and amount only", sl.staffListLines(v2).every((l) => Object.keys(l).sort().join() === "answers,item,mine,notes,ordered,quantity,ref,teammates"));
 
@@ -260,7 +271,8 @@ const to = (p: { phone: string }) => texts.filter((t) => t.phone === p.phone);
 check("At 8 AM each accepted person gets one text", to(jayde).length === 1 && to(marcus).length === 1, JSON.stringify(texts));
 check("Offered and declined people get none", to(sam).length === 0 && to(dee).length === 0);
 const msg = to(jayde)[0]?.message ?? "";
-check("The wording, with the link to the Supplies tab", /^The shopping list for Justin · Birthday, \w{3}, \w{3} \d+ is ready\. Open it and mark what you already have: https:\/\/plan\.test\/team\/e\/s1\?tab=shopping$/.test(msg), msg);
+check("The wording, with the link straight to the Shopping list tab", /^The shopping list for Justin · Birthday, \w{3}, \w{3} \d+ is ready\. Open it and mark what you already have: https:\/\/plan\.test\/team\/e\/s1\?tab=list$/.test(msg), msg);
+check("The link is the one the page opens the Shopping list tab from", sl.listLink("https://plan.test", "s1") === "https://plan.test/team/e/s1?tab=list" && /\["chat", "wrapup", "shopping", "list",/.test(src("app/team/e/[id]/page.tsx")) && src("app/team/e/[id]/page.tsx").includes('(askedTab === "list" && !shoppingList) ? "details" : askedTab'));
 await sldb.sendListReadyTexts(new Date(eight.getTime() + 3_600_000));
 const manual = await sldb.textTeamTheList(S(), new Date(eight.getTime() + 7_200_000));
 check("Never twice: the cron again and the button send nothing new", to(jayde).length === 1 && to(marcus).length === 1 && manual.sent === 0 && manual.message === "Everyone on the event already has the text.");
@@ -269,13 +281,17 @@ check("The past event's button says it is over", (await sldb.textTeamTheList(S("
 // Someone accepted later gets it once, by the button, before the list is ready.
 reset();
 db.event_assignments.push({ id: "x6", session_id: "s1", staff_id: "b3", status: "accepted" });
+check("Before the button: no sources, not ready", (await viewFor(jayde))!.ready === false);
 const byHand = await sldb.textTeamTheList(S(), morning);
 check("Text the team the list sends it by hand to everyone accepted", byHand.sent === 3 && to(sam).length === 1 && byHand.message === "Texted 3 people.", byHand.message);
+check("...with the link to the Shopping list tab", to(sam)[0].message.endsWith("/team/e/s1?tab=list"), to(sam)[0].message);
+check("Once a ready text went out, the tab shows the list even with few sources", (await viewFor(jayde))!.ready === true && (await viewFor(marcus))!.ready === true && (await viewFor({ ...admin, role: "bartender", bartenderView: true }))!.ready === true);
 const quiet = await sldb.textTeamTheList(S(), night);
 check("...and again sends nothing new", quiet.queued === 0 && to(sam).length === 1);
 reset();
 const held = await sldb.textTeamTheList(S(), night);
 check("By hand in quiet hours: held until 8 AM", held.sent === 0 && held.held && texts.length === 0 && /8 AM/.test(held.message));
+check("...and a text still waiting does not make the list ready", (await viewFor(jayde))!.ready === false);
 check("The admin tab has the button and the count", src("app/team/admin/e/[id]/order/order-sheet.tsx").includes("Text the team the list") && src("app/team/admin/e/[id]/order/order-sheet.tsx").includes("already have</span>"));
 check("The cron runs it", src("app/api/cron/team/route.ts").includes("sendListReadyTexts(now)"));
 
@@ -284,6 +300,7 @@ reset();
 missingTables.add("order_sheet_answers");
 missingTables.add("order_sheet_ready_texts");
 check("Before the migration the list still shows, with no answers", !!(await viewFor(jayde)) && (await osdb.getSheetView(S())).answers.badge === 0);
+check("...and reads as not ready until most lines have a source", (await viewFor(jayde))!.ready === false);
 const notYet = await sldb.saveAnswer(S(), jayde as never, { ref: (await adminLines())[0].ref, answer: "have" });
 check("...and saving says it is not set up yet", !notYet.ok && notYet.status === 503);
 check("...and the cron sends nothing", (await sldb.sendListReadyTexts(morning)) === 0);
@@ -293,10 +310,20 @@ check("The migration adds the kind, the answers, and the ready texts", mig.inclu
 
 // ===== The page and wording =====
 const tabs = src("app/team/e/[id]/event-tabs.tsx");
-check("The section is on the Supplies tab, ahead of the Tools lock", tabs.includes("{shoppingList && <ShoppingList initial={shoppingList} />}") && tabs.indexOf("<ShoppingList") < tabs.indexOf("<SuppliesLocked"));
+const panel = (t: string) => { const m = tabs.match(new RegExp(`<div hidden=\\{tab !== "${t}"\\}[\\s\\S]*?\\n      </div>`)); return m ? m[0] : ""; };
+check("Shopping list is its own tab, right after Supplies", /\["shopping", SUPPLIES_TAB\],\n\s*\.\.\.\(shoppingList \? \(\[\["list", LIST_TAB\]\]/.test(tabs) && sl.LIST_TAB === "Shopping list");
+check("The tab shows for the same people who get the list (accepted, or an admin in Bartender view)", tabs.includes("...(shoppingList ? ([[\"list\", LIST_TAB]]") && tabs.includes("{shoppingList && (\n        <div hidden={tab !== \"list\"}>"));
+check("The list lives on that tab, and no longer on Supplies", panel("list").includes("<ShoppingList initial={shoppingList} />") && !panel("shopping").includes("<ShoppingList"));
+check("Supplies keeps its own list, with the card pointing to the new tab, for the same people", panel("shopping").includes("<Supplies\n") && panel("shopping").includes('{shoppingList && <ListMovedCard onOpen={() => setTab("list")} />}') && panel("shopping").indexOf("<ListMovedCard") < panel("shopping").indexOf("<Supplies"));
+check("The card's wording", sl.LIST_MOVED === "Looking for the shopping list? It has its own tab now." && tabs.includes("{LIST_MOVED}") && tabs.includes("{LIST_MOVED_BUTTON}"));
+check("Someone who has not done Tools can open Supplies and Shopping list: neither panel waits on Tools", !/toolsAt|SuppliesLocked/.test(panel("shopping") + panel("list")) && !tabs.includes("SuppliesLocked"));
+check("Not ready: the tab shows the plain line instead of the lines", sl.LIST_NOT_READY === "The shopping list is not ready yet. You will get a text when it is." && src("app/team/e/[id]/shopping-list.tsx").includes("if (!view.ready) {") && src("app/team/e/[id]/shopping-list.tsx").includes("{LIST_NOT_READY}"));
+check("The tab row is one row that swipes sideways", tabs.includes('className="flex flex-nowrap gap-1 overflow-x-auto') && tabs.includes("shrink-0 whitespace-nowrap") && !/grid-cols-\d/.test(tabs.slice(tabs.indexOf('role="tablist"') - 300, tabs.indexOf('role="tablist"'))));
+check("Opened from a link, the selected tab scrolls into view", tabs.includes("<nav ref={navRef}") && tabs.includes(`querySelector<HTMLElement>('[aria-selected="true"]')`) && tabs.includes("nav.scrollTo("));
+check("The admin event page tabs are unchanged", !/"list"/.test(src("lib/team/manager-tabs.ts")));
 const ui = src("app/team/e/[id]/shopping-list.tsx");
 const words = [
-  sl.LIST_TITLE, sl.LIST_INTRO, sl.LIST_READ_ONLY, sl.LIST_PREVIEW, ...Object.values(sl.GROUP_TITLES), ...Object.values(sl.BUTTONS),
+  sl.LIST_TITLE, sl.LIST_INTRO, sl.LIST_READ_ONLY, sl.LIST_PREVIEW, sl.LIST_TAB, sl.LIST_NOT_READY, sl.LIST_MOVED, sl.LIST_MOVED_BUTTON, ...Object.values(sl.GROUP_TITLES), ...Object.values(sl.BUTTONS),
   "Ordered", "Not ordered yet", "Add a note", "Change note", "You said: ", "Your note: ", "For reference. The client buys these.", "Nothing on the shopping list yet.",
   "Text the team the list", "Skip ordering", "Dismiss", "(handled)", "No answers from the team yet.", "From the team:",
   "Everyone on the event already has the text.", "Nobody has accepted this event yet.", "This event is over.", sldb.NOT_SET_UP,

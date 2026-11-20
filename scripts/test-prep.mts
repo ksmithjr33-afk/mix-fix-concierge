@@ -49,7 +49,7 @@ async function finishTools(who: typeof b1) {
 // ----- The pure rules -----
 check("The strip reads 1 Tools, 2 Supplies, each Done or To do", JSON.stringify(prep.prepSteps({ tools: true, supplies: false })) === JSON.stringify([{ n: 1, label: "Tools", done: true }, { n: 2, label: "Supplies", done: false }]));
 check("What is left, in words", prep.stepsLeft({ tools: false, supplies: false }) === "Tools and Supplies" && prep.stepsLeft({ tools: true, supplies: false }) === "Supplies" && prep.stepsLeft({ tools: true, supplies: true }) === "");
-check("Supplies unlocks only once Tools is done", !prep.suppliesUnlocked({ tools: false }) && prep.suppliesUnlocked({ tools: true }));
+check("No lock rule is left: Supplies never waits on Tools", !("suppliesUnlocked" in prep) && !("SUPPLIES_LOCKED" in prep) && !("SUPPLIES_LOCKED_NOTE" in prep));
 const ed = (db.sessions = [event("e1", DAY, "x")], (db.sessions[0] as { event_data: Record<string, unknown> }).event_data);
 check("The person's text is due from 2 hours before service, not before", !prep.staffReminderDue(ed, at(18 * 60 - 121), { tools: false, supplies: false }) && prep.staffReminderDue(ed, at(16 * 60), { tools: false, supplies: false }) && !prep.staffReminderDue(ed, at(18 * 60), { tools: false, supplies: false }));
 check("Nobody is texted when both steps are done", !prep.staffReminderDue(ed, at(16 * 60 + 30), { tools: true, supplies: true }));
@@ -57,7 +57,6 @@ check("The admin text is due from 30 minutes before service", !prep.adminAlertDu
 
 // ----- Tools, then Supplies -----
 reset();
-check("Supplies cannot be confirmed before Tools", !(await prepDb.confirmSupplies(session(), b1, "https://plan.test")).ok && db.staff_supplies_confirmations.length === 0);
 check("Tools is done with the existing I have everything", !!(await finishTools(b1)) && (await prepDb.prepTimes(session(), "b1")).toolsAt !== null);
 const items = sup.allSupplies((await supdb.staffSupplies(session())).list);
 for (const i of items.slice(1)) await events.saveCheck(session(), b1, "shopping", i.key, true);
@@ -94,10 +93,12 @@ const tabs = src("app/team/e/[id]/event-tabs.tsx");
 check("The Checklist tab is named Tools", tabs.includes('["checklist", TOOLS_TAB],') && !tabs.includes('"Checklist"]') && prep.TOOLS_TAB === "Tools");
 const order = ['["details", "Details"]', '["checklist", TOOLS_TAB]', '["shopping", SUPPLIES_TAB]', '[["wrapup", WRAP_UP_TAB]]', '["chat", `Chat'].map((s) => tabs.indexOf(s));
 check("Tab order: Details, Tools, Supplies, Wrap up, Chat", order.every((n, i) => n > 0 && (i === 0 || n > order[i - 1])), JSON.stringify(order));
-check("Supplies is locked with Finish Tools first until Tools is done", tabs.includes("{toolsAt || suppliesAt ? (") && tabs.includes("<SuppliesLocked onTools=") && prep.SUPPLIES_LOCKED === "Finish Tools first");
+check("Supplies always opens: no Finish Tools first lock on the page", !tabs.includes("SuppliesLocked") && !tabs.includes("Finish Tools first") && !tabs.includes("toolsAt || suppliesAt") && /<div hidden=\{tab !== "shopping"\}[\s\S]*?<Supplies\n/.test(tabs));
+check("No tab is locked behind another: every tab panel is shown by the selected tab alone", (tabs.match(/<div hidden=\{tab !== "(\w+)"\}/g) ?? []).length === 7 && !/toolsAt \?|toolsAt &&|suppliesAt \?|suppliesAt &&/.test(tabs));
+check("The server never refuses Supplies for Tools", !src("lib/team/prep-db.ts").includes("Finish Tools first") && !src("app/api/team/supplies-confirm/route.ts").includes("Finish Tools"));
 check("Supplies has the explicit confirm, warning about unchecked items first", tabs.includes("SUPPLIES_CONFIRM_LABEL") && prep.SUPPLIES_CONFIRM_LABEL === "I have gone through the supplies list" && tabs.includes("will be reported missing to the team") && tabs.includes('fetch("/api/team/supplies-confirm"'));
 check("The progress strip is on the event page", tabs.includes("<PrepStrip tools={!!toolsAt} supplies={!!suppliesAt} onOpen={setTab} />"));
-check("Confirming Tools updates the strip and unlocks Supplies right away", tabs.includes("onConfirmed={setToolsAt}") && tabs.includes("onConfirmed={setSuppliesAt}"));
+check("Confirming Tools and Supplies updates the strip right away", tabs.includes("onConfirmed={setToolsAt}") && tabs.includes("onConfirmed={setSuppliesAt}"));
 check("The route checks the person is on the event", src("app/api/team/supplies-confirm/route.ts").includes("const access = await openEvent(sessionId, staff);") && src("app/api/team/supplies-confirm/route.ts").includes("confirmSupplies(access.session, staff"));
 check("Clock in is never blocked by Tools or Supplies", !/prep|toolsAt|suppliesConfirm|confirmedAt/.test(src("lib/team/clock-db.ts")) && !/prep|confirmedAt/.test(src("lib/team/clock.ts")) && typeof clock.lateSetupDue === "function");
 check("Nothing in the database was renamed", src("lib/team/events.ts").includes('checkRows(staff.id, session.id, "checklist")') && src("lib/team/events.ts").includes('from("staff_confirmations")'));
@@ -140,6 +141,22 @@ await prepDb.sendPrepReminders(at(16 * 60));
 check("Only people who accepted are texted", textsTo(b1).length === 0 && textsTo(b2).length === 1);
 check("The cron runs it", src("app/api/cron/team/route.ts").includes("sendPrepReminders(now)"));
 check("A replacement starts with a clean Supplies confirm", src("lib/team/shifts-db.ts").includes('from("staff_supplies_confirmations").delete()'));
+
+// ----- Supplies before Tools, for every role -----
+reset();
+const helper = { id: "b3", name: "Riley Park", phone: "+12145550113", role: "event_helper" as const, active: true, alerts: true };
+const adminAsBartender = { ...admin, role: "bartender" as const, bartenderView: true };
+db.staff.push({ ...helper, markets: ["dallas"] });
+db.event_assignments.push({ id: "as3", session_id: "e1", staff_id: "b3", status: "accepted" });
+const everyItem = sup.allSupplies((await supdb.staffSupplies(session())).list);
+for (const who of [b1, b2, helper, adminAsBartender]) {
+  for (const i of everyItem) await events.saveCheck(session(), who as typeof b1, "shopping", i.key, true);
+  const before = await prepDb.prepTimes(session(), who.id);
+  const r = await prepDb.confirmSupplies(session(), who as typeof b1, "https://plan.test");
+  const after = await prepDb.prepTimes(session(), who.id);
+  check(`${"bartenderView" in who ? "An admin in Bartender view" : { bartender: "A bartender", bar_back: "A bar back", event_helper: "An event helper" }[who.role as string]} who has not done Tools can confirm Supplies`, before.toolsAt === null && r.ok && after.suppliesAt !== null);
+  check("...and Tools still shows To do", after.toolsAt === null && prep.prepSteps(prepDb.statusOf(after))[0].done === false && prep.stepsLeft(prepDb.statusOf(after)) === "Tools");
+}
 
 const sql = src("supabase/migrations/20261209_tools_supplies.sql");
 check("The migration adds staff_supplies_confirmations, safe to run twice", sql.includes("create table if not exists public.staff_supplies_confirmations") && sql.includes("primary key (staff_id, session_id)"));

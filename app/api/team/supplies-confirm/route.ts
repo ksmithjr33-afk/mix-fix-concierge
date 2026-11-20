@@ -3,7 +3,7 @@ import { getCurrentStaff } from "@/lib/team/auth";
 import { openEvent } from "@/lib/team/events";
 import { confirmSupplies } from "@/lib/team/prep-db";
 
-// "I have gone through the supplies list" (step 2). Only once Tools is done;
+// "I have gone through the supplies list" (step 2). Any time, Tools done or not;
 // anything left unchecked is reported missing to admins and managers.
 export async function POST(request: Request) {
   const staff = await getCurrentStaff();
