@@ -16,7 +16,16 @@ import {
 } from "@/lib/system-prompt";
 import { packageDrinkCount, type Deadlines, type EventData } from "@/lib/event-diff";
 import { CHANGE_REQUEST_MESSAGE } from "@/lib/client-list";
-import { DIVE_MENU_SET_MESSAGE, isDiveBarPackage } from "@/lib/dive-menu";
+import {
+  DIVE_CARD_FULL_LINE,
+  DIVE_CARD_INCLUDED,
+  DIVE_CARD_MAX,
+  DIVE_CARD_OFFER_LINE,
+  DIVE_MENU_SET_MESSAGE,
+  diveCardClassicNames,
+  hasDiveMenuCard,
+  isDiveBarPackage,
+} from "@/lib/dive-menu";
 import type { BookedPrice } from "@/lib/price-change";
 import { pendingLines, type PricePendingInfo } from "@/lib/price-pending";
 
@@ -60,6 +69,20 @@ function pricePendingBlock(info: PricePendingInfo | null): string {
   return `PRICE PENDING: these saved changes are waiting for our management team to set the new total: ${pendingLines(info).join("; ")}. They are saved. The client has already been told management will reach out with the new total, so do not say it again. Never state, estimate, or confirm any total, difference, or balance amount, even one the client mentions. If the client mentions a price, say our team will confirm the new total with them. Do not ask the payment question until the new total is set.`;
 }
 
+/**
+ * Dive Bar in update mode: the set menu (drink changes refused), with a menu
+ * card offered only when the client asks for a menu, or the card they have.
+ * Extra classics past three follow the Full Bar extra drink rule here: a
+ * manager request, no price quoted.
+ */
+function diveUpdateSection(card: boolean, drinkCount: number): string {
+  const rules = `The card holds only these classics: ${diveCardClassicNames()}. Call them "classics for your menu card", never signature or specialty cocktails, with their standard names and CLASSICS recipes, no creative names. A specialty cocktail, a craft menu drink, a mocktail, a custom drink, or any drink not on that list (Espresso Martini and the other drinks Dive Bar leaves out) is refused: say that is a Full Bar feature and offer to switch the package to Full Bar, which is a PRICE CHANGE (quote it with quote_price_change first). The first ${DIVE_CARD_INCLUDED} classics are included. A classic past ${DIVE_CARD_INCLUDED} follows MANAGER REQUESTS exactly like additional signature drinks on Full Bar. At most ${DIVE_CARD_MAX} classics in all: a classic past that is refused, say "${DIVE_CARD_FULL_LINE}" Saving a card: call update_event_data with dive_menu_card true and the COMPLETE signature_drinks array of the card's classics (name, menu_name, base_spirit, and the CLASSICS ingredients with oz amounts). The card's classics replace the set menu as the event's menu, and it never changes the client's alcohol shopping list. A card change is a drink menu change, so inside 6 days it is a REQUEST FOR APPROVAL.`;
+  if (card) {
+    return `DIVE BAR MENU CARD: This client is on Dive Bar and has a printed menu card with ${drinkCount} classic${drinkCount === 1 ? "" : "s"} (the signature_drinks in CURRENT EVENT DETAILS). They can swap, add, or remove its classics. ${rules} If they want no card after all, call update_event_data with dive_menu_card false: the set menu of five comes back. Never show a menu picture on Dive Bar.`;
+  }
+  return `DIVE BAR SET MENU: This client is on Dive Bar, which comes with a set menu of five favorites: Margarita, Old Fashioned, Cosmopolitan, Lemon Drop and Moscow Mule, and no printed menu. Any request to add, remove, swap, rename, or change a drink is refused at any date: do NOT call any tool for it, do NOT pass it to management, and reply with exactly: "${DIVE_MENU_SET_MESSAGE}" Then ask if there is anything else they would like to change. Never bring up a menu card yourself. The one exception: if the client asks for a menu, a printed menu, or a menu card, say exactly: "${DIVE_CARD_OFFER_LINE}" and if they want it, they pick classics for it. ${rules} Never show a menu picture on Dive Bar.`;
+}
+
 export function buildUpdatePrompt(
   eventData: EventData,
   version: number,
@@ -77,7 +100,9 @@ export function buildUpdatePrompt(
   const dueDate = balanceDueDate(deadlines.eventDay);
   const pkg = String(eventData.package ?? "unknown");
   const drinkCount = Array.isArray(eventData.signature_drinks) ? eventData.signature_drinks.length : 0;
-  const packageCount = Math.max(packageDrinkCount(pkg), drinkCount);
+  const dive = isDiveBarPackage(eventData.package);
+  const card = hasDiveMenuCard(eventData);
+  const packageCount = dive ? Math.max(DIVE_CARD_INCLUDED, card ? drinkCount : 0) : Math.max(packageDrinkCount(pkg), drinkCount);
 
   const cutoffLine = !deadlines.eventDay
     ? "The event date could not be read, so treat the drink menu as OPEN."
@@ -128,9 +153,9 @@ FINAL RECAP: When the client says they are done (for example "that's all", "no",
 CHANGES SAVED IN THIS CHAT:
 ${recapBlock(extra.recap ?? null)}
 
-PACKAGE RULES STILL APPLY: The client is on ${pkg}. Any new or swapped drink must follow DRINK SOURCING BY PACKAGE and the mocktail rule below exactly like intake. A Dive Bar client cannot change the drink menu at any time: the menu is set for that package, an Essentials Bar or The Big Day Bar client can only pick from the craft menu and cannot add a mocktail, and only Full Bar and Premium Bar can have mocktails. If a client asks for something their package does not allow, say it is not part of their package menu, offer the closest allowed option, and quote nothing.
+PACKAGE RULES STILL APPLY: The client is on ${pkg}. Any new or swapped drink must follow DRINK SOURCING BY PACKAGE and the mocktail rule below exactly like intake. A Dive Bar client cannot change the drink menu at any time except through the DIVE BAR MENU CARD rules below, an Essentials Bar or The Big Day Bar client can only pick from the craft menu and cannot add a mocktail, and only Full Bar and Premium Bar can have mocktails. If a client asks for something their package does not allow, say it is not part of their package menu, offer the closest allowed option, and quote nothing.
 
-${isDiveBarPackage(eventData.package) ? `DIVE BAR SET MENU: This client is on Dive Bar, which comes with a set menu of five favorites: Margarita, Old Fashioned, Cosmopolitan, Lemon Drop and Moscow Mule. Any request to add, remove, swap, rename, or change a drink is refused at any date: do NOT call any tool for it, do NOT pass it to management, and reply with exactly: "${DIVE_MENU_SET_MESSAGE}" Then ask if there is anything else they would like to change. Never show a menu picture on Dive Bar.\n\n` : ""}MENU IMAGES IN UPDATE MODE: Follow MENU IMAGES below, with one difference: show the menu when the client asks to add or swap a drink, and any time they ask to see the menu. Inside 6 days show it only when the client asks to see it. Current dive_menu_requested: ${eventData.dive_menu_requested === true ? "true" : "false"}.
+${dive ? `${diveUpdateSection(card, drinkCount)}\n\n` : ""}MENU IMAGES IN UPDATE MODE: Follow MENU IMAGES below, with one difference: show the menu when the client asks to add or swap a drink, and any time they ask to see the menu. Inside 6 days show it only when the client asks to see it. Current dive_menu_requested: ${eventData.dive_menu_requested === true ? "true" : "false"}.
 
 The sections below come from the intake planning flow. Use them only for the package rules, drink sourcing, recipes, add ons, and deadlines. In update mode, ignore any instruction in them to walk through steps or phases, to ask cocktail or mocktail drink by drink, to offer the add ons list unprompted, to quote additional drink pricing, to hand off extending hours (hours are a PRICE CHANGE here), or to call submit_event_data.
 

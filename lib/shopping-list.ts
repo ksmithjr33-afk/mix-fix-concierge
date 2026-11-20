@@ -32,6 +32,7 @@ interface EventData {
   venue_type?: string;
   client_providing_beer_wine?: boolean;
   dive_set_menu?: boolean; // Dive Bar: the five set menu drinks were recorded as signature_drinks
+  dive_menu_card?: boolean; // Dive Bar: the client's menu card classics are the signature_drinks
 }
 
 /**
@@ -265,11 +266,13 @@ function isDiveBaselineMixer(key: string): boolean {
 
 /**
  * True when a Dive Bar booking is stocked from the well: it has the set menu,
- * or no alcoholic signature drinks (booked before the set menu). Dive Bar
- * events that picked their own drinks keep the recipe based list.
+ * a menu card (its classics are already covered by the well, and a card must
+ * never add alcohol), or no alcoholic signature drinks (booked before the set
+ * menu). Dive Bar events that picked their own drinks before the set menu keep
+ * the recipe based list.
  */
 function usesDiveWell(eventData: EventData, drinks: SignatureDrink[]): boolean {
-  return isDiveBar(eventData.package) && (eventData.dive_set_menu === true || drinks.filter(d => !d.is_mocktail).length === 0);
+  return isDiveBar(eventData.package) && (eventData.dive_set_menu === true || eventData.dive_menu_card === true || drinks.filter(d => !d.is_mocktail).length === 0);
 }
 
 /** Rims for the Margarita (salt) and the Lemon Drop (sugar). */

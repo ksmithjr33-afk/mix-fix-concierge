@@ -26,7 +26,7 @@ import {
 import { UPDATE_OPENER } from "@/lib/update-mode-shared";
 import { deliverEventUpdates } from "@/lib/update-delivery";
 import { allowedMenus, createMenuFilter, type MenuKey } from "@/lib/menu-markers";
-import { applyDiveSetMenu, DIVE_MENU_SET_MESSAGE } from "@/lib/dive-menu";
+import { applyDiveSetMenu, DIVE_CARD_MAX, DIVE_MENU_SET_MESSAGE } from "@/lib/dive-menu";
 import { DEFAULT_DEPOSIT, impliedLine, money, paymentPhrase, toCount, type PriceChange } from "@/lib/price-change";
 import { CHANGE_REQUEST_MESSAGE } from "@/lib/client-list";
 import { announceRequest } from "@/lib/change-requests";
@@ -272,6 +272,7 @@ function quoteToolResult(quote: QuoteResult | null, pending: PricePendingInfo | 
   if (!quote) return "TOOL RESULT: This event could not be priced right now. Tell the client our team will confirm the price, and do not quote anything.";
   const parts: string[] = [];
   if (quote.diveMenuSet) parts.push(`DRINK MENU SET, Dive Bar has a set menu and drinks cannot be changed. Say exactly: "${DIVE_MENU_SET_MESSAGE}"`);
+  parts.push(...diveCardLines(quote));
   if (quote.listHold) {
     parts.push(`REQUEST FOR APPROVAL, within 6 days of the event. This change would change the client's shopping list, so after they say yes it is sent to our team for approval instead of saving. Tell them that when you ask, and after update_event_data say exactly: "${CHANGE_REQUEST_MESSAGE}"`);
   }
@@ -288,6 +289,18 @@ function quoteToolResult(quote: QuoteResult | null, pending: PricePendingInfo | 
     );
   }
   return `TOOL RESULT:\n\n${parts.join("\n\n")}`;
+}
+
+/** Dive Bar menu card picks the server dropped, for the bot to say so. */
+function diveCardLines(r: { diveCardRefused: string[]; diveCardOverMax: string[] }): string[] {
+  const out: string[] = [];
+  if (r.diveCardRefused.length > 0) {
+    out.push(`NOT ON THE MENU CARD: ${r.diveCardRefused.join(", ")}. A Dive Bar menu card holds only the classics Dive Bar allows, never a specialty cocktail, a mocktail, a custom drink, or a drink Dive Bar leaves out. Tell the client that is a Full Bar feature, and offer to switch the package to Full Bar (a package change is a PRICE CHANGE: quote it with quote_price_change first). Never call it a signature or specialty cocktail.`);
+  }
+  if (r.diveCardOverMax.length > 0) {
+    out.push(`NOT ON THE MENU CARD: ${r.diveCardOverMax.join(", ")}. A Dive Bar menu card holds at most ${DIVE_CARD_MAX} classics. Tell the client the card is full at ${DIVE_CARD_MAX} and they can swap one instead.`);
+  }
+  return out;
 }
 
 /**
@@ -311,13 +324,15 @@ function updateToolResult(result: ApplyResult | null): string {
   if (result.diveMenuSet) {
     parts.push(`DRINK CHANGE NOT SAVED, Dive Bar has a set menu. Say exactly: "${DIVE_MENU_SET_MESSAGE}"`);
   }
+  parts.push(...diveCardLines(result));
   if (result.requestFailed) {
     parts.push("NOTHING SAVED AND NOT SENT: this change is within 6 days of the event and could not be sent to our team for approval right now. Tell the client honestly it did not go through and our team will follow up. Do not say it was saved or sent.");
   }
   if (result.held) {
     parts.push(`NOT SAVED, SENT TO OUR TEAM FOR APPROVAL: within 6 days of the event this change is a request that our team approves or declines first. It is NOT confirmed. Never say it was saved, updated, changed, or done. Say exactly: "${CHANGE_REQUEST_MESSAGE}" Anything listed below as SAVED AND APPLIED NOW was saved separately and can be confirmed.`);
   }
-  if (result.rows.length === 0 && !result.requestFailed && !result.diveMenuSet && !result.held) {
+  const cardDropped = result.diveCardRefused.length > 0 || result.diveCardOverMax.length > 0;
+  if (result.rows.length === 0 && !result.requestFailed && !result.diveMenuSet && !result.held && !cardDropped) {
     if (result.pricePending) {
       return `TOOL RESULT: ALREADY SAVED, PRICE PENDING: this is already saved and waiting for our management team to set the new total. Acknowledge it in a few words, do not mention the price again, do not ask them to confirm it, and ask if there is anything else they would like to change.`;
     }
@@ -592,6 +607,10 @@ async function updateModeResponse(session: SessionRow, messages: ChatMessage[], 
               text = "Sorry, that change did not go through. Our team will follow up with you.";
             } else if (lastApply.held && lastApply.rows.length === 0) {
               text = `${CHANGE_REQUEST_MESSAGE} Anything else you would like to change?`;
+            } else if (lastApply.rows.length === 0 && (lastApply.diveCardRefused.length > 0 || lastApply.diveCardOverMax.length > 0)) {
+              text = lastApply.diveCardRefused.length > 0
+                ? "That is a Full Bar feature. Your menu card can have classics only. Anything else you would like to change?"
+                : `Your menu card can hold up to ${DIVE_CARD_MAX} classics. Anything else you would like to change?`;
             } else if (lastApply.rows.length === 0) {
               text = lastApply.diveMenuSet ? DIVE_MENU_SET_MESSAGE : "That is already on file. Anything else you would like to change?";
             } else {
@@ -885,7 +904,7 @@ export async function POST(request: Request) {
               delete input.day_of_contact_phone;
             }
             const filled = { ...input, ...bookingFill(input, factsAsSession(facts)) };
-            // Dive Bar: record the five set menu drinks as the event's menu.
+            // Dive Bar: record the five set menu drinks, or the classics on the menu card the client asked for.
             // The barback asked for (Full Bar weddings) is applied after the save as a priced update.
             const split = splitBarback(approvalOnly ? null : session, applyDiveSetMenu(filled) as EventData);
             const eventData = split.data;

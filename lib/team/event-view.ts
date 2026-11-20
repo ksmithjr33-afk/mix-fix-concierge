@@ -6,7 +6,7 @@
 
 import { recipeKeys } from "@/lib/order-sheet-shared";
 import { DRINK_MENU_RULES } from "@/lib/system-prompt";
-import { DIVE_NOT_AVAILABLE, DIVE_SET_MENU, diveSetMenuDrinks, usesDiveSetMenu } from "@/lib/dive-menu";
+import { DIVE_NOT_AVAILABLE, DIVE_SET_MENU, diveSetMenuDrinks, hasDiveMenuCard, usesDiveSetMenu } from "@/lib/dive-menu";
 import { staffingFor } from "@/lib/pricing";
 import { isBottleRequest } from "@/lib/shopping-list";
 import { recapLines, type FieldChange } from "@/lib/event-diff";
@@ -98,6 +98,7 @@ export interface StaffEventView {
   drinks: StaffDrink[];
   classics: ClassicGroup[] | null; // Dive Bar: the other classics guests can order ("Also available")
   setMenu: boolean; // Dive Bar: the drinks are the package's set menu
+  menuCard: boolean; // Dive Bar: the drinks are the classics on the client's menu card
   lastUpdated: string;
   timeZone: string; // the event's market time zone, for times shown on the page
   market: string; // "Austin", or "No market"
@@ -160,7 +161,9 @@ function toCount(v: unknown): number | null {
 const DIVE_SKIP = new Set<string>([...DIVE_SET_MENU, ...DIVE_NOT_AVAILABLE]);
 
 /** The CLASSICS section of the bot's menu, grouped by spirit: the same recipes the bot offers. */
-export function classicsMenu(opts: { dive?: boolean } = {}): ClassicGroup[] {
+/** With skip (a menu card's classics), the set menu five are back on the list and the card's picks come off. */
+export function classicsMenu(opts: { dive?: boolean; skip?: string[] } = {}): ClassicGroup[] {
+  const skip = new Set<string>(opts.dive && !opts.skip ? DIVE_SKIP : [...(opts.dive ? DIVE_NOT_AVAILABLE : []), ...(opts.skip ?? [])]);
   const lines = DRINK_MENU_RULES.split("\n");
   const from = lines.findIndex((l) => l.startsWith("=== CLASSICS"));
   const groups: ClassicGroup[] = [];
@@ -174,7 +177,7 @@ export function classicsMenu(opts: { dive?: boolean } = {}): ClassicGroup[] {
       }
       continue;
     }
-    if (opts.dive && DIVE_SKIP.has(m[1].trim())) continue;
+    if (skip.has(m[1].trim())) continue;
     groups.at(-1)?.drinks.push({ name: m[1].trim(), recipe: m[2].trim() });
   }
   return groups.filter((g) => g.drinks.length > 0);
@@ -197,7 +200,7 @@ const STAFF_CHANGE_FIELDS = new Set([
   "venue_type", "indoor_outdoor", "bar_on_site", "bar_details", "bar_floor_access", "parking_info", "guest_count",
   "package", "bartenders", "theme", "event_colors", "allergies", "special_requests", "day_of_contact_name", "beer",
   "wine", "client_providing_beer_wine", "beer_and_wine_details", "dual_bar_setup", "extra_bottles", "dive_menu_requested", "dive_set_menu",
-  "drinking_pace",
+  "dive_menu_card", "drinking_pace",
 ]);
 
 /** True for fields staff see, so client updates to anything else do not text them. */
@@ -237,6 +240,8 @@ export function buildStaffEventView(
   // Dive Bar with the set menu, or booked before it with no drinks: the five are the menu.
   const setMenu = usesDiveSetMenu({ ...ed, package: pkg });
   const drinks = setMenu && drinksOf(ed).filter((d) => d.kind !== "Mocktail").length === 0 ? drinksOf({ signature_drinks: diveSetMenuDrinks() }) : drinksOf(ed);
+  // Dive Bar with a menu card: the card's classics are the menu, and guests can still order the other classics.
+  const menuCard = hasDiveMenuCard({ ...ed, package: pkg });
   const address = scrub(ed.event_address);
   const showPhone = showDayOfPhone(ed, now);
   const dayPhone = text(ed.day_of_contact_phone);
@@ -274,8 +279,9 @@ export function buildStaffEventView(
     specialRequests: scrub(ed.special_requests),
     bottleNote: ed.extra_bottles && !isBottleRequest(ed.extra_bottles) && !/^(no|none|n\/a)\.?$/i.test(text(ed.extra_bottles)) ? scrub(ed.extra_bottles) : "",
     drinks,
-    classics: setMenu ? classicsMenu({ dive: true }) : null,
+    classics: setMenu ? classicsMenu({ dive: true }) : menuCard ? classicsMenu({ dive: true, skip: drinks.map((d) => d.name) }) : null,
     setMenu,
+    menuCard,
     lastUpdated: chicagoStamp(session.updated_at ?? session.submitted_at, s.tz),
     timeZone: s.tz,
     market: marketLabel(sessionMarket(session)),

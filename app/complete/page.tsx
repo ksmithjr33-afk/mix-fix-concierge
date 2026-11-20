@@ -38,6 +38,7 @@ interface EventData {
   day_of_contact_phone?: string;
   package: string;
   signature_drinks?: SignatureDrink[] | null;
+  dive_menu_card?: boolean;
   extra_bottles?: string;
   beer?: boolean;
   wine?: boolean;
@@ -329,7 +330,11 @@ export default function CompletePage() {
         {Array.isArray(data.signature_drinks) && data.signature_drinks.length > 0 && (
           <section className="space-y-4">
             <h3 className="font-heading text-lg font-bold text-[#2C2420]">
-              Your Signature Drinks
+              {!String(data.package ?? "").toLowerCase().includes("dive")
+                ? "Your Signature Drinks"
+                : data.dive_menu_card === true
+                  ? "Your Menu Card Classics"
+                  : "Your Dive Bar Set Menu"}
             </h3>
             {data.signature_drinks.map((drink, i) => (
               <div

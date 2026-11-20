@@ -3,7 +3,7 @@
 // package does not include, and the setup differences. One source for the
 // Package card (manager and bartender Details) and the Packages section of the
 // Training page. Pure, no database. No prices here: the bartender view never
-// shows any.
+// shows any, except the Dive Bar menu card line the owner asked for.
 //
 // The wording comes from the owner's package text (2026-11). The client facing
 // concierge (lib/system-prompt.ts) was brought in line on the points that
@@ -125,7 +125,7 @@ export const PACKAGE_GUIDES: PackageGuide[] = [
       "Cups, napkins and straws",
       "Ice",
       "One cooler per bartender",
-      "A printed menu, only if the client asks",
+      "A printed menu card, only if the client asks",
     ],
     clientProvides: ["The alcohol", "Beer and wine, if they want them served"],
     notIncluded: ["Specialty cocktails", "Mocktails", "A menu tasting", "Espresso martinis (never a Dive classic)"],
@@ -139,7 +139,8 @@ export const PACKAGE_GUIDES: PackageGuide[] = [
       { ask: "A specialty or signature cocktail", say: "Tonight is our Dive Bar menu: the classics, done right. What are you in the mood for?" },
       { ask: "A mocktail", say: "We do not have mocktails on tonight's menu. I can get you a soda, a juice or a bottled water." },
     ],
-    setup: { bar: "Our bar", menu: "Printed menu only if the client asked for one", barback: "No barback" },
+    // The one price in the guide, by the owner's wording (2026-11-20). Kept off the short client wording.
+    setup: { bar: "Our bar", menu: "Menu card on request only: three classics the client picks, each additional $50.", barback: "No barback" },
     short: {
       line: "The dive bar experience.",
       bullets: [

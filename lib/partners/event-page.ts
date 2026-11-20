@@ -104,6 +104,7 @@ export interface PartnerEventView {
   guestCount: string;
   drinks: StaffEventView["drinks"];
   setMenu: boolean;
+  menuCard: boolean; // Dive Bar: the drinks are the classics on the menu card
   menu: { typeLabel: string; isPdf: boolean } | null;
   shoppingList: ReturnType<typeof clientList> | null;
   photos: { url: string; caption: string }[];
@@ -213,6 +214,7 @@ export async function partnerEventView(a: EventAccess, now: Date = new Date()): 
     guestCount: v.guestCount,
     drinks: v.drinks,
     setMenu: v.setMenu,
+    menuCard: v.menuCard,
     menu: menuRow ? { typeLabel: typeLabel(menuRow.file_type), isPdf: menuRow.file_type === "application/pdf" } : null,
     shoppingList: submitted ? clientList(s.event_data ?? {}) : null,
     photos,

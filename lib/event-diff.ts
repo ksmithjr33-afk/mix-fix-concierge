@@ -4,7 +4,7 @@
 // lib/event-updates.ts for that.
 
 import { parseEventDate } from "@/lib/event-date";
-import { diveSetMenuDrinks, isDiveBarPackage } from "@/lib/dive-menu";
+import { cardPicks, DIVE_CARD_INCLUDED, diveSetMenuDrinks, hasDiveMenuCard, isDiveBarPackage } from "@/lib/dive-menu";
 
 export type EventData = Record<string, unknown>;
 type Drink = Record<string, unknown>;
@@ -45,6 +45,7 @@ export const UPDATABLE_FIELDS = [
   "menu_colors",
   "event_name",
   "dive_menu_requested",
+  "dive_menu_card", // Dive Bar: a printed menu card with classics the client picks
   "signature_drinks",
   // Priced or schedule fields not covered above
   "event_date",
@@ -91,7 +92,7 @@ export function isPricedField(field: string): boolean {
 }
 
 /** Fields that make up the drink menu. Inside the six day cutoff a change to them waits for an admin. */
-export const DRINK_FIELDS = ["signature_drinks", "dive_menu_requested"] as const;
+export const DRINK_FIELDS = ["signature_drinks", "dive_menu_requested", "dive_menu_card", "dive_set_menu"] as const;
 
 export function isDrinkField(field: string): boolean {
   return field.startsWith("signature_drinks") || (DRINK_FIELDS as readonly string[]).includes(field);
@@ -129,6 +130,7 @@ const FIELD_LABELS: Record<string, string> = {
   event_name: "Event name",
   dive_menu_requested: "Dive Bar menu requested",
   dive_set_menu: "Dive Bar set menu",
+  dive_menu_card: "Menu card",
   manager_request: "Manager request",
   event_date: "Event date",
   hours_booked: "Hours booked",
@@ -502,9 +504,49 @@ export interface UpdatePlan {
   // Drink menu changes asked for inside the six day cutoff. Not applied here:
   // the caller saves them as a request for an admin to approve or decline.
   cutoffChanges: FieldChange[];
-  // Drink menu changes on Dive Bar, which has a set menu. Refused, and the
-  // client is told the menu is set for the package. Not a cutoff rule.
+  // Drink menu changes on Dive Bar with no menu card, which has a set menu.
+  // Refused, and the client is told the menu is set for the package. Not a cutoff rule.
   diveMenuSet: boolean;
+  // Dive Bar menu card picks that were dropped: not a classic Dive Bar allows
+  // (a specialty cocktail, mocktail, custom or excluded drink), or past the sixth.
+  diveCardRefused: string[];
+  diveCardOverMax: string[];
+}
+
+interface DiveCardPlan {
+  drinks: Drink[] | null; // the event's drinks after this update, null for no drink change
+  card: boolean; // dive_menu_card after this update
+  extras: Drink[]; // classics past the allowed count: a manager request, like extra drinks on Full Bar
+  refused: string[];
+  overMax: string[];
+  refusedSetMenu: boolean; // a drink change with no menu card: the set menu stays
+}
+
+/**
+ * A Dive Bar update's drinks. With no card, drink changes are refused (the set
+ * menu). Asking for a card (dive_menu_card true with the picks) or changing the
+ * picks on a card keeps the classics Dive Bar allows, three included, and any
+ * past that (up to six) become a manager request exactly like extra signature
+ * drinks on Full Bar. A card already holding extras keeps them. Turning the card
+ * off brings the set menu back.
+ */
+function planDiveCard(current: EventData, updates: EventData): DiveCardPlan {
+  const had = hasDiveMenuCard(current);
+  const asked = "dive_menu_card" in updates ? updates.dive_menu_card === true : had;
+  const sent = Array.isArray(updates.signature_drinks) ? (updates.signature_drinks as Drink[]) : null;
+  const touched = sent !== null || "dive_menu_card" in updates || "dive_menu_requested" in updates;
+  const none: DiveCardPlan = { drinks: null, card: had, extras: [], refused: [], overMax: [], refusedSetMenu: false };
+  if (!asked) {
+    if (had) return { ...none, drinks: diveSetMenuDrinks() as unknown as Drink[], card: false };
+    return { ...none, refusedSetMenu: touched && (sent !== null || updates.dive_menu_requested === true) };
+  }
+  if (!sent) return none; // a card with no picks yet: nothing to save
+  const picks = cardPicks(sent);
+  if (picks.drinks.length === 0) return { ...none, refused: picks.refused, overMax: picks.overMax };
+  const currentCount = had && Array.isArray(current.signature_drinks) ? current.signature_drinks.length : 0;
+  const allowed = Math.max(DIVE_CARD_INCLUDED, currentCount);
+  const all = picks.drinks as unknown as Drink[];
+  return { drinks: all.slice(0, allowed), card: true, extras: all.slice(allowed), refused: picks.refused, overMax: picks.overMax, refusedSetMenu: false };
 }
 
 function diffDrinks(oldDrinks: Drink[], newDrinks: Drink[]): FieldChange[] {
@@ -550,8 +592,26 @@ export function planUpdate(
     requests.push({ field: "manager_request", old: null, new: options.managerRequest.trim() });
   }
 
-  // Drinks beyond the package count are a manager request.
   const currentDrinks = (Array.isArray(current.signature_drinks) ? current.signature_drinks : []) as Drink[];
+  const nextPkg = "package" in updates ? updates.package : current.package;
+  const staysDive = isDiveBarPackage(current.package) && isDiveBarPackage(nextPkg);
+
+  // Dive Bar: the set menu, or a menu card of classics the client picks.
+  const diveCard = staysDive ? planDiveCard(current, updates) : null;
+  if (diveCard) {
+    delete updates.signature_drinks;
+    delete updates.dive_menu_card;
+    delete updates.dive_menu_requested;
+    if (diveCard.extras.length > 0) {
+      requests.push({
+        field: "manager_request",
+        old: null,
+        new: `Add drinks beyond the package count: ${diveCard.extras.map(formatDrink).join("; ")} (Dive Bar menu card)`,
+      });
+    }
+  }
+
+  // Drinks beyond the package count are a manager request.
   let newDrinks: Drink[] | null = Array.isArray(updates.signature_drinks)
     ? (updates.signature_drinks as Drink[])
     : null;
@@ -574,21 +634,19 @@ export function planUpdate(
     if (!sameValue(current[key], value)) changes.push({ field: key, old: current[key] ?? null, new: value });
   }
   if (newDrinks) changes.push(...diffDrinks(currentDrinks, newDrinks));
+  if (diveCard?.drinks) {
+    changes.push(...diffDrinks(currentDrinks, diveCard.drinks));
+    if (diveCard.card !== (current.dive_menu_card === true)) changes.push({ field: "dive_menu_card", old: current.dive_menu_card ?? null, new: diveCard.card });
+    if (!diveCard.card !== (current.dive_set_menu === true)) changes.push({ field: "dive_set_menu", old: current.dive_set_menu ?? null, new: !diveCard.card });
+  }
 
   let kept = changes;
   let keptRequests = requests;
   let cutoffChanges: FieldChange[] = [];
 
-  // Dive Bar has a set menu: drink changes are refused while the event stays on Dive Bar.
-  let diveMenuSet = false;
-  const nextPkg = "package" in updates ? updates.package : current.package;
-  const staysDive = isDiveBarPackage(current.package) && isDiveBarPackage(nextPkg);
-  if (staysDive) {
-    const before = kept.length + keptRequests.length;
-    kept = kept.filter((c) => !isDrinkField(c.field));
-    keptRequests = keptRequests.filter((c) => !String(c.new).startsWith("Add drinks beyond"));
-    diveMenuSet = kept.length + keptRequests.length < before;
-  } else if (deadlines.withinSixDays) {
+  // Dive Bar with no menu card has a set menu: other drink changes are refused.
+  const diveMenuSet = diveCard?.refusedSetMenu === true;
+  if (deadlines.withinSixDays) {
     // Inside the cutoff a drink menu change waits for an admin instead of applying.
     cutoffChanges = kept.filter((c) => isDrinkField(c.field));
     kept = kept.filter((c) => !isDrinkField(c.field));
@@ -605,6 +663,10 @@ export function planUpdate(
     // Leaving Dive Bar: the five classics stay as the drinks, no longer a set menu.
     kept.push({ field: "dive_set_menu", old: true, new: false });
   }
+  if (isDiveBarPackage(current.package) && !isDiveBarPackage(nextPkg) && current.dive_menu_card === true && kept.some((c) => c.field === "package")) {
+    // Leaving Dive Bar with a menu card: its classics stay as the drinks.
+    kept.push({ field: "dive_menu_card", old: true, new: false });
+  }
 
   return {
     next: applyChanges(current, kept),
@@ -612,6 +674,8 @@ export function planUpdate(
     requests: row(keptRequests, false, null),
     cutoffChanges,
     diveMenuSet,
+    diveCardRefused: diveCard?.refused ?? [],
+    diveCardOverMax: diveCard?.overMax ?? [],
   };
 }
 

@@ -59,6 +59,12 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
+/** Dive Bar never calls its drinks signature drinks: the menu card's classics, or the set menu. */
+function drinksTitle(data: EventData): string {
+  if (!String(data.package ?? "").toLowerCase().includes("dive")) return "Signature drinks";
+  return data.dive_menu_card === true ? "Your menu card classics" : "Dive Bar set menu";
+}
+
 export default function EventSummary({ data, cups = false }: { data: EventData; cups?: boolean }) {
   // What the package includes, in the same short wording every page and the concierge use.
   const short = packageShortFor(data.package, {
@@ -121,7 +127,7 @@ export default function EventSummary({ data, cups = false }: { data: EventData; 
 
       {drinks.length > 0 && (
         <section className="bg-[#F5F0EB] rounded-2xl border border-[#DDD5CC] px-4 py-3 sm:px-5 sm:py-4">
-          <h3 className="font-heading text-base font-bold text-[#2C2420] mb-2">Signature drinks</h3>
+          <h3 className="font-heading text-base font-bold text-[#2C2420] mb-2">{drinksTitle(data)}</h3>
           <ul className="space-y-3">
             {drinks.map((drink, i) => (
               <li key={i} className="border-b border-[#DDD5CC] last:border-0 pb-3 last:pb-0">

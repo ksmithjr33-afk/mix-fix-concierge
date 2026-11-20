@@ -37,6 +37,7 @@ import { packageKey, staffingFor } from "@/lib/pricing";
 import { bookedGuestCount } from "@/lib/booked-facts";
 import { autoSendOn, holdChange, listWouldChange } from "@/lib/client-list-db";
 import { bookingFill } from "@/lib/booking-webhook";
+import { syncDiveMenuPickup } from "@/lib/dive-menu-pickup-db";
 
 export const SESSION_COLUMNS =
   "id, name, email, event_date, package_type, guest_count, event_name, hours_booked, status, event_data, version, submitted_at, updated_at";
@@ -159,6 +160,8 @@ export async function recordSubmission(sessionId: string, eventData: EventData):
     return false;
   }
   if (!data || data.length === 0) return false;
+  // Dive Bar: no printed menu unless the client asked for a menu card.
+  await syncDiveMenuPickup(sessionId, clean);
 
   const { error: insertError } = await supabase.from("event_updates").insert({
     session_id: sessionId,
@@ -218,6 +221,8 @@ export interface ApplyResult {
   // request (the database refused it). Nothing was saved.
   requestFailed: boolean;
   diveMenuSet: boolean; // drink changes on Dive Bar, which has a set menu, dropped
+  diveCardRefused: string[]; // Dive Bar menu card picks that are not a classic Dive Bar allows, dropped
+  diveCardOverMax: string[]; // Dive Bar menu card classics past the sixth, dropped
   withinSixDays: boolean;
   paymentPreference: string | null;
   // Inside six days a client drink change, and (auto send on) a client change
@@ -285,6 +290,8 @@ interface PreparedUpdate {
   bookedComputed: boolean;
   cutoffChanges: FieldChange[]; // drink changes inside the cutoff, for a request
   diveMenuSet: boolean;
+  diveCardRefused: string[];
+  diveCardOverMax: string[];
 }
 
 /** Plan and price an update without saving anything. */
@@ -339,7 +346,7 @@ function prepareUpdate(
     }
   }
 
-  return { current, deadlines, applied, requests: plan.requests, next, price, booked, bookedComputed, cutoffChanges: plan.cutoffChanges, diveMenuSet: plan.diveMenuSet };
+  return { current, deadlines, applied, requests: plan.requests, next, price, booked, bookedComputed, cutoffChanges: plan.cutoffChanges, diveMenuSet: plan.diveMenuSet, diveCardRefused: plan.diveCardRefused, diveCardOverMax: plan.diveCardOverMax };
 }
 
 /**
@@ -381,6 +388,8 @@ export interface QuoteResult {
   price: PriceChange | null; // null when nothing priced changes
   listHold: boolean; // saving it will send it to an admin as a request: it changes the shopping list inside six days
   diveMenuSet: boolean;
+  diveCardRefused: string[];
+  diveCardOverMax: string[];
   withinSixDays: boolean;
   changes: FieldChange[]; // what would apply, implied changes included
 }
@@ -401,6 +410,8 @@ export async function quoteEventUpdate(
     price: prep.price,
     listHold,
     diveMenuSet: prep.diveMenuSet,
+    diveCardRefused: prep.diveCardRefused,
+    diveCardOverMax: prep.diveCardOverMax,
     withinSixDays: prep.deadlines.withinSixDays,
     changes: prep.applied?.changes ?? [],
   };
@@ -465,6 +476,8 @@ export async function applyEventUpdate(
       needsQuote: null,
       requestFailed: false,
       diveMenuSet: prep.diveMenuSet,
+      diveCardRefused: prep.diveCardRefused,
+      diveCardOverMax: prep.diveCardOverMax,
       withinSixDays: prep.deadlines.withinSixDays,
       paymentPreference: (current.payment_preference as string | undefined) || null,
       held: null as ApplyResult["held"],
@@ -561,6 +574,11 @@ export async function applyEventUpdate(
       const { data, error } = await supabase.from("event_updates").insert(inserts).select("*");
       if (error) throw new Error(`event_updates insert failed: ${error.message}`);
       rows = (data as EventUpdateRow[]) ?? [];
+    }
+
+    // Dive Bar: a menu card added or removed (or a switch to or from Dive Bar) moves "No printed menu".
+    if (applied?.changes.some((c) => c.field === "package" || c.field === "dive_menu_card" || c.field === "dive_set_menu")) {
+      await syncDiveMenuPickup(sessionId, next, { previousPackage: current.package });
     }
 
     // The Full Bar wedding barback removed or added back: who and when, for the Team tab.

@@ -154,6 +154,7 @@ export default async function PartnerEventPage({ params }: { params: Promise<{ k
             </ul>
           )}
           {v.setMenu && <p className="text-sm text-[#6B5D52]">This package comes with a set menu.</p>}
+          {v.menuCard && <p className="text-sm text-[#6B5D52]">These classics are on the printed menu card.</p>}
           {v.menu && (
             <div className="flex flex-wrap gap-3 pt-1">
               <a href={`/api/partners/menu-file?key=${encodeURIComponent(key)}`} target="_blank" rel="noopener noreferrer" className="rounded-lg bg-[#2C2420] text-white px-4 py-2 text-sm font-medium">

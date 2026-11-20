@@ -34,7 +34,9 @@ check("An unknown package has no guide", pk.packageGuide("Mystery Bar") === null
 check("Every package name the Add event form offers has a guide", (await import("../lib/manual-event.ts")).MANUAL_PACKAGES.every((p: string) => pk.packageGuide(p) !== null));
 const legacy = pk.PACKAGE_GUIDES.filter((g) => g.legacy).map((g) => g.name);
 check("Essentials, Tailored and Bartender Only are the legacy packages", legacy.join() === "Essentials Bar,Tailored Bar,Bartender Only");
-check("The guide has no prices anywhere", !/\$\s?\d/.test(JSON.stringify(pk.PACKAGE_GUIDES)) && !/\$\s?\d/.test(JSON.stringify(pk.ALL_PACKAGES)));
+// One price by the owner's wording: the Dive Bar menu card line. Nothing else.
+const DIVE_CARD_LINE = "Menu card on request only: three classics the client picks, each additional $50.";
+check("The guide has no prices anywhere but the Dive Bar menu card line", !/\$\s?\d/.test(JSON.stringify(pk.PACKAGE_GUIDES).replace(DIVE_CARD_LINE, "")) && !/\$\s?\d/.test(JSON.stringify(pk.ALL_PACKAGES)) && pk.packageGuide("Dive Bar")?.setup.menu === DIVE_CARD_LINE);
 const g = (k: string) => pk.guideByKey(k)!;
 check("Beer and Wine: beer and wine only, no cocktails, no mixers; client brings beer, wine, cups and napkins", g("beer-wine").notIncluded.includes("Cocktails") && g("beer-wine").notIncluded.includes("Mixers") && ["The beer", "The wine", "Cups", "Napkins"].every((x) => g("beer-wine").clientProvides.includes(x)) && g("beer-wine").weBring.includes("One cooler per bartender"));
 check("Dive Bar: the five, classics on request, no espresso martini, no mocktails or tasting", ["Margarita", "Old Fashioned", "Cosmopolitan", "Lemon Drop", "Moscow Mule"].every((d) => g("dive").summary.includes(d)) && g("dive").notIncluded.some((x) => /Espresso martinis/.test(x)) && g("dive").notIncluded.includes("Mocktails") && g("dive").notIncluded.includes("A menu tasting"));

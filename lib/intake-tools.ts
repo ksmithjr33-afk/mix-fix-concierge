@@ -83,6 +83,11 @@ export const submitEventDataTool: Anthropic.Tool = {
       menu_reference_photos: { type: ["boolean", "null"] },
       dual_bar_setup: { type: "boolean" },
       dive_menu_requested: { type: "boolean", default: false },
+      dive_menu_card: {
+        type: "boolean",
+        description:
+          "Dive Bar only. true only when the client asked for a menu card and picked classics for it (send them in signature_drinks). Otherwise false or left out.",
+      },
       payment_preference: {
         type: "string",
         description: 'How the client wants the remaining balance handled, from the PAYMENT STEP. One of: "Auto charge now", "Auto charge on <date>", "Auto charge on due date", "Payment link", "Payment plan: <split>". Empty if they did not answer.',

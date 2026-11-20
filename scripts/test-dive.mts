@@ -35,7 +35,7 @@ check("The excluded drinks get the same flat answer", autoFill.includes('say "Th
 check("Drink sourcing names the five and the classics", SYSTEM_PROMPT.includes("Dive Bar: SET MENU, NO DRINK SELECTION.") && SYSTEM_PROMPT.includes("Margarita, Old Fashioned, Cosmopolitan, Lemon Drop, and Moscow Mule"));
 check("No menu pictures on Dive Bar", allowedMenus("Dive Bar").length === 0 && allowedMenus("Dive Bar", true).length === 0 && SYSTEM_PROMPT.includes("Dive Bar: never, it has its set menu."));
 check("Other packages keep their menu pictures", allowedMenus("Full Bar").join() === "specialty,classics" && allowedMenus("Essentials Bar").join() === "specialty");
-check("The submit tool tells the model to leave Dive Bar drinks empty", SYSTEM_PROMPT.includes("an empty array for Beer and Wine Package and Dive Bar, since the system records the Dive Bar set menu itself"));
+check("The submit tool tells the model to leave Dive Bar drinks empty", SYSTEM_PROMPT.includes("an empty array for Beer and Wine Package and for Dive Bar with no menu card, since the system records the Dive Bar set menu itself"));
 
 // ----- The recorded menu -----
 const classics = dive.classicRecipes();
@@ -159,7 +159,8 @@ check("The chat route answers with the menu set message", (chat.match(/DIVE_MENU
 console.log = () => {};
 const fields = buildEventFields(setEvent).fields;
 console.log = mute;
-check("The designer brief has the five for the printed menu", !!fields.graphic_designer_brief && FIVE.split(",").every((n) => fields.graphic_designer_brief!.includes(n)));
+// Dive Bar has no printed menu by default (2026-11-20): only a menu card goes to the designer (test-dive-card.mts).
+check("No designer brief for the set menu: there is no printed menu", !fields.graphic_designer_brief && fields.menu_colors === null);
 check("The GHL drink summary lists the five", FIVE.split(",").every((n) => (fields.signature_drink_summary ?? "").includes(n)));
 check("GHL is told this is the set menu", fields.dive_set_menu === true);
 check("The GHL shopping note covers the well", !!fields.shopping_list && /salt/i.test(fields.shopping_list) && /vodka/i.test(fields.shopping_list));
@@ -170,7 +171,7 @@ const alsoNames = (v.classics ?? []).flatMap((g) => g.drinks.map((d) => d.name))
 check("The bartender page shows the five as the set menu, with recipes", v.setMenu && v.drinks.map((d) => d.name).join() === FIVE && v.drinks[0].ingredients[0] === "2 oz tequila blanco");
 check("The bartender page lists the other classics as Also available", alsoNames.includes("Pina Colada") && !alsoNames.some((n) => FIVE.split(",").includes(n) || ELEVEN.includes(n)));
 const tabs = src("app/team/e/[id]/event-details.tsx"); // the Details block, shared by both views
-check("The page labels them Dive Bar set menu and Also available", tabs.includes('v.setMenu ? "Dive Bar set menu" : "Signature drinks"') && tabs.includes(">Also available</h3>"));
+check("The page labels them Dive Bar set menu and Also available", tabs.includes('v.setMenu ? "Dive Bar set menu" : v.menuCard ? "Dive Bar menu card" : "Signature drinks"') && tabs.includes(">Also available</h3>"));
 check("The CLASSICS section still has every recipe the five need", FIVE.split(",").every((n) => new RegExp(`^${n}: `, "m").test(DRINK_MENU_RULES)));
 
 done("dive bar");
