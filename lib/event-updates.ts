@@ -19,6 +19,7 @@ import {
   type PlannedRow,
 } from "@/lib/event-diff";
 import {
+  barbackOnIn,
   basisFromEvent,
   bookedAfter,
   buildPriceChange,
@@ -27,11 +28,13 @@ import {
   withImpliedChanges,
   toCount,
   withHoursBooked,
+  money,
   type BookedPrice,
   type PendingChange,
   type PriceChange,
 } from "@/lib/price-change";
 import { eventTimeZone } from "@/lib/team/markets";
+import { withLog } from "@/lib/team/staffing-fix";
 import { addPending, unpriced, unpricedReason, type PricePendingInfo } from "@/lib/price-pending";
 import { packageKey, staffingFor } from "@/lib/pricing";
 import { bookedGuestCount } from "@/lib/booked-facts";
@@ -586,7 +589,13 @@ export async function applyEventUpdate(
     if (applied?.changes.some((c) => c.field === "barback")) {
       const by = options.editor?.name || (source === "manager" ? "an admin" : "client");
       const extras = ((session as { package_extras?: unknown }).package_extras ?? {}) as Record<string, unknown>;
-      const { error: xErr } = await supabase.from("sessions").update({ package_extras: { ...extras, barback_by: by, barback_at: nowIso } }).eq("id", sessionId);
+      // A priced change ends "not part of this booking", and goes in the Team tab's staffing log.
+      const on = barbackOnIn(next);
+      const priceNote = price && typeof price.amount === "number" && price.amount !== 0 ? ` (${price.amount < 0 ? "credit" : "charge"} ${money(price.amount)})` : "";
+      const log = withLog(session, { at: nowIso, by, text: `${on ? "Barback added back" : "Barback removed"}${priceNote}` });
+      const rest = { ...extras };
+      delete rest.barback_not_booked;
+      const { error: xErr } = await supabase.from("sessions").update({ package_extras: { ...rest, barback_by: by, barback_at: nowIso, staffing_log: log } }).eq("id", sessionId);
       if (xErr) console.warn(`[barback] ${sessionId}: who changed the barback was not saved: ${xErr.message}`);
     }
 

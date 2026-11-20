@@ -65,11 +65,12 @@ function drinksTitle(data: EventData): string {
   return data.dive_menu_card === true ? "Your menu card classics" : "Dive Bar set menu";
 }
 
-export default function EventSummary({ data, cups = false }: { data: EventData; cups?: boolean }) {
+export default function EventSummary({ data, cups = false, noBarback = false }: { data: EventData; cups?: boolean; noBarback?: boolean }) {
   // What the package includes, in the same short wording every page and the concierge use.
   const short = packageShortFor(data.package, {
     wedding: String(data.event_type ?? "").toLowerCase().includes("wedding"),
-    barback: String(data.barback ?? "").trim().toLowerCase() === "removed" ? "removed" : "on",
+    // noBarback: a barback was never part of this booking, so the line is left out (not "removed").
+    barback: String(data.barback ?? "").trim().toLowerCase() === "removed" ? (noBarback ? "none" : "removed") : "on",
     cups,
   });
   const drinks = (Array.isArray(data.signature_drinks) ? data.signature_drinks : []) as Drink[];

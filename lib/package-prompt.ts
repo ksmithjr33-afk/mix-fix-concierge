@@ -81,6 +81,11 @@ export function bookingPackageSection(
         `If the client asks to remove the barback: ${recommend} If they still want it removed, ${quote} If they keep it, send nothing about the barback.`,
         "Removing it is a credit toward the remaining balance, and adding it back later costs the same amount."
       );
+    } else if (b.notBooked) {
+      lines.push(
+        "BARBACK: a barback is not part of this booking. Never say a barback is included, booked, or removed. Do not bring it up yourself.",
+        `If the client asks to add a barback: ${quote}`
+      );
     } else {
       lines.push(
         "BARBACK: the barback was removed from this booking. Never say a barback is included or booked.",

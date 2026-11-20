@@ -39,8 +39,10 @@ export default function UpdateMode({
   menu = null,
   extra = null,
   cups = false,
+  noBarback = false,
 }: {
   cups?: boolean; // custom cups promised on an older Full Bar booking (sessions.package_extras)
+  noBarback?: boolean; // a barback was never part of this booking (sessions.package_extras.barback_not_booked)
   extra?: React.ReactNode; // the planners card, on client held events
   menu?: { type: string; typeLabel: string; viewHref: string; downloadHref: string } | null; // "Your menu": the approved menu, once uploaded
   sessionId: string;
@@ -264,7 +266,7 @@ export default function UpdateMode({
               A change you asked for is waiting for our team&apos;s approval. It is not confirmed yet, and the details below do not include it.
             </p>
           )}
-          <EventSummary data={eventData} cups={cups} />
+          <EventSummary data={eventData} cups={cups} noBarback={noBarback} />
         </div>
 
         {menu && (

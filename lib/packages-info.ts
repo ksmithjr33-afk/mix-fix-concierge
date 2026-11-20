@@ -50,7 +50,7 @@ export const BARBACK_REMOVED_LINE = "No barback (removed from this booking).";
 /** What one booking adds to or takes from the package's short wording. */
 export interface BookingShort {
   wedding?: boolean; // the event is a wedding (the Full Bar barback line only shows at weddings)
-  barback?: "on" | "removed"; // Full Bar weddings
+  barback?: "on" | "removed" | "none"; // Full Bar weddings; none: a barback was never part of this booking, so no line at all
   cups?: boolean; // custom cups promised on an older Full Bar booking
 }
 
@@ -68,7 +68,7 @@ export function packageShortFor(name: unknown, booking?: BookingShort): PackageS
   let bullets = [...g.short.bullets];
   if (g.key === "full") {
     bullets = bullets.filter((b) => b !== BARBACK_AT_WEDDINGS);
-    if (booking.wedding) bullets.push(booking.barback === "removed" ? BARBACK_REMOVED_LINE : BARBACK_AT_WEDDINGS);
+    if (booking.wedding && booking.barback !== "none") bullets.push(booking.barback === "removed" ? BARBACK_REMOVED_LINE : BARBACK_AT_WEDDINGS);
     if (booking.cups) bullets.push(CUPS_WITH_BOOKING);
   }
   return { ...g.short, bullets: bullets.slice(0, MAX_PACKAGE_BULLETS) };

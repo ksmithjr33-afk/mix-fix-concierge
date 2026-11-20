@@ -17,7 +17,9 @@ import { distancesToEvent } from "@/lib/team/profile-db";
 import HideAction from "./hide-action";
 import EditEvent, { type EditValues } from "./edit-event";
 import { formValue, PACKAGE_CHOICES } from "@/lib/team/admin-edit";
-import { eventSchedule, todayIn } from "@/lib/team/time";
+import { chicagoStamp, eventSchedule, todayIn } from "@/lib/team/time";
+import BartendersNeeded from "./bartenders-needed";
+import { bartendersFix, bookedBartenders, estimateNote, staffingLog } from "@/lib/team/staffing-fix";
 import { isHidden } from "@/lib/team/hidden";
 import { ensureMarket } from "@/lib/team/markets-db";
 import { handoffPanel, postPanel } from "@/lib/team/shifts-db";
@@ -305,7 +307,8 @@ async function AdminEventPage({
 
   const panels: Record<ManagerTab, () => React.ReactNode> = {
     details: () => {
-      const bart = bartendersNeeded(session);
+      // The priced Bartenders field edits the booking: the booking's number, not the Team tab's staffing number.
+      const bart = bookedBartenders(session).count;
       const fv = (f: keyof EditValues) => formValue(f, ed, session, bart);
       const editValues: EditValues = {
         event_date: fv("event_date"),
@@ -395,14 +398,22 @@ async function AdminEventPage({
       const available = staff
         .filter((s) => s.active && !onEvent.has(s.id))
         .map((s) => ({ id: s.id, name: s.name || s.phone, role: s.role, declined: people.some((p) => p.staffId === s.id), markets: s.markets, unavailable: away.has(s.id), record: records[s.id], cert: certs[s.id], distance: distances.get(s.id) }));
+      const fix = bartendersFix(session);
       return (
         <>
-          {barback.applies && (
-            <p className="px-1 text-[15px] text-[#2C2420]" data-barback-line>
-              {barback.line}
-              {barbackNeeded && <span className="text-[#A0412D]"> · no bar back assigned yet</span>}
-            </p>
-          )}
+          <BartendersNeeded
+            sessionId={id}
+            data={{
+              value: bartendersNeeded(session),
+              booked: bookedBartenders(session).count,
+              setBy: fix?.by ?? "",
+              setAt: fix ? chicagoStamp(fix.at, v.timeZone) : "",
+              estimateNote: estimateNote(session),
+              barbackLine: barback.applies ? barback.line : "",
+              barbackMissing: barbackNeeded,
+              log: staffingLog(session).slice(0, 10).map((e) => ({ at: chicagoStamp(e.at, v.timeZone), by: e.by, text: e.text })),
+            }}
+          />
           <AssignPanel
             sessionId={id}
             summary={`${staffingLabel(counts)}${counts.accepted ? `, ${counts.accepted} accepted` : ""}${counts.stillNeeded ? ` · ${counts.stillNeeded} still needed` : ""}`}

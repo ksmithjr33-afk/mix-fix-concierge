@@ -149,7 +149,7 @@ check("Admin: removing it saves through the price change flow", saved.ok && row(
 check("...the Team tab says removed by the admin's name", extras.barbackStatus(row("fw")).line === "Barback: removed by Kenneth");
 const again = await editDb.saveAdminEdit({ sessionId: "fw", admin, changes: { barback: "Included" }, price: { mode: "engine" }, expectedVersion: row("fw").version, origin: "https://plan.test" });
 check("Admin: adding it back works the same way", again.ok && extras.barbackStatus(row("fw")).on && extras.barbackStatus(row("fw")).line === "Barback: included");
-check("Booking card and Team tab use it", src("app/team/admin/e/[id]/booking-card.tsx").includes("<BarbackControl sessionId={sessionId} data={barback} />") && src("app/team/admin/e/[id]/page.tsx").includes("{barback.line}") && src("app/team/admin/e/[id]/page.tsx").includes("(barbackNeeded ? 1 : 0)"));
+check("Booking card and Team tab use it", src("app/team/admin/e/[id]/booking-card.tsx").includes("<BarbackControl sessionId={sessionId} data={barback} />") && src("app/team/admin/e/[id]/page.tsx").includes("barbackLine: barback.applies ? barback.line : \"\"") && src("app/team/admin/e/[id]/page.tsx").includes("(barbackNeeded ? 1 : 0)"));
 
 // Intake: the price for removing it is in the prompt, and it is applied after the final save.
 reset();
@@ -188,7 +188,7 @@ const iceRules = await import("../lib/team/ice-pickup.ts");
 const wording = [
   ...info.PACKAGE_GUIDES.flatMap((g) => { const s = info.packageShortFor(g.name, { wedding: true, barback: "removed", cups: true })!; return [s.line, ...s.bullets, s.provides]; }),
   info.BARBACK_AT_WEDDINGS, info.BARBACK_REMOVED_LINE, info.CUPS_WITH_BOOKING, pp.BARBACK_KEEP_LINE,
-  extras.barbackStatus(row("fw")).line, "Barback: removed by client", "Part of this package. It cannot be removed.", "Remove the barback", "Add the barback back",
+  extras.barbackStatus(row("fw")).line, "Barback: removed by client", "Part of this package. It cannot be removed.", "Remove the barback and credit the client", "A barback was not part of this booking", "Add the barback back",
   receiptsRules.RECEIPTS_ADMIN_PREVIEW, receiptsRules.RECEIPTS_NOT_SET_UP,
   iceRules.ICE_BACKUP_LINE, iceRules.ICE_MACHINE_NO_PICKUP, iceRules.ICE_MACHINE_BACKUP,
   "Pricing...", "Saving...", "Apply", "Cancel", "Remove the barback.", "Add the barback back.",

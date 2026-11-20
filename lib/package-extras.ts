@@ -8,6 +8,15 @@
 //   the normal price change flow. The state is event_data.barback ("Included"
 //   or "Removed"; missing means on). Who changed it last and when is kept on
 //   sessions.package_extras (barback_by, barback_at).
+// - "A barback was not part of this booking" (an admin, Booking card): for a Full
+//   Bar wedding that was never sold one. It turns the barback off with no price
+//   change: event_data.barback becomes "Removed" and the booked price's basis
+//   says no barback, so the booked total stays exactly as it was and a later
+//   change is priced without one. No change order, no client text, no GHL.
+//   package_extras.barback_not_booked marks it, so the Team tab says "not part
+//   of this booking" and the package wording leaves the barback line out.
+//   Undone at no charge (lib/team/staffing-fix-db.ts) or with the priced add
+//   back (the normal flow, which clears the mark).
 // - A wedding is what the price engine calls a wedding: the event type
 //   contains "wedding" (lib/price-change.ts basisFromEvent).
 //
@@ -28,6 +37,13 @@ export interface PackageExtras {
   cups_set_at?: string;
   barback_by?: string; // "client", or the admin's first name
   barback_at?: string;
+  barback_not_booked?: boolean; // a barback was never part of this booking (no price change)
+  // The Team tab's staffing corrections and their log: lib/team/staffing-fix.ts.
+  bartenders_needed?: number;
+  bartenders_needed_booked?: number | null;
+  bartenders_needed_by?: string;
+  bartenders_needed_at?: string;
+  staffing_log?: { at: string; by: string; text: string }[];
 }
 
 interface SessionLike {
@@ -56,27 +72,31 @@ export interface BarbackStatus {
   applies: boolean; // the package has a barback at all (Big Day, Premium, a Full Bar wedding)
   removable: boolean; // Full Bar weddings only
   on: boolean; // needed in staffing, and in the price
+  notBooked: boolean; // off because a barback was never part of this booking (no price change)
   by: string; // who removed it or added it back last: "client" or an admin's first name
   at: string | null;
-  line: string; // "Barback: included", "Barback: removed by client", ""
+  line: string; // "Barback: included", "Barback: removed by client", "Barback: not part of this booking, set by Kenneth", ""
 }
 
 export function barbackStatus(session: SessionLike | null | undefined): BarbackStatus {
-  const none: BarbackStatus = { applies: false, removable: false, on: false, by: "", at: null, line: "" };
+  const none: BarbackStatus = { applies: false, removable: false, on: false, notBooked: false, by: "", at: null, line: "" };
   if (!session) return none;
   const key = packageKey(pkgOf(session));
-  if (key === "wedding" || key === "premium") return { applies: true, removable: false, on: true, by: "", at: null, line: "Barback: included" };
+  if (key === "wedding" || key === "premium") return { applies: true, removable: false, on: true, notBooked: false, by: "", at: null, line: "Barback: included" };
   if (key !== "full" || !isEngineWedding(session)) return none;
   const x = extrasOf(session);
   const on = barbackOnIn(session.event_data ?? {});
   const by = x.barback_by ?? "";
+  // The mark only counts while the barback is off: a priced add back turns it on.
+  const notBooked = !on && x.barback_not_booked === true;
   return {
     applies: true,
     removable: true,
     on,
+    notBooked,
     by,
     at: x.barback_at ?? null,
-    line: on ? "Barback: included" : `Barback: removed by ${by || "client"}`,
+    line: on ? "Barback: included" : notBooked ? `Barback: not part of this booking${by ? `, set by ${by}` : ""}` : `Barback: removed by ${by || "client"}`,
   };
 }
 
@@ -87,7 +107,8 @@ export function cupsIncluded(session: SessionLike | null | undefined): boolean {
 }
 
 /** This booking's changes to the short package wording (lib/packages-info.ts packageShortFor). */
-export function bookingShortOf(session: SessionLike | null | undefined): { wedding: boolean; barback: "on" | "removed"; cups: boolean } {
+export function bookingShortOf(session: SessionLike | null | undefined): { wedding: boolean; barback: "on" | "removed" | "none"; cups: boolean } {
   const b = barbackStatus(session);
-  return { wedding: !!session && isEngineWedding(session), barback: b.removable && !b.on ? "removed" : "on", cups: !!session && extrasOf(session).cups_included === true };
+  const barback = b.notBooked ? "none" : b.removable && !b.on ? "removed" : "on";
+  return { wedding: !!session && isEngineWedding(session), barback, cups: !!session && extrasOf(session).cups_included === true };
 }

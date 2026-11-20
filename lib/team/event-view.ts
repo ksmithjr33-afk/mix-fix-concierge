@@ -7,7 +7,7 @@
 import { recipeKeys } from "@/lib/order-sheet-shared";
 import { DRINK_MENU_RULES } from "@/lib/system-prompt";
 import { DIVE_NOT_AVAILABLE, DIVE_SET_MENU, diveSetMenuDrinks, hasDiveMenuCard, usesDiveSetMenu } from "@/lib/dive-menu";
-import { staffingFor } from "@/lib/pricing";
+import { bartendersFix, bookedBartenders } from "@/lib/team/staffing-fix";
 import { isBottleRequest } from "@/lib/shopping-list";
 import { recapLines, type FieldChange } from "@/lib/event-diff";
 import { chicagoStamp, eventDayStart, eventSchedule, formatClock, longDate } from "@/lib/team/time";
@@ -115,8 +115,9 @@ export interface SessionLike {
   package_type?: string | null;
   updated_at?: string | null;
   submitted_at?: string | null;
-  booked_price?: { bartenders?: number | null } | null;
+  booked_price?: { bartenders?: number | null; source?: string | null } | null;
   team_market?: string | null;
+  package_extras?: unknown; // the Team tab's bartenders needed (lib/team/staffing-fix.ts)
 }
 
 export interface UpdateLike {
@@ -150,11 +151,6 @@ function venueLabel(v: unknown): string {
   if (v === "private_residence") return "Private residence";
   if (v === "venue") return "Venue";
   return text(v);
-}
-
-function toCount(v: unknown): number | null {
-  const n = parseFloat(String(v ?? "").replace(/[^\d.]/g, ""));
-  return Number.isFinite(n) && n > 0 ? Math.round(n) : null;
 }
 
 /** Classics a Dive Bar guest can order besides the set menu: not the five, and not the drinks Dive Bar leaves out. */
@@ -221,11 +217,13 @@ export function showDayOfPhone(ed: Record<string, unknown>, now: Date): boolean 
   return now.getTime() >= start.getTime() - PHONE_LEAD_MS;
 }
 
-/** Bartenders the event needs: the saved count, else the booked count, else the staffing rule for the guest count. */
+/**
+ * Bartenders the event needs: what an admin set on the Team tab (staffing only,
+ * lib/team/staffing-fix.ts), else the saved count, else the booked count, else
+ * the staffing rule for the guest count.
+ */
 export function bartendersNeeded(session: SessionLike): number | null {
-  const ed = session.event_data ?? {};
-  const guests = toCount(ed.guest_count) ?? toCount(session.guest_count);
-  return toCount(ed.bartenders) ?? toCount(session.booked_price?.bartenders) ?? (guests ? staffingFor(guests) : null);
+  return bartendersFix(session)?.value ?? bookedBartenders(session).count;
 }
 
 export function buildStaffEventView(
