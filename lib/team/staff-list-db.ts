@@ -22,6 +22,7 @@ import { siteOrigin } from "@/lib/team/clock-db";
 import { sendStaffText } from "@/lib/team/sms";
 import { inQuietHours, sendableAt } from "@/lib/team/shifts";
 import type { ViewedStaff } from "@/lib/team/view-mode";
+import { isAdminRole } from "@/lib/team/roles";
 import {
   cleanAnswer,
   groupOf,
@@ -29,6 +30,7 @@ import {
   LIST_READ_ONLY,
   listLink,
   listReady,
+  notReadyView,
   readyText,
   staffList,
   type AnswerRow,
@@ -72,28 +74,50 @@ async function assignmentStatus(sessionId: string, staffId: string): Promise<str
 }
 
 /**
+ * An admin looking at the staff event page in Bartender view. There are two
+ * ways in: the view switch (a cookie: role becomes bartender, bartenderView
+ * set) and the manager view's "Bartender view" link (?as=bartender: no cookie,
+ * so the role stays admin or manager). Admins without either are sent to the
+ * manager view before the page loads, so an admin role here means Bartender view.
+ * Receipts decides the same way.
+ */
+export function inBartenderView(staff: Pick<ViewedStaff, "role" | "bartenderView">): boolean {
+  return !!staff.bartenderView || isAdminRole(staff.role);
+}
+
+/** Accepted on the event (any role), or an admin in Bartender view. */
+export function canSeeList(status: string | null | undefined, staff: Pick<ViewedStaff, "role" | "bartenderView">): boolean {
+  return status === "accepted" || inBartenderView(staff);
+}
+
+/**
  * The list for this viewer, or null when they may not see it: accepted on the
  * event (any role), or an admin in Bartender view (read only unless they also
  * accepted). Offered, declined, and everyone else see nothing.
+ * Pass `status` when the caller already read the assignment (the event page).
+ * Once they may see it, a failure building the list is logged and the tab
+ * gets the not ready line: it never hides the tab.
  */
-export async function staffListFor(session: SessionLike, staff: ViewedStaff, now: Date = new Date()): Promise<StaffListView | null> {
-  const status = await assignmentStatus(session.id, staff.id);
-  const accepted = status === "accepted";
-  if (!accepted && !staff.bartenderView) return null;
-  const [{ sheet, stores }, answers, textSent] = await Promise.all([staffSheet(session), answersFor(session.id), readyTextSent(session.id)]);
-  const over = eventOver(session, now);
-  const names = await staffNames(answers.map((a) => a.staff_id));
-  return staffList({
-    sessionId: session.id,
-    sheet,
-    stores,
-    answers,
-    names,
-    viewerId: staff.id,
-    canAnswer: accepted && !over,
-    readOnlyNote: over ? LIST_READ_ONLY : accepted ? "" : LIST_PREVIEW,
-    textSent,
-  });
+export async function staffListFor(session: SessionLike, staff: ViewedStaff, now: Date = new Date(), status?: string | null): Promise<StaffListView | null> {
+  const st = status !== undefined ? status : await assignmentStatus(session.id, staff.id);
+  const accepted = st === "accepted";
+  if (!canSeeList(st, staff)) return null;
+  let over = false;
+  try {
+    over = eventOver(session, now);
+  } catch (err) {
+    console.error(`[shopping list] ${session.id}: could not read the event times:`, err);
+  }
+  const canAnswer = accepted && !over;
+  const readOnlyNote = over ? LIST_READ_ONLY : accepted ? "" : LIST_PREVIEW;
+  try {
+    const [{ sheet, stores }, answers, textSent] = await Promise.all([staffSheet(session), answersFor(session.id), readyTextSent(session.id)]);
+    const names = await staffNames(answers.map((a) => a.staff_id));
+    return staffList({ sessionId: session.id, sheet, stores, answers, names, viewerId: staff.id, canAnswer, readOnlyNote, textSent });
+  } catch (err) {
+    console.error(`[shopping list] ${session.id}: could not build the list, showing not ready:`, err);
+    return notReadyView({ sessionId: session.id, canAnswer, readOnlyNote });
+  }
 }
 
 /** A "list is ready" text already went out to someone on this event (by the cron or Text the team the list). */

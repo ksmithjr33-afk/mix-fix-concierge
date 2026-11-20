@@ -27,7 +27,8 @@ import { allSupplies } from "@/lib/team/supplies";
 import { venuePhotosFor } from "@/lib/team/venue-photos-db";
 import { bookingShortOf } from "@/lib/package-extras";
 import { staffReceiptsView } from "@/lib/team/receipts-db";
-import { staffListFor } from "@/lib/team/staff-list-db";
+import { canSeeList, staffListFor } from "@/lib/team/staff-list-db";
+import { notReadyView } from "@/lib/team/staff-list";
 import SurpriseBanner from "../../surprise-banner";
 import { surpriseBannerText } from "@/lib/partners/surprise-banner";
 
@@ -111,10 +112,13 @@ async function TeamEventPage({
     // The ice pickup card: everyone on the event sees who is picking up and each status.
     staffIceView(access.session, staff),
   ]);
-  // The Shopping list tab: accepted (any role) or an admin in Bartender view. Null for anyone else.
-  const shoppingListP = staffListFor(access.session, staff).catch((err) => {
-    console.error("[shopping list] could not load:", err);
-    return null;
+  // The Shopping list tab: accepted (any role) or an admin in Bartender view
+  // (the switch or the ?as=bartender link). Null for anyone else. A load error
+  // is logged and shows the tab with the not ready line, never hides it.
+  const listAllowed = canSeeList(assignment?.status, staff);
+  const shoppingListP = staffListFor(access.session, staff, undefined, assignment?.status ?? null).catch((err) => {
+    console.error(`[shopping list] ${id}: could not load, showing not ready:`, err);
+    return listAllowed ? notReadyView({ sessionId: id }) : null;
   });
   const [venuePhotos, receipts, shoppingList] = await Promise.all([venueP, receiptsP, shoppingListP]);
   if (chatTab) await markThreadRead(id, staff.id);

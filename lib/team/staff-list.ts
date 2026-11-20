@@ -1,8 +1,9 @@
 // The staff "Shopping list for this event" on its own Shopping list tab (right
 // after Supplies), and what staff tell us about each line. Pure, no database.
 //
-// Ready: more than half our lines have a source (listReady), or a ready text
-// already went out for the event. Before then the tab says it is not ready yet.
+// Ready: the list has lines, and more than half our lines have a source
+// (listReady) or a ready text already went out for the event. Before then, or
+// when the list cannot be built, the tab still shows and says it is not ready yet.
 //
 // One list, never a copy: the lines are the admin Shopping list's own lines
 // (lib/order-sheet.ts buildSheet, read through staffSheet), grouped by each
@@ -192,7 +193,12 @@ export function staffList(o: {
       lines: split ? [] : mine.map(view),
     });
   }
-  return { sessionId: o.sessionId, groups, total: lines.length, canAnswer: o.canAnswer, readOnlyNote: o.readOnlyNote, ready: !!o.textSent || listReady(o.sheet) };
+  return { sessionId: o.sessionId, groups, total: lines.length, canAnswer: o.canAnswer, readOnlyNote: o.readOnlyNote, ready: lines.length > 0 && (!!o.textSent || listReady(o.sheet)) };
+}
+
+/** The tab with the not ready line: before there is a list, or when it could not be built. */
+export function notReadyView(o: { sessionId: string; canAnswer?: boolean; readOnlyNote?: string }): StaffListView {
+  return { sessionId: o.sessionId, groups: [], total: 0, canAnswer: !!o.canAnswer, readOnlyNote: o.readOnlyNote ?? "", ready: false };
 }
 
 /** Every line in the staff list, in order, for checking it matches the sheet. */

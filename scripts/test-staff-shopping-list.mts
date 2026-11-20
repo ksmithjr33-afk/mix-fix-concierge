@@ -295,6 +295,63 @@ check("...and a text still waiting does not make the list ready", (await viewFor
 check("The admin tab has the button and the count", src("app/team/admin/e/[id]/order/order-sheet.tsx").includes("Text the team the list") && src("app/team/admin/e/[id]/order/order-sheet.tsx").includes("already have</span>"));
 check("The cron runs it", src("app/api/cron/team/route.ts").includes("sendListReadyTexts(now)"));
 
+// ===== Why the tab went missing (live, admin in Bartender view) =====
+// Cause 1: the manager view's "Bartender view" link is ?as=bartender. That path
+// sets no cookie, so the admin keeps role admin and has no bartenderView flag.
+// The list only checked bartenderView and returned null; Receipts also accepts
+// an admin role, so it showed.
+reset();
+await source();
+const viaLink = { ...admin }; // role "admin", no bartenderView: exactly what ?as=bartender gives the page
+const viaSwitch = { ...admin, role: "bartender", bartenderView: true };
+const linkView = await viewFor(viaLink);
+check("Admin in Bartender view by the ?as=bartender link sees the list (was null)", !!linkView && !linkView.canAnswer && linkView.readOnlyNote === sl.LIST_PREVIEW && linkView.ready, JSON.stringify(linkView)?.slice(0, 120));
+check("...a manager by that link too", !!(await viewFor({ id: "m9", name: "Alex Rivera", role: "manager", active: true })));
+check("...and by the view switch, as before", !!(await viewFor(viaSwitch)));
+check("Who sees the list matches who sees Receipts on the page", sldb.inBartenderView(viaLink) && sldb.inBartenderView(viaSwitch) && !sldb.inBartenderView(jayde) && src("app/team/e/[id]/page.tsx").includes("adminPreview: !!staff.bartenderView || isAdminRole(staff.role)"));
+check("Offered, declined, and not on the event still see nothing", (await viewFor(sam)) === null && (await viewFor(dee)) === null && (await viewFor({ id: "zz", name: "Nobody", role: "event_helper" })) === null);
+check("An accepted event helper sees it", sldb.canSeeList("accepted", { role: "event_helper" }) && !sldb.canSeeList("offered", { role: "event_helper" }));
+const pg = src("app/team/e/[id]/page.tsx");
+check("The page asks with the assignment it already read, and the same rule", pg.includes("staffListFor(access.session, staff, undefined, assignment?.status ?? null)") && pg.includes("const listAllowed = canSeeList(assignment?.status, staff);"));
+
+// Cause 2 (checked, hardened): anything that throws while building the list.
+// The page's catch used to turn that into null and hide the tab.
+const logged: unknown[][] = [];
+const realError = console.error;
+console.error = (...a: unknown[]) => { logged.push(a); };
+try {
+  reset();
+  db.order_sheet_lines = [];
+  missingTables.add("order_sheet_stores");
+  missingTables.add("order_sheet_meta");
+  let x = await viewFor(jayde);
+  check("No order sheet built yet and no stores: the tab shows, not ready", !!x && x.ready === false && x.canAnswer);
+  missingTables.clear();
+  const bare = { ...S(), id: "s1", event_data: {} };
+  x = await sldb.staffListFor(bare as never, jayde as never);
+  check("Missing booking details (no package, date, or drinks): the tab shows, not ready", !!x && x.ready === false);
+  x = await sldb.staffListFor({ ...S(), event_data: null } as never, viaLink as never);
+  check("No booking details at all: the tab shows, not ready", !!x && x.ready === false);
+  const broken = { ...S() } as Record<string, unknown>;
+  Object.defineProperty(broken, "event_data", { get() { throw new Error("event_data exploded"); }, enumerable: true });
+  logged.length = 0;
+  x = await sldb.staffListFor(broken as never, jayde as never);
+  check("A throw while building the list shows the tab with the not ready line", !!x && x.ready === false && x.groups.length === 0 && x.sessionId === "s1");
+  check("...and logs the real error with the event", logged.some((l) => String(l[0]).includes("[shopping list] s1") && l.some((v) => v instanceof Error && v.message === "event_data exploded")), JSON.stringify(logged.map((l) => String(l[0]))));
+  x = await sldb.staffListFor(broken as never, viaLink as never);
+  check("...for an admin in Bartender view too, read only", !!x && x.ready === false && !x.canAnswer);
+  x = await sldb.staffListFor(broken as never, sam as never, undefined, "offered");
+  check("...but never for someone who may not see it", x === null);
+  missingTables.add("event_assignments");
+  x = await sldb.staffListFor(S(), jayde as never, undefined, "accepted");
+  check("The page's own assignment read decides, even if a second read would fail", !!x && x.canAnswer);
+  missingTables.clear();
+} finally {
+  console.error = realError;
+}
+check("An empty list is never ready, even after a text went out", sl.staffList({ sessionId: "e", sheet: { sections: [] } as never, stores: [], answers: [], names: new Map(), viewerId: "b1", canAnswer: true, readOnlyNote: "", textSent: true }).ready === false);
+check("The page's last resort keeps the tab: a load error gives the not ready line, not null", pg.includes("return listAllowed ? notReadyView({ sessionId: id }) : null;"));
+
 // ===== Before the migration =====
 reset();
 missingTables.add("order_sheet_answers");
