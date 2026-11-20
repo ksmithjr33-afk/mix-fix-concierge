@@ -38,6 +38,7 @@ import { seenItems, suppliesFromSheet, supplyChanges, inNoticeWindow, type SeenI
 import { eventSchedule } from "@/lib/team/time";
 import { listSyrups } from "@/lib/syrups-db";
 import { cleanSyrupEdit, sameSyrup, syrupViews, type SyrupRecipe, type SyrupView } from "@/lib/syrups";
+import { adminAnswers, type AdminAnswers, type AnswerRow } from "@/lib/team/staff-list";
 
 type EventData = Record<string, unknown>;
 
@@ -72,6 +73,20 @@ export interface SheetView {
   meta: SheetMeta;
   stores: StoreInfo[]; // every store, retired ones too, in list order
   suggestions: boolean; // the team setting
+  answers: AdminAnswers; // what staff said about each line (lib/team/staff-list.ts)
+}
+
+/** Staff answers on this event, with names, for the admin sheet. None before the migration. */
+async function sheetAnswers(sessionId: string, sheet: Sheet, stores: StoreInfo[]): Promise<AdminAnswers> {
+  const { data, error } = await supabase.from("order_sheet_answers").select("*").eq("session_id", sessionId);
+  const rows = error ? [] : ((data as AnswerRow[]) ?? []).map((r) => ({ ...r, note: r.note ?? "" }));
+  const ids = [...new Set(rows.map((r) => r.staff_id))];
+  const names = new Map<string, string>();
+  if (ids.length > 0) {
+    const { data: staff } = await supabase.from("staff").select("id, name").in("id", ids);
+    for (const p of (staff as { id: string; name: string }[]) ?? []) names.set(p.id, p.name ?? "");
+  }
+  return adminAnswers(sheet, stores, rows, names);
 }
 
 function eventDataOf(s: SessionLike): EventData {
@@ -172,7 +187,9 @@ export async function getSheetView(session: SessionLike): Promise<SheetView> {
   const ed = eventDataOf(session);
   const [{ sheet, suggestions, stores, meta: m }, library] = await Promise.all([build(session), listSyrups()]);
   const list = withRecipeEdits(recipes(ed), m.recipe_edits);
+  const answers = await sheetAnswers(session.id, sheet, stores);
   return {
+    answers,
     sessionId: session.id,
     header: sheetHeader(ed),
     recipes: list,
@@ -190,12 +207,13 @@ export async function getSheetView(session: SessionLike): Promise<SheetView> {
  * suggestions or store list needed, plus this event's recipe edits. For the
  * bartender Supplies tab, the Something is missing sheet, and the wrap up.
  */
-export async function staffSheet(session: SessionLike): Promise<{ sheet: Sheet; recipes: SheetRecipe[]; syrups: SyrupView[] }> {
+export async function staffSheet(session: SessionLike): Promise<{ sheet: Sheet; recipes: SheetRecipe[]; syrups: SyrupView[]; stores: StoreInfo[] }> {
   const ed = eventDataOf(session);
   const [saved, m, library, stores] = await Promise.all([savedRows(session.id), metaRow(session.id), listSyrups(), listStores()]);
-  const sheet = buildSheet(calculatedLines(ed), saved);
+  // The team's store list, so a line on a store an admin added keeps its store (the staff Shopping list groups by it).
+  const sheet = buildSheet(calculatedLines(ed), saved, () => null, stores);
   const list = withRecipeEdits(recipes(ed), m.recipe_edits);
-  return { sheet, recipes: list, syrups: sheetSyrups(sheet, list, library, stores, m) };
+  return { sheet, recipes: list, syrups: sheetSyrups(sheet, list, library, stores, m), stores };
 }
 
 /**
@@ -537,6 +555,31 @@ export async function applySheetAction(session: SessionLike, editor: Editor, bod
       }
       const { error } = await supabase.from("order_sheet_meta").upsert({ session_id: session.id, syrup_edits: edits, updated_at: now }, { onConflict: "session_id" });
       if (error) return bad("Could not save. Try again.", 500);
+      break;
+    }
+    case "dismiss_out": {
+      // An admin handled an "I'm out" without changing the line's source.
+      if (typeof body.ref !== "string" || typeof body.staffId !== "string") return bad("Bad request");
+      const { error } = await supabase
+        .from("order_sheet_answers")
+        .update({ dismissed_at: now, dismissed_by_name: who.name })
+        .eq("session_id", session.id)
+        .eq("line_ref", body.ref)
+        .eq("staff_id", body.staffId)
+        .eq("answer", "out");
+      if (error) return bad("Could not save. Try again.", 500);
+      break;
+    }
+    case "skip_ordering": {
+      // Someone on the event already has it: it comes from their supply instead of being ordered.
+      const t = findTarget(body.ref, calc, saved, sheet);
+      if (!t?.line) return bad("That line is no longer on the sheet. Reload the page.", 404);
+      if (t.line.ordered) return bad("This line is already ordered.");
+      const target = (await sheetAnswers(session.id, sheet, stores)).supplyStore;
+      if (!target) return bad("Add a store of the kind Bring from your supply on Manage stores first.");
+      const row = await rowFor(session.id, t);
+      if (!row) return bad("Could not save. Try again.", 500);
+      await updateRow(row.id, storePatch(target, t.line.fields.name, who, now));
       break;
     }
     default:

@@ -27,6 +27,7 @@ import { allSupplies } from "@/lib/team/supplies";
 import { venuePhotosFor } from "@/lib/team/venue-photos-db";
 import { bookingShortOf } from "@/lib/package-extras";
 import { staffReceiptsView } from "@/lib/team/receipts-db";
+import { staffListFor } from "@/lib/team/staff-list-db";
 import SurpriseBanner from "../../surprise-banner";
 import { surpriseBannerText } from "@/lib/partners/surprise-banner";
 
@@ -110,7 +111,12 @@ async function TeamEventPage({
     // The ice pickup card: everyone on the event sees who is picking up and each status.
     staffIceView(access.session, staff),
   ]);
-  const [venuePhotos, receipts] = await Promise.all([venueP, receiptsP]);
+  // The staff Shopping list: accepted (any role) or an admin in Bartender view. Null for anyone else.
+  const shoppingListP = staffListFor(access.session, staff).catch((err) => {
+    console.error("[shopping list] could not load:", err);
+    return null;
+  });
+  const [venuePhotos, receipts, shoppingList] = await Promise.all([venueP, receiptsP, shoppingListP]);
   if (chatTab) await markThreadRead(id, staff.id);
   const accepted = assignment?.status === "accepted";
   const renderedAt = serverNow();
@@ -178,6 +184,7 @@ async function TeamEventPage({
         venuePhotos={venuePhotos}
         receipts={receipts}
         packageBooking={bookingShortOf(access.session)}
+        shoppingList={shoppingList}
       />
     </>
   );

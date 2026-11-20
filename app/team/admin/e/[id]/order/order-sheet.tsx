@@ -6,6 +6,7 @@ import type { FieldName, Fields, SheetLine, SheetRecipe } from "@/lib/order-shee
 import { ingredientText, type SyrupView } from "@/lib/syrups";
 import { SyrupBody, SYRUP_TITLE } from "../../../../syrup-recipes";
 import type { SheetView } from "@/lib/order-sheet-db";
+import type { AdminLineAnswers } from "@/lib/team/staff-list";
 import { timeLabel } from "@/lib/team/clock-label";
 
 // The order sheet as Isabel's Word docs read: a plain white page, Arial, a
@@ -394,8 +395,10 @@ function Line({
   onCopied,
   sectionLabel,
   costs = null,
+  answers = null,
 }: {
   costs?: SheetCosts["byRef"] | null;
+  answers?: Record<string, AdminLineAnswers> | null;
   line: SheetLine;
   stores: StoreInfo[];
   open: Open;
@@ -411,8 +414,9 @@ function Line({
   const editing = open?.kind === "edit" && open.ref === line.ref;
   const picking = open?.kind === "store" && open.ref === line.ref;
   const flagged = !!line.conflict || line.gone;
+  const said = answers?.[line.ref] ?? null;
   return (
-    <li data-ref={line.ref} data-store={line.store ?? ""} className="relative flex items-start gap-1">
+    <li data-ref={line.ref} data-store={line.store ?? ""} className="relative flex flex-wrap items-start gap-1">
       {/* The Ordered box sits where the bullet is, for items we buy. The client's own items keep a plain bullet. */}
       <span className="flex w-7 shrink-0 justify-center">
         {line.clientBuys ? (
@@ -470,6 +474,35 @@ function Line({
           style={store ? { background: store.color } : sug ? { borderColor: sug.color } : undefined}
         />
       </button>
+      {/* What staff on the event said about this line: green has it, red is out. Never printed. */}
+      {said && (said.answers.length > 0 || said.notes.length > 0) && (
+        <div className="basis-full pl-8 pb-1 text-[13px] leading-snug print:hidden" data-answers>
+          {said.answers.map((a) => (
+            <span key={a.staffId} className="mr-3 inline-block">
+              <span className={a.tone === "have" ? "font-medium text-[#1E7B34]" : a.tone === "out" ? "font-medium text-[#B3261E]" : "text-[#888]"}>
+                {a.text}
+                {a.tone === "handled" ? " (handled)" : ""}
+              </span>
+              {a.note && <span className="text-[#555]">: {a.note}</span>}
+              {a.canDismiss && (
+                <button type="button" onClick={() => call({ action: "dismiss_out", ref: line.ref, staffId: a.staffId })} className="ml-1.5 text-[#555] underline">
+                  Dismiss
+                </button>
+              )}
+            </span>
+          ))}
+          {said.notes.map((n) => (
+            <span key={n} className="mr-3 inline-block text-[#555]">
+              {n}
+            </span>
+          ))}
+          {said.skip && (
+            <button type="button" onClick={() => call({ action: "skip_ordering", ref: line.ref })} className="rounded border border-[#1E7B34] px-1.5 text-[#1E7B34] font-medium">
+              Skip ordering
+            </button>
+          )}
+        </div>
+      )}
       {editing && (
         <LineEditor
           line={line}
@@ -917,7 +950,22 @@ export default function OrderSheet({ initial, timeZone, costs = null }: { initia
   const sectionTitle = (id: SectionId) => SECTIONS.find((s) => s.id === id)?.title ?? "";
   const flagged = view.sheet.sections.flatMap((s) => s.lines).filter((l) => l.conflict || l.gone).length;
   const deliveryInUse = view.sheet.sections.some((s) => s.lines.some((l) => l.store === "delivery"));
-  const lineProps = { stores: view.stores, open, setOpen, call, tz: timeZone, onAddStore: setAddFor, onCopied: copied, costs: costs?.byRef ?? null };
+  const lineProps = { stores: view.stores, open, setOpen, call, tz: timeZone, onAddStore: setAddFor, onCopied: copied, costs: costs?.byRef ?? null, answers: view.answers?.byRef ?? null };
+  const textTeam = async () => {
+    setSaving((n) => n + 1);
+    setError("");
+    try {
+      const res = await fetch("/api/team/admin/order-sheet", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: view.sessionId, action: "text_team" }) });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(d.error ?? "Could not send.");
+      if (d.view) setView(d.view);
+      flash(d.message ?? "Sent.", 4000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not send.");
+    } finally {
+      setSaving((n) => n - 1);
+    }
+  };
 
   return (
     <div className="space-y-3">
@@ -970,6 +1018,18 @@ export default function OrderSheet({ initial, timeZone, costs = null }: { initia
             );
           })}
           {saving > 0 && <span className="ml-2 text-[#A39585]">Saving...</span>}
+        </p>
+        <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px] text-[#4A3F38]">
+          {view.answers?.summary ? (
+            <span data-answer-summary>
+              <span className="font-medium">From the team:</span> <span className="text-[#B3261E]">{view.answers.out} out</span>, <span className="text-[#1E7B34]">{view.answers.have} already have</span>
+            </span>
+          ) : (
+            <span className="text-[#6B5D52]">No answers from the team yet.</span>
+          )}
+          <button type="button" onClick={textTeam} disabled={saving > 0} className="rounded border border-[#B5845A] px-2 py-0.5 font-medium text-[#9A7049] disabled:opacity-40">
+            Text the team the list
+          </button>
         </p>
         {flagged > 0 && (
           <p className="mt-1 text-[13px] text-[#8A4B12]">

@@ -506,7 +506,8 @@ async function AdminEventPage({
           // The menu is not picked up (or nobody is assigned) inside 48 hours, no approved menu inside 72 hours, and the ice not done inside 24 hours.
           pickups: (pickup.outstanding ? 1 : 0) + (menuFile.missing ? 1 : 0) + (ice.outstanding ? 1 : 0),
           team: hidden ? 0 : counts.stillNeeded + handoffs.length + (barbackNeeded ? 1 : 0),
-          order: sheetFlags,
+          // Changed lines, plus each "I'm out" from staff on a supply line until an admin changes its source or dismisses it.
+          order: sheetFlags + (sheet.answers?.badge ?? 0),
           client: pendingHolds.length,
           dayof: dayofCount,
           receipts: receiptsWaiting,

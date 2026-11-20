@@ -21,6 +21,8 @@ const UNIQUE: Record<string, string[][]> = {
   event_message_reads: [["session_id", "staff_id"]],
   event_chat_notices: [["session_id", "staff_id"]],
   order_sheet_stores: [["color"]],
+  order_sheet_answers: [["session_id", "line_ref", "staff_id"]],
+  order_sheet_ready_texts: [["session_id", "staff_id"]],
 };
 
 /** Tables a test treats as not created yet (a migration not run): every query on them returns an error. */

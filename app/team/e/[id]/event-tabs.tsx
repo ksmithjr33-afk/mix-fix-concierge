@@ -27,6 +27,8 @@ import type { StaffMenuSection } from "@/lib/team/approved-menu-db";
 import MenuSection from "./menu-section";
 import { card, Details } from "./event-details";
 import VenuePhotos from "./venue-photos";
+import ShoppingList from "./shopping-list";
+import type { StaffListView } from "@/lib/team/staff-list";
 import type { VenuePhotoView } from "@/lib/team/venue-photos-db";
 import PackageCard from "../../package-card";
 import type { BookingShort } from "@/lib/packages-info";
@@ -532,8 +534,10 @@ export default function EventTabs({
   venuePhotos = null,
   receipts = null,
   packageBooking = null,
+  shoppingList = null,
 }: {
   packageBooking?: BookingShort | null; // this booking's barback and cups, for the Package card
+  shoppingList?: StaffListView | null; // "Shopping list for this event": accepted staff and admins in Bartender view only
   receipts?: StaffReceiptsView | null; // the Receipts tab: on the event, not declined, until 14 days after it
   venuePhotos?: VenuePhotoView | null; // Bar and venue photos on the Location card, read only, for staff on the event
   runningLow?: { items: string[] } | null; // the Running low button, from setup through the end of breakdown
@@ -666,7 +670,9 @@ export default function EventTabs({
           onConfirmed={setToolsAt}
         />
       </div>
-      <div hidden={tab !== "shopping"}>
+      <div hidden={tab !== "shopping"} className="space-y-6">
+        {/* Before the event: the order sheet by source, to mark what you already have. Not behind the Tools step. */}
+        {shoppingList && <ShoppingList initial={shoppingList} />}
         {toolsAt || suppliesAt ? (
           <Supplies
             sessionId={view.sessionId}

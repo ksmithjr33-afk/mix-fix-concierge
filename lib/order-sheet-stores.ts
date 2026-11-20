@@ -5,7 +5,7 @@
 // in the database). Server only, admins only.
 
 import { supabase } from "@/lib/supabase";
-import { DEFAULT_STORES, inPalette, normalColor, type Store, type StoreInfo } from "@/lib/order-sheet-shared";
+import { DEFAULT_STORES, inPalette, isStoreKind, normalColor, type Store, type StoreInfo } from "@/lib/order-sheet-shared";
 
 interface StoreRow {
   id: string;
@@ -14,6 +14,7 @@ interface StoreRow {
   position: number;
   retired: boolean;
   last_legend_name: string | null;
+  kind?: string | null; // supply, delivery or pickup (supabase/migrations/20261230_staff_shopping_list.sql)
 }
 
 const toInfo = (r: StoreRow): StoreInfo => ({
@@ -23,6 +24,7 @@ const toInfo = (r: StoreRow): StoreInfo => ({
   position: Number(r.position) || 0,
   retired: r.retired === true,
   lastLegendName: r.last_legend_name ?? "",
+  kind: isStoreKind(r.kind) ? r.kind : null,
 });
 
 const defaultRow = (s: StoreInfo) => ({ id: s.id, name: s.name, color: s.color, position: s.position, retired: false, last_legend_name: null });
@@ -68,7 +70,7 @@ function dbProblem(message: string): string {
   return "Could not save. Try again.";
 }
 
-export async function addStore(raw: { name?: unknown; color?: unknown }): Promise<StoreResult> {
+export async function addStore(raw: { name?: unknown; color?: unknown; kind?: unknown }): Promise<StoreResult> {
   const stores = await listStores();
   const name = cleanName(raw.name);
   const color = normalColor(raw.color);
@@ -77,15 +79,15 @@ export async function addStore(raw: { name?: unknown; color?: unknown }): Promis
   const position = Math.max(0, ...stores.map((s) => s.position)) + 1;
   const { data, error } = await supabase
     .from("order_sheet_stores")
-    .insert({ name, color, position, retired: false, updated_at: new Date().toISOString() })
+    .insert({ name, color, position, retired: false, ...(isStoreKind(raw.kind) ? { kind: raw.kind } : {}), updated_at: new Date().toISOString() })
     .select("*")
     .single();
   if (error || !data) return bad(dbProblem(error?.message ?? ""), error && /duplicate|unique/i.test(error.message) ? 409 : 500);
   return { ok: true, stores: await listStores(), store: toInfo(data as StoreRow) };
 }
 
-/** Rename, recolor, retire, or bring back one store. */
-export async function updateStore(id: unknown, raw: { name?: unknown; color?: unknown; retired?: unknown }): Promise<StoreResult> {
+/** Rename, recolor, retire, bring back, or set the kind of one store. */
+export async function updateStore(id: unknown, raw: { name?: unknown; color?: unknown; retired?: unknown; kind?: unknown }): Promise<StoreResult> {
   const stores = await listStores();
   const store = stores.find((s) => s.id === id);
   if (!store) return bad("We could not find that store.", 404);
@@ -109,6 +111,10 @@ export async function updateStore(id: unknown, raw: { name?: unknown; color?: un
       if (problem) return bad(`${problem} Rename one of them first.`);
     }
     patch.retired = retired;
+  }
+  if (raw.kind !== undefined) {
+    if (!isStoreKind(raw.kind)) return bad("Pick a kind: pick up, delivery, or bring from your supply.");
+    patch.kind = raw.kind;
   }
   if (Object.keys(patch).length === 0) return bad("Nothing to change.");
   const { error } = await supabase.from("order_sheet_stores").update({ ...patch, updated_at: new Date().toISOString() }).eq("id", store.id);

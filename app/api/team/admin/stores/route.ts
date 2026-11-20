@@ -15,7 +15,7 @@ export async function POST(request: Request) {
       body.action === "add"
         ? await addStore(body)
         : body.action === "update"
-          ? await updateStore(body.id, { name: body.name, color: body.color, retired: body.retired })
+          ? await updateStore(body.id, { name: body.name, color: body.color, retired: body.retired, kind: body.kind })
           : body.action === "move"
             ? await moveStore(body.id, body.direction)
             : body.action === "list"

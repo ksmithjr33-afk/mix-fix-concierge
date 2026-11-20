@@ -18,6 +18,33 @@ export function isSection(v: unknown): v is SectionId {
 /** A store id: one of the starting five ("specs") or a uuid for a store an admin added. */
 export type Store = string;
 
+/**
+ * What kind of source a store is, for the staff "Shopping list for this event":
+ * supply (staff bring it from what they keep), delivery, or pickup.
+ */
+export type StoreKind = "supply" | "delivery" | "pickup";
+export const STORE_KINDS: { id: StoreKind; label: string }[] = [
+  { id: "pickup", label: "Pick up" },
+  { id: "delivery", label: "Delivery" },
+  { id: "supply", label: "Bring from your supply" },
+];
+export function isStoreKind(v: unknown): v is StoreKind {
+  return v === "supply" || v === "delivery" || v === "pickup";
+}
+
+/** The kind a store's name suggests, for stores nobody has set a kind on. */
+export function kindFromName(name: string): StoreKind {
+  const n = name.toLowerCase();
+  if (/\b(supply|supplies|stock|inventory|on hand|bring)\b/.test(n)) return "supply";
+  if (/\b(deliver(y|ed|ies)?|amazon|shipped|shipping|instacart)\b/.test(n)) return "delivery";
+  return "pickup";
+}
+
+/** A store's kind: the one set on it, else the one its name suggests. */
+export function storeKind(s: { name: string; kind?: StoreKind | null }): StoreKind {
+  return isStoreKind(s.kind) ? s.kind : kindFromName(s.name);
+}
+
 /** A store on the team's list, as the sheet and the Manage stores screen see it. */
 export interface StoreInfo {
   id: Store;
@@ -26,6 +53,7 @@ export interface StoreInfo {
   position: number;
   retired: boolean; // stays on old sheets, not offered on new lines
   lastLegendName: string; // the legend name used on the last event, the default for the next
+  kind?: StoreKind | null; // null: worked out from the name (storeKind)
 }
 
 /**

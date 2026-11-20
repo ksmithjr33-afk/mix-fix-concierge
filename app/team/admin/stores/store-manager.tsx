@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { PALETTE, textOn, type StoreInfo } from "@/lib/order-sheet-shared";
+import { PALETTE, STORE_KINDS, storeKind, textOn, type StoreInfo } from "@/lib/order-sheet-shared";
 import { AddStoreDialog } from "../e/[id]/order/order-sheet";
 
 const card = "bg-[#F5F0EB] rounded-2xl border border-[#DDD5CC] px-4 py-3 sm:px-5 sm:py-4";
@@ -113,6 +113,22 @@ export default function StoreManager({ initial }: { initial: StoreInfo[] }) {
           <button type="button" onClick={() => setColoring(coloring === s.id ? "" : s.id)} className="text-[#9A7049] underline">
             Change color
           </button>
+          <label className="inline-flex items-center gap-1 text-[#6B5D52]">
+            Kind
+            <select
+              value={storeKind(s)}
+              disabled={!!busy}
+              onChange={(e) => send(`kind:${s.id}`, { action: "update", id: s.id, kind: e.target.value })}
+              aria-label={`Kind of source for ${s.name}`}
+              className="rounded border border-[#DDD5CC] bg-white px-1 py-0.5 text-sm text-[#2C2420]"
+            >
+              {STORE_KINDS.map((k) => (
+                <option key={k.id} value={k.id}>
+                  {k.label}
+                </option>
+              ))}
+            </select>
+          </label>
           {s.retired ? (
             <button type="button" disabled={!!busy} onClick={() => send(`retire:${s.id}`, { action: "update", id: s.id, retired: false })} className="text-[#9A7049] underline">
               Bring back

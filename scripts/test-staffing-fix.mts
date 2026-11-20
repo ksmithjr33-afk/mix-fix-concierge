@@ -26,7 +26,6 @@ const pc = await import("../lib/price-change.ts");
 const view = await import("../lib/team/event-view.ts");
 const myEvents = await import("../lib/team/my-events.ts");
 const assignDb = await import("../lib/team/assignments-db.ts");
-const shifts = await import("../lib/team/shifts-db.ts");
 const updates = await import("../lib/event-updates.ts");
 const editDb = await import("../lib/team/admin-edit-db.ts");
 const route = await import("../app/api/team/admin/staffing/route.ts");

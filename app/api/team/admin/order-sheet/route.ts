@@ -2,11 +2,13 @@ import { NextResponse } from "next/server";
 import { getCurrentStaff } from "@/lib/team/auth";
 import { getSubmittedSession } from "@/lib/team/events";
 import { firstName } from "@/lib/team/event-view";
-import { applySheetAction } from "@/lib/order-sheet-db";
+import { applySheetAction, getSheetView } from "@/lib/order-sheet-db";
+import { textTeamTheList } from "@/lib/team/staff-list-db";
 import { isAdminRole } from "@/lib/team/roles";
 
 // Order sheet edits, admins only. Bartenders (and admins in Bartender view)
 // get 403, signed out gets 401. { sessionId, action, ... } returns the sheet as it now stands.
+// action "text_team" also returns a message saying who was texted.
 export async function POST(request: Request) {
   const staff = await getCurrentStaff();
   if (!staff) return NextResponse.json({ error: "Sign in again." }, { status: 401 });
@@ -16,6 +18,11 @@ export async function POST(request: Request) {
     if (typeof body.sessionId !== "string") return NextResponse.json({ error: "Bad request" }, { status: 400 });
     const session = await getSubmittedSession(body.sessionId);
     if (!session) return NextResponse.json({ error: "We could not find that event." }, { status: 404 });
+    // "Text the team the list": the ready text to everyone accepted who has not had it.
+    if (body.action === "text_team") {
+      const t = await textTeamTheList(session);
+      return NextResponse.json({ ok: true, message: t.message, view: await getSheetView(session) });
+    }
     const r = await applySheetAction(session, { id: staff.id, name: firstName(staff.name) }, body);
     if (!r.ok) return NextResponse.json({ error: r.error }, { status: r.status });
     return NextResponse.json({ ok: true, view: r.view });
