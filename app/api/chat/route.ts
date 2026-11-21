@@ -30,7 +30,7 @@ import { applyDiveSetMenu, DIVE_CARD_MAX, DIVE_MENU_SET_MESSAGE } from "@/lib/di
 import { DEFAULT_DEPOSIT, impliedLine, money, paymentPhrase, toCount, type PriceChange } from "@/lib/price-change";
 import { CHANGE_REQUEST_MESSAGE } from "@/lib/client-list";
 import { announceRequest } from "@/lib/change-requests";
-import { ACCEPT_EXTRA_DRINKS, clientAsks, clientEventData } from "@/lib/team-notes";
+import { clientAsks, clientEventData, updateToolInput, withClientVoice } from "@/lib/team-notes";
 import { packageDrinkCount } from "@/lib/event-diff";
 import { eventTimeZone } from "@/lib/team/markets";
 import { quoteGuestCountTool, submitEventDataTool } from "@/lib/intake-tools";
@@ -114,14 +114,18 @@ const submitProperties = submitEventDataTool.input_schema.properties as Record<s
 const updateEventDataTool: Anthropic.Tool = {
   name: "update_event_data",
   description:
-    "Save a change to this already submitted event. It applies right away. Call it only after the client clearly said yes. Include ONLY the fields that changed. When any drink changes, send the complete signature_drinks array. Anything the client tells you that no other field covers (for example 'I will provide the cups') goes in special_requests as the complete existing text plus the new note. A change to guest count, service times or hours, bartenders, package, or the barback must be quoted with quote_price_change first, and quoted_new_total must be the new total you quoted. Use manager_request only for drinks beyond the package count. Set change_approval_needed when you passed something along to management under the CONDUCT RULE.",
+    "Save a change to this already submitted event. It applies right away. Call it only after the client clearly said yes. Include ONLY the fields that changed. When any drink changes, send the complete signature_drinks array. Anything the client tells you that no other field covers goes in special_requests, written to the client ('You will provide your own cups.'), following the special_requests rule in the prompt. Anything for our team only goes in team_note. A change to guest count, service times or hours, bartenders, package, or the barback must be quoted with quote_price_change first, and quoted_new_total must be the new total you quoted. Use manager_request only for drinks beyond the package count. Set change_approval_needed when you passed something along to management under the CONDUCT RULE.",
   input_schema: {
     type: "object",
     additionalProperties: false,
     properties: {
       ...Object.fromEntries(
-        UPDATABLE_FIELDS.map((field) => [field, submitProperties[field] ?? { type: "string" }])
+        UPDATABLE_FIELDS.filter((field) => field !== "team_notes").map((field) => [field, submitProperties[field] ?? { type: "string" }])
       ),
+      team_note: {
+        type: "string",
+        description: "One new note for our team only (a follow up, what the client says they were promised, an instruction to staff). It is added to the team notes; the client never sees it. See SPECIAL REQUESTS AND TEAM NOTES.",
+      },
       event_date: { type: "string", description: "New event date, written like the current one." },
       hours_booked: { type: "number", description: "New number of service hours, when the client changes the length of service." },
       bartenders: { type: "number", description: "New number of bartenders, only when the client asks for a different count." },
@@ -498,7 +502,7 @@ async function updateModeResponse(session: SessionRow, messages: ChatMessage[], 
           let approvalLine = ""; // a planner's priced change sent to the booking holder
           for (const toolUse of toolUses) {
             // Only the client's own Yes on their page adds extra drinks with a price, never the concierge.
-            const { [ACCEPT_EXTRA_DRINKS]: _accept, ...input } = toolUse.input as Record<string, unknown>;
+            const input = updateToolInput(eventData, toolUse.input as Record<string, unknown>);
             if (toolUse.name === "quote_price_change" && approvalOnly && partner) {
               // Quoted the same way, but it goes to the booking holder instead of to this planner.
               const priced = changedPriced(eventData, splitPriced(input).priced);
@@ -996,7 +1000,8 @@ export async function POST(request: Request) {
             const { answers: bookingAnswers, rest: answered } = takeBookingAnswers(submitted);
             // Skipped drink details still submit, marked Drinks not finalized; an extra drink nobody said yes to is held back.
             drinks = checkDrinks(answered, session?.package_type ?? answered.package);
-            const input = drinks.data;
+            // Written to the client since 2026-11-21: these special requests may show on their page.
+            const input = withClientVoice(drinks.data);
             attempted = input;
             // A surprise: the booker's private number is the client phone. The guest of honor's number is never saved as the client phone or the day of contact.
             const sx = ((await getSession(sessionId)) ?? session) as EventSession | null;

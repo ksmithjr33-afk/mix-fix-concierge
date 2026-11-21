@@ -1,4 +1,5 @@
 import { parseEventDate } from "@/lib/event-date";
+import { extraSodasOf } from "@/lib/extra-sodas";
 
 interface SignatureDrink {
   name: string;
@@ -1398,31 +1399,6 @@ function isPureeJuiceOrSyrup(key: string): boolean {
   );
 }
 
-/** Parse special requests for extra sodas like Diet Coke, Sprite, etc. */
-function parseExtraSodas(specialRequests?: string): string[] {
-  if (!specialRequests) return [];
-  const extras: string[] = [];
-  const lower = specialRequests.toLowerCase();
-  const sodaKeywords = [
-    { match: "diet coke", label: "Diet Coke" },
-    { match: "diet cola", label: "Diet Coke" },
-    { match: "sprite", label: "Sprite" },
-    { match: "dr pepper", label: "Dr Pepper" },
-    { match: "ginger ale", label: "Ginger ale" },
-    { match: "lemon lime", label: "Lemon lime soda" },
-    { match: "7up", label: "7UP" },
-    { match: "coca cola", label: "Coca Cola" },
-    { match: "coke", label: "Coca Cola" },
-    { match: "root beer", label: "Root beer" },
-  ];
-  for (const soda of sodaKeywords) {
-    if (lower.includes(soda.match)) {
-      extras.push(soda.label);
-    }
-  }
-  return extras;
-}
-
 /**
  * Generates Natalie's supply list — everything she needs to know to prep and shop.
  */
@@ -1550,7 +1526,7 @@ export function generateNatalieSupplyList(eventData: EventData): string {
     parts.push("");
   }
 
-  const extraSodas = parseExtraSodas(eventData.special_requests);
+  const extraSodas = extraSodasOf(eventData as { extra_sodas?: unknown; special_requests?: unknown });
   for (const extra of extraSodas) {
     if (!seenMixers.has(extra.toLowerCase())) {
       seenMixers.add(extra.toLowerCase());
@@ -2080,7 +2056,7 @@ export function formatShoppingListForNote(
       const label = m.item.charAt(0).toUpperCase() + m.item.slice(1);
       lines.push(`- ${label} — ${m.quantity}`);
     }
-    const extraSodas = parseExtraSodas(eventData.special_requests);
+    const extraSodas = extraSodasOf(eventData as { extra_sodas?: unknown; special_requests?: unknown });
     for (const extra of extraSodas) {
       if (!seenMixers.has(extra.toLowerCase())) {
         seenMixers.add(extra.toLowerCase());

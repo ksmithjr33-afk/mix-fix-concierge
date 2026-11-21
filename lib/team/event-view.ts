@@ -195,7 +195,7 @@ function drinksOf(ed: Record<string, unknown>): StaffDrink[] {
 const STAFF_CHANGE_FIELDS = new Set([
   "event_name", "event_type", "event_date", "bar_service_start", "bar_service_end", "hours_booked", "event_address",
   "venue_type", "indoor_outdoor", "bar_on_site", "bar_details", "bar_floor_access", "parking_info", "guest_count",
-  "package", "bartenders", "theme", "event_colors", "allergies", "special_requests", "day_of_contact_name", "beer",
+  "package", "bartenders", "theme", "event_colors", "allergies", "special_requests", "team_notes", "day_of_contact_name", "beer",
   "wine", "client_providing_beer_wine", "beer_and_wine_details", "dual_bar_setup", "extra_bottles", "dive_menu_requested", "dive_set_menu",
   "dive_menu_card", "drinking_pace",
 ]);
@@ -207,7 +207,7 @@ export function staffChange(field: string): boolean {
 
 export function whatChanged(update: UpdateLike | null): string[] {
   if (!update) return [];
-  return recapLines(update.changes.filter((c) => staffChange(c.field))).map(scrub);
+  return recapLines(update.changes.filter((c) => staffChange(c.field)), { team: true }).map(scrub);
 }
 
 /** True from 48 hours before service starts (or before the event day when the start time is unknown). */

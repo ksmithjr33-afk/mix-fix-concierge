@@ -381,6 +381,7 @@ check("Replay: the closing (sent without the tool live) ends submitted", plan.CL
 check("Replay: marked Drinks not finalized, with the 4th drink held back", ED()!.drinks_not_finalized === true && (ED()!.signature_drinks as unknown[]).length === 3);
 check("Replay: the client is told plainly we will text them to finish the menu", closing.reply.endsWith(plan.SUBMITTED_DRINKS_LINE));
 check("Replay: the date the chat gave is saved, not null", ED()!.event_date === "December 11, 2026");
+check("Replay: the submission is marked written to the client, so its requests may show on their page", ED()!.requests_voice === "client");
 check("Replay: no reply ever claimed a submission the system did not make", produced.every((x) => !plan.claimsSubmitted(x.reply.replace(plan.SUBMITTED_DRINKS_LINE, ""))));
 check("Replay: the team got the menu follow up text", adminTexts().some((m) => m.startsWith("Drinks not finalized for Sam and Dana Rivers")));
 

@@ -11,12 +11,13 @@ import {
   ADD_ONS_RULES,
   CHANGE_DEADLINES,
   CONDUCT_RULE,
+  REQUESTS_AND_NOTES_RULE,
   lateChargeRule,
   todayAndDates,
 } from "@/lib/system-prompt";
 import { packageDrinkCount, type Deadlines, type EventData } from "@/lib/event-diff";
 import { CHANGE_REQUEST_MESSAGE } from "@/lib/client-list";
-import { clientAsks, clientEventData } from "@/lib/team-notes";
+import { clientAsks, clientEventData, requestsShown } from "@/lib/team-notes";
 import {
   DIVE_CARD_FULL_LINE,
   DIVE_CARD_INCLUDED,
@@ -107,6 +108,11 @@ export function buildUpdatePrompt(
   extra: { booked?: BookedPrice | null; recap?: ChatRecap | null; pricePending?: PricePendingInfo | null; planner?: string; packageSection?: string } = {}
 ): string {
   const paymentPreference = String(eventData.payment_preference ?? "").trim();
+  // Older events' special requests were written for our team: the concierge never sees them, and what it sends is added to them.
+  const shown = requestsShown(eventData);
+  const requestsHow = shown
+    ? "send the COMPLETE special_requests text, the existing text plus the new line, never dropping what is already there;"
+    : "this event's earlier special requests are kept by our team and are not shown here, so send ONLY the new line in special_requests, and it is added to them;";
   // While a price is pending no total is ever shown to the client.
   const bookedTotal = extra.pricePending ? null : (extra.booked?.total ?? null);
   const deposit = extra.booked?.deposit_paid ?? 150;
@@ -132,7 +138,10 @@ export function buildUpdatePrompt(
 ${FORMATTING_RULES}
 
 ${CONDUCT_RULE}
-In update mode the CONDUCT RULE is recorded with update_event_data: send the COMPLETE special_requests text with the new item added, and set change_approval_needed to true in the same call. Never say the phrase before or instead of the tool call, say it after the TOOL RESULT comes back. The CONDUCT RULE never applies to a drink change inside 6 days, see REQUESTS INSIDE 6 DAYS.
+
+${REQUESTS_AND_NOTES_RULE}
+In update mode a team note goes in team_note on update_event_data, one new note at a time; it is added to the notes on file.
+In update mode the CONDUCT RULE is recorded with update_event_data: ${requestsHow} put what our team must decide in team_note, and set change_approval_needed to true in the same call. Never say the phrase before or instead of the tool call, say it after the TOOL RESULT comes back. The CONDUCT RULE never applies to a drink change inside 6 days, see REQUESTS INSIDE 6 DAYS.
 
 ${extra.planner ? `${extra.planner}\n\n` : ""}${extra.packageSection ? `${extra.packageSection}\n\n` : ""}UPDATE MODE: This client already finished planning and submitted their event. Their current event details are at the bottom of this prompt and they are the source of truth. Your only job is to help them change details. Every change you save applies right away: the event details, their lists, and their total update the moment the TOOL RESULT confirms it.
 1. NEVER re-ask intake questions and never walk them through the planning flow again. Do not ask about anything they did not bring up.
@@ -140,9 +149,9 @@ ${extra.planner ? `${extra.planner}\n\n` : ""}${extra.packageSection ? `${extra.
 3. When the client says yes, call the update_event_data tool with ONLY the changed fields and write NO text in that reply. Nothing is saved until the tool returns, so before the tool result comes back NEVER say "locking that in", "updating now", "done", "saved", "all set", "updated", or anything else that claims or announces the change. After the tool returns you get a message starting with TOOL RESULT that lists exactly what was recorded. Only then reply: confirm exactly what that result lists, in plain words, nothing more and nothing less, then ask if there is anything else they would like to change. If the result says nothing was recorded or something failed, say so honestly and never claim it was saved.
 4. If the client changes several things at once, confirm them together in one message and send them in one update_event_data call.
 5. signature_drinks: when any drink changes, send the COMPLETE signature_drinks array with every drink, changed and unchanged, in the same order. Every ingredient needs its oz amount exactly like intake, for example "2 oz vodka", except "Top with" items. Keep is_mocktail and is_custom accurate. When you show drinks to the client, list ingredient names only, never oz amounts.
-6. special_requests: when adding an add on or a note, send the COMPLETE special_requests text, the existing text plus the new item. Never drop what is already there.
+6. special_requests: ${requestsHow}
 7. Times: if the client moves the start time, keep the same length of service and calculate the new end time, then confirm both.
-8. Anything that does not fit a field is a special_requests change. If the client tells you something about their event that no other field covers, for example "I will provide the cups", "we are bringing our own garnishes", "the bar needs to face the pool", or "my sister will handle the ice", NEVER just acknowledge it. Confirm it back like any other change, and when they say yes, call update_event_data with the COMPLETE special_requests text, the existing text plus the new note, worded as a short plain note the client will also see on their page, for example "Bringing our own cups", never "the client" or "they". If it is not recorded with update_event_data, our team never sees it.
+8. Anything that does not fit a field is a special_requests change. If the client tells you something about their event that no other field covers, for example "I will provide the cups", "we are bringing our own garnishes", "the bar needs to face the pool", or "my sister will handle the ice", NEVER just acknowledge it. Confirm it back like any other change, and when they say yes, call update_event_data with special_requests (${shown ? "the COMPLETE text, the existing text plus the new line" : "only the new line"}) written to the client, for example "You will provide your own cups.", following SPECIAL REQUESTS AND TEAM NOTES. If it is not recorded with update_event_data, our team never sees it.
 9. Already on file: before calling update_event_data, compare what the client said with CURRENT EVENT DETAILS below. If they restate something that is already saved there (for example they repeat the day of contact phone that is already listed, or a note already in special_requests), do NOT call update_event_data again and do NOT say you just updated or saved it. Say it is already on file, repeat the saved value, and ask if there is anything else they would like to change.
 10. A saved change is already in place the moment the TOOL RESULT confirms it. Speak about it as done, never as something still to come.
 

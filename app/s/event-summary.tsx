@@ -5,7 +5,7 @@
 
 import { isBlank } from "@/lib/blank";
 import { packageShortFor } from "@/lib/packages-info";
-import { clientRequests } from "@/lib/team-notes";
+import { clientRequests, requestsShown } from "@/lib/team-notes";
 
 type EventData = Record<string, unknown>;
 
@@ -172,7 +172,8 @@ export default function EventSummary({
 
       <Section title="Add ons and special requests">
         {asks}
-        <Row label="Requests" value={clientRequests(data) || "None"} />
+        {/* Older events' requests were written for our team: they stay with the team, never shown here. */}
+        {requestsShown(data) && <Row label="Requests" value={clientRequests(data) || "None"} />}
         <Row label="Second bar setup" value={data.dual_bar_setup === true ? "Yes" : ""} />
       </Section>
 

@@ -37,6 +37,7 @@ export const UPDATABLE_FIELDS = [
   "client_providing_beer_wine",
   "beer_and_wine_details",
   "special_requests",
+  "team_notes", // our team's notes: the concierge adds one at a time (team_note), never shown to the client
   "dual_bar_setup",
   "extra_bottles",
   "allergies",
@@ -134,6 +135,7 @@ const FIELD_LABELS: Record<string, string> = {
   dive_menu_card: "Menu card",
   manager_request: "Manager request",
   additional_drinks: "Additional drinks",
+  team_notes: "Team notes",
   event_date: "Event date",
   hours_booked: "Hours booked",
   package: "Package",
@@ -719,8 +721,9 @@ export function consolidateChanges(changes: FieldChange[]): FieldChange[] {
 }
 
 /** One plain text recap line per change, old value to new value, for the client. */
-export function recapLines(changes: FieldChange[]): string[] {
-  return consolidateChanges(changes).flatMap((c) => {
+export function recapLines(changes: FieldChange[], o: { team?: boolean } = {}): string[] {
+  // Team notes are never read back to the client or a planner: only the team side passes team.
+  return consolidateChanges(o.team ? changes : changes.filter((c) => c.field !== "team_notes")).flatMap((c) => {
     const label = fieldLabel(c.field);
     if (RECAP_LONG_TEXT.has(c.field)) {
       const { added, removed } = sentenceDiff(c.old, c.new);

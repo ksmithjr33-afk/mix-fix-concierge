@@ -11,13 +11,50 @@
 // showing special requests and team notes together, exactly as before:
 // teamRequestsText. The client page, the update concierge and anything sent
 // to the browser get clientEventData, which has neither internal field.
+//
+// Events submitted before 2026-11-21 had special requests written for our team
+// ("Client claims...", "bar manager to follow up"). Only events marked
+// requests_voice "client" (the concierge writes to the client since then) show
+// their special requests on the client page; on every other event the free
+// text never reaches the browser. Nothing is deleted and the team side is
+// unchanged.
 
 import { isBlank } from "@/lib/blank";
+import { parseExtraSodas } from "@/lib/extra-sodas";
 
 export const TEAM_NOTES = "team_notes";
 export const UNCONFIRMED_DRINKS = "unconfirmed_drinks";
 /** Fields only our team reads. Never sent to the client's browser. */
 export const INTERNAL_FIELDS = [TEAM_NOTES, UNCONFIRMED_DRINKS] as const;
+
+/** Set to "client" on events whose special requests are written to the client. */
+export const REQUESTS_VOICE = "requests_voice";
+export const CLIENT_VOICE = "client";
+/** The concierge's update tool adds one team note at a time with this; it is never saved under this name. */
+export const TEAM_NOTE_INPUT = "team_note";
+
+/** True when this event's special requests are written to the client and may show on their page. */
+export function requestsShown(ed: EventData): boolean {
+  return ed[REQUESTS_VOICE] === CLIENT_VOICE;
+}
+
+/** Marks a new concierge submission: its special requests are written to the client. */
+export function withClientVoice(ed: EventData): EventData {
+  return { ...ed, [REQUESTS_VOICE]: CLIENT_VOICE };
+}
+
+/**
+ * The special requests to save when the update concierge sends some. On an
+ * event written to the client it sends the complete text. On an older event
+ * it never sees the earlier text, so what it sends is added to it, and
+ * nothing already on file is lost.
+ */
+export function mergedRequests(current: EventData, sent: unknown): unknown {
+  if (requestsShown(current) || typeof sent !== "string") return sent;
+  const have = lines(current.special_requests);
+  const add = lines(sent).filter((l) => !have.includes(l));
+  return [...have, ...add].join("\n");
+}
 
 /**
  * Sent with signature_drinks when the client said yes to the extra drink
@@ -50,9 +87,9 @@ export function splitTeamNotes(special: unknown): { requests: string; notes: str
   return { requests: all.filter((l) => !isTeamNoteLine(l)).join("\n"), notes: all.filter(isTeamNoteLine) };
 }
 
-/** Special requests as the client sees them: only what they asked for. */
+/** Special requests as the client sees them: only what they asked for, and nothing on an older event. */
 export function clientRequests(ed: EventData): string {
-  return splitTeamNotes(ed.special_requests).requests;
+  return requestsShown(ed) ? splitTeamNotes(ed.special_requests).requests : "";
 }
 
 /** Special requests plus team notes, the way the team side has always shown them. */
@@ -156,7 +193,12 @@ export function clearUnconfirmed(ed: EventData, answer: string): EventData {
 export function clientEventData(ed: EventData | null | undefined): EventData {
   const out: EventData = { ...(ed ?? {}) };
   for (const k of INTERNAL_FIELDS) delete out[k];
-  if (typeof out.special_requests === "string") {
+  if (!requestsShown(out) && "special_requests" in out) {
+    // An older event: the free text stays with our team. The sodas it asked for stay on the client's list.
+    const sodas = parseExtraSodas(out.special_requests);
+    if (sodas.length) out.extra_sodas = sodas;
+    delete out.special_requests;
+  } else if (typeof out.special_requests === "string") {
     const requests = clientRequests(out);
     if (requests) out.special_requests = requests;
     else delete out.special_requests;
@@ -211,11 +253,25 @@ export const FINISH_DRINKS_MESSAGE = "I would like to finish my drink menu.";
  */
 export function teamEventData<T extends EventData>(ed: T): T {
   if (!ed || typeof ed !== "object") return ed;
-  const has = INTERNAL_FIELDS.some((k) => k in ed);
-  if (!has) return ed;
+  const keys = [...INTERNAL_FIELDS, REQUESTS_VOICE];
+  if (!keys.some((k) => k in ed)) return ed;
   const out: EventData = { ...ed };
-  for (const k of INTERNAL_FIELDS) delete out[k];
+  for (const k of keys) delete out[k];
   const joined = teamRequestsText(ed);
   if (joined) out.special_requests = joined;
   return out as T;
+}
+
+/**
+ * The concierge's update_event_data input as it is applied. Never the extra
+ * drink Yes (only the client's button sends that) and never a whole new
+ * team_notes: a team_note is added to the notes on file. On an older event
+ * the concierge never sees the earlier special requests, so what it sends is
+ * added to them.
+ */
+export function updateToolInput(current: EventData, raw: EventData): EventData {
+  const { [ACCEPT_EXTRA_DRINKS]: _accept, [TEAM_NOTES]: _notes, [TEAM_NOTE_INPUT]: note, ...input } = raw;
+  if ("special_requests" in input) input.special_requests = mergedRequests(current, input.special_requests);
+  if (typeof note === "string" && note.trim()) input[TEAM_NOTES] = withTeamNotes(current, [note.trim()])[TEAM_NOTES];
+  return input;
 }
