@@ -1,8 +1,11 @@
 // Read only summary of a submitted event, shown under the update mode chat.
-// Same sections the client saw at the end of intake. No oz amounts.
+// Same sections the client saw at the end of intake. No oz amounts. Every line
+// speaks to the client ("You provide the alcohol"), and team notes never show:
+// the event passed in is clientEventData, and special requests are filtered again here.
 
 import { isBlank } from "@/lib/blank";
 import { packageShortFor } from "@/lib/packages-info";
+import { clientRequests } from "@/lib/team-notes";
 
 type EventData = Record<string, unknown>;
 
@@ -67,14 +70,24 @@ function drinksTitle(data: EventData): string {
   return data.dive_menu_card === true ? "Your menu card classics" : "Dive Bar set menu";
 }
 
-export default function EventSummary({ data, cups = false, noBarback = false }: { data: EventData; cups?: boolean; noBarback?: boolean }) {
+export default function EventSummary({
+  data,
+  cups = false,
+  noBarback = false,
+  asks = null,
+}: {
+  data: EventData;
+  cups?: boolean;
+  noBarback?: boolean;
+  asks?: React.ReactNode; // the client's own questions (finish the drink menu, the extra drink), under Add ons and special requests
+}) {
   // What the package includes, in the same short wording every page and the concierge use.
   const short = packageShortFor(data.package, {
     wedding: String(data.event_type ?? "").toLowerCase().includes("wedding"),
     // noBarback: a barback was never part of this booking, so the line is left out (not "removed").
     barback: String(data.barback ?? "").trim().toLowerCase() === "removed" ? (noBarback ? "none" : "removed") : "on",
     cups,
-  });
+  }, "client");
   const drinks = (Array.isArray(data.signature_drinks) ? data.signature_drinks : []) as Drink[];
   const start = text(data.bar_service_start);
   const end = text(data.bar_service_end);
@@ -87,7 +100,7 @@ export default function EventSummary({ data, cups = false, noBarback = false }: 
   return (
     <div className="space-y-3">
       <Section title="Event">
-        <Row label="Client" value={text(data.client_name)} />
+        <Row label="Name" value={text(data.client_name)} />
         <Row label="Event" value={text(data.event_name) || text(data.event_type)} />
         <Row label="Date" value={text(data.event_date)} />
         <Row label="Guest count" value={text(data.guest_count)} />
@@ -134,14 +147,13 @@ export default function EventSummary({ data, cups = false, noBarback = false }: 
           <ul className="space-y-3">
             {drinks.map((drink, i) => (
               <li key={i} className="border-b border-[#DDD5CC] last:border-0 pb-3 last:pb-0">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="font-heading font-bold text-[#B5845A]">{drink.name}</span>
-                  <span className="text-xs text-[#A39585] bg-[#E8DDD5] px-2 py-0.5 rounded-full shrink-0">
-                    {drink.is_mocktail ? "Mocktail" : drink.base_spirit}
-                  </span>
-                </div>
+                {/* The name, then the spirit on its own line, so they never run together. */}
+                <p className="font-heading font-bold text-[#B5845A]">{drink.name}</p>
+                {(drink.is_mocktail || text(drink.base_spirit)) && (
+                  <p className="text-xs text-[#A39585] uppercase tracking-wide mt-0.5">{drink.is_mocktail ? "Mocktail" : text(drink.base_spirit)}</p>
+                )}
                 <p className="text-sm text-[#6B5D52] mt-1">
-                  {toArray(drink.ingredients).map(stripMeasurements).join(", ")}
+                  {toArray(drink.ingredients).map(stripMeasurements).join(", ") || "Recipe not finished yet"}
                 </p>
               </li>
             ))}
@@ -159,7 +171,8 @@ export default function EventSummary({ data, cups = false, noBarback = false }: 
       </Section>
 
       <Section title="Add ons and special requests">
-        <Row label="Requests" value={text(data.special_requests) || "None"} />
+        {asks}
+        <Row label="Requests" value={clientRequests(data) || "None"} />
         <Row label="Second bar setup" value={data.dual_bar_setup === true ? "Yes" : ""} />
       </Section>
 

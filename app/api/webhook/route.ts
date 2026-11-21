@@ -6,6 +6,7 @@ import { completionFields } from "@/lib/client-list-db";
 import { createdByFields } from "@/lib/update-notes";
 import { supabase } from "@/lib/supabase";
 import { scrubHostContact } from "@/lib/partners/rules";
+import { teamEventData } from "@/lib/team-notes";
 
 const anthropic = new Anthropic();
 
@@ -64,7 +65,10 @@ Return only the summary paragraph, no preamble or labels.`,
 
 export async function POST(request: Request) {
   try {
-    const { eventData, conversationTranscript, clientEmail, sessionId } = await request.json();
+    const body = await request.json();
+    const { conversationTranscript, clientEmail, sessionId } = body;
+    // Special requests and team notes together, as GHL has always had them.
+    const eventData = body.eventData ? teamEventData(body.eventData) : body.eventData;
 
     const webhookUrl = process.env.GHL_WEBHOOK_URL;
     if (!webhookUrl) {

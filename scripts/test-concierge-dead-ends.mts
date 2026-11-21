@@ -211,8 +211,9 @@ check("...and save-event and the GHL webhook still fire", hooks.some((h) => h.ur
 // Drinks skipped: Drinks not finalized, the team is texted, the 4th drink held back.
 const ed = ED()!;
 check("Skipped drink details still submit, marked drinks_not_finalized", ed.drinks_not_finalized === true);
-check("...with the Drinks not finalized line in special requests", String(ed.special_requests ?? "").includes("Drinks not finalized: the client named Mistletoe Mojito, White Christmas Margarita, North Pole Espresso Martini, Christmas Bourbon Old Fashioned. Text them to finish the menu."), String(ed.special_requests));
-check("The 4th drink nobody said yes to is held back and listed", (ed.signature_drinks as unknown[]).length === 3 && String(ed.special_requests).includes("Not confirmed: Christmas Bourbon Old Fashioned as an additional drink ($50 each)."));
+check("...with the Drinks not finalized line in the team notes, never in special requests", !/Drinks not finalized|Not confirmed/.test(String(ed.special_requests ?? "")) && String(ed.team_notes ?? "").includes("Drinks not finalized: the client named Mistletoe Mojito, White Christmas Margarita, North Pole Espresso Martini, Christmas Bourbon Old Fashioned. Text them to finish the menu."), String(ed.team_notes));
+check("The 4th drink nobody said yes to is held back and listed", (ed.signature_drinks as unknown[]).length === 3 && String(ed.team_notes).includes("Not confirmed: Christmas Bourbon Old Fashioned as an additional drink ($50 each)."));
+check("...and kept whole for the client's Yes or No on their page", Array.isArray(ed.unconfirmed_drinks) && (ed.unconfirmed_drinks as { name: string }[]).length === 1 && (ed.unconfirmed_drinks as { name: string }[])[0].name === "Christmas Bourbon Old Fashioned", JSON.stringify(ed.unconfirmed_drinks));
 check("...drinks_finalized and extra_drinks_accepted never reach the saved event", !("drinks_finalized" in ed) && !("extra_drinks_accepted" in ed));
 check("The admins get one text to follow up on the menu", adminTexts().length === 1 && adminTexts()[0].includes("Drinks not finalized for Sam and Dana Rivers") && adminTexts()[0].includes("Christmas Bourbon Old Fashioned ($50 each)"), adminTexts().join(" | "));
 check("...with the event date the chat gave, never null", adminTexts()[0].includes("Dec 11") && !/null/i.test(adminTexts()[0]), adminTexts()[0]);
@@ -221,7 +222,7 @@ check("...with the event date the chat gave, never null", adminTexts()[0].includ
 reset();
 ai.script.reply = (p) => (p.tool_choice?.type === "tool" ? [ai.toolUse("submit_event_data", { ...PAYLOAD, extra_drinks_accepted: true })] : [{ type: "text", text: CLOSING }]);
 await turn(R.slice(0, 66));
-check("A clear yes to the extra drink keeps all four", (ED()!.signature_drinks as unknown[]).length === 4 && !String(ED()!.special_requests ?? "").includes("Not confirmed"));
+check("A clear yes to the extra drink keeps all four", (ED()!.signature_drinks as unknown[]).length === 4 && !String(ED()!.team_notes ?? "").includes("Not confirmed") && !ED()!.unconfirmed_drinks);
 
 // Every drink complete: no flag, no admin text, the plain line.
 reset();

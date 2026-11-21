@@ -30,6 +30,8 @@ import { applyDiveSetMenu, DIVE_CARD_MAX, DIVE_MENU_SET_MESSAGE } from "@/lib/di
 import { DEFAULT_DEPOSIT, impliedLine, money, paymentPhrase, toCount, type PriceChange } from "@/lib/price-change";
 import { CHANGE_REQUEST_MESSAGE } from "@/lib/client-list";
 import { announceRequest } from "@/lib/change-requests";
+import { ACCEPT_EXTRA_DRINKS, clientAsks, clientEventData } from "@/lib/team-notes";
+import { packageDrinkCount } from "@/lib/event-diff";
 import { eventTimeZone } from "@/lib/team/markets";
 import { quoteGuestCountTool, submitEventDataTool } from "@/lib/intake-tools";
 import { guestCountFlag, guestQuoteToolResult, quoteGuestCount, submitWithGuestCount } from "@/lib/intake-guests";
@@ -466,9 +468,11 @@ async function updateModeResponse(session: SessionRow, messages: ChatMessage[], 
           }
           if (result.rows.length === 0) return;
           // Refresh the event details on the page as soon as the save lands.
+          // The browser never gets team notes or the extra drinks waiting for an answer.
           send(controller, {
             event: "updated",
-            eventData: result.eventData,
+            eventData: clientEventData(result.eventData),
+            asks: clientAsks(result.eventData, packageDrinkCount(result.eventData.package)),
             version: result.version,
             updatedAt: result.updatedAt,
             updates: result.rows.map((r) => ({ version: r.version, applied: r.applied, summary: r.summary })),
@@ -493,7 +497,8 @@ async function updateModeResponse(session: SessionRow, messages: ChatMessage[], 
           let lastQuote: QuoteResult | null | undefined;
           let approvalLine = ""; // a planner's priced change sent to the booking holder
           for (const toolUse of toolUses) {
-            const input = toolUse.input as Record<string, unknown>;
+            // Only the client's own Yes on their page adds extra drinks with a price, never the concierge.
+            const { [ACCEPT_EXTRA_DRINKS]: _accept, ...input } = toolUse.input as Record<string, unknown>;
             if (toolUse.name === "quote_price_change" && approvalOnly && partner) {
               // Quoted the same way, but it goes to the booking holder instead of to this planner.
               const priced = changedPriced(eventData, splitPriced(input).priced);
@@ -1066,7 +1071,7 @@ export async function POST(request: Request) {
           );
         }
         if (completeData) {
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ event: "complete", eventData: completeData })}\n\n`));
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ event: "complete", eventData: clientEventData(completeData as Record<string, unknown>) })}\n\n`));
         }
 
         controller.enqueue(encoder.encode("data: [DONE]\n\n"));

@@ -6,6 +6,8 @@ import ShoppingList from "./shopping-list";
 import { UPDATE_OPENER, updateGreeting } from "@/lib/update-mode-shared";
 import MenuCards from "@/app/menu-card";
 import type { MenuKey } from "@/lib/menu-markers";
+import ClientAsks from "./client-asks";
+import { FINISH_DRINKS_MESSAGE, type ClientAsks as Asks } from "@/lib/team-notes";
 
 interface Message {
   role: "user" | "assistant";
@@ -40,7 +42,9 @@ export default function UpdateMode({
   extra = null,
   cups = false,
   noBarback = false,
+  initialAsks = null,
 }: {
+  initialAsks?: Asks | null; // the client's own questions: finish the drink menu, the extra drink
   cups?: boolean; // custom cups promised on an older Full Bar booking (sessions.package_extras)
   noBarback?: boolean; // a barback was never part of this booking (sessions.package_extras.barback_not_booked)
   extra?: React.ReactNode; // the planners card, on client held events
@@ -63,6 +67,8 @@ export default function UpdateMode({
   const [version, setVersion] = useState(initialVersion);
   const [updatedAt, setUpdatedAt] = useState(initialUpdatedAt);
   const [pending, setPending] = useState(listPending);
+  const [asks, setAsks] = useState<Asks | null>(initialAsks);
+  const chatRef = useRef<HTMLElement>(null);
   // The version this chat opened on: the final recap covers every change saved after it.
   const [chatStartVersion] = useState(initialVersion);
   const [input, setInput] = useState("");
@@ -108,6 +114,7 @@ export default function UpdateMode({
           error?: string;
           event?: string;
           eventData?: EventData;
+          asks?: Asks;
           version?: number;
           updatedAt?: string | null;
           menu?: MenuKey;
@@ -123,6 +130,7 @@ export default function UpdateMode({
         }
         if (parsed.event === "updated") {
           if (parsed.eventData) setEventData(parsed.eventData);
+          if (parsed.asks) setAsks(parsed.asks);
           if (typeof parsed.version === "number") setVersion(parsed.version);
           if (parsed.updatedAt) setUpdatedAt(parsed.updatedAt);
           return;
@@ -171,6 +179,13 @@ export default function UpdateMode({
     await streamResponse([...messages.filter((m) => m.content), { role: "user", content: text }]);
   };
 
+  // "Finish my drink menu": the chat opens on the drinks step.
+  const finishDrinks = async () => {
+    if (isStreaming) return;
+    chatRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    await streamResponse([...messages.filter((m) => m.content), { role: "user", content: FINISH_DRINKS_MESSAGE }]);
+  };
+
   const lastUpdated = formatUpdated(updatedAt);
 
   return (
@@ -184,7 +199,7 @@ export default function UpdateMode({
 
       <main className="max-w-2xl mx-auto px-4 py-4 sm:py-6 space-y-4">
         {/* Chat panel */}
-        <section className="flex flex-col h-[60dvh] min-h-[360px] bg-[#F5F0EB] rounded-2xl border border-[#DDD5CC] overflow-hidden">
+        <section ref={chatRef} className="scroll-mt-4 flex flex-col h-[60dvh] min-h-[360px] bg-[#F5F0EB] rounded-2xl border border-[#DDD5CC] overflow-hidden">
           <div className="px-4 py-2.5 border-b border-[#DDD5CC]">
             <h1 className="font-heading text-base font-bold text-[#2C2420]">Update your event</h1>
             <p className="text-xs text-[#6B5D52] mt-0.5 leading-snug">
@@ -266,7 +281,26 @@ export default function UpdateMode({
               A change you asked for is waiting for our team&apos;s approval. It is not confirmed yet, and the details below do not include it.
             </p>
           )}
-          <EventSummary data={eventData} cups={cups} noBarback={noBarback} />
+          <EventSummary
+            data={eventData}
+            cups={cups}
+            noBarback={noBarback}
+            asks={
+              <ClientAsks
+                sessionId={sessionId}
+                asks={asks}
+                disabled={isStreaming}
+                onFinishDrinks={finishDrinks}
+                onAnswered={(r) => {
+                  setEventData(r.eventData);
+                  setAsks(r.asks);
+                  setVersion(r.version);
+                  if (r.updatedAt) setUpdatedAt(r.updatedAt);
+                  if (r.pending) setPending(true);
+                }}
+              />
+            }
+          />
         </div>
 
         {menu && (

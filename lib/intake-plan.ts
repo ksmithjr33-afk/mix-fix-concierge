@@ -14,6 +14,7 @@
 import { isBlank, present } from "@/lib/blank";
 import { packageDrinkCount } from "@/lib/event-diff";
 import { CLOSING_PATTERN } from "@/lib/unsaved-sessions";
+import { UNCONFIRMED_DRINKS, hasRecipe, notConfirmedNote, notFinalizedNote, withTeamNotes } from "@/lib/team-notes";
 
 export { CLOSING_PATTERN };
 
@@ -298,16 +299,13 @@ export interface DrinkCheck {
 }
 
 const drinkName = (d: unknown) => present((d as { name?: unknown })?.name) ?? present((d as { menu_name?: unknown })?.menu_name) ?? "";
-const hasRecipe = (d: unknown) => {
-  const ing = (d as { ingredients?: unknown })?.ingredients;
-  return Array.isArray(ing) ? ing.some((x) => !isBlank(x)) : !isBlank(ing);
-};
 
 /**
  * Skipped drink details still submit: the event is marked drinks_not_finalized
- * with a "Drinks not finalized: ..." line in special_requests. Drinks past the
- * package count are kept only when extra_drinks_accepted is true; otherwise
- * they are held back and listed for the team. drinks_finalized and
+ * with a "Drinks not finalized: ..." line in team_notes (never special_requests,
+ * which the client sees). Drinks past the package count are kept only when
+ * extra_drinks_accepted is true; otherwise they are held back whole in
+ * unconfirmed_drinks, listed for the team, and asked on the client page. drinks_finalized and
  * extra_drinks_accepted are taken off the saved event.
  */
 export function checkDrinks(input: Record<string, unknown>, packageType: unknown): DrinkCheck {
@@ -319,17 +317,21 @@ export function checkDrinks(input: Record<string, unknown>, packageType: unknown
   let drinks = Array.isArray(data.signature_drinks) ? (data.signature_drinks as unknown[]) : [];
   const named = drinks.map(drinkName).filter(Boolean);
   let unconfirmed: string[] = [];
+  let held: unknown[] = [];
   if (drinks.length > included && extrasFlag !== true) {
-    unconfirmed = drinks.slice(included).map(drinkName).filter(Boolean);
+    // Kept whole, so the client can say yes on their page and the drink is added as it was built.
+    held = drinks.slice(included).filter((d) => drinkName(d) !== "");
+    unconfirmed = held.map(drinkName);
     drinks = drinks.slice(0, included);
   }
   const notFinalized = finalizedFlag === false || drinks.length === 0 || drinks.some((d) => !hasRecipe(d));
   const notes: string[] = [];
-  if (notFinalized) notes.push(`Drinks not finalized: ${named.length ? `the client named ${named.join(", ")}` : "no drinks picked yet"}. Text them to finish the menu.`);
-  if (unconfirmed.length) notes.push(`Not confirmed: ${unconfirmed.join(", ")} as ${unconfirmed.length === 1 ? "an additional drink" : "additional drinks"} ($50 each). Ask the client before adding.`);
-  const special = present(data.special_requests);
-  const out: Record<string, unknown> = { ...data, signature_drinks: drinks };
-  if (notes.length) out.special_requests = [special, ...notes].filter(Boolean).join("\n");
+  if (notFinalized) notes.push(notFinalizedNote(named));
+  if (unconfirmed.length) notes.push(notConfirmedNote(unconfirmed));
+  // Team notes never go in special_requests: the client page shows special_requests.
+  let out: Record<string, unknown> = { ...data, signature_drinks: drinks };
+  if (notes.length) out = withTeamNotes(out, notes);
+  if (held.length) out[UNCONFIRMED_DRINKS] = held;
   if (notFinalized) out.drinks_not_finalized = true;
   return { data: out, notFinalized, unconfirmed, named };
 }

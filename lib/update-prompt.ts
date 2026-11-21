@@ -16,6 +16,7 @@ import {
 } from "@/lib/system-prompt";
 import { packageDrinkCount, type Deadlines, type EventData } from "@/lib/event-diff";
 import { CHANGE_REQUEST_MESSAGE } from "@/lib/client-list";
+import { clientAsks, clientEventData } from "@/lib/team-notes";
 import {
   DIVE_CARD_FULL_LINE,
   DIVE_CARD_INCLUDED,
@@ -83,6 +84,22 @@ function diveUpdateSection(card: boolean, drinkCount: number): string {
   return `DIVE BAR SET MENU: This client is on Dive Bar, which comes with a set menu of five favorites: Margarita, Old Fashioned, Cosmopolitan, Lemon Drop and Moscow Mule, and no printed menu. Any request to add, remove, swap, rename, or change a drink is refused at any date: do NOT call any tool for it, do NOT pass it to management, and reply with exactly: "${DIVE_MENU_SET_MESSAGE}" Then ask if there is anything else they would like to change. Never bring up a menu card yourself. The one exception: if the client asks for a menu, a printed menu, or a menu card, say exactly: "${DIVE_CARD_OFFER_LINE}" and if they want it, they pick classics for it. ${rules} Never show a menu picture on Dive Bar.`;
 }
 
+/**
+ * What the client still has to finish on their drinks, in plain words. The
+ * team notes themselves are never in this prompt, so they are never read out.
+ */
+function drinkTodoSection(eventData: EventData, packageCount: number): string {
+  const asks = clientAsks(eventData, packageCount);
+  const out: string[] = [];
+  if (asks.drinksUnfinished) {
+    out.push(`DRINK MENU NOT FINISHED: This client's drink menu is not finished yet: a drink is missing or has no recipe in CURRENT EVENT DETAILS. When they want to finish it (for example "I would like to finish my drink menu"), help them finish each drink one at a time the same way intake builds a drink, following DRINK SOURCING BY PACKAGE, confirm it back, and save the complete signature_drinks array with update_event_data once they say yes. Never mention internal notes or that our team was told anything.`);
+  }
+  if (asks.extraDrinks.length > 0) {
+    out.push(`EXTRA DRINK QUESTION ON THEIR PAGE: They named ${asks.extraDrinks.join(", ")} past the ${packageCount} drinks their package includes. Their event page asks them to add it for $${asks.price} with a Yes or No button. If they bring it up, tell them to answer that question with the Yes or No button on their page, under Add ons and special requests. Do not add it yourself and do not quote any other price.`);
+  }
+  return out.length ? `${out.join("\n\n")}\n\n` : "";
+}
+
 export function buildUpdatePrompt(
   eventData: EventData,
   version: number,
@@ -125,7 +142,7 @@ ${extra.planner ? `${extra.planner}\n\n` : ""}${extra.packageSection ? `${extra.
 5. signature_drinks: when any drink changes, send the COMPLETE signature_drinks array with every drink, changed and unchanged, in the same order. Every ingredient needs its oz amount exactly like intake, for example "2 oz vodka", except "Top with" items. Keep is_mocktail and is_custom accurate. When you show drinks to the client, list ingredient names only, never oz amounts.
 6. special_requests: when adding an add on or a note, send the COMPLETE special_requests text, the existing text plus the new item. Never drop what is already there.
 7. Times: if the client moves the start time, keep the same length of service and calculate the new end time, then confirm both.
-8. Anything that does not fit a field is a special_requests change. If the client tells you something about their event that no other field covers, for example "I will provide the cups", "we are bringing our own garnishes", "the bar needs to face the pool", or "my sister will handle the ice", NEVER just acknowledge it. Confirm it back like any other change, and when they say yes, call update_event_data with the COMPLETE special_requests text, the existing text plus the new note, worded clearly for our team. If it is not recorded with update_event_data, our team never sees it.
+8. Anything that does not fit a field is a special_requests change. If the client tells you something about their event that no other field covers, for example "I will provide the cups", "we are bringing our own garnishes", "the bar needs to face the pool", or "my sister will handle the ice", NEVER just acknowledge it. Confirm it back like any other change, and when they say yes, call update_event_data with the COMPLETE special_requests text, the existing text plus the new note, worded as a short plain note the client will also see on their page, for example "Bringing our own cups", never "the client" or "they". If it is not recorded with update_event_data, our team never sees it.
 9. Already on file: before calling update_event_data, compare what the client said with CURRENT EVENT DETAILS below. If they restate something that is already saved there (for example they repeat the day of contact phone that is already listed, or a note already in special_requests), do NOT call update_event_data again and do NOT say you just updated or saved it. Say it is already on file, repeat the saved value, and ask if there is anything else they would like to change.
 10. A saved change is already in place the moment the TOOL RESULT confirms it. Speak about it as done, never as something still to come.
 
@@ -171,6 +188,6 @@ ${ADD_ONS_RULES}
 
 ${CHANGE_DEADLINES}
 
-CURRENT EVENT DETAILS (version ${version}):
-${JSON.stringify(eventData, null, 2)}`;
+${drinkTodoSection(eventData, packageCount)}CURRENT EVENT DETAILS (version ${version}):
+${JSON.stringify(clientEventData(eventData), null, 2)}`;
 }

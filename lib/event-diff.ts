@@ -4,6 +4,7 @@
 // lib/event-updates.ts for that.
 
 import { parseEventDate } from "@/lib/event-date";
+import { ACCEPT_EXTRA_DRINKS, settleDrinkFlags } from "@/lib/team-notes";
 import { cardPicks, DIVE_CARD_INCLUDED, diveSetMenuDrinks, hasDiveMenuCard, isDiveBarPackage } from "@/lib/dive-menu";
 
 export type EventData = Record<string, unknown>;
@@ -132,6 +133,7 @@ const FIELD_LABELS: Record<string, string> = {
   dive_set_menu: "Dive Bar set menu",
   dive_menu_card: "Menu card",
   manager_request: "Manager request",
+  additional_drinks: "Additional drinks",
   event_date: "Event date",
   hours_booked: "Hours booked",
   package: "Package",
@@ -504,6 +506,8 @@ export interface UpdatePlan {
   // Drink menu changes asked for inside the six day cutoff. Not applied here:
   // the caller saves them as a request for an admin to approve or decline.
   cutoffChanges: FieldChange[];
+  // Drinks past the package count the client said yes to on their page ($50 each).
+  acceptedExtras: Drink[];
   // Drink menu changes on Dive Bar with no menu card, which has a set menu.
   // Refused, and the client is told the menu is set for the package. Not a cutoff rule.
   diveMenuSet: boolean;
@@ -615,9 +619,13 @@ export function planUpdate(
   let newDrinks: Drink[] | null = Array.isArray(updates.signature_drinks)
     ? (updates.signature_drinks as Drink[])
     : null;
+  let acceptedExtras: Drink[] = [];
   if (newDrinks) {
     const allowed = Math.max(packageDrinkCount(current.package), currentDrinks.length);
-    if (newDrinks.length > allowed) {
+    // The client said yes to the extra drink question on their page: priced at $50 each (prepareUpdate).
+    if (partial[ACCEPT_EXTRA_DRINKS] === true && newDrinks.length > allowed) {
+      acceptedExtras = newDrinks.slice(allowed);
+    } else if (newDrinks.length > allowed) {
       const extra = newDrinks.slice(allowed);
       requests.push({
         field: "manager_request",
@@ -669,8 +677,10 @@ export function planUpdate(
   }
 
   return {
-    next: applyChanges(current, kept),
+    // Once every drink has its recipe the menu is finished, and its team note comes off.
+    next: kept.length > 0 ? settleDrinkFlags(applyChanges(current, kept)) : applyChanges(current, kept),
     applied: row(kept, true, true),
+    acceptedExtras: kept.some((c) => c.field.startsWith("signature_drinks")) ? acceptedExtras : [],
     requests: row(keptRequests, false, null),
     cutoffChanges,
     diveMenuSet,

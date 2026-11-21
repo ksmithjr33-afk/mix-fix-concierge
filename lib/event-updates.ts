@@ -29,6 +29,7 @@ import {
   toCount,
   withHoursBooked,
   money,
+  DEFAULT_DEPOSIT,
   type BookedPrice,
   type PendingChange,
   type PriceChange,
@@ -42,6 +43,7 @@ import { autoSendOn, holdChange, listWouldChange } from "@/lib/client-list-db";
 import { bookingFill } from "@/lib/booking-webhook";
 import { syncDiveMenuPickup } from "@/lib/dive-menu-pickup-db";
 import { present, withBlankBookingFields } from "@/lib/blank";
+import { ACCEPT_EXTRA_DRINKS, EXTRA_DRINK_PRICE, clearUnconfirmed, hasRecipe, notFinalizedNote, unconfirmedDrinks, withTeamNotes } from "@/lib/team-notes";
 
 export const SESSION_COLUMNS =
   "id, name, email, event_date, package_type, guest_count, event_name, hours_booked, status, event_data, version, submitted_at, updated_at";
@@ -351,7 +353,52 @@ function prepareUpdate(
     }
   }
 
+  // Drinks past the package count the client said yes to on their page: $50 each, on top of any other price change.
+  if (plan.acceptedExtras.length > 0 && applied) {
+    if (!booked) ({ booked, computed: bookedComputed } = resolveBookedPrice(session, current));
+    price = extraDrinksPrice(plan.acceptedExtras, price, booked, { pending: !!session.price_pending, version: session.version, now: options.now });
+  }
+
   return { current, deadlines, applied, requests: plan.requests, next, price, booked, bookedComputed, cutoffChanges: plan.cutoffChanges, diveMenuSet: plan.diveMenuSet, diveCardRefused: plan.diveCardRefused, diveCardOverMax: plan.diveCardOverMax };
+}
+
+/**
+ * The price of the extra drinks the client said yes to, added to the price of
+ * anything else in the same update. Unpriced (our team confirms it) when the
+ * booked total is unknown or an earlier change is still waiting for its price.
+ */
+export function extraDrinksPrice(
+  drinks: { name?: string }[],
+  other: PriceChange | null,
+  booked: BookedPrice | null,
+  o: { pending: boolean; version?: number; now?: Date }
+): PriceChange {
+  const add = EXTRA_DRINK_PRICE * drinks.length;
+  const names = drinks.map((d) => d.name || "Drink").join(", ");
+  const change: FieldChange = { field: "additional_drinks", old: null, new: names };
+  const label = `Additional drink${drinks.length === 1 ? "" : "s"}: ${names} ($${EXTRA_DRINK_PRICE} each)`;
+  const baseTotal = other ? other.new_total : (booked?.total ?? null);
+  const baseAmount = other ? other.amount : 0;
+  const known = !o.pending && baseTotal !== null && baseAmount !== null;
+  const amount = known ? baseAmount! + add : null;
+  const newTotal = known ? baseTotal! + add : null;
+  const pkg = other ? other.package_price : (booked?.package_price ?? null);
+  return {
+    changes: [...(other?.changes ?? []), change],
+    ...(other?.implied ? { implied: other.implied } : {}),
+    requested_at: other?.requested_at ?? (o.now ?? new Date()).toISOString(),
+    base_version: other?.base_version ?? o.version,
+    amount,
+    new_total: newTotal,
+    package_price: known && pkg !== null ? pkg + add : null,
+    gratuity: known ? (other ? other.gratuity : (booked?.gratuity ?? null)) : null,
+    price_text: priceText(amount, newTotal),
+    summary: [other?.summary, label].filter(Boolean).join("; "),
+    basis: other?.basis ?? booked?.basis ?? null,
+    class49_applied: other?.class49_applied ?? false,
+    booked_total: other?.booked_total ?? booked?.total ?? null,
+    deposit_paid: other?.deposit_paid ?? booked?.deposit_paid ?? DEFAULT_DEPOSIT,
+  };
 }
 
 /**
@@ -667,6 +714,8 @@ export function requestParts(
       if ((UPDATABLE_FIELDS as readonly string[]).includes(key)) out[key] = after[key];
     }
   }
+  // A yes to the extra drink question stays a yes when an admin approves the request.
+  if (partial[ACCEPT_EXTRA_DRINKS] === true && "signature_drinks" in out) out[ACCEPT_EXTRA_DRINKS] = true;
   return { partial: out, changes: [...heldApplied, ...cutoff] };
 }
 
@@ -693,4 +742,70 @@ export async function changesSince(
     totalBefore: priced[0]?.booked_total ?? null,
     totalAfter: priced.at(-1)?.new_total ?? null,
   };
+}
+
+/**
+ * Change only the fields our team reads (team notes, the extra drinks waiting
+ * for an answer). Not a client change: no version bump, no history row.
+ */
+export async function setInternal(sessionId: string, fn: (ed: EventData) => EventData): Promise<EventData | null> {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const session = await getSession(sessionId);
+    if (!session?.event_data) return null;
+    const next = fn(session.event_data);
+    if (JSON.stringify(next) === JSON.stringify(session.event_data)) return next;
+    const { data, error } = await supabase
+      .from("sessions")
+      .update({ event_data: next })
+      .eq("id", sessionId)
+      .eq("version", session.version)
+      .select("id");
+    if (error) throw new Error(`sessions update failed: ${error.message}`);
+    if (data && data.length > 0) return next;
+  }
+  return null;
+}
+
+export type ExtraDrinkAnswer =
+  | { ok: true; kind: "declined"; eventData: EventData }
+  | { ok: true; kind: "added" | "requested"; eventData: EventData; result: ApplyResult }
+  | { ok: false; error: string; status: number };
+
+/**
+ * The client answered "Add it for $50?" on their page. Yes adds the drinks
+ * the normal way: a priced change ($50 each) that applies now, or inside six
+ * days a request for our team to approve. No drops them. Either way the team
+ * note says what they answered.
+ */
+export async function answerExtraDrinks(sessionId: string, accept: boolean, now?: Date): Promise<ExtraDrinkAnswer> {
+  const session = await getSession(sessionId);
+  if (!session || session.status !== "submitted" || !session.event_data) return { ok: false, error: "We could not find your event.", status: 404 };
+  const extras = unconfirmedDrinks(session.event_data);
+  if (extras.length === 0) return { ok: false, error: "That question was already answered.", status: 409 };
+  const names = extras.map((d) => String(d.name ?? "")).join(", ");
+
+  if (!accept) {
+    const saved = await setInternal(sessionId, (ed) => clearUnconfirmed(ed, `Client said no to the additional drink: ${names}.`));
+    if (!saved) return { ok: false, error: "Could not save. Try again.", status: 500 };
+    return { ok: true, kind: "declined", eventData: saved };
+  }
+
+  const current = Array.isArray(session.event_data.signature_drinks) ? (session.event_data.signature_drinks as unknown[]) : [];
+  const result = await applyEventUpdate(sessionId, { signature_drinks: [...current, ...extras], [ACCEPT_EXTRA_DRINKS]: true }, { now });
+  if (!result || result.requestFailed) return { ok: false, error: "That did not go through. Try again, or text us.", status: 500 };
+  const added = result.rows.some((r) => r.applied && r.changes.some((c) => c.field.startsWith("signature_drinks")));
+  // Inside six days it waits for an admin; on a Dive Bar menu card a manager handles extra classics.
+  const requested = !added && (!!result.held || result.rows.some((r) => !r.applied && r.changes.some((c) => c.field === "manager_request")));
+  if (!added && !requested) return { ok: false, error: "That did not go through. Try again, or text us.", status: 500 };
+  const unfinished = extras.some((d) => !hasRecipe(d));
+  const saved = await setInternal(sessionId, (ed) => {
+    let out = clearUnconfirmed(
+      ed,
+      `Client said yes to the additional drink: ${names} ($${EXTRA_DRINK_PRICE} each).${requested ? " Sent as a change request for approval (inside six days)." : ""}`
+    );
+    // A drink kept from before its recipe was saved: the menu still needs finishing.
+    if (added && unfinished) out = { ...withTeamNotes(out, [notFinalizedNote(names.split(", "))]), drinks_not_finalized: true };
+    return out;
+  });
+  return { ok: true, kind: added ? "added" : "requested", eventData: saved ?? result.eventData, result };
 }

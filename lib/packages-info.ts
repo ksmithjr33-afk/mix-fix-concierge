@@ -61,7 +61,41 @@ export interface BookingShort {
  * page and both concierge prompts describe a package with this, so a package
  * reads the same everywhere. Never more than five bullets.
  */
-export function packageShortFor(name: unknown, booking?: BookingShort): PackageShort | null {
+export function packageShortFor(name: unknown, booking?: BookingShort, voice: PackageVoice = "team"): PackageShort | null {
+  const s = packageShortTeam(name, booking);
+  return s && voice === "client" ? clientVoiceShort(s) : s;
+}
+
+/**
+ * Who reads the wording. "team" (admin, staff, planner pages, the concierge
+ * prompts): "The client provides the alcohol." "client" (the client's own
+ * event page): "You provide the alcohol."
+ */
+export type PackageVoice = "team" | "client";
+
+/** One line of the package wording, spoken to the client. */
+export function toClientVoice(line: string): string {
+  return line
+    .replace(/\bThe client provides\b/g, "You provide")
+    .replace(/\bthe client provides\b/g, "you provide")
+    .replace(/\bThe client's\b/g, "Your")
+    .replace(/\bthe client's\b/g, "your")
+    .replace(/\bThe client\b/g, "You")
+    .replace(/\bthe client\b/g, "you")
+    .replace(/\bfor the couple\b/g, "for the two of you")
+    .replace(/\bif they want\b/g, "if you want")
+    .replace(/\btheir own\b/g, "your own")
+    .replace(/\bThey\b/g, "You")
+    .replace(/\bthey\b/g, "you")
+    .replace(/\btheir\b/g, "your")
+    .replace(/\bTheir\b/g, "Your");
+}
+
+function clientVoiceShort(s: PackageShort): PackageShort {
+  return { line: toClientVoice(s.line), bullets: s.bullets.map(toClientVoice), provides: toClientVoice(s.provides) };
+}
+
+function packageShortTeam(name: unknown, booking?: BookingShort): PackageShort | null {
   const g = packageGuide(name);
   if (!g) return null;
   if (!booking) return { ...g.short, bullets: g.short.bullets.slice(0, MAX_PACKAGE_BULLETS) };

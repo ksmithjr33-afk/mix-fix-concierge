@@ -10,6 +10,8 @@
 // column below or listed in SESSION_ONLY_FIELDS, so a new field fails the test
 // until someone decides where it goes.
 
+import { teamEventData } from "@/lib/team-notes";
+
 /** Every column of public.events in the live database (checked 2026-11-13). */
 export const EVENTS_COLUMNS = [
   "id", "created_at", "client_name", "email", "event_type", "event_name", "event_date", "venue_type", "event_address",
@@ -29,7 +31,9 @@ export const SESSION_ONLY_FIELDS = ["payment_preference", "change_approval_neede
 const COLUMNS = new Set<string>(EVENTS_COLUMNS);
 
 /** The payload with only events columns, and the keys that were left out. */
-export function eventsInsertRow(payload: Record<string, unknown>): { row: Record<string, unknown>; dropped: string[] } {
+export function eventsInsertRow(input: Record<string, unknown>): { row: Record<string, unknown>; dropped: string[] } {
+  // The flat copy keeps special requests and team notes together, as before team notes had their own field.
+  const payload = teamEventData(input);
   const row: Record<string, unknown> = {};
   const dropped: string[] = [];
   for (const [key, value] of Object.entries(payload)) {

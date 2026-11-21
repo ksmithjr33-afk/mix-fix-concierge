@@ -13,6 +13,7 @@ import { recapLines, type FieldChange } from "@/lib/event-diff";
 import { chicagoStamp, eventDayStart, eventSchedule, formatClock, longDate } from "@/lib/team/time";
 import { eventData, marketLabel, sessionMarket } from "@/lib/team/markets";
 import { isAdminRole, type Role } from "@/lib/team/roles";
+import { teamRequestsText } from "@/lib/team-notes";
 
 export const MIX_FIX_LINE = "469 754 8512";
 export const PHONE_HIDDEN_NOTE = "Contact number appears 48 hours before the event.";
@@ -274,7 +275,8 @@ export function buildStaffEventView(
     beerAndWine: [beerWine, ed.client_providing_beer_wine === true ? "client is bringing it" : "", scrub(ed.beer_and_wine_details)]
       .filter(Boolean)
       .join(", "),
-    specialRequests: scrub(ed.special_requests),
+    // Special requests and team notes together, as the team has always seen them.
+    specialRequests: scrub(teamRequestsText(ed)),
     bottleNote: ed.extra_bottles && !isBottleRequest(ed.extra_bottles) && !/^(no|none|n\/a)\.?$/i.test(text(ed.extra_bottles)) ? scrub(ed.extra_bottles) : "",
     drinks,
     classics: setMenu ? classicsMenu({ dive: true }) : menuCard ? classicsMenu({ dive: true, skip: drinks.map((d) => d.name) }) : null,

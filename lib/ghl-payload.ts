@@ -13,12 +13,15 @@ import {
 } from "@/lib/shopping-list";
 import { toIsoEventDate } from "@/lib/event-date";
 import { generateIsabelSummary } from "@/lib/isabel-summary";
+import { teamEventData } from "@/lib/team-notes";
 
 // event_data is the model's tool input, so it is loosely typed by nature.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type LooseEventData = Record<string, any>;
 
-export function buildEventFields(eventData: LooseEventData) {
+export function buildEventFields(raw: LooseEventData) {
+  // GHL gets special requests and team notes together, as it always has.
+  const eventData = teamEventData(raw);
   let shoppingListNote = "";
   let shoppingListEmail = "";
   let graphicDesignerBrief = "";

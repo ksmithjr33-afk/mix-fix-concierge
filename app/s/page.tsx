@@ -11,6 +11,8 @@ import { clientPlannersCard, clientLinkBlocked } from "@/lib/partners/client-vie
 import { surpriseOn, type EventSession } from "@/lib/partners/db";
 import { SURPRISE_LABEL } from "@/lib/partners/surprise";
 import { isBlank } from "@/lib/blank";
+import { clientAsks, clientEventData } from "@/lib/team-notes";
+import { packageDrinkCount } from "@/lib/event-diff";
 
 // The booking fields /chat takes as query params for intake.
 const INTAKE_PARAMS = [
@@ -123,7 +125,9 @@ export default async function ShortRedirectPage({
       <UpdateMode
         sessionId={sessionId}
         clientName={(data.event_data.client_name as string) || data.name}
-        initialEventData={data.event_data}
+        // Never the team notes or the extra drinks waiting for an answer: only what the client should see.
+        initialEventData={clientEventData(data.event_data)}
+        initialAsks={clientAsks(data.event_data, packageDrinkCount(data.event_data.package))}
         initialVersion={data.version}
         initialUpdatedAt={data.updated_at ?? data.submitted_at}
         initialMessages={Array.isArray(log?.update_messages) ? log.update_messages : []}
