@@ -6,6 +6,7 @@
 // Pure, no database, no server imports.
 
 import { formatClock, parseClock } from "@/lib/team/time";
+import { isBlank, present } from "@/lib/blank";
 
 /** "6:00 PM" from "6pm", "18:00", or "6:00 PM". Null when it is not a time. */
 function startTime(v: unknown): string | null {
@@ -18,6 +19,7 @@ function startTime(v: unknown): string | null {
  * higher end, the number the concierge has always planned for. Null when none.
  */
 export function bookedGuestCount(v: unknown): number | null {
+  if (isBlank(v)) return null;
   const nums = (String(v ?? "").match(/\d+/g) ?? []).map(Number).filter((n) => n > 0);
   return nums.length ? Math.max(...nums) : null;
 }
@@ -59,7 +61,8 @@ export function contextFields(content: string): Record<string, string> {
     const from = (m.index ?? 0) + m[0].length;
     const to = i + 1 < hits.length ? hits[i + 1].index ?? body.length : body.length;
     const value = body.slice(from, to).trim();
-    if (value && !(m[1] in out)) out[m[1]] = value;
+    // "Event date: null" from an older chat: missing, never a value.
+    if (!isBlank(value) && !(m[1] in out)) out[m[1]] = value;
   });
   return out;
 }
@@ -68,10 +71,7 @@ const count = (v: unknown): number | null => {
   const n = Number(String(v ?? "").replace(/[^\d.]/g, ""));
   return Number.isFinite(n) && n > 0 ? n : null;
 };
-const text = (v: unknown): string | null => {
-  const s = typeof v === "string" || typeof v === "number" ? String(v).trim() : "";
-  return s ? s : null;
-};
+const text = (v: unknown): string | null => (typeof v === "string" || typeof v === "number" ? present(v) : null);
 
 /** The booked facts from the session row, filled in from the CONTEXT message where the row has none. */
 export function bookedFacts(session: Record<string, unknown> | null | undefined, messages: { role: string; content: unknown }[] = []): BookedFacts {

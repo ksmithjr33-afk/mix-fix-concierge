@@ -30,6 +30,14 @@ export const submitEventDataTool: Anthropic.Tool = {
       bar_details: { type: "string" },
       parking_info: { type: "string" },
       guest_count: { type: "number" },
+      drinks_finalized: {
+        type: "boolean",
+        description: "false when the client skipped or postponed the drink details (send the drink names they gave in signature_drinks). The plan still submits, marked Drinks not finalized, and our team texts them to finish the menu. Leave it out or true when every drink is complete.",
+      },
+      extra_drinks_accepted: {
+        type: "boolean",
+        description: "true only when the client named more drinks than the package includes AND clearly said yes to paying $50 for each extra one. Without it, drinks past the package count are held back for our team to confirm.",
+      },
       barback: {
         type: "string",
         enum: ["Included", "Removed"],

@@ -629,7 +629,8 @@ ai.script.reply = () => [{ type: "text", text: `Welcome! ${ROLE_Q}` }];
 let g: Msg[] = [CTX, { role: "user", content: "Hi" }];
 await clientTurn("g1", g);
 const firstSys = sysText(ai.calls.at(-1));
-check("B2: right after the greeting, one question with three answers, word for word", firstSys.includes(`right after your greeting and before any event question, ask exactly: "${ROLE_Q}"`) && !firstSys.includes("Are you planning this for yourself"));
+// A birthday has a guest of honor, so the role question comes right after the greeting (and the opening summary check).
+check("B2: right after the greeting, one question with three answers, word for word", firstSys.includes(`Right after your greeting (and after the OPENING SUMMARY check, if there is one), before any other event question, ask exactly: "${ROLE_Q}"`) && !firstSys.includes("Are you planning this for yourself"));
 check("B2: the concierge can save the answer the moment it is given", toolNames(ai.calls.at(-1)).includes("save_planning_role"));
 g = [...g, { role: "assistant", content: `Welcome! ${ROLE_Q}` }, { role: "user", content: "I am the guest of honor" }];
 ai.script.reply = () => [{ type: "text", text: "Happy birthday! What is your full name?" }, ai.toolUse("save_planning_role", { role: "guest_of_honor" })];
@@ -832,7 +833,7 @@ db.sessions.push(intakeRow("sp3", { is_surprise: true, honoree_name: "Maya Field
 const cp = await planning.savePlanningRole("sp3", { private_phone: "214 555 0155" });
 check("B3: the honoree's number is refused as the client phone", cp.refused === surprise.honoreeRefusal("client phone"));
 ai.calls.length = 0;
-ai.script.reply = (p) => (p.tool_choice?.type === "none" ? [{ type: "text", text: surprise.honoreeRefusal("client phone") }] : [{ type: "text", text: "Thanks!" }, ai.toolUse("save_planning_role", { private_phone: "2145550155" })]);
+ai.script.reply = (p) => (p.tool_choice?.type === "none" ? [{ type: "text", text: `${surprise.honoreeRefusal("client phone")} What is a different number we can reach you at?` }] : [{ type: "text", text: "Thanks!" }, ai.toolUse("save_planning_role", { private_phone: "2145550155" })]);
 const cpChat = await clientTurn("sp3", [CTX, { role: "user", content: "Hi" }, { role: "assistant", content: PRIVATE_Q }, { role: "user", content: "214 555 0155" }]);
 const cpSaved = ((db.conversation_logs ?? []).find((c) => c.session_id === "sp3") as { messages: Msg[] }).messages.at(-1)?.content ?? "";
 check("B3: ...and the concierge says why", ai.calls.length === 2 && JSON.stringify(ai.calls[1].messages).includes("cannot be saved as the client phone") && cpChat.includes("data:") && cpSaved.includes("cannot be saved as the client phone"));
@@ -901,7 +902,8 @@ await pdb.linkPlanner(S("cw1"), cwP.partner, { via: "staff", by: staffActor(ADMI
 const cwTok = await signInPartner(PLANNER3_PHONE);
 const base3: Msg[] = [CTX, { role: "user", content: "Hi" }, { role: "assistant", content: "Hello! Who is the wedding for?" }];
 db.conversation_logs = [{ id: "cl1", session_id: "cw1", messages: base3, updated_at: "2026-01-01T00:00:00.000Z" }];
-ai.script.reply = (p) => [{ type: "text", text: `Reply to: ${lastUser(p)}` }];
+// Real replies end with the next question (the route adds one otherwise).
+ai.script.reply = (p) => [{ type: "text", text: `Reply to: ${lastUser(p)}?` }];
 const clientWrite = clientTurn("cw1", [...base3, { role: "user", content: "Client says tacos" }]);
 const plannerWrite = asPartner(cwTok, () => partnerChatRoute.POST(new Request("http://plan.test/api/partners/chat", { method: "POST", body: JSON.stringify({ key: S("cw1").partner_key, text: "Planner says mezcal" }) })).then((r) => r.text()));
 await Promise.all([clientWrite, plannerWrite]);
@@ -909,13 +911,13 @@ const cwLog = () => ((db.conversation_logs ?? []).find((c) => c.session_id === "
 const cwText = cwLog().map((x) => x.content);
 check(
   "C: two writers at once: every turn from both is kept",
-  ["Client says tacos", "Reply to: Client says tacos", "Planner says mezcal", "Reply to: Planner says mezcal"].every((t) => cwText.includes(t)) && cwText.length === base3.length + 4,
+  ["Client says tacos", "Reply to: Client says tacos?", "Planner says mezcal", "Reply to: Planner says mezcal?"].every((t) => cwText.includes(t)) && cwText.length === base3.length + 4,
   cwText.join(" | ")
 );
 check("C: ...and the planner's turn is still marked as theirs", cwLog().some((x) => x.content === "Planner says mezcal" && x.by?.partnerId === cwP.partner.id));
-await clientTurn("cw1", [...base3, { role: "user", content: "Client says tacos" }, { role: "assistant", content: "Reply to: Client says tacos" }, { role: "user", content: "Client again" }]);
+await clientTurn("cw1", [...base3, { role: "user", content: "Client says tacos" }, { role: "assistant", content: "Reply to: Client says tacos?" }, { role: "user", content: "Client again" }]);
 const cwText2 = cwLog().map((x) => x.content);
-check("C: the client saving from a view without the planner's turns drops nothing and repeats nothing", cwText2.includes("Planner says mezcal") && cwText2.includes("Reply to: Planner says mezcal") && cwText2.includes("Client again") && cwText2.length === base3.length + 6 && new Set(cwText2).size === cwText2.length);
+check("C: the client saving from a view without the planner's turns drops nothing and repeats nothing", cwText2.includes("Planner says mezcal") && cwText2.includes("Reply to: Planner says mezcal?") && cwText2.includes("Client again") && cwText2.length === base3.length + 6 && new Set(cwText2).size === cwText2.length);
 // A deterministic race: the planner's save lands between the client's read and the client's write.
 const { guards } = await import("./fake-supabase.mts");
 let raced = false;
@@ -930,7 +932,7 @@ guards.push((table, op, rows) => {
 await clientTurn("cw1", [...cwLog().filter((x) => !x.content.includes("sneaks")), { role: "user", content: "Client last word" }]);
 guards.length = 0;
 const cwText3 = cwLog().map((x) => x.content);
-check("C: a save that races another save keeps both: the late writer reads again and appends", raced && cwText3.includes("Planner sneaks in") && cwText3.includes("Reply to: Planner sneaks in") && cwText3.includes("Client last word") && cwText3.includes("Reply to: Client last word") && new Set(cwText3).size === cwText3.length, cwText3.join(" | "));
+check("C: a save that races another save keeps both: the late writer reads again and appends", raced && cwText3.includes("Planner sneaks in") && cwText3.includes("Reply to: Planner sneaks in") && cwText3.includes("Client last word") && cwText3.includes("Reply to: Client last word?") && new Set(cwText3).size === cwText3.length, cwText3.join(" | "));
 check("C: the save reads the stored messages again and only lands if nobody saved in between", src("app/api/chat/route.ts").includes("mergeChatTurns(row.messages, messages)") && src("app/api/chat/route.ts").includes('q.eq("updated_at", row.updated_at)'));
 
 // =====================================================================

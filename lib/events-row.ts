@@ -23,7 +23,8 @@ export const EVENTS_COLUMNS = [
 ] as const;
 
 /** Event fields that are kept on the session (event_data) only, with no events column. */
-export const SESSION_ONLY_FIELDS = ["payment_preference", "change_approval_needed", "hours_booked", "barback", "dive_menu_card"] as const;
+// drinks_finalized and extra_drinks_accepted are read at submission (checkDrinks, lib/intake-plan.ts) and never saved.
+export const SESSION_ONLY_FIELDS = ["payment_preference", "change_approval_needed", "hours_booked", "barback", "dive_menu_card", "drinks_finalized", "extra_drinks_accepted"] as const;
 
 const COLUMNS = new Set<string>(EVENTS_COLUMNS);
 

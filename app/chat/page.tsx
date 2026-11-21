@@ -1,5 +1,6 @@
 "use client";
 
+import { present } from "@/lib/blank";
 import { useState, useRef, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import MenuCards from "@/app/menu-card";
@@ -67,17 +68,19 @@ function ChatContent() {
     const startFresh = () => {
       const initialMessages: Message[] = [];
 
-      // Build context message from URL query parameters
-      const name = searchParams.get("name");
-      const email = searchParams.get("email");
-      const eventDate = searchParams.get("event_date");
-      const packageType = searchParams.get("package_type");
-      const guestCount = searchParams.get("guest_count");
-      const eventName = searchParams.get("event_name");
-      const hoursBooked = searchParams.get("hours_booked");
-      const eventType = searchParams.get("event_type");
-      const startTime = searchParams.get("bar_service_start");
-      const bartenderCount = searchParams.get("bartender_count");
+      // Build context message from URL query parameters. The text "null" (how
+      // GHL sends an empty field) is missing, never a value.
+      const param = (k: string) => present(searchParams.get(k));
+      const name = param("name");
+      const email = param("email");
+      const eventDate = param("event_date");
+      const packageType = param("package_type");
+      const guestCount = param("guest_count");
+      const eventName = param("event_name");
+      const hoursBooked = param("hours_booked");
+      const eventType = param("event_type");
+      const startTime = param("bar_service_start");
+      const bartenderCount = param("bartender_count");
 
       if (name || email || eventDate || packageType || guestCount || eventName || hoursBooked || eventType || startTime || bartenderCount) {
         const parts: string[] = [];

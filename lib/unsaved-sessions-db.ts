@@ -1,5 +1,6 @@
 // Reads for the admin save alerts (lib/unsaved-sessions.ts). Server only.
-// Looks back 30 days; reads only the last message of each conversation.
+// Looks back 30 days. Reads each conversation's messages to see whether the
+// closing line went out anywhere in it, not only as the last message.
 
 import { supabase } from "@/lib/supabase";
 import { hiddenEventIds } from "@/lib/team/hidden";
@@ -8,7 +9,7 @@ import { pricePendingList, type PricePendingAlert } from "@/lib/price-pending-db
 import { staleBookings, type ClientRow, type StaleBooking } from "@/lib/client-history";
 import { guestCountFlag } from "@/lib/intake-guests";
 import type { SessionRow } from "@/lib/event-updates";
-import { bookedWithPastDate, finishedNotSaved, type LogTail, type PastDateSession, type SessionState, type UnsavedSession } from "@/lib/unsaved-sessions";
+import { bookedWithPastDate, finishedNotSaved, sentClosing, type LogTail, type PastDateSession, type SessionState, type UnsavedSession } from "@/lib/unsaved-sessions";
 
 const LOOKBACK_DAYS = 30;
 
@@ -30,7 +31,7 @@ export interface GuestCountAlert {
 export async function saveAlerts(now: Date = new Date(), sharedRows?: Promise<ClientRow[]>): Promise<SaveAlerts> {
   const since = new Date(now.getTime() - LOOKBACK_DAYS * 86_400_000).toISOString();
   const [logsRes, submittedRes, hidden, clientRows, pricePending] = await Promise.all([
-    supabase.from("conversation_logs").select("session_id, client_name, status, updated_at, last:messages->-1").gte("updated_at", since),
+    supabase.from("conversation_logs").select("session_id, client_name, status, updated_at, messages").gte("updated_at", since),
     supabase.from("sessions").select("id, name, status, event_data, event_date, submitted_at, created_at, guest_count, price_pending").eq("status", "submitted").gte("submitted_at", since),
     hiddenEventIds(),
     sharedRows ?? allClientRows(),
@@ -39,8 +40,11 @@ export async function saveAlerts(now: Date = new Date(), sharedRows?: Promise<Cl
   if (logsRes.error) throw new Error(`conversation_logs read failed: ${logsRes.error.message}`);
   if (submittedRes.error) throw new Error(`sessions read failed: ${submittedRes.error.message}`);
 
-  // The test database returns whole rows, so fall back to the last of messages there.
-  const logs = ((logsRes.data as unknown as (LogTail & { messages?: LogTail["last"][] })[]) ?? []).map((l) => ({ ...l, last: l.last ?? l.messages?.at(-1) ?? null }));
+  const logs = ((logsRes.data as unknown as (Omit<LogTail, "last"> & { messages?: LogTail["last"][] | null })[]) ?? []).map(({ messages, ...l }) => ({
+    ...l,
+    last: messages?.at(-1) ?? null,
+    closed: sentClosing(messages as { role?: string; content?: unknown }[] | null),
+  }));
   const ids = [...new Set(logs.map((l) => l.session_id))];
   const sessions: SessionState[] = [];
   for (let i = 0; i < ids.length; i += 150) {

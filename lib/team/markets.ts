@@ -6,6 +6,7 @@
 import { distanceMeters, type LatLng } from "@/lib/team/clock";
 import { TZ, TZ_KEY } from "@/lib/team/time";
 import { cityFallback } from "@/lib/booking-webhook";
+import { isBlank } from "@/lib/blank";
 
 export const MARKETS = ["dallas", "austin", "houston", "los_angeles"] as const;
 export type Market = (typeof MARKETS)[number];
@@ -84,7 +85,9 @@ export function sessionMarket(s: object): Market | null {
  */
 export function eventData(s: { event_date?: string | null; event_data: Record<string, unknown> | null }): Record<string, unknown> {
   const ed: Record<string, unknown> = { ...(s.event_data ?? {}) };
-  if (!ed.event_date && s.event_date) ed.event_date = s.event_date;
+  // The text "null" (how GHL sent an empty date) is no date at all.
+  if (isBlank(ed.event_date)) delete ed.event_date;
+  if (!ed.event_date && !isBlank(s.event_date)) ed.event_date = String(s.event_date).trim();
   ed[TZ_KEY] = marketTz(sessionMarket(s));
   // Planner held events: the title rule's keys (see lib/team/event-list.ts). Absent before the partners migration.
   const b = s as { booking_holder?: string | null; host_name?: string | null; planner_label?: string | null };

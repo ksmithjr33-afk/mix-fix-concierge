@@ -5,6 +5,7 @@
 
 import type Anthropic from "@anthropic-ai/sdk";
 import { firstWord } from "@/lib/partners/rules";
+import { HONOREE_EVENT_TYPES } from "@/lib/intake-plan";
 
 /** Who wrote a chat message. Untagged user messages are the client's. */
 export interface MessageAuthor {
@@ -123,7 +124,7 @@ export function withBookingFields(tool: Anthropic.Tool): Anthropic.Tool {
 export const savePlanningRoleTool: Anthropic.Tool = {
   name: "save_planning_role",
   description:
-    "Save who is planning, the moment they answer. Call it right after they answer the opening question (with role, and host_name once you have it), right after they answer the surprise question (with is_surprise and honoree_name), and right after they give their private number (with private_phone). Send only what they just told you. Write your reply text in the same turn.",
+    "Save who is planning, the moment they answer. Call it right after they answer the opening question (with role, and host_name once you have it), right after they answer the surprise question (with is_surprise and honoree_name), and right after they give their private number (with private_phone). Send only what they just told you. In the same turn, write your reply and end it with the next planning question, so the client always has something to answer.",
   input_schema: {
     type: "object",
     additionalProperties: false,
@@ -179,7 +180,16 @@ export const PRIVATE_NUMBER_QUESTION = "What is the best private number to reach
  * askRole false once it is answered or the booking already tells us; role is
  * the saved answer when there is one; askSurprise false once answered.
  */
-export function bookingQuestionsSection(o: { askRole: boolean; askPlanner: boolean; askSurprise?: boolean; role?: "guest_of_honor" | "someone_else" | "planner" | null; canSave?: boolean; eventType?: string | null }): string {
+export function bookingQuestionsSection(o: {
+  askRole: boolean;
+  askPlanner: boolean;
+  askSurprise?: boolean;
+  role?: "guest_of_honor" | "someone_else" | "planner" | null;
+  canSave?: boolean;
+  eventType?: string | null;
+  // Does this event have a guest of honor (lib/intake-plan.ts honoreeFit)? unknown: wait until they say what they are celebrating.
+  roleFit?: "ask" | "unknown";
+}): string {
   // Eligible: someone hosting for someone else or a planner (or not known yet), and not answered yet.
   const eligible = o.askSurprise ?? o.askRole;
   const fit = surpriseFit(o.eventType);
@@ -187,8 +197,13 @@ export function bookingQuestionsSection(o: { askRole: boolean; askPlanner: boole
   const save = o.canSave ? " Call save_planning_role with" : " Remember";
   const lines: string[] = ["WHO IS PLANNING:"];
   if (o.askRole) {
+    const honoree = HONOREE_EVENT_TYPES.map((e) => e.type).join(", ");
+    const when =
+      o.roleFit === "unknown"
+        ? `Know what kind of event it is first: if you do not know yet, ask what they are celebrating (after the OPENING SUMMARY check, if there is one). Only if it is an event with a guest of honor (${honoree}) ask exactly: "${ROLE_QUESTION}" right after they tell you. For any other kind of event (a holiday party, a corporate event, a gathering with friends) never ask it and never call save_planning_role: just ask the working with a planner question once, later, as described below.`
+        : `Right after your greeting (and after the OPENING SUMMARY check, if there is one), before any other event question, ask exactly: "${ROLE_QUESTION}"`;
     lines.push(
-      `In your FIRST reply, right after your greeting and before any event question, ask exactly: "${ROLE_QUESTION}" Ask it only once in the whole chat, and never again once they answered.${save} role as soon as they answer.`,
+      `${when} Ask it only once in the whole chat, and never again once they answered.${save} role as soon as they answer, and in that same reply ask the next planning question.`,
       'If they are the guest of honor, or hosting their own event: role "guest_of_honor". Continue as usual, and send booking_role "guest_of_honor" in submit_event_data.',
       `If they are hosting for someone else and are not a planner: role "someone_else". Ask who the event is for (that person's full name) and nothing else about them: never ask for that person's phone or email.${o.canSave ? " Call save_planning_role with host_name." : ""} Send booking_role "someone_else" and host_name in submit_event_data.`,
       'If they are a planner: role "planner". Ask who the event is for (the host\'s full name). From then on speak to them as the planner and talk about the event as the host\'s event (for example "Jordan\'s wedding"). Send booking_role "planner" and host_name in submit_event_data. Do not ask the working with a planner question.'

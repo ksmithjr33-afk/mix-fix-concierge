@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { parseBookingBody, readBooking } from "@/lib/booking-webhook";
+import { missingBookingFields, parseBookingBody, readBooking } from "@/lib/booking-webhook";
 import { insertBooking, payloadHash, recentDuplicate } from "@/lib/booking-webhook-db";
 
 // The GHL booking webhook. Every booking creates a new session: it is never
@@ -43,5 +43,8 @@ export async function POST(req: NextRequest) {
 
   const made = await insertBooking(booking, hash);
   if (!made.ok) return NextResponse.json({ error: "Failed to create session" }, { status: 500 });
+  // Every expected field that arrived missing (blank, "null", or a merge tag), so a gap on the booking side shows in the logs.
+  const gaps = missingBookingFields(booking);
+  if (gaps.length > 0) console.warn(`[create-session] session=${made.id}: booking arrived without ${gaps.join(", ")}`);
   return NextResponse.json({ id: made.id, url: link(made.id) });
 }

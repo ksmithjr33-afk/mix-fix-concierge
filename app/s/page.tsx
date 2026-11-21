@@ -10,6 +10,7 @@ import PlannersCard from "./planners-card";
 import { clientPlannersCard, clientLinkBlocked } from "@/lib/partners/client-view";
 import { surpriseOn, type EventSession } from "@/lib/partners/db";
 import { SURPRISE_LABEL } from "@/lib/partners/surprise";
+import { isBlank } from "@/lib/blank";
 
 // The booking fields /chat takes as query params for intake.
 const INTAKE_PARAMS = [
@@ -149,8 +150,9 @@ export default async function ShortRedirectPage({
   chatParams.set("session_id", sessionId);
   for (const key of INTAKE_PARAMS) {
     const value = data[key];
-    if (value != null && value !== "") {
-      chatParams.set(key, String(value));
+    // Never pass the text "null" on as a booking detail (GHL sends empty fields that way).
+    if (!isBlank(value)) {
+      chatParams.set(key, String(value).trim());
     }
   }
 

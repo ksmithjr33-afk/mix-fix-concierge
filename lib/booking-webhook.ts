@@ -1,14 +1,16 @@
 // The GHL booking webhook (/api/create-session): reading the body, cleaning
 // each field, and the package_summary fallback. Pure, no database.
 //
-// Every field is optional. Blank strings, whitespace, and unrendered merge
-// tags (anything still containing "{{") count as missing. Dedicated fields
+// Every field is optional. Blank strings, whitespace, unrendered merge tags
+// (anything still containing "{{"), and the text "null" or "undefined" (how GHL
+// sends an empty field) count as missing (lib/blank.ts). Dedicated fields
 // always win over what package_summary says, and the total price is never
 // read from the summary.
 
 import { parseTipJar } from "@/lib/price-change";
 import { normalizePhone } from "@/lib/team/codes";
 import { formatClock, parseClock } from "@/lib/team/time";
+import { isBlank } from "@/lib/blank";
 
 export { parseTipJar };
 
@@ -113,13 +115,36 @@ function parseForm(text: string): Record<string, unknown> | null {
 
 // ---------- fields ----------
 
-/** The text of a field, or null when it is missing: blank, whitespace, or an unrendered merge tag. */
+/** The text of a field, or null when it is missing: blank, whitespace, an unrendered merge tag, or the text "null" or "undefined". */
 export function clean(v: unknown): string | null {
-  if (v === null || v === undefined) return null;
-  if (typeof v === "object") return null;
-  const s = String(v).trim();
-  if (!s || s.includes("{{")) return null;
-  return s;
+  if (typeof v === "boolean") return String(v);
+  return isBlank(v) ? null : String(v).trim();
+}
+
+/**
+ * The booking fields we expect on every booking, by the payload key GHL sends.
+ * Any that arrive missing are logged when the session is created.
+ */
+export const EXPECTED_BOOKING_FIELDS: readonly { key: string; label: string; of: (b: Booking) => unknown }[] = [
+  { key: "contact_id", label: "GHL contact", of: (b) => b.contactId },
+  { key: "name", label: "name", of: (b) => b.name },
+  { key: "email", label: "email", of: (b) => b.email },
+  { key: "phone", label: "phone", of: (b) => b.phone },
+  { key: "event_date", label: "event date", of: (b) => b.eventDate },
+  { key: "start_time", label: "bar service start", of: (b) => b.startTime },
+  { key: "package_type", label: "package", of: (b) => b.packageType },
+  { key: "guest_count", label: "guest count", of: (b) => b.guestCount },
+  { key: "event_type", label: "event type", of: (b) => b.eventType },
+  { key: "hours_booked", label: "hours booked", of: (b) => b.hoursBooked },
+  { key: "bartender_count", label: "bartenders", of: (b) => b.bartenderCount },
+  { key: "total_price", label: "total price", of: (b) => b.totalCents },
+  { key: "city", label: "city", of: (b) => b.city },
+  { key: "state", label: "state", of: (b) => b.state },
+];
+
+/** The expected booking fields this booking is missing, by payload key. */
+export function missingBookingFields(b: Booking): string[] {
+  return EXPECTED_BOOKING_FIELDS.filter((f) => f.of(b) === null || f.of(b) === undefined).map((f) => f.key);
 }
 
 /** "$1,749.50" → 174950. Null when missing or not an amount. */

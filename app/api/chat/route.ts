@@ -35,7 +35,29 @@ import { quoteGuestCountTool, submitEventDataTool } from "@/lib/intake-tools";
 import { guestCountFlag, guestQuoteToolResult, quoteGuestCount, submitWithGuestCount } from "@/lib/intake-guests";
 import { createFillerFilter, pendingLines, PRICE_PENDING_CLIENT_MESSAGE, quotedAmount, unpriced, type PricePendingInfo } from "@/lib/price-pending";
 import { recordClientQuoted, textPricePending } from "@/lib/price-pending-db";
-import { bookedFacts, factsAsSession } from "@/lib/booked-facts";
+import { bookedFacts, contextFields, factsAsSession } from "@/lib/booked-facts";
+import { present } from "@/lib/blank";
+import { formatClock, parseClock } from "@/lib/team/time";
+import {
+  checkDrinks,
+  CLOSING_PATTERN,
+  closedEarlier,
+  createClaimFilter,
+  FORCE_SUBMIT_INSTRUCTION,
+  GENERIC_NEXT,
+  hasQuestion,
+  honoreeFit,
+  nextPlanStep,
+  openingSummarySection,
+  regenerateInstruction,
+  resultLine,
+  SAVE_FAILED_LINE,
+  type DrinkCheck,
+  type KnownBooking,
+  type PlanContext,
+  type SaveOutcome,
+} from "@/lib/intake-plan";
+import { alertDrinks, alertSaveFailed } from "@/lib/intake-alerts-db";
 import { bookingFill } from "@/lib/booking-webhook";
 import { currentPopularDrinks } from "@/lib/popular-drinks-db";
 import { popularForPrompt } from "@/lib/popular-drinks";
@@ -671,21 +693,25 @@ function whoIsPlanning(s: EventSession, bookedType: string | null): { text: stri
   const plannerAsked = s.planner_asked === true;
   // The surprise question is only for SURPRISE_EVENT_TYPES. The booking's type first; with none, the chat waits until the client says.
   const eventType = bookingEventType(s) || bookedType;
+  // The role question only makes sense when the event has a guest of honor (a birthday, a wedding, ...).
+  // A generic booking type (Social Gathering) waits until the client says what they are celebrating.
+  const fit = honoreeFit(eventType);
+  const roleFit = fit === "ask" ? ("ask" as const) : ("unknown" as const);
   if (!ready) {
     const ask = !holderPlanner && !plannerAsked;
-    return { text: bookingQuestionsSection({ askRole: ask, askPlanner: ask, eventType }), canSave: false };
+    return { text: bookingQuestionsSection({ askRole: ask && fit !== "skip", askPlanner: ask, eventType, roleFit }), canSave: false };
   }
   const surprise = surpriseOf(s);
   const known = planningRoleOf(s) ?? (holderPlanner ? "planner" : s.host_name ? "someone_else" : surprise.on ? "someone_else" : null);
-  const askRole = !known && !plannerAsked;
+  const askRole = !known && !plannerAsked && fit !== "skip";
   const askSurprise = !surprise.answered && (askRole || known === "someone_else" || known === "planner");
   const askPlanner = !holderPlanner && !plannerAsked && known !== "planner";
-  return { text: bookingQuestionsSection({ askRole, askSurprise, askPlanner, role: known, canSave: true, eventType }), canSave: true };
+  return { text: bookingQuestionsSection({ askRole, askSurprise, askPlanner, role: known, canSave: true, eventType, roleFit }), canSave: true };
 }
 
 /** The booking's event type: the session's event_type, then event_data.event_type. */
 function bookingEventType(s: EventSession): string | null {
-  const t = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : null);
+  const t = (v: unknown) => present(v);
   return t((s as { event_type?: unknown }).event_type) ?? t(s.event_data?.event_type);
 }
 
@@ -697,8 +723,31 @@ function surpriseReminder(s: EventSession, askPrivate: boolean): string {
   return `SURPRISE EVENT: this is a surprise for ${first}. Never suggest contacting ${first}, never ask for their phone or email, and never offer them access.${ask}`;
 }
 
+/** What the booking already told us, for the opening summary and the plan. Missing values ("null") stay missing. */
+function knownBooking(session: SessionRow | null, facts: ReturnType<typeof bookedFacts>, messages: ChatMessage[]): KnownBooking {
+  const first = messages[0];
+  const ctx = first?.role === "user" && typeof first.content === "string" ? contextFields(first.content) : {};
+  const s = (session ?? {}) as Record<string, unknown>;
+  const start = facts.startTime ? parseClock(facts.startTime) : null;
+  return {
+    name: present(s.name) ?? present(ctx["Client name"]),
+    eventDate: present(s.event_date) ?? present(ctx["Event date"]),
+    packageType: present(s.package_type) ?? present(ctx["Package"]),
+    guests: facts.guests ?? null,
+    hours: facts.hours,
+    startTime: facts.startTime,
+    endTime: start !== null && facts.hours ? formatClock(start + Math.round(facts.hours * 60)) : null,
+    bartenders: facts.bartenders,
+    eventType: facts.eventType ?? present(s.event_name),
+    city: present(s.event_city),
+    state: present(s.event_state),
+  };
+}
+
 export async function POST(request: Request) {
-  const { messages, sessionId, clientName, email, chatStartVersion } = await request.json();
+  const { messages: rawMessages, sessionId, clientName, email, chatStartVersion } = await request.json();
+  // An empty reply stored earlier (a turn that wrote nothing) is never sent back to the model.
+  const messages: ChatMessage[] = (Array.isArray(rawMessages) ? rawMessages : []).filter((m: ChatMessage) => typeof m?.content === "string" && m.content.trim() !== "");
   // A planner, checked by /api/partners/chat and attached in process. Null for every browser request here.
   const partner = partnerChatFor(request);
   const approvalOnly = !!partner && !partner.ctx.holdsBooking;
@@ -721,6 +770,7 @@ export async function POST(request: Request) {
   const booked = session?.booked_price ?? null;
   // What the booking already gave (start time, bartenders, event type) is never asked again.
   const facts = bookedFacts(session as unknown as Record<string, unknown> | null, messages);
+  const known = knownBooking(session, facts, messages);
   // The most popular lists the concierge answers "what is popular?" from (cached 10 minutes).
   const popular = await currentPopularDrinks().catch((err) => {
     console.error("popular drinks failed:", err);
@@ -742,6 +792,7 @@ export async function POST(request: Request) {
         // Who is planning: a planner, or the client asked once (only for a session we can record the answer on).
         people: [typeof people === "string" ? people : people.text, session ? surpriseReminder(session as EventSession, !partner) : ""].filter(Boolean).join("\n"),
         noPayment: approvalOnly,
+        opening: openingSummarySection(known),
         packageSection: session
           ? bookingPackageSection({ ...session, event_data: session.event_data ?? bookedEventFrom(session) }, String(session.package_type ?? ""), messages, approvalOnly ? "approval" : "intake", approvalOnly ? null : intakeBarbackQuote(session))
           : "",
@@ -757,13 +808,17 @@ export async function POST(request: Request) {
     role: m.role as "user" | "assistant",
     content: partner && !partner.money.total ? hideMoney(m.content) : m.content,
   }));
-  const stream = anthropic.messages.stream({
-    model: "claude-sonnet-4-6",
-    max_tokens: 8192,
-    system,
-    tools,
-    messages: history,
-  });
+  // What the code knows about the plan, to work out the next unanswered item.
+  const planContext: PlanContext = {
+    packageType: known.packageType,
+    booking: known,
+    planningRole: session ? planningRoleOf(session as EventSession) : null,
+    plannerAsked: (session as EventSession | null)?.planner_asked === true || (session as EventSession | null)?.booking_holder === "planner",
+    noPayment: approvalOnly,
+  };
+  // The chat already sent the closing line but nothing was submitted (the model skipped the tool):
+  // this turn submits right away instead of chatting on, so the client is never told "submitted" falsely.
+  const submitFirst = !!sessionId && !!session && closedEarlier(messages);
 
   const encoder = new TextEncoder();
 
@@ -778,89 +833,134 @@ export async function POST(request: Request) {
         },
         (menu) => controller.enqueue(encoder.encode(`data: ${JSON.stringify({ event: "menu", menu })}\n\n`))
       );
+      // Our own words (the result of the final save, a missing question): straight to the client.
+      const say = (t: string) => {
+        const chunk = fullText.trim() ? `\n\n${t}` : t;
+        fullText += chunk;
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ text: chunk })}\n\n`));
+      };
       // The recommendation invite: once, with the first menu, never repeated.
       const used = inviteUsed(messages);
       const invite = createInviteFilter(used, (t) => menuFilter.push(t));
       // With the guest count tool, "Let me get a price" never reaches the client: the price is never in that sentence.
       let filler = guestTool ? createFillerFilter((t) => invite.push(t)) : null;
-      const push = (t: string) => (filler ? filler.push(t) : invite.push(t));
-      try {
-        for await (const event of stream) {
-          if (
-            event.type === "content_block_delta" &&
-            event.delta.type === "text_delta"
-          ) {
-            push(event.delta.text);
-          }
-        }
+      // The model never says the plan was submitted: only the real result does (resultLine).
+      let claims = createClaimFilter((t) => (filler ? filler.push(t) : invite.push(t)));
+      const push = (t: string) => claims.push(t);
+      const flushModelText = () => {
+        claims.finish();
         filler?.finish();
         invite.finish();
-
-        // Inspect the assembled message for the completion tool call.
-        const finalMessage = await stream.finalMessage();
-        const toolUse = finalMessage.content.find(
-          (block): block is Anthropic.ToolUseBlock =>
-            block.type === "tool_use" && block.name === "submit_event_data"
-        );
-        const quoteUse = finalMessage.content.find(
-          (block): block is Anthropic.ToolUseBlock => block.type === "tool_use" && block.name === "quote_guest_count"
-        );
-        // Who is planning, saved the moment it is answered, so it is never asked again.
-        const roleResults: Anthropic.ToolResultBlockParam[] = [];
-        let roleRefused = false;
-        for (const block of finalMessage.content) {
-          if (block.type !== "tool_use" || block.name !== "save_planning_role" || !sessionId) continue;
-          const r = await savePlanningRole(sessionId, block.input as Record<string, unknown>);
-          if (r.refused) roleRefused = true;
-          roleResults.push({ type: "tool_result", tool_use_id: block.id, content: planningRoleToolResult(r) });
+      };
+      /** A second model turn whose words follow the first reply, through the same filters. */
+      const streamMore = async (extra: Anthropic.MessageParam[], opts: { useFiller?: boolean } = {}) => {
+        const more = anthropic.messages.stream({ model: "claude-sonnet-4-6", max_tokens: 1024, system, tools, tool_choice: { type: "none" }, messages: [...history, ...extra] });
+        let separated = !fullText.trim();
+        if (opts.useFiller) filler = createFillerFilter((t) => invite.push(t));
+        claims = createClaimFilter((t) => (filler && opts.useFiller ? filler.push(t) : invite.push(t)));
+        for await (const event of more) {
+          if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
+            claims.push(separated ? event.delta.text : `\n\n${event.delta.text}`);
+            separated = true;
+          }
         }
-        // A save with no words, or a refused number: a second turn where the bot says what the TOOL RESULT says.
-        if (roleResults.length > 0 && !quoteUse && !toolUse && (roleRefused || !fullText.trim())) {
-          const followUp = anthropic.messages.stream({
+        flushModelText();
+      };
+      /** The model's reply so far, as an assistant turn (never empty). */
+      const replySoFar = (content: Anthropic.MessageParam["content"] | null): Anthropic.MessageParam[] =>
+        content && (typeof content !== "string" || content.trim()) ? [{ role: "assistant", content }] : [];
+      /** Ask the model for the submit_event_data call it skipped. */
+      const forceSubmit = async (): Promise<Anthropic.ToolUseBlock | null> => {
+        try {
+          const forced = anthropic.messages.stream({
             model: "claude-sonnet-4-6",
-            max_tokens: 1024,
+            max_tokens: 8192,
             system,
             tools,
-            tool_choice: { type: "none" },
-            messages: [...history, { role: "assistant", content: finalMessage.content }, { role: "user", content: roleResults }],
+            tool_choice: { type: "tool", name: "submit_event_data" },
+            messages: [...history, ...replySoFar(fullText.trim()), { role: "user", content: FORCE_SUBMIT_INSTRUCTION }],
           });
-          let separated = !fullText.trim();
-          for await (const event of followUp) {
-            if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
-              invite.push(separated ? event.delta.text : `\n\n${event.delta.text}`);
-              separated = true;
-            }
+          for await (const _event of forced) {
+            /* the tool input only, no words for the client */
           }
-          invite.finish();
+          const msg = await forced.finalMessage();
+          return msg.content.find((b): b is Anthropic.ToolUseBlock => b.type === "tool_use" && b.name === "submit_event_data") ?? null;
+        } catch (err) {
+          console.error(`[FINAL SAVE] session=${sessionId}: the forced submit_event_data call failed:`, err);
+          return null;
         }
+      };
 
-        // A different guest count: price it, then a second turn where the bot
-        // says what the TOOL RESULT says, the same way update mode quotes.
-        if (quoteUse && !toolUse && session) {
-          const asked = toCount((quoteUse.input as Record<string, unknown>).guest_count);
-          const quote = asked ? quoteGuestCount(session, asked) : null;
-          const followUp = anthropic.messages.stream({
-            model: "claude-sonnet-4-6",
-            max_tokens: 1024,
-            system,
-            tools,
-            tool_choice: { type: "none" },
-            messages: [
-              ...history,
-              { role: "assistant", content: finalMessage.content },
-              { role: "user", content: [{ type: "tool_result", tool_use_id: quoteUse.id, content: guestQuoteToolResult(quote, asked) }, ...roleResults] },
-            ],
-          });
-          let separated = !fullText.trim();
-          filler = createFillerFilter((t) => invite.push(t));
-          for await (const event of followUp) {
+      try {
+        let toolUse: Anthropic.ToolUseBlock | undefined;
+        let quoteUse: Anthropic.ToolUseBlock | undefined;
+        let closedNow = false;
+
+        if (submitFirst) {
+          // The closing already went out without a save: submit now, nothing else.
+          toolUse = (await forceSubmit()) ?? undefined;
+          closedNow = true;
+        } else {
+          const stream = anthropic.messages.stream({ model: "claude-sonnet-4-6", max_tokens: 8192, system, tools, messages: history });
+          for await (const event of stream) {
             if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
-              filler.push(separated ? event.delta.text : `\n\n${event.delta.text}`);
-              separated = true;
+              push(event.delta.text);
             }
           }
-          filler.finish();
-          invite.finish();
+          flushModelText();
+
+          // Inspect the assembled message for the completion tool call.
+          const finalMessage = await stream.finalMessage();
+          toolUse = finalMessage.content.find((block): block is Anthropic.ToolUseBlock => block.type === "tool_use" && block.name === "submit_event_data");
+          quoteUse = finalMessage.content.find((block): block is Anthropic.ToolUseBlock => block.type === "tool_use" && block.name === "quote_guest_count");
+          // Who is planning, saved the moment it is answered, so it is never asked again.
+          const roleResults: Anthropic.ToolResultBlockParam[] = [];
+          let roleRefused = false;
+          for (const block of finalMessage.content) {
+            if (block.type !== "tool_use" || block.name !== "save_planning_role" || !sessionId) continue;
+            const r = await savePlanningRole(sessionId, block.input as Record<string, unknown>);
+            if (r.refused) roleRefused = true;
+            roleResults.push({ type: "tool_result", tool_use_id: block.id, content: planningRoleToolResult(r) });
+          }
+          // A save with a refused number, or a reply that stopped at the save without the next
+          // question (the model waits for the TOOL RESULT): a second turn that continues from it.
+          if (roleResults.length > 0 && !quoteUse && !toolUse && (roleRefused || !hasQuestion(fullText))) {
+            await streamMore([{ role: "assistant", content: finalMessage.content }, { role: "user", content: roleResults }]);
+          }
+
+          // A different guest count: price it, then a second turn where the bot
+          // says what the TOOL RESULT says, the same way update mode quotes.
+          if (quoteUse && !toolUse && session) {
+            const asked = toCount((quoteUse.input as Record<string, unknown>).guest_count);
+            const quote = asked ? quoteGuestCount(session, asked) : null;
+            await streamMore(
+              [
+                { role: "assistant", content: finalMessage.content },
+                { role: "user", content: [{ type: "tool_result", tool_use_id: quoteUse.id, content: guestQuoteToolResult(quote, asked) }, ...roleResults] },
+              ],
+              { useFiller: true }
+            );
+          }
+
+          // The closing line without the submit_event_data call: never left hanging, the save is made now.
+          closedNow = CLOSING_PATTERN.test(fullText);
+          if (closedNow && !toolUse && sessionId && session) {
+            console.warn(`[FINAL SAVE] session=${sessionId}: the closing went out without submit_event_data; asking for it now.`);
+            toolUse = (await forceSubmit()) ?? undefined;
+          }
+
+          // Every reply before the wrap up ends with the next question: a reply with none is continued
+          // with the next unanswered item, worked out from what is saved and what the chat covered.
+          if (!toolUse && !closedNow && !hasQuestion(fullText)) {
+            const next = nextPlanStep(planContext, [...messages, { role: "assistant", content: fullText }]);
+            const instruction = regenerateInstruction(next);
+            const extra: Anthropic.MessageParam[] = fullText.trim()
+              ? [{ role: "assistant", content: fullText.trim() }, { role: "user", content: instruction }]
+              : [{ role: "user", content: instruction }];
+            await streamMore(extra).catch((err) => console.error("[next question] regenerate failed:", err));
+            if (!hasQuestion(fullText)) say(next?.question ?? GENERIC_NEXT);
+            console.warn(`[next question] session=${sessionId ?? "none"}: a reply had no question; asked ${next?.id ?? "the generic line"}.`);
+          }
         }
 
         menuFilter.finish();
@@ -870,30 +970,29 @@ export async function POST(request: Request) {
           controller.enqueue(encoder.encode(`data: ${JSON.stringify({ text: addInvite })}\n\n`));
         }
 
-        const closingText = fullText.trim();
+        // The chat as the team sees it in the transcript: before our result line.
+        const transcriptMessages: ChatMessage[] = [...messages, ...(fullText.trim() ? [assistantMessage(fullText.trim(), menuFilter.menus())] : [])];
+        let completeData: unknown = null;
 
-        if (sessionId) {
-          const updatedMessages: ChatMessage[] = [
-            ...messages,
-            assistantMessage(closingText, menuFilter.menus()),
-          ];
-
-          await upsertConversationLog(
-            sessionId,
-            clientName ?? null,
-            email ?? null,
-            updatedMessages
-          ).catch((err) =>
-            console.error("Failed to save conversation log:", err)
-          );
-
-          if (toolUse) {
+        if (sessionId && session && closedNow && !toolUse) {
+          // The model would not make the call: nothing was saved, and the client hears that honestly.
+          say(SAVE_FAILED_LINE);
+          await alertSaveFailed(sessionId, session, {});
+        } else if (sessionId && toolUse) {
+          let outcome: SaveOutcome = "failed";
+          let drinks: DrinkCheck | null = null;
+          let attempted: Record<string, unknown> = {};
+          try {
             // What the booking gave fills what the concierge left blank (it never
             // asks for a booked start time), so the events row, the GHL webhook,
             // and the session all get bar_service_start and bar_service_end.
             const { guest_count_quoted_total: quotedTotal, ...submitted } = toolUse.input as Record<string, unknown>;
             // Who is planning (and a planner's guest count ask) never goes in the event itself.
-            const { answers: bookingAnswers, rest: input } = takeBookingAnswers(submitted);
+            const { answers: bookingAnswers, rest: answered } = takeBookingAnswers(submitted);
+            // Skipped drink details still submit, marked Drinks not finalized; an extra drink nobody said yes to is held back.
+            drinks = checkDrinks(answered, session?.package_type ?? answered.package);
+            const input = drinks.data;
+            attempted = input;
             // A surprise: the booker's private number is the client phone. The guest of honor's number is never saved as the client phone or the day of contact.
             const sx = ((await getSession(sessionId)) ?? session) as EventSession | null;
             const privatePhone = normalizePhone(bookingAnswers.privatePhone);
@@ -908,28 +1007,22 @@ export async function POST(request: Request) {
             // The barback asked for (Full Bar weddings) is applied after the save as a priced update.
             const split = splitBarback(approvalOnly ? null : session, applyDiveSetMenu(filled) as EventData);
             const eventData = split.data;
-            const transcript = buildTranscript(updatedMessages);
+            const transcript = buildTranscript(transcriptMessages);
             const origin = new URL(request.url).origin;
 
             // Save the full payload on the session row as version 1 so the
             // session link opens in update mode from now on.
             // A failure is retried once, logged as [FINAL SAVE FAILED], and
-            // listed for admins; it never stops the webhook or the client's finish.
+            // listed for admins; it never stops the webhook.
             // A guest count different from the booked one is applied as version 2
             // (priced, or price pending), the way update mode applies it.
             const sub = await submitWithGuestCount(sessionId, session, eventData as EventData, quotedTotal);
+            outcome = sub.saved;
             const finalData = { ...eventData, guest_count: sub.guestCount, ...(sub.bartenders !== undefined ? { bartenders: sub.bartenders } : {}) };
 
             // Fire (and await) the completion side effects BEFORE telling the
-            // client we are done, so they run regardless of whether the tab
-            // stays open.
-            await fireCompletion(
-              origin,
-              finalData,
-              transcript,
-              email ?? null,
-              sessionId
-            );
+            // client the result, so they run regardless of whether the tab stays open.
+            await fireCompletion(origin, finalData, transcript, email ?? null, sessionId);
 
             // The guest count update: one admin text when it could not be priced,
             // then the GHL update with the change order, after the completion webhook.
@@ -955,25 +1048,35 @@ export async function POST(request: Request) {
             } else {
               await applyBookingAnswers(sessionId, bookingAnswers);
             }
-
-            const completePayload = JSON.stringify({
-              event: "complete",
-              eventData: finalData,
-            });
-            controller.enqueue(
-              encoder.encode(`data: ${completePayload}\n\n`)
-            );
+            if (outcome !== "failed") completeData = finalData;
+          } catch (err) {
+            console.error(`[FINAL SAVE FAILED] session=${sessionId}: submission threw:`, err);
+            outcome = "failed";
           }
+
+          // The client hears the real result, in our words, never the model's.
+          say(resultLine(outcome, !!drinks?.notFinalized));
+          if (outcome === "failed") await alertSaveFailed(sessionId, session, attempted);
+          else if (drinks) await alertDrinks(sessionId, session, attempted, drinks);
+        }
+
+        if (sessionId) {
+          await upsertConversationLog(sessionId, clientName ?? null, email ?? null, [...messages, assistantMessage(fullText.trim(), menuFilter.menus())]).catch((err) =>
+            console.error("Failed to save conversation log:", err)
+          );
+        }
+        if (completeData) {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ event: "complete", eventData: completeData })}\n\n`));
         }
 
         controller.enqueue(encoder.encode("data: [DONE]\n\n"));
         controller.close();
       } catch (error) {
-        const message =
-          error instanceof Error ? error.message : "Unknown error";
-        controller.enqueue(
-          encoder.encode(`data: ${JSON.stringify({ error: message })}\n\n`)
-        );
+        const message = error instanceof Error ? error.message : "Unknown error";
+        console.error(`[chat] session=${sessionId ?? "none"}: turn failed:`, error);
+        // Never an empty reply: the client is told plainly to send it again.
+        if (!fullText.trim()) controller.enqueue(encoder.encode(`data: ${JSON.stringify({ text: "Sorry, something went wrong on our end. Could you send that again?" })}\n\n`));
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: message })}\n\n`));
         controller.close();
       }
     },

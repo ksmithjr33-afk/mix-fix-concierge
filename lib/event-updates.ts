@@ -41,6 +41,7 @@ import { bookedGuestCount } from "@/lib/booked-facts";
 import { autoSendOn, holdChange, listWouldChange } from "@/lib/client-list-db";
 import { bookingFill } from "@/lib/booking-webhook";
 import { syncDiveMenuPickup } from "@/lib/dive-menu-pickup-db";
+import { present, withBlankBookingFields } from "@/lib/blank";
 
 export const SESSION_COLUMNS =
   "id, name, email, event_date, package_type, guest_count, event_name, hours_booked, status, event_data, version, submitted_at, updated_at";
@@ -114,7 +115,8 @@ export async function getSession(sessionId: string): Promise<SessionRow | null> 
     console.error("sessions lookup error:", error);
     return null;
   }
-  return (data as SessionRow | null) ?? null;
+  // A booking column holding the text "null" (how GHL sent an empty field) reads as missing.
+  return data ? (withBlankBookingFields(data as Record<string, unknown>) as unknown as SessionRow) : null;
 }
 
 export async function getEventUpdates(sessionId: string): Promise<EventUpdateRow[]> {
@@ -359,11 +361,11 @@ function prepareUpdate(
  */
 export function bookedEventFrom(session: SessionRow): EventData {
   const ed: EventData = {
-    package: session.package_type ?? undefined,
+    package: present(session.package_type) ?? undefined,
     guest_count: bookedGuestCount(session.guest_count) ?? undefined,
     hours_booked: toCount(session.hours_booked) ?? undefined,
-    event_type: session.event_type ?? session.event_name ?? undefined,
-    event_date: session.event_date ?? undefined,
+    event_type: present(session.event_type) ?? present(session.event_name) ?? undefined,
+    event_date: present(session.event_date) ?? undefined,
   };
   const bartenders = session.booked_price?.bartenders ?? session.bartender_count ?? null;
   if (bartenders) ed.bartenders = bartenders;

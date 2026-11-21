@@ -18,7 +18,15 @@ export interface LogTail {
   client_name: string | null;
   status: string | null;
   updated_at: string | null;
-  last: { role?: string; content?: string } | null; // the last message only
+  last: { role?: string; content?: string } | null; // the last message
+  // Any assistant message sent the closing line. The client often keeps chatting
+  // after it ("Is that everything?"), so the last message alone misses those.
+  closed?: boolean;
+}
+
+/** True when any assistant message in the chat is the closing message. */
+export function sentClosing(messages: { role?: string; content?: unknown }[] | null | undefined): boolean {
+  return (messages ?? []).some((m) => m?.role === "assistant" && CLOSING_PATTERN.test(String(m.content ?? "")));
 }
 
 export interface SessionState {
@@ -46,7 +54,7 @@ export interface PastDateSession {
 }
 
 export function looksFinished(log: LogTail): boolean {
-  if (log.status === "completed") return true;
+  if (log.status === "completed" || log.closed) return true;
   return log.last?.role === "assistant" && CLOSING_PATTERN.test(String(log.last.content ?? ""));
 }
 

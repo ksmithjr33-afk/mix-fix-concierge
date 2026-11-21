@@ -2,6 +2,8 @@
 // query params (app/chat/page.tsx), built here from the session row for a
 // planner starting the planning chat in the partner portal. Pure.
 
+import { present } from "@/lib/blank";
+
 const PREFIX = "CONTEXT - Pre-filled from booking system:";
 
 interface SessionFields {
@@ -18,7 +20,7 @@ interface SessionFields {
 }
 
 export function bookingContextMessage(s: SessionFields): string | null {
-  const v = (x: unknown) => (x === null || x === undefined ? "" : String(x).trim());
+  const v = (x: unknown) => present(x) ?? "";
   const parts: string[] = [];
   if (v(s.name)) parts.push(`Client name: ${v(s.name)}`);
   if (v(s.email)) parts.push(`Email: ${v(s.email)}`);

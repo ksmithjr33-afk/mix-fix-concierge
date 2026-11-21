@@ -1,6 +1,7 @@
 // Read only summary of a submitted event, shown under the update mode chat.
 // Same sections the client saw at the end of intake. No oz amounts.
 
+import { isBlank } from "@/lib/blank";
 import { packageShortFor } from "@/lib/packages-info";
 
 type EventData = Record<string, unknown>;
@@ -13,6 +14,7 @@ interface Drink {
 }
 
 function text(v: unknown): string {
+  if (typeof v === "string" && isBlank(v)) return "";
   if (v === null || v === undefined) return "";
   if (typeof v === "boolean") return v ? "Yes" : "No";
   if (Array.isArray(v)) return v.map(String).join(", ");
