@@ -180,10 +180,11 @@ export async function partnerEventView(a: EventAccess, now: Date = new Date()): 
   if (money.total || money.balance) {
     const total = Number(s.booked_price?.total ?? NaN);
     const pays = money.payments || money.balance ? await paymentsCents(s.id) : [];
-    const paid = pays.reduce((n, p) => n + p.amount_cents, 0) / 100 || Number(s.booked_price?.deposit_paid ?? 0);
+    // Only recorded payments: never guessed from the deposit. With none recorded there is no balance to show.
+    const paid = pays.reduce((n, p) => n + p.amount_cents, 0) / 100;
     pricing = {
       total: money.total && Number.isFinite(total) ? dollars(total) : "",
-      balance: money.balance && Number.isFinite(total) ? dollars(Math.max(0, total - paid)) : "",
+      balance: money.balance && Number.isFinite(total) && pays.length > 0 ? dollars(Math.max(0, total - paid)) : "",
       payments: money.payments ? pays.map((p) => ({ amount: dollars(p.amount_cents / 100), on: longDate(p.paid_on) })) : [],
       agreements: money.agreement ? (await currentAgreements(s.id)).map((r) => ({ id: r.id, label: r.label || "Agreement", typeLabel: typeLabel(r.file_type) })) : [],
     };

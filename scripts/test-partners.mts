@@ -304,7 +304,8 @@ check("Linking them again as Lead brings the link back", !(await clientView.clie
 // =====================================================================
 const patAcc = (await pdb.eventAccess(principal, S("p1").partner_key as string))!;
 const patView = await page.partnerEventView(patAcc);
-check("The Lead on a planner held event holds the booking and sees the total, balance and payments", patView.holdsBooking && patView.pricing?.total === "$2,400" && patView.pricing?.balance === "$2,250" && patView.money.agreement && patView.money.approve);
+check("The Lead on a planner held event holds the booking and sees the total, balance and payments", patView.holdsBooking && patView.pricing?.total === "$2,400" && patView.money.balance && patView.money.agreement && patView.money.approve);
+check("...but with no payments recorded there is no balance number: never guessed from the $150 deposit", patView.pricing?.balance === "" && !JSON.stringify(patView.pricing).includes("2,250"));
 const samAcc2 = (await pdb.eventAccess(samPrincipal, S("p1").partner_key as string))!;
 const samView = await page.partnerEventView(samAcc2);
 check("Other planners see no money by default", samView.pricing === null && !samView.money.approve);

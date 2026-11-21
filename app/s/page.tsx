@@ -13,6 +13,8 @@ import { SURPRISE_LABEL } from "@/lib/partners/surprise";
 import { isBlank } from "@/lib/blank";
 import { clientAsks, clientEventData } from "@/lib/team-notes";
 import { packageDrinkCount } from "@/lib/event-diff";
+import { eventHome } from "@/lib/event-home-db";
+import { ALL_MONEY } from "@/lib/event-home";
 
 // The booking fields /chat takes as query params for intake.
 const INTAKE_PARAMS = [
@@ -113,13 +115,15 @@ export default async function ShortRedirectPage({
 
   // Submitted sessions open in update mode: chat on top, event summary below.
   if (data.status === "submitted" && data.event_data) {
-    const [{ data: log }, showList, pending, menu, planners] = await Promise.all([
+    const [{ data: log }, showList, pending, menu, planners, home] = await Promise.all([
       supabase.from("conversation_logs").select("update_messages").eq("session_id", sessionId).maybeSingle(),
       clientCanSeeList(sessionId).catch(() => false),
       holdsFor(sessionId, "pending").catch(() => []),
       clientMenu(sessionId).catch(() => null),
       // Client held events only; null before the partners migration, so nothing shows.
       clientPlannersCard(data).catch(() => null),
+      // The link always belongs to the booking holder, who sees all of the money (total, paid, balance, agreement).
+      eventHome(data, ALL_MONEY).catch(() => null),
     ]);
     return (
       <UpdateMode
@@ -136,15 +140,10 @@ export default async function ShortRedirectPage({
         menu={menu}
         cups={extrasOf(data).cups_included === true}
         noBarback={barbackStatus(data).notBooked}
-        extra={
-          <>
-            {/* The booking holder sees that it is a surprise. */}
-            {surpriseOn(data as EventSession) && (
-              <p className="inline-block text-[11px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-[#EDE3F5] text-[#5B3F7A]">{SURPRISE_LABEL}</p>
-            )}
-            {planners ? <PlannersCard sessionId={sessionId} planners={planners.planners} pricingOn={planners.pricingOn} activity={planners.activity} /> : null}
-          </>
-        }
+        home={home}
+        // The booking holder sees that it is a surprise.
+        badge={surpriseOn(data as EventSession) ? <p className="inline-block text-[11px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-[#EDE3F5] text-[#5B3F7A]">{SURPRISE_LABEL}</p> : null}
+        extra={planners ? <PlannersCard sessionId={sessionId} planners={planners.planners} pricingOn={planners.pricingOn} activity={planners.activity} /> : null}
       />
     );
   }

@@ -5,6 +5,12 @@ import { eventAccess } from "@/lib/partners/db";
 import { partnerEventView } from "@/lib/partners/event-page";
 import PartnerHeader from "../../partner-header";
 import { Approvals, LeadSwitches, PlannerList } from "./event-actions";
+import { eventHome } from "@/lib/event-home-db";
+import { buildTodo, countdown, dayLines, leftToDo, statusLine, type HomeMoney, type TodoItem } from "@/lib/event-home";
+import { clientAsks } from "@/lib/team-notes";
+import { packageDrinkCount } from "@/lib/event-diff";
+import { eventData } from "@/lib/team/markets";
+import { AgreementCard, BarTeam, Checklist, HelpCard, PaymentCard, RequestsCard, YourDay } from "@/app/_event-home/sections";
 
 export const dynamic = "force-dynamic";
 
@@ -41,6 +47,20 @@ export default async function PartnerEventPage({ params }: { params: Promise<{ k
   const v = await partnerEventView(access);
   const isPlanner = v.viewer.kind === "planner";
   const isLead = v.viewer.kind === "planner" && v.viewer.isLead;
+  // The same home the client sees, with the money "Planner can see pricing" (moneyAccess) allows.
+  const money: HomeMoney = { total: v.money.total, balance: v.money.balance, payments: v.money.payments, agreement: v.money.agreement };
+  const home = await eventHome(access.session, money).catch(() => null);
+  const ed = eventData(access.session);
+  const asks = v.submitted ? clientAsks(ed, packageDrinkCount(ed.package)) : null;
+  // The extra drink question carries a price: only for a planner who sees the total.
+  const todo = home && v.submitted ? buildTodo(ed, { asks: asks && !money.total ? { ...asks, extraDrinks: [] } : asks, balance: home.balance, past: home.past }) : [];
+  const planHref = `/partners/e/${encodeURIComponent(key)}/plan`;
+  const todoAction = (it: TodoItem) =>
+    isPlanner && it.action ? (
+      <Link href={planHref} className="inline-block rounded-lg bg-[#B5845A] text-white px-4 py-2 text-sm font-medium">
+        Open the planning chat
+      </Link>
+    ) : null;
   const title = [v.eventFor.name.split(" ")[0] ? `${v.eventFor.name.split(" ")[0]}'s` : "", v.eventType || "event"].filter(Boolean).join(" ");
 
   return (
@@ -55,7 +75,7 @@ export default async function PartnerEventPage({ params }: { params: Promise<{ k
           {v.surprise && <p className="mt-1 inline-block text-[11px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-[#EDE3F5] text-[#5B3F7A]">Surprise event</p>}
           {v.eventName && <p className="text-[17px] text-[#2C2420]">{v.eventName}</p>}
           <p className="text-[15px] text-[#6B5D52]">
-            {[v.date, v.status].filter(Boolean).join(" · ")}
+            {[v.date, v.status, home ? countdown(home.daysUntil) : "", home ? statusLine(leftToDo(todo), home.daysUntil) : ""].filter(Boolean).join(" · ")}
             {isPlanner && <> · {v.holdsBooking ? "You hold the booking" : v.holder === "client" ? "The client holds the booking" : "Your Lead planner holds the booking"}</>}
           </p>
         </div>
@@ -67,6 +87,8 @@ export default async function PartnerEventPage({ params }: { params: Promise<{ k
         )}
 
         {v.approvals.length > 0 && <Approvals eventKey={key} items={v.approvals} />}
+
+        <Checklist items={todo} renderAction={todoAction} />
 
         {v.stillNeeded.length > 0 && (
           <Card title="Still needed">
@@ -92,11 +114,13 @@ export default async function PartnerEventPage({ params }: { params: Promise<{ k
           {!v.readOnly && <Row label="Email" value={v.eventFor.email} />}
         </Card>
 
+        {home && <YourDay lines={dayLines(ed)} />}
+
         <Card title="When and where">
           <Row label="Date" value={v.date} />
           <Row label="Bar service" value={v.serviceTimes} />
-          <Row label="Bartender arrives" value={v.arrival} />
-          <Row label="Breakdown wraps up" value={v.breakdown ? `around ${v.breakdown}` : ""} />
+          {!home && <Row label="Bartender arrives" value={v.arrival} />}
+          {!home && <Row label="Breakdown wraps up" value={v.breakdown ? `around ${v.breakdown}` : ""} />}
           <Row label="Venue" value={v.venueType} />
           <Row label="Address" value={v.mapsUrl ? <a href={v.mapsUrl} target="_blank" rel="noopener noreferrer" className="underline">{v.address}</a> : v.address} />
           <Row label="Guest count" value={v.guestCount} />
@@ -116,29 +140,7 @@ export default async function PartnerEventPage({ params }: { params: Promise<{ k
           {v.packageProvides && <p className="text-[15px] text-[#6B5D52]">{v.packageProvides}</p>}
         </Card>
 
-        {v.pricing && (
-          <Card title="Pricing">
-            <Row label="Booked total" value={v.pricing.total} />
-            <Row label="Remaining balance" value={v.pricing.balance} />
-            {v.pricing.payments.length > 0 && (
-              <div className="text-[15px]">
-                <p className="text-[#6B5D52]">Payments</p>
-                <ul className="pl-0 text-[#2C2420]">
-                  {v.pricing.payments.map((p, i) => (
-                    <li key={i}>
-                      {p.amount} on {p.on}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-            {v.pricing.agreements.map((ag) => (
-              <a key={ag.id} href={`/api/partners/agreement-file?key=${encodeURIComponent(key)}&id=${encodeURIComponent(ag.id)}`} target="_blank" rel="noopener noreferrer" className="block text-[15px] text-[#B5845A] underline">
-                {ag.label} ({ag.typeLabel})
-              </a>
-            ))}
-          </Card>
-        )}
+        {home && <RequestsCard requests={home.requests} />}
 
         <Card title="Drinks and menu">
           {v.drinks.length === 0 ? (
@@ -196,10 +198,13 @@ export default async function PartnerEventPage({ params }: { params: Promise<{ k
           </Card>
         )}
 
-        {v.bartenders.length > 0 && (
-          <Card title="Your bar team">
-            <p className="text-[15px] text-[#2C2420]">{v.bartenders.join(", ")}</p>
-          </Card>
+        {home && <BarTeam team={home.team} />}
+        {home && <PaymentCard payment={home.payment} lines={home.paymentLines} />}
+        {home && (
+          <AgreementCard
+            agreements={home.agreements}
+            href={(id, download) => `/api/partners/agreement-file?key=${encodeURIComponent(key)}&id=${encodeURIComponent(id)}${download ? "&download=1" : ""}`}
+          />
         )}
 
         <Card title="Change deadlines">
@@ -208,11 +213,12 @@ export default async function PartnerEventPage({ params }: { params: Promise<{ k
               ? "We are within 6 days of the event. A change to the drinks or the shopping list is sent to our team for approval."
               : `Drink changes save right away through ${v.deadlines.lastDrinkChange}. After that, a drink change is sent to our team for approval.`}
           </p>
-          <p className="text-sm text-[#6B5D52]">Questions? Text us at 469 754 8512.</p>
         </Card>
 
         {isPlanner && <PlannerList eventKey={key} planners={v.planners} canManage={isLead && v.holder === "planner"} />}
         {isLead && v.holder === "planner" && <LeadSwitches eventKey={key} others={v.switches.others} host={v.switches.host} hostOnEvent={v.hostOnEvent} />}
+
+        <HelpCard />
       </main>
     </>
   );

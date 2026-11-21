@@ -55,14 +55,40 @@ function Row({ label, value }: { label: string; value: string }) {
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+/** "Change": opens the chat on this part of the plan. */
+function ChangeButton({ onClick, what }: { onClick?: () => void; what: string }) {
+  if (!onClick) return null;
+  return (
+    <button type="button" onClick={onClick} aria-label={`Change ${what}`} className="shrink-0 rounded-lg border border-[#B5845A] text-[#B5845A] px-3 py-1 text-sm font-medium hover:bg-[#B5845A] hover:text-white">
+      Change
+    </button>
+  );
+}
+
+function Section({ title, children, onChange }: { title: string; children: React.ReactNode; onChange?: () => void }) {
   return (
     <section className="bg-[#F5F0EB] rounded-2xl border border-[#DDD5CC] px-4 py-3 sm:px-5 sm:py-4">
-      <h3 className="font-heading text-base font-bold text-[#2C2420] mb-1">{title}</h3>
+      <div className="flex items-center justify-between gap-2 mb-1">
+        <h3 className="font-heading text-base font-bold text-[#2C2420]">{title}</h3>
+        <ChangeButton onClick={onChange} what={title.toLowerCase()} />
+      </div>
       <dl>{children}</dl>
     </section>
   );
 }
+
+/** What the chat is opened with for each part of the plan, in the client's words. */
+export const CHANGE_MESSAGES = {
+  event: "I would like to change my event details.",
+  times: "I would like to change my bar service times.",
+  location: "I would like to change my location or parking details.",
+  package: "I would like to change my package.",
+  drinks: "I would like to change my drinks.",
+  beerWine: "I would like to change my beer and wine.",
+  requests: "I would like to change my add ons or special requests.",
+  contact: "I would like to change my day of contact.",
+} as const;
+export type ChangeTopic = keyof typeof CHANGE_MESSAGES;
 
 /** Dive Bar never calls its drinks signature drinks: the menu card's classics, or the set menu. */
 function drinksTitle(data: EventData): string {
@@ -75,12 +101,15 @@ export default function EventSummary({
   cups = false,
   noBarback = false,
   asks = null,
+  onChange,
 }: {
   data: EventData;
   cups?: boolean;
   noBarback?: boolean;
   asks?: React.ReactNode; // the client's own questions (finish the drink menu, the extra drink), under Add ons and special requests
+  onChange?: (topic: ChangeTopic) => void; // the Change button on each section; none on a read only view
 }) {
+  const change = (t: ChangeTopic) => (onChange ? () => onChange(t) : undefined);
   // What the package includes, in the same short wording every page and the concierge use.
   const short = packageShortFor(data.package, {
     wedding: String(data.event_type ?? "").toLowerCase().includes("wedding"),
@@ -99,18 +128,18 @@ export default function EventSummary({
 
   return (
     <div className="space-y-3">
-      <Section title="Event">
+      <Section title="Event" onChange={change("event")}>
         <Row label="Name" value={text(data.client_name)} />
         <Row label="Event" value={text(data.event_name) || text(data.event_type)} />
         <Row label="Date" value={text(data.event_date)} />
         <Row label="Guest count" value={text(data.guest_count)} />
       </Section>
 
-      <Section title="Times">
+      <Section title="Times" onChange={change("times")}>
         <Row label="Bar service" value={start && end ? `${start} to ${end}` : start} />
       </Section>
 
-      <Section title="Location and parking">
+      <Section title="Location and parking" onChange={change("location")}>
         <Row label="Venue type" value={venueLabel(data.venue_type)} />
         <Row label="Address" value={text(data.event_address)} />
         <Row label="Bar setting" value={text(data.indoor_outdoor)} />
@@ -120,7 +149,7 @@ export default function EventSummary({
         <Row label="Parking" value={text(data.parking_info)} />
       </Section>
 
-      <Section title="Package">
+      <Section title="Package" onChange={change("package")}>
         <Row label="Package" value={text(data.package)} />
         {short && (
           <div className="py-2.5 border-b border-[#DDD5CC] last:border-0" data-package-short>
@@ -143,7 +172,10 @@ export default function EventSummary({
 
       {drinks.length > 0 && (
         <section className="bg-[#F5F0EB] rounded-2xl border border-[#DDD5CC] px-4 py-3 sm:px-5 sm:py-4">
-          <h3 className="font-heading text-base font-bold text-[#2C2420] mb-2">{drinksTitle(data)}</h3>
+          <div className="flex items-center justify-between gap-2 mb-2">
+            <h3 className="font-heading text-base font-bold text-[#2C2420]">{drinksTitle(data)}</h3>
+            <ChangeButton onClick={change("drinks")} what="drinks" />
+          </div>
           <ul className="space-y-3">
             {drinks.map((drink, i) => (
               <li key={i} className="border-b border-[#DDD5CC] last:border-0 pb-3 last:pb-0">
@@ -161,7 +193,7 @@ export default function EventSummary({
         </section>
       )}
 
-      <Section title="Beer and wine">
+      <Section title="Beer and wine" onChange={change("beerWine")}>
         <Row label="Serving" value={beerWine || "None"} />
         <Row label="Details" value={text(data.beer_and_wine_details)} />
         <Row
@@ -170,14 +202,14 @@ export default function EventSummary({
         />
       </Section>
 
-      <Section title="Add ons and special requests">
+      <Section title="Add ons and special requests" onChange={change("requests")}>
         {asks}
         {/* Older events' requests were written for our team: they stay with the team, never shown here. */}
         {requestsShown(data) && <Row label="Requests" value={clientRequests(data) || "None"} />}
         <Row label="Second bar setup" value={data.dual_bar_setup === true ? "Yes" : ""} />
       </Section>
 
-      <Section title="Day of contact">
+      <Section title="Day of contact" onChange={change("contact")}>
         <Row label="Contact" value={contactLine || "To be confirmed"} />
       </Section>
     </div>

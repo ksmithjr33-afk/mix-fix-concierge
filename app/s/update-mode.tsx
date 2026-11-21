@@ -6,8 +6,12 @@ import ShoppingList from "./shopping-list";
 import { UPDATE_OPENER, updateGreeting } from "@/lib/update-mode-shared";
 import MenuCards from "@/app/menu-card";
 import type { MenuKey } from "@/lib/menu-markers";
-import ClientAsks from "./client-asks";
-import { FINISH_DRINKS_MESSAGE, type ClientAsks as Asks } from "@/lib/team-notes";
+import { ExtraDrinkButtons } from "./client-asks";
+import { type ClientAsks as Asks } from "@/lib/team-notes";
+import { ASK_BUTTON, buildTodo, countdown, dayLines, homeTitle, leftToDo, listLine, statusLine, type TodoItem } from "@/lib/event-home";
+import type { HomeData } from "@/lib/event-home-db";
+import { AgreementCard, BarTeam, Checklist, HelpCard, HomeCard, HomeTop, PaymentCard, RequestsCard, YourDay } from "@/app/_event-home/sections";
+import { CHANGE_MESSAGES } from "./event-summary";
 
 interface Message {
   role: "user" | "assistant";
@@ -43,7 +47,11 @@ export default function UpdateMode({
   cups = false,
   noBarback = false,
   initialAsks = null,
+  home = null,
+  badge = null,
 }: {
+  home?: HomeData | null; // the countdown, bar team, payment, agreement, requests and list timing (lib/event-home-db.ts)
+  badge?: React.ReactNode; // the surprise label, under the title
   initialAsks?: Asks | null; // the client's own questions: finish the drink menu, the extra drink
   cups?: boolean; // custom cups promised on an older Full Bar booking (sessions.package_extras)
   noBarback?: boolean; // a barback was never part of this booking (sessions.package_extras.barback_not_booked)
@@ -69,6 +77,10 @@ export default function UpdateMode({
   const [pending, setPending] = useState(listPending);
   const [asks, setAsks] = useState<Asks | null>(initialAsks);
   const chatRef = useRef<HTMLElement>(null);
+  const [chatOpen, setChatOpen] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [guestBusy, setGuestBusy] = useState(false);
+  const [guestError, setGuestError] = useState("");
   // The version this chat opened on: the final recap covers every change saved after it.
   const [chatStartVersion] = useState(initialVersion);
   const [input, setInput] = useState("");
@@ -179,11 +191,75 @@ export default function UpdateMode({
     await streamResponse([...messages.filter((m) => m.content), { role: "user", content: text }]);
   };
 
-  // "Finish my drink menu": the chat opens on the drinks step.
-  const finishDrinks = async () => {
-    if (isStreaming) return;
-    chatRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-    await streamResponse([...messages.filter((m) => m.content), { role: "user", content: FINISH_DRINKS_MESSAGE }]);
+  // The chat stays closed until a button opens it: with a topic, it starts on that topic; the top button opens it empty.
+  const openChat = async (message?: string) => {
+    setChatOpen(true);
+    setTimeout(() => {
+      chatRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      if (!message) inputRef.current?.focus();
+    }, 50);
+    if (!message || isStreaming) return;
+    await streamResponse([...messages.filter((m) => m.content), { role: "user", content: message }]);
+  };
+
+  const confirmGuests = async (count: string) => {
+    setGuestBusy(true);
+    setGuestError("");
+    try {
+      const res = await fetch("/api/client-guest-count", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId, count }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) setGuestError(data.error ?? "Could not save. Try again.");
+      else if (data.eventData) setEventData(data.eventData);
+    } catch {
+      setGuestError("Could not reach the server. Try again.");
+    } finally {
+      setGuestBusy(false);
+    }
+  };
+
+  const todo = buildTodo(eventData, { asks, balance: home?.balance ?? null, past: home?.past ?? false });
+  const button = "rounded-lg px-4 py-2 text-sm font-medium disabled:opacity-40";
+  const renderAction = (it: TodoItem) => {
+    const a = it.action;
+    if (!a) return null;
+    if (a.kind === "chat")
+      return (
+        <button type="button" onClick={() => openChat(a.message)} disabled={isStreaming} className={`${button} bg-[#B5845A] text-white`}>
+          {a.button}
+        </button>
+      );
+    if (a.kind === "extra_drink")
+      return (
+        <ExtraDrinkButtons
+          sessionId={sessionId}
+          disabled={isStreaming}
+          onAnswered={(r, line) => {
+            setEventData(r.eventData);
+            setAsks(r.asks);
+            setVersion(r.version);
+            if (r.updatedAt) setUpdatedAt(r.updatedAt);
+            if (r.pending) setPending(true);
+            setNotice(line);
+          }}
+        />
+      );
+    return (
+      <div className="space-y-1">
+        <div className="flex flex-wrap gap-2">
+          <button type="button" onClick={() => confirmGuests(a.count)} disabled={guestBusy || isStreaming} className={`${button} bg-[#B5845A] text-white`}>
+            {a.button}
+          </button>
+          <button type="button" onClick={() => openChat(a.changeMessage)} disabled={isStreaming} className={`${button} border border-[#2C2420] text-[#2C2420]`}>
+            Change it
+          </button>
+        </div>
+        {guestError && <p className="text-sm text-[#A0412D]">{guestError}</p>}
+      </div>
+    );
   };
 
   const lastUpdated = formatUpdated(updatedAt);
@@ -192,16 +268,35 @@ export default function UpdateMode({
     <div className="min-h-dvh bg-[#E8DDD5]">
       <header className="flex items-center justify-between px-3 sm:px-4 py-2 sm:py-3 bg-[#F5F0EB] border-b border-[#DDD5CC]">
         <img src="/logo.png" alt="The Mix Fix" className="h-8 sm:h-10" />
-        <a href="sms:4697548512" className="text-xs text-[#6B5D52] hover:text-[#B5845A]">
-          Text us 469 754 8512
-        </a>
       </header>
 
       <main className="max-w-2xl mx-auto px-4 py-4 sm:py-6 space-y-4">
-        {/* Chat panel */}
-        <section ref={chatRef} className="scroll-mt-4 flex flex-col h-[60dvh] min-h-[360px] bg-[#F5F0EB] rounded-2xl border border-[#DDD5CC] overflow-hidden">
+        {/* 1. Top: the event, the countdown, and one status line. */}
+        <HomeTop
+          title={homeTitle(eventData)}
+          date={home?.date || String(eventData.event_date ?? "")}
+          countdown={countdown(home?.daysUntil ?? null)}
+          status={statusLine(leftToDo(todo), home?.daysUntil ?? null)}
+          badge={badge}
+        >
+          <button type="button" onClick={() => openChat()} className="w-full rounded-xl bg-[#B5845A] text-white py-3 font-medium hover:bg-[#9A7049]">
+            {ASK_BUTTON}
+          </button>
+        </HomeTop>
+
+        {/* 2. What we need from you. */}
+        <Checklist items={todo} renderAction={renderAction} />
+        {notice && <p className="px-1 text-sm text-[#2C2420]">{notice}</p>}
+
+        {/* 3. The chat: closed until a button opens it. */}
+        <section ref={chatRef} aria-label="Chat with us" aria-hidden={!chatOpen} className={`${chatOpen ? "flex" : "hidden"} scroll-mt-4 flex-col h-[60dvh] min-h-[360px] bg-[#F5F0EB] rounded-2xl border border-[#DDD5CC] overflow-hidden`}>
           <div className="px-4 py-2.5 border-b border-[#DDD5CC]">
-            <h1 className="font-heading text-base font-bold text-[#2C2420]">Update your event</h1>
+            <div className="flex items-center justify-between gap-2">
+              <h2 className="font-heading text-base font-bold text-[#2C2420]">Change something or ask a question</h2>
+              <button type="button" onClick={() => setChatOpen(false)} className="text-sm text-[#6B5D52] underline">
+                Close
+              </button>
+            </div>
             <p className="text-xs text-[#6B5D52] mt-0.5 leading-snug">
               Changes save right away up to 6 days before your event. After that, a change to your drink
               menu or shopping list is sent to our team for approval.
@@ -266,10 +361,17 @@ export default function UpdateMode({
           </div>
         </section>
 
-        {/* Read only summary */}
+        {/* 4. Your day. */}
+        <YourDay
+          lines={dayLines(eventData)}
+          address={String(eventData.event_address ?? "").trim()}
+          contact={[eventData.day_of_contact_name, eventData.day_of_contact_phone].map((v) => String(v ?? "").trim()).filter((v) => v && v !== "null").join(", ")}
+        />
+
+        {/* 5. Your plan, with a Change button on each part, and the requests waiting on our team. */}
         <div id="event-details" className="scroll-mt-4">
           <div className="flex items-baseline justify-between mb-2 px-1">
-            <h2 className="font-heading text-lg font-bold text-[#2C2420]">Your event details</h2>
+            <h2 className="font-heading text-lg font-bold text-[#2C2420]">Your plan</h2>
             {lastUpdated && (
               <span className="text-xs text-[#A39585]">
                 Last updated {lastUpdated} (version {version})
@@ -285,24 +387,12 @@ export default function UpdateMode({
             data={eventData}
             cups={cups}
             noBarback={noBarback}
-            asks={
-              <ClientAsks
-                sessionId={sessionId}
-                asks={asks}
-                disabled={isStreaming}
-                onFinishDrinks={finishDrinks}
-                onAnswered={(r) => {
-                  setEventData(r.eventData);
-                  setAsks(r.asks);
-                  setVersion(r.version);
-                  if (r.updatedAt) setUpdatedAt(r.updatedAt);
-                  if (r.pending) setPending(true);
-                }}
-              />
-            }
+            onChange={(t) => openChat(CHANGE_MESSAGES[t])}
           />
         </div>
+        {home && <RequestsCard requests={home.requests} />}
 
+        {/* 6. Your menu. */}
         {menu && (
           <section id="your-menu" className="bg-[#F5F0EB] rounded-2xl border border-[#DDD5CC] px-4 py-4 space-y-3" aria-label="Your menu">
             <h2 className="font-heading text-lg font-bold text-[#2C2420]">Your menu</h2>
@@ -323,9 +413,30 @@ export default function UpdateMode({
           </section>
         )}
 
-        {showList && <ShoppingList data={eventData} pending={pending} />}
+        {/* 7. Your shopping list, or when to expect it. */}
+        {showList ? (
+          <ShoppingList data={eventData} pending={pending} />
+        ) : home && listLine(home.listTiming) ? (
+          <HomeCard title="Your shopping list" id="shopping-list">
+            <p className="text-[15px] text-[#6B5D52]">{listLine(home.listTiming)}</p>
+          </HomeCard>
+        ) : null}
 
+        {/* 8. Your bar team. 9. Payment. 10. Your agreement. */}
+        {home && <BarTeam team={home.team} />}
+        {home && <PaymentCard payment={home.payment} lines={home.paymentLines} />}
+        {home && (
+          <AgreementCard
+            agreements={home.agreements}
+            href={(id, download) => `/api/agreement?id=${encodeURIComponent(sessionId)}&file=${encodeURIComponent(id)}${download ? "&download=1" : ""}`}
+          />
+        )}
+
+        {/* 11. Planners. */}
         {extra}
+
+        {/* 12. Help. */}
+        <HelpCard />
       </main>
     </div>
   );

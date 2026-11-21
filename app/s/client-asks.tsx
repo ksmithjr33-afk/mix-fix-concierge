@@ -17,6 +17,55 @@ export interface ExtraDrinkReply {
   pending: boolean;
 }
 
+const REPLY_LINE: Record<ExtraDrinkReply["kind"], string> = {
+  declined: "Got it. We left it off your menu.",
+  requested: "Got it. Your event is less than a week away, so our team will confirm it with you.",
+  added: "Added to your menu.",
+};
+
+async function postExtraDrink(sessionId: string, accept: boolean): Promise<{ reply: ExtraDrinkReply } | { error: string }> {
+  try {
+    const res = await fetch("/api/client-extra-drink", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sessionId, accept }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return { error: data.error ?? "Could not save. Try again." };
+    return { reply: data as ExtraDrinkReply };
+  } catch {
+    return { error: "Could not reach the server. Try again." };
+  }
+}
+
+/** Yes and No for the extra drink, on the checklist (the question is the checklist line). */
+export function ExtraDrinkButtons({ sessionId, onAnswered, disabled = false }: { sessionId: string; onAnswered: (reply: ExtraDrinkReply, line: string) => void; disabled?: boolean }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const answer = async (accept: boolean) => {
+    setBusy(true);
+    setError("");
+    const r = await postExtraDrink(sessionId, accept);
+    setBusy(false);
+    if ("error" in r) setError(r.error);
+    else onAnswered(r.reply, REPLY_LINE[r.reply.kind]);
+  };
+  const button = "rounded-lg px-4 py-2 text-sm font-medium disabled:opacity-40";
+  return (
+    <div className="space-y-1">
+      <div className="flex gap-2">
+        <button type="button" onClick={() => answer(true)} disabled={busy || disabled} className={`${button} bg-[#B5845A] text-white`}>
+          Yes
+        </button>
+        <button type="button" onClick={() => answer(false)} disabled={busy || disabled} className={`${button} border border-[#2C2420] text-[#2C2420]`}>
+          No
+        </button>
+      </div>
+      {error && <p className="text-sm text-[#A0412D]">{error}</p>}
+    </div>
+  );
+}
+
 export default function ClientAsks({
   sessionId,
   asks,

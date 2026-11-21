@@ -235,4 +235,88 @@ const noteRow = diff.planUpdate(saved, { team_notes: added.team_notes }, { deadl
 check("A team note is a saved change, so the team and GHL hear about it", !!noteRow.applied && noteRow.applied.changes.some((c) => c.field === "team_notes"));
 check("...but it is never read back to the client in the recap", diff.recapLines(noteRow.applied!.changes).length === 0 && diff.recapLines(noteRow.applied!.changes, { team: true }).length === 1);
 
+// ---------------------------------------------------------------------------
+// The event home: every new section speaks to the client, shows no team or
+// money detail it should not, and the payment never guesses a balance.
+// ---------------------------------------------------------------------------
+const home = await import("../lib/event-home.ts");
+const money = (o: Partial<Parameters<typeof home.paymentView>[0]>) =>
+  home.paymentView({ money: home.ALL_MONEY, total: 2400, pricePending: false, eventDay: "2026-12-11", payments: [], preference: "Zelle", ...o });
+const noPays = money({})!;
+check("Payment: the package total and the due date always", noPays.total === "$2,400" && noPays.due === "Friday, November 27, 2026", JSON.stringify(noPays));
+check("Payment: with no payments recorded, no paid or balance number, and Text us for your current balance", noPays.paid === "" && noPays.balance === "" && noPays.balanceLine === "Text us for your current balance");
+const paid = money({ payments: [{ cents: 15000 }, { cents: 50000 }] })!;
+check("Payment: with payments recorded, paid and balance from them", paid.paid === "$650" && paid.balance === "$1,750" && paid.balanceLine === "");
+check("Payment: a total being confirmed shows no number and no balance", (() => { const p = money({ pricePending: true, payments: [{ cents: 15000 }] })!; return p.total === "" && p.balance === "" && p.totalNote.includes("confirming"); })());
+check("Payment: no booked total on file reads Text us for your package total, never a computed guess", (() => { const p = money({ total: null })!; return p.total === "" && p.totalNote === home.NO_TOTAL_LINE && p.balance === ""; })());
+check("Payment: a planner without pricing sees no payment section at all", home.paymentView({ money: home.NO_MONEY, total: 2400, pricePending: false, eventDay: "2026-12-11", payments: [{ cents: 15000 }], preference: "" }) === null);
+check("Payment: a host with Host can see pricing sees the total only", (() => { const p = home.paymentView({ money: { ...home.NO_MONEY, total: true }, total: 2400, pricePending: false, eventDay: "2026-12-11", payments: [{ cents: 15000 }], preference: "" })!; return p.total === "$2,400" && p.balance === "" && p.paid === "" && p.balanceLine === ""; })());
+check("Payment: the planner page never falls back to the deposit", !src("lib/partners/event-page.ts").includes("|| Number(s.booked_price?.deposit_paid") && !src("lib/event-home-db.ts").includes("deposit_paid"));
+
+const todo = home.buildTodo(clientData, { asks, balance: { amount: 1750, due: "Friday, November 27, 2026" }, past: false });
+check("Checklist: finish drinks, the extra drink, day of contact, guest count, balance", ["drinks", "extra_drink", "day_of_contact", "guest_count", "balance"].every((k) => todo.some((t) => t.key === k)), todo.map((t) => t.key).join());
+check("Checklist: only what is missing is open", todo.find((t) => t.key === "drinks")!.done === false && todo.find((t) => t.key === "guest_count")!.done === false);
+check("Checklist: no balance item without recorded payments", !home.buildTodo(clientData, { asks, balance: null, past: false }).some((t) => t.key === "balance"));
+check("Checklist: nothing after the event", home.buildTodo(clientData, { asks, balance: null, past: true }).length === 0);
+const confirmed = { ...clientData, guest_count: 60, [home.GUEST_CONFIRMED_FIELD]: { count: "60", at: "x" } };
+check("Guest count: confirmed while the count is unchanged, open again after a change", home.guestCountConfirmed(confirmed) && !home.guestCountConfirmed({ ...confirmed, guest_count: 75 }));
+check("Status line: things left, all set, and past", home.statusLine(3, 20) === "3 things left to do" && home.statusLine(0, 20) === "You are all set." && home.countdown(20) === "20 days to go" && home.countdown(0) === "Today");
+check("Guest count confirm touches nothing else: no texts, no GHL, no new version", (() => { const r = src("app/api/client-guest-count/route.ts").replace(/^\s*\/\/.*$/gm, ""); return r.includes("setInternal(") && !/sendSms|textClient|ghl|deliverEventUpdates|applyEventUpdate/i.test(r); })());
+
+const HOME = {
+  date: "Friday, December 11, 2026",
+  daysUntil: 20,
+  past: false,
+  team: [{ name: "Taylor", role: "" }, { name: "Jordan", role: "" }],
+  payment: noPays,
+  paymentLines: [],
+  balance: null,
+  agreements: [{ id: "a1", label: "Signed agreement", typeLabel: "PDF" }],
+  listTiming: "review" as const,
+  requests: [{ summary: "Guest count: from 60 to 75", status: home.REQUEST_STATUS.pending, when: "November 20, 2026" }],
+};
+const homePage = (h: typeof HOME, showList = false) =>
+  textOf(
+    renderToStaticMarkup(
+      React.createElement(UpdateMode, {
+        sessionId: "s1",
+        clientName: String(clientData.client_name ?? ""),
+        initialEventData: clientData,
+        initialAsks: asks,
+        initialVersion: 1,
+        initialUpdatedAt: "2026-11-21T18:00:00Z",
+        initialMessages: [],
+        showList,
+        menu: null,
+        home: h,
+        extra: React.createElement(PlannersCard, { sessionId: "s1", planners: [{ id: "p1", name: "Riley", company: "Riley Events" }], pricingOn: false, activity: [] }),
+      })
+    )
+  );
+const ht = homePage(HOME);
+check("Home: no text says the client, ask the client, text them, or anything from the team notes", hits(ht).length === 0, hits(ht).join(" | "));
+check("Home top: the event, the date, the countdown and the status line", ht.includes("2nd Annual Christmas Gift Exchange") && ht.includes("Friday, December 11, 2026") && ht.includes("20 days to go") && /\d things? left to do/.test(ht));
+check("Home top: one always visible button, Change something or ask a question", ht.includes("Change something or ask a question"));
+check("Home: What we need from you, written to the client", ht.includes("What we need from you") && ht.includes("Your drink menu is not finished yet.") && ht.includes("Give us a day of contact") && ht.includes("Confirm your final guest count: 60 guests.") && ht.includes("Yes, 60 is final"));
+check("Home: Your day in plain words", ht.includes("Your day") && ht.includes("Our team arrives to set up") && ht.includes("Bar service starts") && ht.includes("Breakdown finishes"));
+check("Home: Your plan with a Change button on each part", ht.includes("Your plan") && (ht.match(/\nChange\n/g) ?? []).length >= 7);
+check("Home: Your requests, with where each one stands", ht.includes("Your requests") && ht.includes("Guest count: from 60 to 75") && ht.includes("Waiting for our team's approval"));
+check("Home: the shopping list says when to expect it", ht.includes("We are checking the recipes you gave us."));
+check("Home: Your bar team, first names only, and never Bartender for everyone", ht.includes("Your bar team") && ht.includes("Taylor") && ht.includes("Jordan") && !/Bartender/.test(ht.slice(ht.indexOf("Your bar team"), ht.indexOf("Payment"))));
+check("Home: an empty team reads plainly", homePage({ ...HOME, team: [] }).includes(home.TEAM_LATER));
+check("Home: Payment with the total and due date, and no balance number without payments", ht.includes("Package total") && ht.includes("$2,400") && ht.includes("Balance due by") && ht.includes("Text us for your current balance") && !ht.includes("Paid so far"));
+const htPaid = homePage({ ...HOME, payment: paid, paymentLines: [{ amount: "$150", on: "October 1, 2026" }] });
+check("Home: with payments recorded, paid and balance show", htPaid.includes("Paid so far") && htPaid.includes("$650") && htPaid.includes("$1,750") && !htPaid.includes("Text us for your current balance"));
+check("Home: Your agreement with view and download", ht.includes("Your agreement") && ht.includes("Signed agreement") && ht.includes("View (PDF)"));
+check("Home: planners after the agreement, help at the very bottom", ht.indexOf("Riley") > ht.indexOf("Your agreement") && ht.trimEnd().endsWith("Text us 469 754 8512"));
+check("Home: the order is top, checklist, your day, plan, menu, list, team, payment, agreement, planners, help", (() => {
+  const at = ["Change something or ask a question", "What we need from you", "Your day", "Your plan", "Your shopping list", "Your bar team", "Payment", "Your agreement", "Riley", "Text us 469 754 8512"].map((t) => ht.indexOf(t));
+  return at.every((n, i) => n >= 0 && (i === 0 || n > at[i - 1]));
+})());
+check("Home: the chat is closed until a button opens it", src("app/s/update-mode.tsx").includes("useState(false)") && src("app/s/update-mode.tsx").includes('chatOpen ? "flex" : "hidden"'));
+check("Home data reads no internal fields, pay, notes, phones or suppliers", (() => { const d = src("lib/event-home-db.ts"); return !/team_notes|pay_rate|hourly|ratings|supplier|\.note\b|created_by_name|recordedBy|phone/.test(d.replace(/^\s*\/\/.*$/gm, "")); })());
+check("Home: the agreement route opens current agreements only, behind the client link check", (() => { const r = src("app/api/agreement/route.ts"); return r.includes("clientLinkBlocked(") && src("lib/event-home-db.ts").includes('.eq("status", "current")'); })());
+check("Planner page: the same home sections, money by moneyAccess", (() => { const p = src("app/partners/e/[key]/page.tsx"); return p.includes("eventHome(access.session, money)") && p.includes("v.money.total") && p.includes("<PaymentCard") && p.includes("<BarTeam") && p.includes("<Checklist"); })());
+check("Planner page: the extra drink price only for a planner who sees the total", src("app/partners/e/[key]/page.tsx").includes("asks && !money.total ? { ...asks, extraDrinks: [] } : asks"));
+
 done("client voice");
