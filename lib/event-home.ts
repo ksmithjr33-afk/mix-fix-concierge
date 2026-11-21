@@ -18,8 +18,6 @@ type EventData = Record<string, unknown>;
 export const HELP_LINE = "Text us 469 754 8512";
 export const ASK_BUTTON = "Change something or ask a question";
 export const TEAM_LATER = "Your team will be listed here closer to your event.";
-export const NO_BALANCE_LINE = "Text us for your current balance";
-export const NO_TOTAL_LINE = "Text us for your package total";
 export const GUEST_CONFIRMED_FIELD = "guest_count_confirmed";
 
 const str = (v: unknown) => (typeof v === "string" && !isBlank(v) ? v.trim() : typeof v === "number" ? String(v) : "");
@@ -160,12 +158,10 @@ export function dayLines(ed: EventData): DayLine[] {
 // ----- Payment -----
 
 export interface PaymentView {
-  total: string; // "" when this viewer may not see it, or while a new price is being confirmed
-  totalNote: string; // "Our team is confirming your new total." while a price is pending; NO_TOTAL_LINE when no booked total is on file
+  total: string; // the booked total, when this viewer may see it and it is on file (never while a new price is being confirmed)
   due: string; // "Saturday, November 27, 2026"
   paid: string; // only when payments have been recorded
-  balance: string; // only when payments have been recorded
-  balanceLine: string; // NO_BALANCE_LINE when no payments are recorded
+  balance: string; // only when payments have been recorded and the total is known
   preference: string; // how they chose to pay
 }
 
@@ -178,10 +174,10 @@ export function balanceDue(eventDay: string | null): string {
 }
 
 /**
- * The package total and the due date always (when this viewer may see the
- * total). Paid and balance only when payments have been recorded for the
- * event; with none, "Text us for your current balance" and no number. Never
- * guessed from the deposit.
+ * Only what we know, and never an invitation to text: the booked total when it
+ * is on file, the due date, paid and balance only when payments have been
+ * recorded, and how they chose to pay. Never guessed from the deposit or
+ * computed again. Null when there is nothing to show, so the section is left out.
  */
 export function paymentView(o: {
   money: HomeMoney;
@@ -193,18 +189,16 @@ export function paymentView(o: {
 }): PaymentView | null {
   if (!o.money.total && !o.money.balance) return null;
   const known = o.money.total && o.total !== null && Number.isFinite(o.total) && !o.pricePending;
-  const recorded = o.payments.length > 0;
+  const recorded = o.money.balance && o.payments.length > 0;
   const paid = o.payments.reduce((n, p) => n + p.cents, 0) / 100;
-  const canBalance = o.money.balance && recorded && known;
-  return {
+  const view: PaymentView = {
     total: known ? money(o.total!) : "",
-    totalNote: o.pricePending ? "Our team is confirming your new total." : o.money.total && !known ? NO_TOTAL_LINE : "",
     due: balanceDue(o.eventDay),
-    paid: canBalance ? money(paid) : "",
-    balance: canBalance ? money(Math.max(0, o.total! - paid)) : "",
-    balanceLine: o.money.balance && !canBalance ? NO_BALANCE_LINE : "",
-    preference: str(o.preference),
+    paid: recorded ? money(paid) : "",
+    balance: recorded && known ? money(Math.max(0, o.total! - paid)) : "",
+    preference: o.money.balance ? str(o.preference) : "",
   };
+  return Object.values(view).some(Boolean) ? view : null;
 }
 
 /** The balance for the checklist: only when payments are recorded and the viewer may see it. */

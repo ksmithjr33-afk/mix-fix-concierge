@@ -244,13 +244,15 @@ const money = (o: Partial<Parameters<typeof home.paymentView>[0]>) =>
   home.paymentView({ money: home.ALL_MONEY, total: 2400, pricePending: false, eventDay: "2026-12-11", payments: [], preference: "Zelle", ...o });
 const noPays = money({})!;
 check("Payment: the package total and the due date always", noPays.total === "$2,400" && noPays.due === "Friday, November 27, 2026", JSON.stringify(noPays));
-check("Payment: with no payments recorded, no paid or balance number, and Text us for your current balance", noPays.paid === "" && noPays.balance === "" && noPays.balanceLine === "Text us for your current balance");
+check("Payment: with no payments recorded, no paid or balance number, and no invitation to text", noPays.paid === "" && noPays.balance === "" && !JSON.stringify(noPays).includes("Text us"));
 const paid = money({ payments: [{ cents: 15000 }, { cents: 50000 }] })!;
-check("Payment: with payments recorded, paid and balance from them", paid.paid === "$650" && paid.balance === "$1,750" && paid.balanceLine === "");
-check("Payment: a total being confirmed shows no number and no balance", (() => { const p = money({ pricePending: true, payments: [{ cents: 15000 }] })!; return p.total === "" && p.balance === "" && p.totalNote.includes("confirming"); })());
-check("Payment: no booked total on file reads Text us for your package total, never a computed guess", (() => { const p = money({ total: null })!; return p.total === "" && p.totalNote === home.NO_TOTAL_LINE && p.balance === ""; })());
+check("Payment: with payments recorded, paid and balance from them", paid.paid === "$650" && paid.balance === "$1,750");
+check("Payment: a total being confirmed shows no total and no balance, only what is known", (() => { const p = money({ pricePending: true, payments: [{ cents: 15000 }] })!; return p.total === "" && p.balance === "" && p.paid === "$150" && p.due !== ""; })());
+check("Payment: no booked total and no payments shows only the due date and how they chose to pay", (() => { const p = money({ total: null })!; return p.total === "" && p.balance === "" && p.paid === "" && p.due === "Friday, November 27, 2026" && p.preference === "Zelle" && !JSON.stringify(p).includes("Text us"); })());
+check("Payment: knowing neither the due date nor how they chose to pay leaves the section out", money({ total: null, eventDay: null, preference: "" }) === null);
+check("Payment: the page never invites a text for the total or balance", !/Text us for your (package total|current balance)/.test(src("lib/event-home.ts") + src("app/_event-home/sections.tsx")));
 check("Payment: a planner without pricing sees no payment section at all", home.paymentView({ money: home.NO_MONEY, total: 2400, pricePending: false, eventDay: "2026-12-11", payments: [{ cents: 15000 }], preference: "" }) === null);
-check("Payment: a host with Host can see pricing sees the total only", (() => { const p = home.paymentView({ money: { ...home.NO_MONEY, total: true }, total: 2400, pricePending: false, eventDay: "2026-12-11", payments: [{ cents: 15000 }], preference: "" })!; return p.total === "$2,400" && p.balance === "" && p.paid === "" && p.balanceLine === ""; })());
+check("Payment: a host with Host can see pricing sees the total and due date only", (() => { const p = home.paymentView({ money: { ...home.NO_MONEY, total: true }, total: 2400, pricePending: false, eventDay: "2026-12-11", payments: [{ cents: 15000 }], preference: "Zelle" })!; return p.total === "$2,400" && p.balance === "" && p.paid === "" && p.preference === ""; })());
 check("Payment: the planner page never falls back to the deposit", !src("lib/partners/event-page.ts").includes("|| Number(s.booked_price?.deposit_paid") && !src("lib/event-home-db.ts").includes("deposit_paid"));
 
 const todo = home.buildTodo(clientData, { asks, balance: { amount: 1750, due: "Friday, November 27, 2026" }, past: false });
@@ -304,9 +306,9 @@ check("Home: Your requests, with where each one stands", ht.includes("Your reque
 check("Home: the shopping list says when to expect it", ht.includes("We are checking the recipes you gave us."));
 check("Home: Your bar team, first names only, and never Bartender for everyone", ht.includes("Your bar team") && ht.includes("Taylor") && ht.includes("Jordan") && !/Bartender/.test(ht.slice(ht.indexOf("Your bar team"), ht.indexOf("Payment"))));
 check("Home: an empty team reads plainly", homePage({ ...HOME, team: [] }).includes(home.TEAM_LATER));
-check("Home: Payment with the total and due date, and no balance number without payments", ht.includes("Package total") && ht.includes("$2,400") && ht.includes("Balance due by") && ht.includes("Text us for your current balance") && !ht.includes("Paid so far"));
+check("Home: Payment with the total and due date, and no balance number or text invitation without payments", ht.includes("Package total") && ht.includes("$2,400") && ht.includes("Balance due by") && !ht.includes("Text us for your") && !ht.includes("Paid so far"));
 const htPaid = homePage({ ...HOME, payment: paid, paymentLines: [{ amount: "$150", on: "October 1, 2026" }] });
-check("Home: with payments recorded, paid and balance show", htPaid.includes("Paid so far") && htPaid.includes("$650") && htPaid.includes("$1,750") && !htPaid.includes("Text us for your current balance"));
+check("Home: with payments recorded, paid and balance show", htPaid.includes("Paid so far") && htPaid.includes("$650") && htPaid.includes("$1,750"));
 check("Home: Your agreement with view and download", ht.includes("Your agreement") && ht.includes("Signed agreement") && ht.includes("View (PDF)"));
 check("Home: planners after the agreement, help at the very bottom", ht.indexOf("Riley") > ht.indexOf("Your agreement") && ht.trimEnd().endsWith("Text us 469 754 8512"));
 check("Home: the order is top, checklist, your day, plan, menu, list, team, payment, agreement, planners, help", (() => {
@@ -318,5 +320,38 @@ check("Home data reads no internal fields, pay, notes, phones or suppliers", (()
 check("Home: the agreement route opens current agreements only, behind the client link check", (() => { const r = src("app/api/agreement/route.ts"); return r.includes("clientLinkBlocked(") && src("lib/event-home-db.ts").includes('.eq("status", "current")'); })());
 check("Planner page: the same home sections, money by moneyAccess", (() => { const p = src("app/partners/e/[key]/page.tsx"); return p.includes("eventHome(access.session, money)") && p.includes("v.money.total") && p.includes("<PaymentCard") && p.includes("<BarTeam") && p.includes("<Checklist"); })());
 check("Planner page: the extra drink price only for a planner who sees the total", src("app/partners/e/[key]/page.tsx").includes("asks && !money.total ? { ...asks, extraDrinks: [] } : asks"));
+
+// ---------------------------------------------------------------------------
+// Older events' other free text fields, the payment with nothing known, and
+// the team side's guest count confirmation.
+// ---------------------------------------------------------------------------
+const OLD_FIELDS = {
+  ...OLD,
+  beer_and_wine_details: "Client provides all beer and wine at the venue",
+  bar_details: "Bar will be set up downstairs near the patio.",
+  parking_info: "Client says they can park in the driveway.",
+  bar_on_site: "Yes, a built in bar",
+};
+const oldFieldsClient = notes.clientEventData(OLD_FIELDS);
+check("Older event: a field written about the client is hidden on the client page", !("beer_and_wine_details" in oldFieldsClient) && !("parking_info" in oldFieldsClient));
+check("Older event: a field written plainly still shows", oldFieldsClient.bar_details === OLD_FIELDS.bar_details && oldFieldsClient.bar_on_site === OLD_FIELDS.bar_on_site);
+check("New event: every field shows, the concierge writes it to the client", (() => { const n = notes.clientEventData(notes.withClientVoice({ beer_and_wine_details: "Client provides the beer" })); return n.beer_and_wine_details === "Client provides the beer"; })());
+check("The team side, GHL and the events row keep every field as is", (() => { const t = notes.teamEventData(OLD_FIELDS); return t.beer_and_wine_details === OLD_FIELDS.beer_and_wine_details && t.parking_info === OLD_FIELDS.parking_info; })());
+const oldFieldsPage = textOf(renderToStaticMarkup(React.createElement(EventSummary, { data: oldFieldsClient })));
+check("Older event page: no field text about the client", !/Client provides|Client says/.test(oldFieldsPage) && oldFieldsPage.includes("Bar will be set up downstairs"));
+const fieldEdit = notes.updateToolInput(OLD_FIELDS, { beer_and_wine_details: "You will bring the beer and wine." });
+check("A hidden field the client changes keeps the earlier text as a team note, nothing lost", fieldEdit.beer_and_wine_details === "You will bring the beer and wine." && String(fieldEdit.team_notes).includes("Earlier beer and wine details: Client provides all beer and wine at the venue"));
+check("...and the new text, written to the client, shows on their page", notes.clientEventData({ ...OLD_FIELDS, ...fieldEdit }).beer_and_wine_details === "You will bring the beer and wine.");
+const oldFieldsPrompt = up.buildUpdatePrompt(OLD_FIELDS, 1, dl);
+check("Update prompt, older event: the hidden fields are named, their text is not in it", oldFieldsPrompt.includes("beer and wine details (beer_and_wine_details)") && !oldFieldsPrompt.includes("Client provides all beer and wine"));
+
+const nothingKnown = textOf(renderToStaticMarkup(React.createElement(UpdateMode, { sessionId: "s1", clientName: "", initialEventData: clientData, initialAsks: asks, initialVersion: 1, initialUpdatedAt: null, initialMessages: [], home: { ...HOME, payment: home.paymentView({ money: home.ALL_MONEY, total: null, pricePending: false, eventDay: null, payments: [], preference: "" }) } })));
+check("Home: with nothing known about the payment, the Payment section is left out", !nothingKnown.includes("Payment") && !nothingKnown.includes("Text us for your"));
+check("Planner page: the same payment rule (the shared paymentView and PaymentCard)", src("app/partners/e/[key]/page.tsx").includes("<PaymentCard payment={home.payment}") && src("lib/event-home-db.ts").includes("paymentView("));
+
+const ev = await import("../lib/team/event-view.ts");
+const confirmedSession = { id: "x", event_date: "2026-12-11", event_data: { ...saved, guest_count: 60, [home.GUEST_CONFIRMED_FIELD]: { count: "60", at: "2026-11-21T18:00:00Z" } } };
+check("Team Details: Guest count confirmed by client, with the date", ev.buildStaffEventView(confirmedSession as never).guestCountConfirmed === "November 21, 2026" && src("app/team/e/[id]/event-details.tsx").includes('label="Guest count confirmed by client"'));
+check("Team Details: nothing once the count changes after", ev.buildStaffEventView({ ...confirmedSession, event_data: { ...confirmedSession.event_data, guest_count: 75 } } as never).guestCountConfirmed === "");
 
 done("client voice");

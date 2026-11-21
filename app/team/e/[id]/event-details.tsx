@@ -42,6 +42,7 @@ export function Details({ v, locationExtra }: { v: StaffEventView; locationExtra
         <Row label="Arrive by" value={v.arrival} />
         <Row label="Bar service" value={v.serviceStart && v.serviceEnd ? `${v.serviceStart} to ${v.serviceEnd}` : v.serviceStart} />
         <Row label="Guest count" value={v.guestCount} />
+        <Row label="Guest count confirmed by client" value={v.guestCountConfirmed} />
         <Row label="Package" value={v.package} />
         <Row label="Bartenders" value={v.bartenders !== null ? String(v.bartenders) : ""} />
         <Row label="Also working" value={v.teammates.join(", ")} />

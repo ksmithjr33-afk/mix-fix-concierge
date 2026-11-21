@@ -1,8 +1,10 @@
 // DRY RUN ONLY. Proposes, for every submitted event whose special requests are
 // hidden on the client page (submitted before 2026-11-21, so written for our
-// team), a client line written to the client and a team note. Writes nothing
-// to the database: it only saves a review file. Applying it is a separate,
-// later step, once the owner has reviewed and approved the file.
+// team), a client line written to the client and a team note. The same for
+// each hidden team voice field (beer and wine details, bar details, parking,
+// bar on site: lib/team-notes.ts TEAM_VOICE_FIELDS). Writes nothing to the
+// database: it only saves a review file. Applying it is a separate, later
+// step, once the owner has reviewed and approved the file.
 //
 // Each event's special requests text (and its package and event type, never a
 // name, email or phone) goes to the Claude API, the same provider the
@@ -10,6 +12,8 @@
 //
 //   node --no-warnings --env-file=.env.local scripts/rewrite-requests-dry-run.mts --out /path/outside/the/repo
 //   (--limit 5 to try a few first)
+//   --reuse <earlier .json>: keep that file's special requests proposals word
+//   for word (the ones already under review) and propose only what is new.
 
 import { registerHooks } from "node:module";
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -25,12 +29,14 @@ process.env.TIMING_LOG = "0";
 
 const { default: Anthropic } = await import("@anthropic-ai/sdk");
 const { supabase } = await import("../lib/supabase.ts");
-const { requestsShown, splitTeamNotes } = await import("../lib/team-notes.ts");
+const { requestsShown, splitTeamNotes, fieldHidden, TEAM_VOICE_FIELDS, TEAM_VOICE_LABEL } = await import("../lib/team-notes.ts");
+const { readFileSync } = await import("node:fs");
 const { REQUESTS_AND_NOTES_RULE } = await import("../lib/system-prompt.ts");
 
 const arg = (f: string) => (process.argv.includes(f) ? process.argv[process.argv.indexOf(f) + 1] : null);
 const out = arg("--out");
 const limit = Number(arg("--limit") ?? 0) || Infinity;
+const reusePath = arg("--reuse");
 if (!out || out.startsWith(process.cwd())) {
   console.error("--out <folder outside the repo> is required.");
   process.exit(1);
@@ -46,13 +52,23 @@ for (let from = 0; ; from += 500) {
 }
 const THIRD_PERSON = /\b(the )?client\b|\bthey\b|\btheir\b|text them/i;
 const BANNED = /\bthe client\b|\bclient\b|\bclient's\b|\bthey\b|\btheir\b|text them|ask the client/i;
-const todo = rows
+type Item = { r: Row; field: string; label: string; text: string };
+const todo: Item[] = rows
   .filter((r) => r.event_data && !requestsShown(r.event_data))
-  .map((r) => ({ r, text: splitTeamNotes(r.event_data!.special_requests).requests }))
-  .filter((x) => x.text.trim() && !/^(none|no|n\/a)\.?$/i.test(x.text.trim()))
+  .flatMap((r): Item[] => {
+    const ed = r.event_data!;
+    const out: Item[] = [];
+    const req = splitTeamNotes(ed.special_requests).requests;
+    if (req.trim() && !/^(none|no|n\/a)\.?$/i.test(req.trim())) out.push({ r, field: "special_requests", label: "Special requests", text: req });
+    for (const f of TEAM_VOICE_FIELDS) if (fieldHidden(ed, f)) out.push({ r, field: f, label: TEAM_VOICE_LABEL[f], text: String(ed[f]).trim() });
+    return out;
+  })
   .slice(0, limit);
+type Earlier = { id: string; original: string; client_line: string; team_note: string; flags: string[]; field?: string };
+const earlier: Earlier[] = reusePath ? JSON.parse(readFileSync(reusePath, "utf8")) : [];
+const reused = (x: Item) => earlier.find((e) => e.id === x.r.id && (e.field ?? "special_requests") === x.field && e.original === x.text) ?? null;
 
-const SYSTEM = `You rewrite one event's special requests for a mobile bar company. The text was written by our concierge for our team, and the client is about to see their requests on their own event page.
+const SYSTEM = `You rewrite one field of one event for a mobile bar company (the field is named in the message: special requests, beer and wine details, bar details, parking info, or bar on site). The text was written by our concierge for our team, and the client is about to see it on their own event page.
 
 ${REQUESTS_AND_NOTES_RULE}
 
@@ -62,18 +78,20 @@ Split the text into:
 Lose nothing: every fact in the text must be in one of the two. Do not add facts, prices or promises that are not in the text. Answer with only a JSON object: {"client_line": "...", "team_note": "..."}`;
 
 const client = new Anthropic();
-type Result = { id: string; event_date: string | null; package: string; original: string; matched_scan: boolean; client_line: string; team_note: string; flags: string[] };
+type Result = { id: string; field: string; label: string; event_date: string | null; package: string; original: string; matched_scan: boolean; client_line: string; team_note: string; flags: string[]; reused: boolean };
 
 async function propose(x: (typeof todo)[number]): Promise<Result> {
   const ed = x.r.event_data!;
-  const base = { id: x.r.id, event_date: x.r.event_date, package: String(ed.package ?? ""), original: x.text, matched_scan: THIRD_PERSON.test(x.text) };
+  const base = { id: x.r.id, field: x.field, label: x.label, event_date: x.r.event_date, package: String(ed.package ?? ""), original: x.text, matched_scan: THIRD_PERSON.test(x.text), reused: false };
+  const was = reused(x);
+  if (was) return { ...base, client_line: was.client_line, team_note: was.team_note, flags: was.flags, reused: true };
   try {
     const res = await client.messages.create({
       model: "claude-opus-5-5",
       max_tokens: 4000,
       output_config: { effort: "low" },
       system: SYSTEM,
-      messages: [{ role: "user", content: `Package: ${base.package}\nEvent type: ${String(ed.event_type ?? "")}\n\nSpecial requests:\n${x.text}` }],
+      messages: [{ role: "user", content: `Package: ${base.package}\nEvent type: ${String(ed.event_type ?? "")}\nField: ${x.label}\n\n${x.label}:\n${x.text}` }],
     } as never) as Anthropic.Message;
     if (res.stop_reason === "refusal") return { ...base, client_line: "", team_note: x.text, flags: ["declined by the model: review by hand"] };
     const raw = res.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("");
@@ -99,30 +117,42 @@ await Promise.all(
     }
   })
 );
-results.sort((a, b) => a.id.localeCompare(b.id));
+const order = ["special_requests", ...TEAM_VOICE_FIELDS] as string[];
+results.sort((a, b) => a.id.localeCompare(b.id) || order.indexOf(a.field) - order.indexOf(b.field));
 
 mkdirSync(out, { recursive: true });
 const stamp = new Date().toISOString().slice(0, 10);
-const jsonPath = join(out, `special-requests-rewrite-${stamp}.json`);
-const mdPath = join(out, `special-requests-rewrite-${stamp}.md`);
+const name = reusePath || todo.some((x) => x.field !== "special_requests") ? "client-page-rewrites" : "special-requests-rewrite";
+const jsonPath = join(out, `${name}-${stamp}.json`);
+const mdPath = join(out, `${name}-${stamp}.md`);
 writeFileSync(jsonPath, JSON.stringify(results, null, 2));
 const flagged = results.filter((r) => r.flags.length);
+const byEvent = new Map<string, Result[]>();
+for (const r of results) byEvent.set(r.id, [...(byEvent.get(r.id) ?? []), r]);
+const count = (f: (r: Result) => boolean) => results.filter(f).length;
 const md = [
-  `# Special requests rewrite: DRY RUN, not applied`,
+  `# Client page rewrites: DRY RUN, not applied`,
   ``,
-  `${results.length} events whose special requests are hidden on the client page. ${results.filter((r) => r.matched_scan).length} of them matched the third person scan (the 187). ${flagged.length} flagged for a closer look.`,
-  `Nothing was changed. These events stay hidden on the client page until this is reviewed and approved.`,
+  `${byEvent.size} events, ${results.length} items hidden on the client page. ${flagged.length} flagged for a closer look.`,
+  `- Special requests: ${count((r) => r.field === "special_requests")} (${count((r) => r.field === "special_requests" && r.matched_scan)} matched the third person scan)${reusePath ? `, proposals kept word for word from ${reusePath.split("/").pop()}` : ""}`,
+  ...TEAM_VOICE_FIELDS.map((f) => `- ${TEAM_VOICE_LABEL[f]}: ${count((r) => r.field === f)}`),
   ``,
-  ...results.flatMap((r) => [
-    `## ${r.id}  (${r.event_date ?? "no date"}, ${r.package || "no package"})${r.flags.length ? `  FLAGGED: ${r.flags.join("; ")}` : ""}`,
+  `Nothing was changed. These stay hidden on the client page until this is reviewed and approved.`,
+  ``,
+  ...[...byEvent.entries()].flatMap(([id, items]) => [
+    `## ${id}  (${items[0].event_date ?? "no date"}, ${items[0].package || "no package"})`,
     ``,
-    `**Now (team wording):** ${r.original.replace(/\n/g, " / ")}`,
-    ``,
-    `**Client would see:** ${r.client_line || "(nothing)"}`,
-    ``,
-    `**Team note:** ${r.team_note || "(nothing)"}`,
-    ``,
+    ...items.flatMap((r) => [
+      `### ${r.label}${r.flags.length ? `  FLAGGED: ${r.flags.join("; ")}` : ""}`,
+      ``,
+      `**Now (team wording):** ${r.original.replace(/\n/g, " / ")}`,
+      ``,
+      `**Client would see:** ${r.client_line || "(nothing)"}`,
+      ``,
+      `**Team note:** ${r.team_note || "(nothing)"}`,
+      ``,
+    ]),
   ]),
 ].join("\n");
 writeFileSync(mdPath, md);
-console.log(`\nDRY RUN: ${results.length} proposed, ${flagged.length} flagged. Nothing written to the database.\n  ${mdPath}\n  ${jsonPath}`);
+console.log(`\nDRY RUN: ${results.length} items (${count((r) => r.reused)} kept from the earlier file), ${flagged.length} flagged. Nothing written to the database.\n  ${mdPath}\n  ${jsonPath}`);

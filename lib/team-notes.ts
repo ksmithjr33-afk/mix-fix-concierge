@@ -38,6 +38,29 @@ export function requestsShown(ed: EventData): boolean {
   return ed[REQUESTS_VOICE] === CLIENT_VOICE;
 }
 
+/**
+ * Free text fields an older event's concierge wrote about the client in the
+ * third person ("Client provides all beer and wine"). On an older event each
+ * one is hidden on the client page when its text reads that way, and shown
+ * when it does not. Nothing is deleted, and the team side shows them as is.
+ */
+export const TEAM_VOICE_FIELDS = ["beer_and_wine_details", "bar_details", "parking_info", "bar_on_site"] as const;
+export const TEAM_VOICE_LABEL: Record<(typeof TEAM_VOICE_FIELDS)[number], string> = {
+  beer_and_wine_details: "Beer and wine details",
+  bar_details: "Bar details",
+  parking_info: "Parking info",
+  bar_on_site: "Bar on site",
+};
+/** Written about the client, not to them. The same scan the dry run uses. */
+export const THIRD_PERSON = /\b(the )?client\b|\bthey\b|\btheir\b|text them/i;
+
+/** True when this field's text on an older event is written about the client, so it stays with our team. */
+export function fieldHidden(ed: EventData, field: string): boolean {
+  if (requestsShown(ed)) return false;
+  const v = ed[field];
+  return typeof v === "string" && THIRD_PERSON.test(v);
+}
+
 /** Marks a new concierge submission: its special requests are written to the client. */
 export function withClientVoice(ed: EventData): EventData {
   return { ...ed, [REQUESTS_VOICE]: CLIENT_VOICE };
@@ -193,6 +216,8 @@ export function clearUnconfirmed(ed: EventData, answer: string): EventData {
 export function clientEventData(ed: EventData | null | undefined): EventData {
   const out: EventData = { ...(ed ?? {}) };
   for (const k of INTERNAL_FIELDS) delete out[k];
+  // Checked on the event as saved, before anything below changes it.
+  for (const f of TEAM_VOICE_FIELDS) if (fieldHidden(ed ?? {}, f)) delete out[f];
   if (!requestsShown(out) && "special_requests" in out) {
     // An older event: the free text stays with our team. The sodas it asked for stay on the client's list.
     const sodas = parseExtraSodas(out.special_requests);
@@ -272,6 +297,12 @@ export function teamEventData<T extends EventData>(ed: T): T {
 export function updateToolInput(current: EventData, raw: EventData): EventData {
   const { [ACCEPT_EXTRA_DRINKS]: _accept, [TEAM_NOTES]: _notes, [TEAM_NOTE_INPUT]: note, ...input } = raw;
   if ("special_requests" in input) input.special_requests = mergedRequests(current, input.special_requests);
-  if (typeof note === "string" && note.trim()) input[TEAM_NOTES] = withTeamNotes(current, [note.trim()])[TEAM_NOTES];
+  const add: string[] = [];
+  // A hidden field the client changes: the concierge never saw the earlier text, so it is kept as a team note, never lost.
+  for (const f of TEAM_VOICE_FIELDS) {
+    if (f in input && fieldHidden(current, f) && input[f] !== current[f]) add.push(`Earlier ${TEAM_VOICE_LABEL[f].toLowerCase()}: ${String(current[f]).trim()}`);
+  }
+  if (typeof note === "string" && note.trim()) add.push(note.trim());
+  if (add.length) input[TEAM_NOTES] = withTeamNotes(current, add)[TEAM_NOTES];
   return input;
 }

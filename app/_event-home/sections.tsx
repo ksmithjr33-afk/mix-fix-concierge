@@ -122,7 +122,6 @@ export function PaymentCard({ payment, lines = [] }: { payment: PaymentView | nu
         {row("Balance", payment.balance)}
         {row("How you chose to pay", payment.preference)}
       </dl>
-      {payment.totalNote && <p className="text-[15px] text-[#6B5D52]">{payment.totalNote}</p>}
       {lines.length > 0 && (
         <ul className="text-sm text-[#6B5D52]">
           {lines.map((l, i) => (
@@ -132,14 +131,6 @@ export function PaymentCard({ payment, lines = [] }: { payment: PaymentView | nu
             </li>
           ))}
         </ul>
-      )}
-      {payment.balanceLine && (
-        <p className="text-[15px] text-[#2C2420]">
-          <a href="sms:4697548512" className="underline">
-            {payment.balanceLine}
-          </a>
-          .
-        </p>
       )}
     </HomeCard>
   );

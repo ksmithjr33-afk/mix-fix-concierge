@@ -17,7 +17,7 @@ import {
 } from "@/lib/system-prompt";
 import { packageDrinkCount, type Deadlines, type EventData } from "@/lib/event-diff";
 import { CHANGE_REQUEST_MESSAGE } from "@/lib/client-list";
-import { clientAsks, clientEventData, requestsShown } from "@/lib/team-notes";
+import { TEAM_VOICE_FIELDS, TEAM_VOICE_LABEL, clientAsks, clientEventData, fieldHidden, requestsShown } from "@/lib/team-notes";
 import {
   DIVE_CARD_FULL_LINE,
   DIVE_CARD_INCLUDED,
@@ -110,6 +110,10 @@ export function buildUpdatePrompt(
   const paymentPreference = String(eventData.payment_preference ?? "").trim();
   // Older events' special requests were written for our team: the concierge never sees them, and what it sends is added to them.
   const shown = requestsShown(eventData);
+  const hiddenFields = TEAM_VOICE_FIELDS.filter((f) => fieldHidden(eventData, f)).map((f) => `${TEAM_VOICE_LABEL[f].toLowerCase()} (${f})`);
+  const hiddenLine = hiddenFields.length
+    ? `\n   This event's ${hiddenFields.join(", ")} are kept by our team and are not shown here. If the client tells you about one of them, confirm it and send the new value written to the client, for example "You will bring all the beer and wine."; our team keeps the earlier text. Never tell the client there is nothing on file for it.`
+    : "";
   const requestsHow = shown
     ? "send the COMPLETE special_requests text, the existing text plus the new line, never dropping what is already there;"
     : "this event's earlier special requests are kept by our team and are not shown here, so send ONLY the new line in special_requests, and it is added to them;";
@@ -149,7 +153,7 @@ ${extra.planner ? `${extra.planner}\n\n` : ""}${extra.packageSection ? `${extra.
 3. When the client says yes, call the update_event_data tool with ONLY the changed fields and write NO text in that reply. Nothing is saved until the tool returns, so before the tool result comes back NEVER say "locking that in", "updating now", "done", "saved", "all set", "updated", or anything else that claims or announces the change. After the tool returns you get a message starting with TOOL RESULT that lists exactly what was recorded. Only then reply: confirm exactly what that result lists, in plain words, nothing more and nothing less, then ask if there is anything else they would like to change. If the result says nothing was recorded or something failed, say so honestly and never claim it was saved.
 4. If the client changes several things at once, confirm them together in one message and send them in one update_event_data call.
 5. signature_drinks: when any drink changes, send the COMPLETE signature_drinks array with every drink, changed and unchanged, in the same order. Every ingredient needs its oz amount exactly like intake, for example "2 oz vodka", except "Top with" items. Keep is_mocktail and is_custom accurate. When you show drinks to the client, list ingredient names only, never oz amounts.
-6. special_requests: ${requestsHow}
+6. special_requests: ${requestsHow}${hiddenLine}
 7. Times: if the client moves the start time, keep the same length of service and calculate the new end time, then confirm both.
 8. Anything that does not fit a field is a special_requests change. If the client tells you something about their event that no other field covers, for example "I will provide the cups", "we are bringing our own garnishes", "the bar needs to face the pool", or "my sister will handle the ice", NEVER just acknowledge it. Confirm it back like any other change, and when they say yes, call update_event_data with special_requests (${shown ? "the COMPLETE text, the existing text plus the new line" : "only the new line"}) written to the client, for example "You will provide your own cups.", following SPECIAL REQUESTS AND TEAM NOTES. If it is not recorded with update_event_data, our team never sees it.
 9. Already on file: before calling update_event_data, compare what the client said with CURRENT EVENT DETAILS below. If they restate something that is already saved there (for example they repeat the day of contact phone that is already listed, or a note already in special_requests), do NOT call update_event_data again and do NOT say you just updated or saved it. Say it is already on file, repeat the saved value, and ask if there is anything else they would like to change.

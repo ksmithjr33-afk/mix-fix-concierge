@@ -14,6 +14,7 @@ import { chicagoStamp, eventDayStart, eventSchedule, formatClock, longDate } fro
 import { eventData, marketLabel, sessionMarket } from "@/lib/team/markets";
 import { isAdminRole, type Role } from "@/lib/team/roles";
 import { teamRequestsText } from "@/lib/team-notes";
+import { GUEST_CONFIRMED_FIELD, guestCountConfirmed } from "@/lib/event-home";
 
 export const MIX_FIX_LINE = "469 754 8512";
 export const PHONE_HIDDEN_NOTE = "Contact number appears 48 hours before the event.";
@@ -87,6 +88,7 @@ export interface StaffEventView {
   barDetails: string;
   parking: string;
   guestCount: string;
+  guestCountConfirmed: string; // the date the client confirmed it ("November 21, 2026"), while it is still the count on file
   package: string;
   bartenders: number | null;
   teammates: string[];
@@ -227,6 +229,14 @@ export function bartendersNeeded(session: SessionLike): number | null {
   return bartendersFix(session)?.value ?? bookedBartenders(session).count;
 }
 
+/** The client's "Yes, 120 is final" (app/api/client-guest-count), only while it is still the count on file. */
+function guestConfirmedLine(ed: Record<string, unknown>, tz: string): string {
+  if (!guestCountConfirmed(ed)) return "";
+  const at = new Date(String((ed[GUEST_CONFIRMED_FIELD] as { at?: unknown }).at ?? ""));
+  if (isNaN(at.getTime())) return "Yes";
+  return at.toLocaleDateString("en-US", { timeZone: tz, month: "long", day: "numeric", year: "numeric" });
+}
+
 export function buildStaffEventView(
   session: SessionLike,
   opts: { now?: Date; teammates?: string[]; latestUpdate?: UpdateLike | null } = {}
@@ -264,6 +274,7 @@ export function buildStaffEventView(
     barDetails: scrub(ed.bar_details),
     parking: scrub(ed.parking_info),
     guestCount: guests,
+    guestCountConfirmed: guestConfirmedLine(ed, s.tz),
     package: pkg,
     bartenders: bartendersNeeded(session),
     teammates: opts.teammates ?? [],

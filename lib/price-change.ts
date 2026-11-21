@@ -57,7 +57,7 @@ export interface BookedPrice {
   discount_amount: number | null;
   tip_jar: boolean;
   deposit_paid: number;
-  source: "create-session" | "computed" | "change-order" | "update";
+  source: "create-session" | "computed" | "change-order" | "update" | "import"; // import: scripts/import-booked-totals.mts, from the owner's export
   basis?: PriceBasis | null; // the event the total was priced for, set once known
   class49_used?: boolean; // CLASS49 already taken off an earlier price change
   // What the booking said each bartender's tip is, in dollars (GHL tip_per_bartender).
