@@ -12,7 +12,8 @@ import type { SessionRow } from "@/lib/event-updates";
 import { eventData, eventTimeZone } from "@/lib/team/markets";
 import { eventSchedule, longDate } from "@/lib/team/time";
 import { computeDeadlines, recapLines } from "@/lib/event-diff";
-import { eventPayments } from "@/lib/team/business-db";
+import { eventPayments, financeRow } from "@/lib/team/business-db";
+import { recordedFrom } from "@/lib/balance";
 import { autoSendOn, holdsFor, listState } from "@/lib/client-list-db";
 import { firstName } from "@/lib/team/event-view";
 import { typeLabel } from "@/lib/team/approved-menu";
@@ -98,9 +99,10 @@ export async function eventHome(s: SessionRow, money: HomeMoney, now: Date = new
   const deadlines = computeDeadlines(ed.event_date ?? s.event_date, now, eventTimeZone(s));
   const past = deadlines.eventPassed;
   const seeMoney = money.total || money.balance;
-  const [team, pays, agreements, timing, requests] = await Promise.all([
+  const [team, pays, finance, agreements, timing, requests] = await Promise.all([
     homeTeam(s.id),
     seeMoney ? eventPayments(s.id).catch(() => []) : Promise.resolve([]),
+    seeMoney ? financeRow(s.id).catch(() => null) : Promise.resolve(null),
     money.agreement ? currentAgreements(s.id).catch(() => []) : Promise.resolve([]),
     listTiming(s.id),
     requestsFor(s, ed, now),
@@ -108,16 +110,18 @@ export async function eventHome(s: SessionRow, money: HomeMoney, now: Date = new
   // The booked total only: never computed again here, never the deposit.
   const raw = s.booked_price?.total;
   const total = raw === null || raw === undefined || !Number.isFinite(Number(raw)) ? null : Number(raw);
-  const payments = pays.map((p) => ({ cents: p.cents }));
-  const payment = paymentView({ money, total, pricePending: !!s.price_pending, eventDay: day ?? deadlines.eventDay, payments, preference: ed.payment_preference });
+  // Recorded only: an entered deposit, a legacy balance, and the payments list. Never the assumed deposit.
+  const recorded = recordedFrom(finance, pays);
+  const payment = paymentView({ money, total, pricePending: !!s.price_pending, eventDay: day ?? deadlines.eventDay, recorded, preference: ed.payment_preference });
+  const depositLine = finance?.deposit_paid_cents ? [{ amount: `${dollars(finance.deposit_paid_cents)} deposit`, on: longDate(finance.deposit_paid_on ?? null) }] : [];
   return {
     date: longDate(day ?? deadlines.eventDay),
     daysUntil: deadlines.daysUntil,
     past,
     team,
     payment,
-    paymentLines: money.payments && payment?.paid ? pays.map((p) => ({ amount: dollars(p.cents), on: longDate(p.paidOn) })) : [],
-    balance: balanceFact(payment, total, payments, day ?? deadlines.eventDay),
+    paymentLines: money.payments && payment?.paid ? [...depositLine, ...pays.map((p) => ({ amount: dollars(p.cents), on: longDate(p.paidOn) }))] : [],
+    balance: balanceFact(payment, total, recorded, day ?? deadlines.eventDay),
     agreements: agreements.map((r) => ({ id: r.id, label: r.label || "Agreement", typeLabel: typeLabel(r.file_type) })),
     listTiming: timing,
     requests,

@@ -121,8 +121,8 @@ export interface Candidate {
   contactId: string;
   eventDay: string | null;
   total: number | null; // booked_price.total on file
-  paidCents: number; // recorded payments
-  payments: number;
+  paidCents: number; // everything recorded as paid (lib/balance.ts recordedFrom): an entered deposit, a legacy balance, payments
+  payments: number; // how many of those are recorded (0: nothing recorded)
 }
 
 export type Outcome =
@@ -148,7 +148,7 @@ export function matchRow(row: ImportRow, all: Candidate[]): Outcome {
   let addPaid: number | null = null;
   const paid = row.paid ?? 0;
   if (paid > 0 && c.payments === 0) addPaid = paid;
-  else if (paid > 0 && Math.abs(c.paidCents / 100 - paid) >= 0.01) notes.push(`${c.payments} payment(s) already recorded totaling $${c.paidCents / 100}, the file says $${paid}: not changed`);
+  else if (paid > 0 && Math.abs(c.paidCents / 100 - paid) >= 0.01) notes.push(`$${c.paidCents / 100} already recorded as paid, the file says $${paid}: not changed`);
   if (c.status !== "submitted") notes.push(`event status is ${c.status}`);
   return { kind: "matched", row, c, setTotal, addPaid, notes };
 }

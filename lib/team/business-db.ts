@@ -5,6 +5,7 @@
 // manager or staff page or route can carry the booking total, costs, or
 // profit even by mistake.
 
+import { PAID_IN_FULL_NOTE, recordedFrom, type Recorded } from "@/lib/balance";
 import { supabase } from "@/lib/supabase";
 import type { SessionRow } from "@/lib/event-updates";
 import type { StaffMember } from "@/lib/team/event-view";
@@ -73,6 +74,20 @@ export async function eventPayments(sessionId: string): Promise<Payment[]> {
   const { data, error } = await supabase.from("event_payments").select("id, amount_cents, paid_on, note, created_by_name, created_at").eq("session_id", sessionId).order("created_at", { ascending: true });
   if (error || !data) return [];
   return (data as PaymentRow[]).map((p) => ({ id: p.id, cents: p.amount_cents, paidOn: p.paid_on, note: p.note ?? "", recordedBy: p.created_by_name ?? "" }));
+}
+
+/**
+ * What has been recorded as paid, for the client and planner pages and both
+ * concierges (lib/balance.ts): an entered deposit, a legacy balance, and the
+ * payments list. Never the assumed default deposit. Null when it cannot be read.
+ */
+export async function recordedPayments(sessionId: string): Promise<Recorded | null> {
+  try {
+    const [finance, payments] = await Promise.all([financeRow(sessionId), eventPayments(sessionId)]);
+    return recordedFrom(finance, payments);
+  } catch {
+    return null;
+  }
 }
 
 /** Service has ended (or, with no times, the day has passed). */
@@ -234,7 +249,7 @@ export async function saveEventBusiness(admin: StaffMember, sessionId: string, b
     if (remaining <= 0) return { ok: false, error: "Nothing remains on this event.", status: 409 };
     const date = String(body.date ?? "").trim() || today;
     if (!isYmd(date)) return { ok: false, error: "Pick the date it was paid.", status: 400 };
-    return insertPayment(admin, sessionId, remaining, date, "Paid in full");
+    return insertPayment(admin, sessionId, remaining, date, PAID_IN_FULL_NOTE);
   }
 
   if (action === "supplies") {

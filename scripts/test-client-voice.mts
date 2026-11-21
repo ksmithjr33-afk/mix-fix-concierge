@@ -205,7 +205,7 @@ const oldText = page(oldClient, null);
 check("Older event: the page shows none of it, and no Requests line saying None", !/promised|Bartender should|Diet Coke and Sprite/.test(oldText) && !oldText.includes("\nRequests\n") && hits(oldText).length === 0, hits(oldText).join(" | "));
 check("New event: its requests, written to the client, show", text.includes("\nRequests\nBar faces the tree"));
 check("The marker never goes to GHL or the events row", !("requests_voice" in notes.teamEventData(saved)) && !("requests_voice" in row));
-check("Only the intake concierge marks a submission as written to the client", src("app/api/chat/route.ts").includes("const input = withClientVoice(drinks.data);") && !src("scripts/admin-submit-session.mts").includes("withClientVoice") && !src("lib/manual-event.ts").includes("withClientVoice"));
+check("Only the intake concierge marks a submission as written to the client", src("app/api/chat/route.ts").includes("let input = withClientVoice(drinks.data);") && !src("scripts/admin-submit-session.mts").includes("withClientVoice") && !src("lib/manual-event.ts").includes("withClientVoice"));
 
 // ---------------------------------------------------------------------------
 // Both concierge prompts: client requests to the client, team things in team notes.
@@ -240,20 +240,24 @@ check("...but it is never read back to the client in the recap", diff.recapLines
 // money detail it should not, and the payment never guesses a balance.
 // ---------------------------------------------------------------------------
 const home = await import("../lib/event-home.ts");
+const bal = await import("../lib/balance.ts");
+const R = (payments: { cents: number; note?: string }[], finance: { deposit_paid_cents?: number | null } | null = null) => bal.recordedFrom(finance, payments);
 const money = (o: Partial<Parameters<typeof home.paymentView>[0]>) =>
-  home.paymentView({ money: home.ALL_MONEY, total: 2400, pricePending: false, eventDay: "2026-12-11", payments: [], preference: "Zelle", ...o });
+  home.paymentView({ money: home.ALL_MONEY, total: 2400, pricePending: false, eventDay: "2026-12-11", recorded: R([]), preference: "Zelle", ...o });
 const noPays = money({})!;
 check("Payment: the package total and the due date always", noPays.total === "$2,400" && noPays.due === "Friday, November 27, 2026", JSON.stringify(noPays));
 check("Payment: with no payments recorded, no paid or balance number, and no invitation to text", noPays.paid === "" && noPays.balance === "" && !JSON.stringify(noPays).includes("Text us"));
-const paid = money({ payments: [{ cents: 15000 }, { cents: 50000 }] })!;
-check("Payment: with payments recorded, paid and balance from them", paid.paid === "$650" && paid.balance === "$1,750");
-check("Payment: a total being confirmed shows no total and no balance, only what is known", (() => { const p = money({ pricePending: true, payments: [{ cents: 15000 }] })!; return p.total === "" && p.balance === "" && p.paid === "$150" && p.due !== ""; })());
+const paid = money({ recorded: R([{ cents: 50000 }], { deposit_paid_cents: 15000 }) })!;
+check("Payment: with payments recorded, paid and balance from them (an entered deposit counts)", paid.paid === "$650" && paid.balance === "$1,750");
+check("Payment: the assumed $150 deposit never counts, only one an admin entered", money({ recorded: R([{ cents: 50000 }]) })!.balance === "$1,900");
+check("Payment: a payment recorded as Paid in full settles the balance", money({ recorded: R([{ cents: 225000, note: "Paid in full" }]) })!.balance === "$0");
+check("Payment: a total being confirmed shows no total and no balance, only what is known", (() => { const p = money({ pricePending: true, recorded: R([{ cents: 15000 }]) })!; return p.total === "" && p.balance === "" && p.paid === "$150" && p.due !== ""; })());
 check("Payment: no booked total and no payments shows only the due date and how they chose to pay", (() => { const p = money({ total: null })!; return p.total === "" && p.balance === "" && p.paid === "" && p.due === "Friday, November 27, 2026" && p.preference === "Zelle" && !JSON.stringify(p).includes("Text us"); })());
 check("Payment: knowing neither the due date nor how they chose to pay leaves the section out", money({ total: null, eventDay: null, preference: "" }) === null);
 check("Payment: the page never invites a text for the total or balance", !/Text us for your (package total|current balance)/.test(src("lib/event-home.ts") + src("app/_event-home/sections.tsx")));
-check("Payment: a planner without pricing sees no payment section at all", home.paymentView({ money: home.NO_MONEY, total: 2400, pricePending: false, eventDay: "2026-12-11", payments: [{ cents: 15000 }], preference: "" }) === null);
-check("Payment: a host with Host can see pricing sees the total and due date only", (() => { const p = home.paymentView({ money: { ...home.NO_MONEY, total: true }, total: 2400, pricePending: false, eventDay: "2026-12-11", payments: [{ cents: 15000 }], preference: "Zelle" })!; return p.total === "$2,400" && p.balance === "" && p.paid === "" && p.preference === ""; })());
-check("Payment: the planner page never falls back to the deposit", !src("lib/partners/event-page.ts").includes("|| Number(s.booked_price?.deposit_paid") && !src("lib/event-home-db.ts").includes("deposit_paid"));
+check("Payment: a planner without pricing sees no payment section at all", home.paymentView({ money: home.NO_MONEY, total: 2400, pricePending: false, eventDay: "2026-12-11", recorded: R([{ cents: 15000 }]), preference: "" }) === null);
+check("Payment: a host with Host can see pricing sees the total and due date only", (() => { const p = home.paymentView({ money: { ...home.NO_MONEY, total: true }, total: 2400, pricePending: false, eventDay: "2026-12-11", recorded: R([{ cents: 15000 }]), preference: "Zelle" })!; return p.total === "$2,400" && p.balance === "" && p.paid === "" && p.preference === ""; })());
+check("Payment: the planner page never falls back to the deposit", !src("lib/partners/event-page.ts").includes("|| Number(s.booked_price?.deposit_paid") && !/booked_price\??\.deposit_paid|DEFAULT_DEPOSIT/.test(src("lib/event-home-db.ts")));
 
 const todo = home.buildTodo(clientData, { asks, balance: { amount: 1750, due: "Friday, November 27, 2026" }, past: false });
 check("Checklist: finish drinks, the extra drink, day of contact, guest count, balance", ["drinks", "extra_drink", "day_of_contact", "guest_count", "balance"].every((k) => todo.some((t) => t.key === k)), todo.map((t) => t.key).join());
@@ -345,7 +349,7 @@ check("...and the new text, written to the client, shows on their page", notes.c
 const oldFieldsPrompt = up.buildUpdatePrompt(OLD_FIELDS, 1, dl);
 check("Update prompt, older event: the hidden fields are named, their text is not in it", oldFieldsPrompt.includes("beer and wine details (beer_and_wine_details)") && !oldFieldsPrompt.includes("Client provides all beer and wine"));
 
-const nothingKnown = textOf(renderToStaticMarkup(React.createElement(UpdateMode, { sessionId: "s1", clientName: "", initialEventData: clientData, initialAsks: asks, initialVersion: 1, initialUpdatedAt: null, initialMessages: [], home: { ...HOME, payment: home.paymentView({ money: home.ALL_MONEY, total: null, pricePending: false, eventDay: null, payments: [], preference: "" }) } })));
+const nothingKnown = textOf(renderToStaticMarkup(React.createElement(UpdateMode, { sessionId: "s1", clientName: "", initialEventData: clientData, initialAsks: asks, initialVersion: 1, initialUpdatedAt: null, initialMessages: [], home: { ...HOME, payment: home.paymentView({ money: home.ALL_MONEY, total: null, pricePending: false, eventDay: null, recorded: R([]), preference: "" }) } })));
 check("Home: with nothing known about the payment, the Payment section is left out", !nothingKnown.includes("Payment") && !nothingKnown.includes("Text us for your"));
 check("Planner page: the same payment rule (the shared paymentView and PaymentCard)", src("app/partners/e/[key]/page.tsx").includes("<PaymentCard payment={home.payment}") && src("lib/event-home-db.ts").includes("paymentView("));
 

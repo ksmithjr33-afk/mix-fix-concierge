@@ -6,8 +6,12 @@
 // and the same event date, and:
 // - sets booked_price.total when no total is on file (a different total on
 //   file is reported and left alone);
-// - records amount_paid as one payment when no payments are recorded (a
-//   different recorded amount is reported and left alone).
+// - records amount_paid when nothing is recorded as paid (a different
+//   recorded amount is reported and left alone). It is recorded the way the
+//   Business tab counts money collected (deposit plus payments): the deposit
+//   part (up to the booked deposit, $150 by default) as the event's entered
+//   deposit, and the rest as one payment. Collected, and the balance the
+//   client sees (lib/balance.ts), then equal amount_paid exactly.
 // No version bump, no history row, no GHL, no texts.
 //
 //   Dry run (default, writes nothing; saves a report next to the file):
@@ -32,6 +36,7 @@ const { readImport, matchRow } = await import("../lib/booked-import.ts");
 const { eventData } = await import("../lib/team/markets.ts");
 const { eventSchedule } = await import("../lib/team/time.ts");
 const { DEFAULT_DEPOSIT } = await import("../lib/price-change.ts");
+const { recordedFrom } = await import("../lib/balance.ts");
 type Candidate = import("../lib/booked-import.ts").Candidate;
 type Outcome = import("../lib/booked-import.ts").Outcome;
 
@@ -56,6 +61,12 @@ for (let from = 0; ; from += 500) {
   if (!data || data.length < 500) break;
 }
 const pays = new Map<string, { cents: number; n: number }>();
+const fin = new Map<string, { deposit_paid_cents: number | null; balance_paid_cents: number | null }>();
+{
+  const { data, error: e } = await supabase.from("event_finance").select("session_id, deposit_paid_cents, balance_paid_cents");
+  if (e) throw new Error(`event_finance read failed: ${e.message}`);
+  for (const f of (data as { session_id: string; deposit_paid_cents: number | null; balance_paid_cents: number | null }[]) ?? []) fin.set(f.session_id, f);
+}
 for (let from = 0; ; from += 1000) {
   const { data, error: e } = await supabase.from("event_payments").select("session_id, amount_cents").range(from, from + 999);
   if (e) throw new Error(`event_payments read failed: ${e.message}`);
@@ -77,8 +88,13 @@ const candidates: Candidate[] = sessions.map((s) => {
     contactId: (s.ghl_contact_id ?? "").trim(),
     eventDay: eventSchedule(ed).day,
     total: total === null || total === undefined || !Number.isFinite(Number(total)) ? null : Number(total),
-    paidCents: pays.get(s.id)?.cents ?? 0,
-    payments: pays.get(s.id)?.n ?? 0,
+    // Everything recorded as paid (an entered deposit, a legacy balance, payments), never the assumed deposit.
+    ...(() => {
+      const f = fin.get(s.id) ?? null;
+      const p = pays.get(s.id);
+      const rec = recordedFrom(f, p ? [{ cents: p.cents }] : []);
+      return { paidCents: rec.cents, payments: (f?.deposit_paid_cents != null ? 1 : 0) + (f?.balance_paid_cents ? 1 : 0) + (p?.n ?? 0) };
+    })(),
   };
 });
 
@@ -89,6 +105,8 @@ for (const o of outcomes) if (o.kind === "matched") seen.set(o.c.id, (seen.get(o
 const final: Outcome[] = outcomes.map((o) => (o.kind === "matched" && seen.get(o.c.id)! > 1 ? { kind: "unmatched", row: o.row, reason: `more than one row in the file for event ${o.c.id}` } : o));
 
 const today = new Date().toISOString().slice(0, 10);
+// Only to split the paid amount into the deposit and the rest, the way the Business tab records them. Never subtracted from a total.
+const depositOf = (s: S) => Number(s.booked_price?.deposit_paid ?? DEFAULT_DEPOSIT);
 const $ = (n: number) => `$${n.toLocaleString("en-US", { minimumFractionDigits: n % 1 ? 2 : 0, maximumFractionDigits: 2 })}`;
 const who = (o: Outcome) => o.row.email || o.row.contactId;
 let wrote = 0;
@@ -99,7 +117,7 @@ const changes = matched.filter((o) => o.setTotal || o.addPaid !== null);
 
 for (const o of changes) {
   const s = byId.get(o.c.id)!;
-  const what = [o.setTotal ? `total ${$(o.row.total!)}` : "", o.addPaid !== null ? `paid ${$(o.addPaid)} (one payment, ${o.row.paidOn ?? today})` : ""].filter(Boolean).join(", ");
+  const what = [o.setTotal ? `total ${$(o.row.total!)}` : "", o.addPaid !== null ? `paid ${$(o.addPaid)} as of ${o.row.paidOn ?? today} (deposit ${$(Math.min(o.addPaid, depositOf(s)))}${o.addPaid > depositOf(s) ? ` + one payment of ${$(o.addPaid - depositOf(s))}` : ""})` : ""].filter(Boolean).join(", ");
   lines.push(`- line ${o.row.line}: ${who(o)}, ${o.row.eventDay} -> session ${o.c.id}: set ${what}${o.notes.length ? ` (${o.notes.join("; ")})` : ""}`);
   if (!confirm) continue;
   let ok = true;
@@ -112,10 +130,19 @@ for (const o of changes) {
     }
   }
   if (ok && o.addPaid !== null) {
-    const { error: e } = await supabase.from("event_payments").insert({ session_id: s.id, amount_cents: Math.round(o.addPaid * 100), paid_on: o.row.paidOn ?? today, note: `Imported: total paid as of ${o.row.paidOn ?? today}`, created_by: null, created_by_name: "Import" });
-    if (e) {
+    const depositCents = Math.min(Math.round(o.addPaid * 100), Math.round(depositOf(s) * 100));
+    const restCents = Math.round(o.addPaid * 100) - depositCents;
+    const on = o.row.paidOn ?? today;
+    const { error: e1 } = await supabase.from("event_finance").upsert({ session_id: s.id, deposit_paid_cents: depositCents, deposit_paid_on: on, updated_at: new Date().toISOString() }, { onConflict: "session_id" });
+    if (e1) {
       ok = false;
-      lines.push(`  NOT SAVED (payment): ${e.message}`);
+      lines.push(`  NOT SAVED (deposit): ${e1.message}`);
+    } else if (restCents > 0) {
+      const { error: e } = await supabase.from("event_payments").insert({ session_id: s.id, amount_cents: restCents, paid_on: on, note: `Imported: paid as of ${on}`, created_by: null, created_by_name: "Import" });
+      if (e) {
+        ok = false;
+        lines.push(`  NOT SAVED (payment): ${e.message}`);
+      }
     }
   }
   if (ok) wrote++;

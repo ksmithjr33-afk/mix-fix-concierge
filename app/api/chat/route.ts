@@ -27,7 +27,9 @@ import { UPDATE_OPENER } from "@/lib/update-mode-shared";
 import { deliverEventUpdates } from "@/lib/update-delivery";
 import { allowedMenus, createMenuFilter, type MenuKey } from "@/lib/menu-markers";
 import { applyDiveSetMenu, DIVE_CARD_MAX, DIVE_MENU_SET_MESSAGE } from "@/lib/dive-menu";
-import { DEFAULT_DEPOSIT, impliedLine, money, paymentPhrase, toCount, type PriceChange } from "@/lib/price-change";
+import { impliedLine, money, paymentPhrase, toCount, type PriceChange } from "@/lib/price-change";
+import { balanceGap, knownBalance, paymentFollowUp, remainingBalanceLine, totalOnFile, withBalanceFollowUp, type Recorded } from "@/lib/balance";
+import { recordedPayments } from "@/lib/team/business-db";
 import { CHANGE_REQUEST_MESSAGE } from "@/lib/client-list";
 import { announceRequest } from "@/lib/change-requests";
 import { clientAsks, clientEventData, updateToolInput, withClientVoice } from "@/lib/team-notes";
@@ -335,7 +337,7 @@ function diveCardLines(r: { diveCardRefused: string[]; diveCardOverMax: string[]
  * What update_event_data actually recorded, handed back to the model so its
  * confirmation repeats exactly what was saved and never claims more.
  */
-function updateToolResult(result: ApplyResult | null): string {
+function updateToolResult(result: ApplyResult | null, recorded: Recorded | null = null): string {
   if (!result) {
     return "TOOL RESULT: NOTHING was recorded, this event could not be updated right now. Tell the client honestly that the change did not go through and our team will follow up. Do not say it was saved.";
   }
@@ -386,6 +388,7 @@ function updateToolResult(result: ApplyResult | null): string {
         "PRICE CHANGE SAVED:",
         ...priceLines(result.priceChange),
         `payment_preference: ${result.paymentPreference ? `${result.paymentPreference} (say "${phrase}")` : "blank"}`,
+        remainingBalanceLine(result.priceChange.new_total, recorded),
       ].join("\n")
     );
   }
@@ -399,8 +402,11 @@ async function updateModeResponse(session: SessionRow, messages: ChatMessage[], 
   const deadlines = computeDeadlines(eventData.event_date ?? session.event_date, undefined, eventTimeZone(session));
   // Every change saved since this chat opened, for the final recap.
   const since = await changesSince(session.id, chatStartVersion).catch(() => null);
+  // What our team recorded as paid: the only thing a balance is ever worked out from.
+  const recorded = approvalOnly ? null : await recordedPayments(session.id);
   const systemText = buildUpdatePrompt(eventData, session.version, deadlines, {
     booked: approvalOnly ? null : (session.booked_price ?? null),
+    recorded,
     planner: partner ? plannerUpdateSection(partner.ctx) : undefined,
     recap: since ? { lines: recapLines(since.changes), totalBefore: since.totalBefore, totalAfter: since.totalAfter } : null,
     pricePending: session.price_pending ? (session.price_pending_info ?? null) : null,
@@ -512,7 +518,7 @@ async function updateModeResponse(session: SessionRow, messages: ChatMessage[], 
                 const saved = await applyEventUpdate(session.id, input, {}).catch(() => null);
                 lastApply = saved;
                 await afterApply(saved);
-                toolResults.push({ type: "tool_result", tool_use_id: toolUse.id, content: updateToolResult(saved) });
+                toolResults.push({ type: "tool_result", tool_use_id: toolUse.id, content: updateToolResult(saved, recorded) });
               } else {
                 lastApply = undefined;
                 lastQuote = undefined;
@@ -537,7 +543,7 @@ async function updateModeResponse(session: SessionRow, messages: ChatMessage[], 
                 lastApply = saved;
                 lastQuote = undefined;
                 await afterApply(saved);
-                toolResults.push({ type: "tool_result", tool_use_id: toolUse.id, content: updateToolResult(saved) });
+                toolResults.push({ type: "tool_result", tool_use_id: toolUse.id, content: updateToolResult(saved, recorded) });
                 continue;
               }
               toolResults.push({ type: "tool_result", tool_use_id: toolUse.id, content: quoteToolResult(lastQuote, session.price_pending ? (session.price_pending_info ?? null) : null) });
@@ -576,6 +582,8 @@ async function updateModeResponse(session: SessionRow, messages: ChatMessage[], 
                 continue;
               }
             }
+            // A payment choice saved with no balance quoted: a team note so someone confirms the balance with the client.
+            partial = paymentFollowUp(eventData, partial, session, recorded);
             const result = await applyEventUpdate(session.id, partial, {
               managerRequest: typeof managerRequest === "string" ? managerRequest : null,
               changeApprovalNeeded: changeApprovalNeeded === true,
@@ -585,9 +593,9 @@ async function updateModeResponse(session: SessionRow, messages: ChatMessage[], 
             });
             lastApply = result;
             await afterApply(result);
-            let recorded = updateToolResult(result);
-            if (honoreeLine) recorded += `\n\nNOT SAVED: the day of contact number. Say exactly: "${honoreeLine}"`;
-            toolResults.push({ type: "tool_result", tool_use_id: toolUse.id, content: approvalLine ? `${recorded}\n\nALSO SENT FOR APPROVAL, NOT SAVED: the part of this change that affects the price. Say exactly: "${approvalLine}"` : recorded });
+            let resultText = updateToolResult(result, recorded);
+            if (honoreeLine) resultText += `\n\nNOT SAVED: the day of contact number. Say exactly: "${honoreeLine}"`;
+            toolResults.push({ type: "tool_result", tool_use_id: toolUse.id, content: approvalLine ? `${resultText}\n\nALSO SENT FOR APPROVAL, NOT SAVED: the part of this change that affects the price. Say exactly: "${approvalLine}"` : resultText });
           }
 
           // Second turn: the model sees what was priced or recorded and says
@@ -775,8 +783,11 @@ export async function POST(request: Request) {
     }
   }
 
-  // The payment step quotes the remaining balance: booked total minus the deposit.
+  // The payment step quotes a balance only from recorded payments: the total on file minus what our team recorded. Never the deposit.
   const booked = session?.booked_price ?? null;
+  const intakeRecorded = session && !approvalOnly ? await recordedPayments(session.id) : null;
+  const intakeTotal = totalOnFile(booked, !!session?.price_pending);
+  const intakeBalance = { balance: knownBalance(intakeTotal, intakeRecorded), gap: balanceGap(intakeTotal, intakeRecorded, !!session?.price_pending) };
   // What the booking already gave (start time, bartenders, event type) is never asked again.
   const facts = bookedFacts(session as unknown as Record<string, unknown> | null, messages);
   const known = knownBooking(session, facts, messages);
@@ -795,7 +806,7 @@ export async function POST(request: Request) {
   const system: Anthropic.TextBlockParam[] = [
     {
       type: "text",
-      text: buildIntakePrompt(booked && !approvalOnly ? { total: booked.total ?? null, deposit: booked.deposit_paid ?? DEFAULT_DEPOSIT } : null, new Date(), {
+      text: buildIntakePrompt(approvalOnly ? null : intakeBalance, new Date(), {
         booked: guestTool || approvalOnly ? facts : { ...facts, guests: null },
         popular: popular ? popularForPrompt(popular) : null,
         // Who is planning: a planner, or the client asked once (only for a session we can record the answer on).
@@ -1001,7 +1012,9 @@ export async function POST(request: Request) {
             // Skipped drink details still submit, marked Drinks not finalized; an extra drink nobody said yes to is held back.
             drinks = checkDrinks(answered, session?.package_type ?? answered.package);
             // Written to the client since 2026-11-21: these special requests may show on their page.
-            const input = withClientVoice(drinks.data);
+            let input = withClientVoice(drinks.data);
+            // No balance was quoted in the payment step: a team note so someone confirms it with the client.
+            if (!approvalOnly && intakeBalance.balance === null && intakeBalance.gap) input = withBalanceFollowUp(input, intakeBalance.gap, input.payment_preference);
             attempted = input;
             // A surprise: the booker's private number is the client phone. The guest of honor's number is never saved as the client phone or the day of contact.
             const sx = ((await getSession(sessionId)) ?? session) as EventSession | null;

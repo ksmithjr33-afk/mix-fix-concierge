@@ -2,6 +2,7 @@
 // (lib/update-prompt.ts) can reuse the package, drink, add on, and deadline
 // rules word for word instead of keeping a second copy in sync.
 
+import { balanceGap, balanceRule, paymentQuestion } from "@/lib/balance";
 import { NO_BOOKED_FACTS, type BookedFacts } from "@/lib/booked-facts";
 import { MENU_COPY } from "@/lib/menu-markers";
 import { formatClock, parseClock } from "@/lib/team/time";
@@ -447,20 +448,27 @@ export function lateChargeRule(dueDate: string | null): string {
 }
 
 /**
- * The payment step, its own step after the drinks and before Phase 6. The
- * remaining balance is the booked total minus the deposit on the session.
+ * The payment step, its own step after the drinks and before Phase 6. A
+ * balance is only ever quoted from recorded payments: the booked total on file
+ * minus what our team recorded (lib/balance.ts). With no total on file or
+ * nothing recorded, no number: our team confirms it, and the submission gets a
+ * team note so someone follows up. Never the deposit as a guess.
  */
-export function paymentStep(booking: { total: number | null; deposit: number } | null): string {
-  const fmt = (n: number) => `$${Math.round(n).toLocaleString("en-US")}`;
-  const total = booking?.total ?? null;
-  const deposit = booking?.deposit ?? 150;
-  const remaining = total !== null ? Math.max(0, total - deposit) : null;
+export function paymentStep(booking: IntakeBalance | null): string {
+  const balance = booking?.balance ?? null;
+  const gap = balance === null ? (booking?.gap ?? balanceGap(null, null)) : null;
   const balanceLine =
-    remaining !== null && total !== null
-      ? `This client's remaining balance is ${fmt(remaining)} (booked total ${fmt(total)} minus the ${fmt(deposit)} deposit). Ask: "Your remaining balance is ${fmt(remaining)}, due two weeks before your event. How would you like to handle it? We can charge your card on file now, on a date you pick, or on the due date. Or we can text you a payment link to pay any time before the due date, or set up a payment plan."`
-      : `We do not have this client's booked total on file, so do not state an amount. Ask: "How would you like to handle your remaining balance, which is due two weeks before your event? We can charge your card on file now, on a date you pick, or on the due date. Or we can text you a payment link to pay any time before the due date, or set up a payment plan."`;
+    balance !== null
+      ? `${balanceRule(balance, null)} Ask: ${paymentQuestion(balance)}`
+      : `${balanceRule(null, gap)} Ask: ${paymentQuestion(null)}`;
   return `PAYMENT STEP (its own step, after the drinks are finished and after Phases 3B, 4, and 5, right before Phase 6, on EVERY package including Beer and Wine and Dive Bar): Ask the payment question once, as its own message. ${balanceLine}
 If they pick a specific date or a payment plan, ask one follow up for the date or the split, then confirm. ${lateChargeRule(null)} Store the answer as payment_preference, exactly one of: "Auto charge now", "Auto charge on <date>" (with the date they gave in place of <date>), "Auto charge on due date", "Payment link", or "Payment plan: <split>" (with the split they gave in place of <split>). If they want something else, use the CONDUCT RULE path and leave payment_preference empty. Do not quote any other number, do not recalculate the balance, and do not discuss fees. Then move on to Phase 6.`;
+}
+
+/** What the intake payment step knows: the balance from recorded payments, or why there is none. */
+export interface IntakeBalance {
+  balance: number | null;
+  gap: string | null;
 }
 
 const INTAKE_CLOSING_HEADER = `EVERY REPLY ENDS WITH THE NEXT QUESTION: Until the closing message, every reply you send ends with the next unanswered planning question, even when you are saving an answer (save_planning_role) or handling a side step. Never send a reply that only acknowledges ("Love it!", "Let me get that saved for you.") and stops: the client should never have to type "Yes" or "What's next" to keep going.
@@ -606,7 +614,7 @@ export interface IntakeOptions {
 const NO_PAYMENT_STEP = "PAYMENT STEP: skip it entirely for this chat. Do not ask about the remaining balance or payment, and leave payment_preference empty. Go from Phase 5 straight to Phase 6.";
 
 /** Intake prompt with the payment step for this session's booked total and deposit. */
-export function buildIntakePrompt(booking: { total: number | null; deposit: number } | null, now: Date = new Date(), opts: IntakeOptions = {}): string {
+export function buildIntakePrompt(booking: IntakeBalance | null, now: Date = new Date(), opts: IntakeOptions = {}): string {
   const f = opts.booked ?? NO_BOOKED_FACTS;
   const booked = bookedDetailsSection(f);
   const people = [opts.opening ?? "", opts.people ?? "", opts.packageSection ?? ""].filter(Boolean).join("\n");

@@ -11,6 +11,7 @@
 import { formatClock, longDate, eventSchedule } from "@/lib/team/time";
 import { isBlank } from "@/lib/blank";
 import type { ClientAsks } from "@/lib/team-notes";
+import { knownBalance, totalOnFile, type Recorded } from "@/lib/balance";
 import { DRINKS_UNFINISHED_LINE, FINISH_DRINKS_BUTTON, FINISH_DRINKS_MESSAGE, extraDrinkQuestion } from "@/lib/team-notes";
 
 type EventData = Record<string, unknown>;
@@ -181,31 +182,31 @@ export function balanceDue(eventDay: string | null): string {
  */
 export function paymentView(o: {
   money: HomeMoney;
-  total: number | null;
+  total: number | null; // the booked total on file (lib/balance.ts totalOnFile), null when none
   pricePending: boolean;
   eventDay: string | null;
-  payments: { cents: number }[];
+  recorded: Recorded | null; // what has been recorded as paid (lib/balance.ts), never the assumed deposit
   preference: unknown;
 }): PaymentView | null {
   if (!o.money.total && !o.money.balance) return null;
-  const known = o.money.total && o.total !== null && Number.isFinite(o.total) && !o.pricePending;
-  const recorded = o.money.balance && o.payments.length > 0;
-  const paid = o.payments.reduce((n, p) => n + p.cents, 0) / 100;
+  const total = o.money.total ? totalOnFile({ total: o.total }, o.pricePending) : null;
+  const rec = o.money.balance && o.recorded?.any ? o.recorded : null;
+  const balance = knownBalance(total, rec);
   const view: PaymentView = {
-    total: known ? money(o.total!) : "",
+    total: total !== null ? money(total) : "",
     due: balanceDue(o.eventDay),
-    paid: recorded ? money(paid) : "",
-    balance: recorded && known ? money(Math.max(0, o.total! - paid)) : "",
+    paid: rec ? money(rec.cents / 100) : "",
+    balance: balance !== null ? money(balance) : "",
     preference: o.money.balance ? str(o.preference) : "",
   };
   return Object.values(view).some(Boolean) ? view : null;
 }
 
-/** The balance for the checklist: only when payments are recorded and the viewer may see it. */
-export function balanceFact(p: PaymentView | null, total: number | null, payments: { cents: number }[], eventDay: string | null): TodoFacts["balance"] {
-  if (!p || !p.balance || total === null) return null;
-  const paid = payments.reduce((n, x) => n + x.cents, 0) / 100;
-  return { amount: Math.max(0, total - paid), due: balanceDue(eventDay) };
+/** The balance for the checklist: only when it is known (lib/balance.ts) and the viewer may see it. */
+export function balanceFact(p: PaymentView | null, total: number | null, recorded: Recorded | null, eventDay: string | null): TodoFacts["balance"] {
+  if (!p || !p.balance) return null;
+  const amount = knownBalance(totalOnFile({ total }), recorded);
+  return amount === null ? null : { amount, due: balanceDue(eventDay) };
 }
 
 // ----- Bar team -----

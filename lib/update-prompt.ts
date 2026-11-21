@@ -2,6 +2,7 @@
 // is changing details. Reuses the intake prompt's package, drink sourcing,
 // menu, add ons, and deadline sections so both modes apply the same rules.
 
+import { PAYMENT_QUESTION_WITH_BALANCE, balanceFollowUpNote, balanceGap, balanceRule, knownBalance, paymentQuestion as paymentQuestionText, totalOnFile, type Recorded } from "@/lib/balance";
 import {
   FORMATTING_RULES,
   DRINK_SOURCING_RULES,
@@ -105,7 +106,7 @@ export function buildUpdatePrompt(
   eventData: EventData,
   version: number,
   deadlines: Deadlines,
-  extra: { booked?: BookedPrice | null; recap?: ChatRecap | null; pricePending?: PricePendingInfo | null; planner?: string; packageSection?: string } = {}
+  extra: { booked?: BookedPrice | null; recorded?: Recorded | null; recap?: ChatRecap | null; pricePending?: PricePendingInfo | null; planner?: string; packageSection?: string } = {}
 ): string {
   const paymentPreference = String(eventData.payment_preference ?? "").trim();
   // Older events' special requests were written for our team: the concierge never sees them, and what it sends is added to them.
@@ -117,13 +118,13 @@ export function buildUpdatePrompt(
   const requestsHow = shown
     ? "send the COMPLETE special_requests text, the existing text plus the new line, never dropping what is already there;"
     : "this event's earlier special requests are kept by our team and are not shown here, so send ONLY the new line in special_requests, and it is added to them;";
+  // A balance is only ever the total on file minus recorded payments (lib/balance.ts). Never the deposit as a guess.
   // While a price is pending no total is ever shown to the client.
-  const bookedTotal = extra.pricePending ? null : (extra.booked?.total ?? null);
-  const deposit = extra.booked?.deposit_paid ?? 150;
-  const paymentQuestion =
-    bookedTotal !== null
-      ? `"Your remaining balance is now $${Math.max(0, Math.round(bookedTotal - deposit)).toLocaleString("en-US")}, due two weeks before your event. How would you like to handle it? We can charge your card on file now, on a date you pick, or on the due date. Or we can text you a payment link to pay any time before the due date, or set up a payment plan."`
-      : `"How would you like to handle your remaining balance, which is due two weeks before your event? We can charge your card on file now, on a date you pick, or on the due date. Or we can text you a payment link to pay any time before the due date, or set up a payment plan."`;
+  const totalNow = totalOnFile(extra.booked, !!extra.pricePending);
+  const balanceNow = knownBalance(totalNow, extra.recorded ?? null);
+  const gapNow = balanceGap(totalNow, extra.recorded ?? null, !!extra.pricePending);
+  const balanceSection = `${balanceRule(balanceNow, gapNow)}${balanceNow === null ? ` If the client asks about their balance, also call update_event_data with team_note: "${balanceFollowUpNote(gapNow ?? "not known")}"` : ""}`;
+  const paymentQuestion = `use remaining_balance from the TOOL RESULT. When it is an amount, ask: ${PAYMENT_QUESTION_WITH_BALANCE} When it says not known, ask: ${paymentQuestionText(null)}`;
   const dueDate = balanceDueDate(deadlines.eventDay);
   const pkg = String(eventData.package ?? "unknown");
   const drinkCount = Array.isArray(eventData.signature_drinks) ? eventData.signature_drinks.length : 0;
@@ -172,6 +173,7 @@ If it is a credit, add: "The $X credit comes off your remaining balance." using 
 If there was no change in price, add nothing about money.
 A package switch must still follow the package rules: The Big Day Bar is for weddings only, and any drinks the new package does not allow are a separate question after the package change is saved. Moving the start time keeps the same length of service unless the client asks for different hours.
 Current payment_preference: ${paymentPreference || "blank"}.
+${balanceSection}
 
 REQUESTS INSIDE 6 DAYS: Today is ${longDate(deadlines.today)}. The event is on ${longDate(deadlines.eventDay)}. Six or more days before the event, everything can be changed and saves right away, drinks included. Fewer than 6 days before the event, a change to the drink menu is never refused: it is sent to our team as a request, and our team approves or declines it. The TOOL RESULT also tells you when any other change inside 6 days became a request.
 ${cutoffLine}
