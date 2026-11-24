@@ -368,4 +368,21 @@ check("Gratuity model engine unchanged: Full 100/4 tip jar $1,749", old.priceEve
   check("The model reaches event_data on submission, on a model change, and on Price needs a check", src("lib/event-updates.ts").includes("withPricingModel(withHoursBooked(") && src("lib/booking-model-db.ts").includes("update.event_data = withPricingModel(") && src("lib/price-check-db.ts").includes("event_data: withPricingModel(") && src("app/api/webhook/route.ts").includes("withPricingModel(teamEventData(body.eventData), sessionRow)"));
 }
 
+// ----- Tip jar on the staff event page -----
+{
+  const ev = await import("../lib/team/event-view.ts");
+  const ed = { client_name: "Dana Whitfield", event_date: "January 10, 2027", package: "Full Bar", guest_count: 80 };
+  const view = (extra: Record<string, unknown>) => ev.buildStaffEventView({ id: "s1", event_data: ed, ...extra } as never);
+  check("Tip jar yes: the exact line", view({ pricing_model: "service_fee", tip_jar: true }).tipJar === "Tip jar allowed. Tips are optional and go entirely to the bar team.");
+  check("Tip jar no: the exact line", view({ pricing_model: "service_fee", tip_jar: false }).tipJar === "No tip jar at this event. Do not set one out.");
+  check("Tip jar from the booked price when the booking column is empty", view({ pricing_model: "service_fee", tip_jar: null, booked_price: { tip_jar: false, total: 1500 } }).tipJar === ev.TIP_JAR_NO);
+  check("The booking's own tip_jar wins over the booked price", view({ pricing_model: "service_fee", tip_jar: true, booked_price: { tip_jar: false } }).tipJar === ev.TIP_JAR_YES);
+  check("No tip jar line on gratuity events", view({ pricing_model: "gratuity", tip_jar: false }).tipJar === "" && view({ tip_jar: true }).tipJar === "");
+  check("No tip jar line when the booking never said", view({ pricing_model: "service_fee" }).tipJar === "");
+  const v = view({ pricing_model: "service_fee", tip_jar: true, booked_price: { total: 1500, service_fee: 250, package_price: 1250, tip_jar: true } });
+  check("Staff view carries no price or fee", !/1500|1250|250|service_fee|total/i.test(JSON.stringify(v).replace(/"tipJar":"[^"]*"/, "")));
+  const details = src("app/team/e/[id]/event-details.tsx");
+  check("Details shows the line as one row", details.includes('<Row label="Tip jar" value={v.tipJar} />'));
+}
+
 done("service fee");

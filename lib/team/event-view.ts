@@ -91,6 +91,7 @@ export interface StaffEventView {
   guestCountConfirmed: string; // the date the client confirmed it ("November 21, 2026"), while it is still the count on file
   package: string;
   bartenders: number | null;
+  tipJar: string; // service fee events only: the tip jar line from the booking, or empty. Never a price.
   teammates: string[];
   theme: string;
   colors: string;
@@ -118,8 +119,11 @@ export interface SessionLike {
   package_type?: string | null;
   updated_at?: string | null;
   submitted_at?: string | null;
-  booked_price?: { bartenders?: number | null; source?: string | null } | null;
+  booked_price?: { bartenders?: number | null; source?: string | null; tip_jar?: boolean | null } | null;
   team_market?: string | null;
+  pricing_model?: string | null;
+  tip_jar?: boolean | null; // the booking's tip_jar, as sent
+
   package_extras?: unknown; // the Team tab's bartenders needed (lib/team/staffing-fix.ts)
 }
 
@@ -237,6 +241,21 @@ function guestConfirmedLine(ed: Record<string, unknown>, tz: string): string {
   return at.toLocaleDateString("en-US", { timeZone: tz, month: "long", day: "numeric", year: "numeric" });
 }
 
+export const TIP_JAR_YES = "Tip jar allowed. Tips are optional and go entirely to the bar team.";
+export const TIP_JAR_NO = "No tip jar at this event. Do not set one out.";
+
+/**
+ * The tip jar line on Details, service fee events only, from the booking's
+ * tip_jar (the booking as sent, else the booked price). Empty on gratuity
+ * events and when the booking never said. Only the yes or no is read: staff
+ * never see a price or the fee.
+ */
+export function tipJarLine(session: Pick<SessionLike, "pricing_model" | "tip_jar" | "booked_price">): string {
+  if (session.pricing_model !== "service_fee") return "";
+  const v = typeof session.tip_jar === "boolean" ? session.tip_jar : typeof session.booked_price?.tip_jar === "boolean" ? session.booked_price.tip_jar : null;
+  return v === null ? "" : v ? TIP_JAR_YES : TIP_JAR_NO;
+}
+
 export function buildStaffEventView(
   session: SessionLike,
   opts: { now?: Date; teammates?: string[]; latestUpdate?: UpdateLike | null } = {}
@@ -277,6 +296,7 @@ export function buildStaffEventView(
     guestCountConfirmed: guestConfirmedLine(ed, s.tz),
     package: pkg,
     bartenders: bartendersNeeded(session),
+    tipJar: tipJarLine(session),
     teammates: opts.teammates ?? [],
     theme: scrub(ed.theme),
     colors: scrub(ed.event_colors),
