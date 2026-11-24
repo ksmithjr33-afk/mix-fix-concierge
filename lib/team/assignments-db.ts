@@ -274,6 +274,18 @@ const updateDeps: UpdateNoticeDeps = {
   send: sendStaffText,
 };
 
+/** One text to everyone on the event (offered or accepted, active). Never throws. Returns texts sent. */
+export async function textAssignedStaff(sessionId: string, message: string): Promise<number> {
+  try {
+    const staff = await updateDeps.assignedStaff(sessionId);
+    const sent = await Promise.all(staff.map((s) => updateDeps.send(s.phone, s.name, message).catch(() => false)));
+    return sent.filter(Boolean).length;
+  } catch (err) {
+    console.error(`[team] texts for ${sessionId} failed:`, err instanceof Error ? err.message : String(err));
+    return 0;
+  }
+}
+
 /** After a client update saves, text each assigned staff member. Never throws. */
 export function notifyStaffOfUpdate(
   session: { id: string; event_date?: string | null; event_data: Record<string, unknown> | null },

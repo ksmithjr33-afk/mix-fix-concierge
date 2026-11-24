@@ -32,7 +32,7 @@ const UNIQUE: Record<string, string[][]> = {
 export const missingTables = new Set<string>();
 
 /** Tests can stand in for database constraints and triggers: return an error message to refuse a write. */
-export const guards: ((table: string, op: string, rows: Record<string, unknown>[]) => string | null)[] = [];
+export const guards: ((table: string, op: string, rows: Record<string, unknown>[], patch?: Row | Row[] | null) => string | null)[] = [];
 
 const JOIN_TABLES: Record<string, string> = { staff: "staff", session: "sessions", sender: "staff" };
 
@@ -174,7 +174,7 @@ class Query implements PromiseLike<Result> {
     if (this.op !== "select") {
       const touched = this.op === "insert" || this.op === "upsert" ? (Array.isArray(this.payload) ? this.payload : [this.payload!]) : rows.filter((r) => this.filters.every((f) => f(r)));
       for (const g of guards) {
-        const refused = g(this.table, this.op, touched);
+        const refused = g(this.table, this.op, touched, this.payload ?? null);
         if (refused) return { data: null, error: { message: refused } };
       }
     }

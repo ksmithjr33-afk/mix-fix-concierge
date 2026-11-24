@@ -44,6 +44,7 @@ console.error = () => {};
 
 const { db } = await import("./fake-supabase.mts");
 const editDb = await import("../lib/team/admin-edit-db.ts");
+const heldDb = await import("../lib/team/held-changes-db.ts");
 const edit = await import("../lib/team/admin-edit.ts");
 const cards = await import("../lib/team/edit-cards.ts");
 const diff = await import("../lib/event-diff.ts");
@@ -180,7 +181,9 @@ check("The update row is marked with the admin", row.updated_by === "admin" && r
 const hook = calls.find((c) => c.url === "https://hooks.test/update");
 check("The GHL payload says updated_by admin", hook?.body.updated_by === "admin" && hook?.body.updated_by_name === "Kenneth");
 check("The GHL note names the admin", calls.some((c) => c.url.includes("/notes") && String(c.body.body ?? "").includes("Updated by admin: Kenneth")));
-check("Assigned staff get the same notice", staffTexts().length === 1 && String(staffTexts()[0].body.message).includes("was updated"));
+check("Assigned staff are not texted per field: the change is held", staffTexts().length === 0 && row.staff_notice === "held");
+const heldNow = await heldDb.heldSummary(admin, "s1");
+check("The bar counts it: 1 change not sent to the team", heldNow?.count === 1 && heldNow.lines[0].startsWith("Theme"));
 
 reset();
 check("Yes or no fields save as yes or no", (await one("beer", "no")).ok && session().event_data.beer === false && (await one("dual_bar_setup", "yes")).ok && session().event_data.dual_bar_setup === true);
@@ -231,7 +234,7 @@ reset({ calendar_only: true });
 const cal = await one("theme", "Luau");
 check("A calendar only event saves the same way", cal.ok && session().event_data.theme === "Luau" && (db.event_updates.at(-1) as Record<string, unknown>).updated_by === "admin");
 check("And sends nothing to GHL", !calls.some((c) => c.url === "https://hooks.test/update" || c.url.includes("/notes") || c.url.includes("/contacts")), calls.map((c) => c.url).join());
-check("Staff still get their notice", staffTexts().length === 1);
+check("Staff are not texted on save here either: held for the team", staffTexts().length === 0 && (db.event_updates.at(-1) as Record<string, unknown>).staff_notice === "held");
 
 // ----- The page -----
 const page = src("app/team/admin/e/[id]/page.tsx");
@@ -246,6 +249,80 @@ check("Priced fields and the date confirm with the price before saving", ui.incl
 check("Tap targets are at least 44px", ui.includes("min-h-[44px] min-w-[44px]") && bulk.includes("min-h-[44px]"));
 check("Edit everything stays as a small text link at the bottom", bulk.includes(">\n            Edit everything\n") && page.indexOf("<EditableDetails") < page.indexOf("<EditEvent"));
 check("The pending choice only shows when the engine cannot price it", src("app/team/admin/e/[id]/edit-price.tsx").includes("{engineCannotPrice(preview) && ("));
+
+// ----- One notification for many edits: changes not sent to the team -----
+{
+  const held = await import("../lib/team/held-changes.ts");
+  const { guards } = await import("./fake-supabase.mts");
+  const deliver = await import("../lib/update-delivery.ts");
+  const managerFor = { ...admin2 };
+  reset();
+  await one("theme", "Roaring 20s");
+  await one("event_colors", "red and white", { who: managerFor });
+  await one("theme", "Disco");
+  await one("guest_count", "120", { price: { mode: "keep" } });
+  check("Four edits by an admin and a manager: no staff text at all", staffTexts().length === 0);
+  const sum = await heldDb.heldSummary(admin, "s1");
+  check("The bar: 3 changes not sent to the team (theme edited twice counts once)", sum?.count === 3 && held.barText(sum.count) === "3 changes not sent to the team", JSON.stringify(sum));
+  check("...no time or location change, so the plain bar", sum?.timePlace === false);
+  check("Bartenders never get the bar", (await heldDb.heldSummary({ ...bartender }, "s1")) === null);
+  const sent = await heldDb.notifyTeam(admin, "s1", origin);
+  const msgs = staffTexts();
+  check("Notify the team: one text that lists all of them", sent.ok && msgs.length === 1 && /Theme: from Gatsby to Disco/.test(String(msgs[0].body.message)) && /Event colors/.test(String(msgs[0].body.message)) && /Guest count: from 100 to 120/.test(String(msgs[0].body.message)), JSON.stringify(msgs.map((m) => m.body.message)));
+  check("...with no client contact details and no prices", !/alex@example|469.?555|\$/.test(String(msgs[0].body.message)));
+  check("...and the bar is gone", (await heldDb.heldSummary(admin, "s1")) === null && db.event_updates.every((r) => (r as Record<string, unknown>).staff_notice !== "held"));
+  check("Pressing it again sends nothing", !(await heldDb.notifyTeam(admin, "s1", origin)).ok && staffTexts().length === 1);
+
+  reset();
+  await one("event_address", "500 Main St, Dallas, TX 75201", { price: { mode: "keep" } });
+  const tp = await heldDb.heldSummary(admin, "s1");
+  check("An address change: the stronger bar with the time or location line", tp?.timePlace === true && held.TIME_PLACE_LINE === "The team has not been told about a time or location change.");
+  const bar = src("app/team/admin/e/[id]/held-changes-bar.tsx");
+  check("The bar has Notify the team and Do not notify, red with the line when time or place changed", bar.includes("Notify the team") && bar.includes("Do not notify") && bar.includes("{strong && <p") && bar.includes("{TIME_PLACE_LINE}") && src("app/team/admin/e/[id]/page.tsx").includes("<HeldChangesBar"));
+  check("Times and the date count as time or location", ["event_date", "bar_service_start", "bar_service_end"].every((f) => held.TIME_PLACE_FIELDS.has(f)));
+  const skip = await heldDb.skipNotify(admin2, "s1");
+  check("Do not notify: saved, nobody texted, the bar is gone", skip.ok && staffTexts().length === 0 && (await heldDb.heldSummary(admin, "s1")) === null && (db.event_updates.at(-1) as Record<string, unknown>).staff_notice === "skipped" && (db.event_updates.at(-1) as Record<string, unknown>).staff_notice_by === admin2.id);
+
+  // The safety net: one reminder to whoever made the changes, never staff.
+  reset();
+  await one("theme", "Luau");
+  const r0 = db.event_updates.at(-1) as Record<string, unknown>;
+  const madeAt = new Date(String(r0.created_at));
+  const adminTexts = () => calls.filter((c) => c.url === "https://hooks.test/staff-sms" && c.body.phone === admin.phone);
+  // Noon Central on the day of the edit, and the event 20 days out.
+  const at = (h: number) => { const base = time.zonedInstant(time.chicagoToday(madeAt), 12 * 60, "America/Chicago"); return new Date(base.getTime() + h * 3_600_000); };
+  r0.created_at = at(0).toISOString();
+  check("Under 2 hours: no reminder", (await heldDb.sendHeldReminders(at(1.9))) === 0 && adminTexts().length === 0);
+  const rem = await heldDb.sendHeldReminders(at(2));
+  check("2 hours unsent: one reminder to the admin who made it, with a link to the event", rem === 1 && adminTexts().length === 1 && String(adminTexts()[0].body.message).includes("1 change not sent to the team") && String(adminTexts()[0].body.message).includes("https://plan.test/team/admin/e/s1"));
+  check("Staff are never texted by the safety net", staffTexts().length === 0);
+  await heldDb.sendHeldReminders(at(3));
+  check("Only once", adminTexts().length === 1);
+  check("The changes are still waiting for a button", (await heldDb.heldSummary(admin, "s1"))?.count === 1);
+
+  // Inside 48 hours of the event: after a short grace instead of 2 hours.
+  const soon = held.reminderDue([{ id: "x", session_id: "s1", created_at: new Date(Date.parse("2026-12-04T15:00:00Z")).toISOString(), changes: [] }], new Date(Date.parse("2026-12-04T15:16:00Z")), new Date(Date.parse("2026-12-05T00:00:00Z")));
+  const tooSoon = held.reminderDue([{ id: "x", session_id: "s1", created_at: new Date(Date.parse("2026-12-04T15:00:00Z")).toISOString(), changes: [] }], new Date(Date.parse("2026-12-04T15:05:00Z")), new Date(Date.parse("2026-12-05T00:00:00Z")));
+  const far = held.reminderDue([{ id: "x", session_id: "s1", created_at: new Date(Date.parse("2026-12-01T15:00:00Z")).toISOString(), changes: [] }], new Date(Date.parse("2026-12-01T15:30:00Z")), new Date(Date.parse("2026-12-20T00:00:00Z")));
+  check("Inside 48 hours: reminded after 15 minutes; far out: waits the 2 hours", soon && !tooSoon && !far);
+  const rr = held.reminderText({ firstName: "Kenneth", count: 2, title: "T", date: "Sat, Dec 5", timePlace: true, link: "L" });
+  check("The reminder says when a time or location change is in it", rr.includes("time or location change") && rr.includes("2 changes not sent to the team"));
+  check("The reminder respects quiet hours", src("lib/team/held-changes-db.ts").includes("if (inQuietHours(now, sched.tz)) continue;") && src("app/api/cron/team/route.ts").includes("sendHeldReminders(now)"));
+
+  // Client changes keep texting the team as before.
+  reset();
+  const clientRows = await (await import("../lib/event-updates.ts")).applyEventUpdate("s1", { theme: "Client theme" } as never, { ignoreCutoff: true });
+  await deliver.deliverEventUpdates("s1", clientRows!.rows, { staffOrigin: origin });
+  check("A client change still texts staff right away and is never held", staffTexts().length === 1 && (db.event_updates.at(-1) as Record<string, unknown>).staff_notice == null);
+  check("The concierge routes still pass staffOrigin", (src("app/api/chat/route.ts").match(/staffOrigin: origin/g) ?? []).length >= 3);
+
+  // Before the migration: holding fails, so staff are texted like before (nothing is lost).
+  reset();
+  guards.push((table, op, _rows, patch) => (table === "event_updates" && op === "update" && !!patch && !Array.isArray(patch) && "staff_notice" in patch ? 'column "staff_notice" does not exist' : null));
+  await one("theme", "Fallback");
+  guards.length = 0;
+  check("Before the migration an admin edit texts staff right away, as it always did", staffTexts().length === 1);
+}
 
 console.log = quiet;
 if (failed > 0) {

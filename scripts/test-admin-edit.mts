@@ -43,6 +43,7 @@ console.log = () => {}; // the list generators log the whole event
 const { db } = await import("./fake-supabase.mts");
 const updates = await import("../lib/event-updates.ts");
 const editDb = await import("../lib/team/admin-edit-db.ts");
+const heldDb = await import("../lib/team/held-changes-db.ts");
 const edit = await import("../lib/team/admin-edit.ts");
 const view = await import("../lib/team/event-view.ts");
 const shop = await import("../lib/team/shopping.ts");
@@ -158,7 +159,10 @@ check(
   JSON.stringify(shop.buildStaffShopping(newEd)) !== JSON.stringify(shop.buildStaffShopping(before)),
 );
 const texts = calls.filter((c) => c.url === "https://hooks.test/staff-sms");
-check("Assigned staff are texted about the change", texts.length === 1 && texts[0].body.phone === bartender.phone && String(texts[0].body.message).includes("was updated. Check your event page: https://plan.test/team/e/s1"), JSON.stringify(texts));
+check("Assigned staff are not texted on save: the change is held for the team", texts.length === 0 && (db.event_updates.at(-1) as Record<string, unknown>).staff_notice === "held", JSON.stringify(texts));
+const notified = await heldDb.notifyTeam(admin, "s1", "https://plan.test");
+const texts2 = calls.filter((c) => c.url === "https://hooks.test/staff-sms");
+check("Notify the team: one text listing the change", notified.ok && texts2.length === 1 && texts2[0].body.phone === bartender.phone && String(texts2[0].body.message).includes("was updated: Guest count") && String(texts2[0].body.message).includes("Check your event page: https://plan.test/team/e/s1"), JSON.stringify(texts2));
 check("The client is never messaged", !calls.some((c) => JSON.stringify(c.body).includes(CLIENT_PHONE) && c.url.includes("staff-sms")) && !texts.some((t) => t.body.phone === CLIENT_PHONE));
 check("The edit inside six days is still saved (no cutoff for admins)", time.eventDay(SOON) !== null && keep.ok);
 

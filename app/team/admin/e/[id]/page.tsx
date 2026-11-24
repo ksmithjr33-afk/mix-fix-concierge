@@ -47,6 +47,8 @@ import { editCards } from "@/lib/team/edit-cards";
 import PackageCard from "../../../package-card";
 import { barbackStatus, bookingShortOf } from "@/lib/package-extras";
 import DeliveryStrip from "./delivery-strip";
+import HeldChangesBar from "./held-changes-bar";
+import { heldSummary } from "@/lib/team/held-changes-db";
 import { availabilityFor } from "@/lib/team/delivery-availability-db";
 import { AssignPanel, BarReadyCard, ClientListPanel, Closeouts, ManagerChat, OffersPanel, OrderSheet, ShiftPanel } from "./lazy-panels";
 import ManagerTabs from "./manager-tabs";
@@ -175,6 +177,8 @@ async function AdminEventPage({
     // The Receipts tab badge: receipts waiting on review. 0 before the migration.
     pendingReceiptCount(id),
   ]);
+  // Admin edits not sent to the team yet: the bar on every tab. Null before the migration.
+  const held = await heldSummary(me, id).catch(() => null);
   // Team tab only.
   const [records, certs, distances, away, tiers] =
     panel && lookIdsP
@@ -306,6 +310,7 @@ async function AdminEventPage({
   const header = (
     <>
     {surprise && <div className="mb-2"><SurpriseBanner text={surprise} /></div>}
+    {held && <div className="mb-2"><HeldChangesBar key={held.rowIds.join()} sessionId={id} summary={held} /></div>}
     <div className="px-1 flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
       <div className="min-w-0">
         <h1 className="font-heading text-2xl font-bold text-[#2C2420] break-words">{adminEventTitle(titled)}</h1>

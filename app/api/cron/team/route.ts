@@ -17,6 +17,7 @@ import { sendListReadyTexts } from "@/lib/team/staff-list-db";
 import { advanceOffers } from "@/lib/team/offers-db";
 import { autoStartOffers } from "@/lib/team/scorecard-offers-db";
 import { sendDeliveryReminders } from "@/lib/team/delivery-availability-db";
+import { sendHeldReminders } from "@/lib/team/held-changes-db";
 import { supabase } from "@/lib/supabase";
 import type { SessionRow } from "@/lib/event-updates";
 
@@ -42,7 +43,7 @@ export async function GET(request: Request) {
   // Shift offers: Automatic markets start offers first, then every live run sends what is due.
   const offerStarts = await Promise.allSettled([autoStartOffers(now)]);
   const offerTexts = await Promise.allSettled([advanceOffers(now)]);
-  const [reminders, alerts, short, shiftTexts, announcementTexts, chatTexts, closeoutTexts, certTexts, supplyTexts, menuTexts, requestTexts, iceTexts, prepTexts, kitSummary, partnerTexts, listReadyTexts, deliveryTexts] = await Promise.allSettled([
+  const [reminders, alerts, short, shiftTexts, announcementTexts, chatTexts, closeoutTexts, certTexts, supplyTexts, menuTexts, requestTexts, iceTexts, prepTexts, kitSummary, partnerTexts, listReadyTexts, deliveryTexts, heldTexts] = await Promise.allSettled([
     sendClockOutReminders(now),
     sendLateSetupAlerts(now),
     sendShortShiftAlerts(now),
@@ -60,6 +61,7 @@ export async function GET(request: Request) {
     sendHeldPartnerTexts(now), // planner, host and client texts about planners held for quiet hours
     sendListReadyTexts(now), // "the shopping list is ready": once per person per event, held for quiet hours
     sendDeliveryReminders(now), // deliveries and pickups: one Wednesday 9 AM Central reminder a week to anyone not confirmed, never in quiet hours
+    sendHeldReminders(now), // admin edits not sent to the team: one reminder to the editor after 2 hours, or inside 48 hours of the event; never texts staff
   ]);
   const result = (r: PromiseSettledResult<number>) => (r.status === "fulfilled" ? r.value : `failed: ${String(r.reason)}`);
   const out = {
@@ -83,6 +85,7 @@ export async function GET(request: Request) {
     partnerTexts: result(partnerTexts),
     listReadyTexts: result(listReadyTexts),
     deliveryReminderTexts: result(deliveryTexts),
+    heldChangeReminders: result(heldTexts),
   };
   console.log("[team-cron]", JSON.stringify(out));
   return NextResponse.json({ ok: true, ...out });

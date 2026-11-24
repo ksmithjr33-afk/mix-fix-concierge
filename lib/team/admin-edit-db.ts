@@ -2,7 +2,8 @@
 // path as a client update (applyEventUpdate, then deliverEventUpdates), so the
 // version bumps, an event_updates row is written, the lists and the needed
 // bartender count follow the new event data, the GHL note and update webhook go
-// out, and assigned staff are texted. Differences: no six day cutoff, the
+// out. Assigned staff are not texted: the edit is held as "changes not sent to
+// the team" (lib/team/held-changes-db.ts). Differences: no six day cutoff, the
 // admin's price choice instead of a quote, and the row is marked with the
 // admin. Nothing here messages the client directly: the update payload says
 // whether GHL sends the client their updated shopping list, which only happens
@@ -21,6 +22,7 @@ import { adminPrice, cleanAdminEdit, cleanPriceChoice } from "@/lib/team/admin-e
 import { unpriced } from "@/lib/price-pending";
 import { barbackStatus } from "@/lib/package-extras";
 import { textPricePending } from "@/lib/price-pending-db";
+import { holdForTeam } from "@/lib/team/held-changes-db";
 
 export interface AdminPreview {
   priced: boolean; // a priced field changes, so the price choice matters
@@ -59,7 +61,7 @@ export async function previewAdminEdit(sessionId: string, rawChanges: unknown): 
   };
 }
 
-export type SaveEditResult = { ok: true; version: number; changed: number; pricePending: boolean } | { ok: false; error: string; status: number };
+export type SaveEditResult = { ok: true; version: number; changed: number; pricePending: boolean; held?: boolean } | { ok: false; error: string; status: number };
 
 export async function saveAdminEdit(opts: {
   sessionId: string;
@@ -110,13 +112,16 @@ export async function saveAdminEdit(opts: {
   if (!result) return { ok: false, error: "We could not find that event.", status: 404 };
   if (result.rows.length === 0) return { ok: false, error: "Nothing changed.", status: 400 };
 
-  // GHL note, update webhook (updated_by "admin"), and texts to assigned staff.
+  // GHL note and update webhook (updated_by "admin"). Staff are not texted:
+  // the change is held as "changes not sent to the team" until someone presses
+  // Notify the team (one text listing all of them) or Do not notify.
   // The client gets the updated list only if the list changed and the box was left on.
   await deliverEventUpdates(opts.sessionId, result.rows, {
-    staffOrigin: opts.origin,
     clientList: { mode: "admin", send: opts.sendList !== false, by: { id: opts.admin.id, name: editor.name } },
   });
+  const fresh = (await getSession(opts.sessionId)) ?? session;
+  const held = await holdForTeam(fresh, result.rows, opts.origin);
   // Price pending rule: the admins get one text when a change is saved without a price.
   if (result.pricePending?.fresh) await textPricePending(session, result.pricePending.info);
-  return { ok: true, version: result.version, changed: result.rows.reduce((n, r) => n + r.changes.length, 0), pricePending: !!result.pricePending?.fresh };
+  return { ok: true, version: result.version, changed: result.rows.reduce((n, r) => n + r.changes.length, 0), pricePending: !!result.pricePending?.fresh, held: held === "held" };
 }
