@@ -104,7 +104,8 @@ export interface BusinessInputs {
   guests: number | null;
   scheduledMinutes: number | null; // setup, service, breakdown, from the event times
   bookedMinutes: number | null; // the same from the booked hours, when the times are missing
-  defaultRateCents: number; // the event's package rate (lineRate with no own rate)
+  defaultRateCents: number; // the event's package rate (lineRate with no own rate); the Top rate on a service fee event
+  defaultRateLabel?: string; // "package rate" unless given ("Top rate" on a service fee event)
   staffingFor: (guests: number) => number;
   // Supplies:
   supplyLines: SupplyLines | null; // null: no Shopping list or no catalog
@@ -225,7 +226,7 @@ export function paymentStatus(totalCents: number | null, depositCents: number, p
 }
 
 /** Labor and where it came from. */
-export function laborEstimate(i: Pick<BusinessInputs, "done" | "crew" | "bookedBartenders" | "guests" | "scheduledMinutes" | "bookedMinutes" | "defaultRateCents" | "staffingFor">): { cents: number; source: LaborSource; note: string } {
+export function laborEstimate(i: Pick<BusinessInputs, "done" | "crew" | "bookedBartenders" | "guests" | "scheduledMinutes" | "bookedMinutes" | "defaultRateCents" | "staffingFor"> & { defaultRateLabel?: string }): { cents: number; source: LaborSource; note: string } {
   const minutes = i.scheduledMinutes ?? i.bookedMinutes;
   const minutesFor = (rate: number) => Math.round((rate * (minutes ?? 0)) / 60);
   if (i.crew.length > 0) {
@@ -243,7 +244,7 @@ export function laborEstimate(i: Pick<BusinessInputs, "done" | "crew" | "bookedB
   const cents = Math.round((people * i.defaultRateCents * hours) / 60);
   const who = i.bookedBartenders ? `${people} booked` : fromGuests ? `${people} for ${i.guests} guests` : "1 assumed";
   const time = minutes === null ? `${ASSUMED_SERVICE_HOURS} hours assumed, no service hours on file` : `${Math.round((minutes / 60) * 100) / 100} hours`;
-  return { cents, source: "booking", note: `${LABOR_LABEL.booking}, ${who} × ${time} × ${usd(i.defaultRateCents)}/hr package rate` };
+  return { cents, source: "booking", note: `${LABOR_LABEL.booking}, ${who} × ${time} × ${usd(i.defaultRateCents)}/hr ${i.defaultRateLabel ?? "package rate"}` };
 }
 
 /**

@@ -4,6 +4,8 @@ import { requireScorecard } from "@/lib/team/scorecard-page";
 import { dateWords, roster, tierSettings, toRate } from "@/lib/team/scorecard-db";
 import { NOT_READY, SCORECARD_PATH, TIER_LABEL } from "@/lib/team/scorecard";
 import { OFFERS_PATH } from "@/lib/team/scorecard-ranks";
+import { unplacedAtCore } from "@/lib/team/scorecard-ranks-db";
+import { NOT_PLACED_WARNING } from "@/lib/team/pay";
 import { MARKETS, MARKET_INFO, marketLabel } from "@/lib/team/markets";
 import { isFullAdmin } from "@/lib/team/roles";
 import { chicagoStamp } from "@/lib/team/time";
@@ -22,7 +24,7 @@ const pill = "rounded-full px-3 py-2 text-sm min-h-[44px] inline-flex items-cent
 export default async function ScorecardPage() {
   const me = await requireScorecard(SCORECARD_PATH);
   const now = new Date();
-  const [r, rate, settings] = await Promise.all([roster(me, now), toRate(me, now), tierSettings()]);
+  const [r, rate, settings, unplaced] = await Promise.all([roster(me, now), toRate(me, now), tierSettings(), unplacedAtCore(me)]);
   const rows: RosterItem[] = (r?.rows ?? []).map((x) => ({
     staffId: x.staffId,
     name: x.name,
@@ -56,6 +58,17 @@ export default async function ScorecardPage() {
           <p className="text-[15px] text-[#6B5D52]">Ratings, tiers and ranks. Admins and managers only. Staff never see any of this.</p>
         </div>
         {r && !r.ready && <p className="rounded-2xl bg-[#FFF8EC] border border-[#E3C9A0] px-4 py-3 text-[15px] text-[#2C2420]">{NOT_READY}</p>}
+        {unplaced.length > 0 && (
+          <div className="rounded-2xl bg-[#FFF8EC] border border-[#E3C9A0] px-4 py-3 text-[15px] text-[#2C2420]" data-pay-warning>
+            <p className="font-medium">{NOT_PLACED_WARNING}</p>
+            <p className="text-sm text-[#6B5D52]">
+              {unplaced.map((p) => p.name).join(", ")}.{" "}
+              <Link href={OFFERS_PATH} className="underline">
+                Place them in the offer order
+              </Link>
+            </p>
+          </div>
+        )}
         <nav className="flex flex-wrap gap-2" aria-label="Scorecard">
           <Link href={OFFERS_PATH} className={pill}>
             Offer order

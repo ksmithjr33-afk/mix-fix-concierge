@@ -11,6 +11,8 @@ import { timesheetRows } from "@/lib/team/timesheet-db";
 import {
   estimatedPayCents,
   eventPackageName,
+  forStaff,
+  isPayReason,
   lineRate,
   mileageLine,
   money,
@@ -24,6 +26,9 @@ import {
   type LineRate,
   type MilesInput,
   type PackageRates,
+  type PayReason,
+  type PayStanding,
+  type PayTier,
   type PayRow,
   type StaffEstimate,
 } from "@/lib/team/pay";
@@ -36,6 +41,9 @@ import type { SessionRow } from "@/lib/event-updates";
 import { myReimbursements } from "@/lib/team/reimbursements-db";
 import { KIND_LABEL } from "@/lib/team/reimbursements";
 import type { TimesheetRow } from "@/lib/team/timesheet";
+import { sessionPricingModel } from "@/lib/pricing-model";
+import { tiersForPay, type TierChange, type TierNow } from "@/lib/team/scorecard-pay-db";
+import { eventSchedule } from "@/lib/team/time";
 
 type Result<T = object> = ({ ok: true } & T) | { ok: false; error: string; status: number };
 
@@ -51,10 +59,148 @@ interface SessionLite {
 
 /**
  * The rate for one person on one event, from their own rate (or none), the
- * package rates, the event's pricing model and the person's role. The one rule: lineRate.
+ * package rates, the event's pricing model, the person's role and, on a
+ * service fee event, their standing (payStandings). The one rule: lineRate.
  */
-export function rateForEvent(ownCents: number | null | undefined, session: SessionLite, rates: PackageRates, role?: string | null): LineRate {
-  return lineRate(ownCents, eventPackageName(eventData(session), session), rates, { model: session.pricing_model, role: role ?? "bartender" });
+export function rateForEvent(ownCents: number | null | undefined, session: SessionLite, rates: PackageRates, role?: string | null, standing?: PayStanding | null): LineRate {
+  return lineRate(ownCents, eventPackageName(eventData(session), session), rates, { model: session.pricing_model, role: role ?? "bartender", standing });
+}
+
+// ----- Standing on service fee events (tier, new hire, accepted and approved rates) -----
+//
+// Read only for service fee events: gratuity events never touch any of this.
+// Server only. What comes back is used to figure a rate; the tier and the
+// reason only ever leave the server on admin pages (forStaff strips them).
+
+const isServiceFee = (s: SessionLite | undefined) => !!s && sessionPricingModel(s) === "service_fee";
+const dayOf = (s: SessionLite) => eventSchedule(eventData(s)).day;
+const chicagoDay = (iso: string) => new Date(iso).toLocaleDateString("en-CA", { timeZone: "America/Chicago" });
+export const standingKey = (sessionId: string, staffId: string) => `${sessionId}:${staffId}`;
+
+type RankNow = Pick<TierNow, "tier" | "placed">;
+type RankChange = TierChange;
+
+/** The tier on a day: the last change on or before it. Never changed: their row if placed, else not placed. */
+export function tierOnDay(day: string | null, now: RankNow | undefined, changes: RankChange[]): PayTier | null {
+  const valid = (t: unknown): t is PayTier => t === "top" || t === "core" || t === "developing";
+  if (changes.length === 0) return now?.placed && valid(now.tier) ? now.tier : null;
+  const upTo = changes.filter((c) => !day || chicagoDay(c.changed_at) <= day).sort((a, b) => a.changed_at.localeCompare(b.changed_at));
+  const t = upTo.at(-1)?.after?.tier;
+  return valid(t) ? t : null;
+}
+
+/** Each person's approved events (session ids with their days), on either model. */
+async function approvedEventDays(staffIds: string[]): Promise<Map<string, { sessionId: string; day: string | null }[]>> {
+  const out = new Map<string, { sessionId: string; day: string | null }[]>();
+  const ids = [...new Set(staffIds)];
+  if (ids.length === 0) return out;
+  const { data: ap } = await supabase.from("time_approvals").select("assignment_id, staff_id").in("staff_id", ids);
+  const approvals = (ap as { assignment_id: string; staff_id: string }[]) ?? [];
+  if (approvals.length === 0) return out;
+  const { data: asg } = await supabase.from("event_assignments").select("id, session_id").in("id", approvals.map((a) => a.assignment_id));
+  const sessionOf = new Map(((asg as { id: string; session_id: string }[]) ?? []).map((a) => [a.id, a.session_id]));
+  const sessions = await sessionsById([...sessionOf.values()]);
+  for (const a of approvals) {
+    const sid = sessionOf.get(a.assignment_id);
+    if (!sid) continue;
+    const list = out.get(a.staff_id) ?? [];
+    if (!list.some((x) => x.sessionId === sid)) list.push({ sessionId: sid, day: sessions.has(sid) ? dayOf(sessions.get(sid)!) : null });
+    out.set(a.staff_id, list);
+  }
+  return out;
+}
+
+/** How many events each person has approved hours on, on either model. For the Scorecard warning. */
+export async function approvedEventCounts(staffIds: string[]): Promise<Map<string, number>> {
+  const days = await approvedEventDays(staffIds);
+  return new Map(staffIds.map((id) => [id, days.get(id)?.length ?? 0]));
+}
+
+/**
+ * Standing for each person on each service fee event, by standingKey. Keys on
+ * gratuity events are left out. accepted: use the rate stored when they
+ * accepted (off when working out that rate). stored: use the rate stored at approval.
+ */
+export async function payStandings(
+  sessions: Map<string, SessionLite>,
+  keys: { sessionId: string; staffId: string }[],
+  opts: { accepted?: boolean; stored?: boolean } = { accepted: true, stored: true }
+): Promise<Map<string, PayStanding>> {
+  const out = new Map<string, PayStanding>();
+  const sf = keys.filter((k) => isServiceFee(sessions.get(k.sessionId)));
+  if (sf.length === 0) return out;
+  const staffIds = [...new Set(sf.map((k) => k.staffId))];
+  const sessionIds = [...new Set(sf.map((k) => k.sessionId))];
+  const [tiers, approved, asgRes] = await Promise.all([
+    tiersForPay(staffIds),
+    approvedEventDays(staffIds),
+    supabase.from("event_assignments").select("*").in("session_id", sessionIds).in("staff_id", staffIds),
+  ]);
+  const ranks = new Map(tiers.now.map((r) => [r.staff_id, r]));
+  const history = tiers.changes;
+  const assignments = (asgRes.data as { id: string; session_id: string; staff_id: string; accepted_rate_cents?: number | null }[]) ?? [];
+  const asgFor = new Map(assignments.map((a) => [standingKey(a.session_id, a.staff_id), a]));
+  let stored = new Map<string, { rate_cents?: number | null; rate_reason?: string | null }>();
+  if (opts.stored !== false && assignments.length) {
+    const { data } = await supabase.from("time_approvals").select("*").in("assignment_id", assignments.map((a) => a.id));
+    stored = new Map(((data as { assignment_id: string; rate_cents?: number | null; rate_reason?: string | null }[]) ?? []).map((x) => [x.assignment_id, x]));
+  }
+  for (const k of sf) {
+    const s = sessions.get(k.sessionId)!;
+    const day = dayOf(s);
+    const asg = asgFor.get(standingKey(k.sessionId, k.staffId));
+    const st = asg ? stored.get(asg.id) : undefined;
+    const before = (approved.get(k.staffId) ?? []).filter((e) => e.sessionId !== k.sessionId && (!day || !e.day || e.day < day)).length;
+    out.set(standingKey(k.sessionId, k.staffId), {
+      tier: tierOnDay(day, ranks.get(k.staffId), history.filter((h) => h.staff_id === k.staffId)),
+      approvedEvents: before,
+      acceptedCents: opts.accepted !== false && asg?.accepted_rate_cents && asg.accepted_rate_cents > 0 ? asg.accepted_rate_cents : null,
+      stored: st?.rate_cents && st.rate_cents > 0 ? { cents: st.rate_cents, reason: isPayReason(st.rate_reason) ? st.rate_reason : null } : null,
+    });
+  }
+  return out;
+}
+
+/** One person's rate on one event, read fresh: own rate, role and standing. */
+async function rateNow(sessionId: string, staffId: string, opts: { accepted?: boolean; stored?: boolean }): Promise<{ session: SessionLite; rate: LineRate } | null> {
+  const { data: s } = await supabase.from("sessions").select("*").eq("id", sessionId).maybeSingle();
+  if (!s) return null;
+  const session = s as SessionLite;
+  const [own, rates, role] = await Promise.all([rateOnFile(staffId), packageRates(), roleOf(staffId)]);
+  const standing = (await payStandings(new Map([[session.id, session]]), [{ sessionId, staffId }], opts)).get(standingKey(sessionId, staffId));
+  return { session, rate: rateForEvent(own, session, rates, role, standing) };
+}
+
+/**
+ * Store the rate that applies to someone when they accept a service fee event
+ * (event_assignments.accepted_rate_cents), so a later tier drop never lowers
+ * pay on it. Keeps the first number. Gratuity events store nothing. Never
+ * throws, never blocks the accept. Runs from lockMileage, after every accept path.
+ */
+export async function lockAcceptedRate(sessionId: string, staffId: string): Promise<void> {
+  try {
+    const asg = await acceptedAssignment(sessionId, staffId);
+    if (!asg) return;
+    const now = await rateNow(sessionId, staffId, { accepted: false, stored: false });
+    if (!now || sessionPricingModel(now.session) !== "service_fee") return;
+    const { error } = await supabase.from("event_assignments").update({ accepted_rate_cents: now.rate.cents }).eq("id", asg.id).is("accepted_rate_cents", null);
+    if (error) console.error("[team] storing the accepted rate failed (run 20270105_tier_pay.sql):", error.message);
+  } catch (err) {
+    console.error("[team] storing the accepted rate failed:", err instanceof Error ? err.message : String(err));
+  }
+}
+
+/**
+ * The rate to store on a timesheet approval: service fee events only (null on
+ * a gratuity event, which stores nothing new). Read before the approval is saved.
+ */
+export async function rateToStore(assignmentId: string): Promise<{ rate_cents: number; rate_reason: PayReason | null } | null> {
+  const { data: a } = await supabase.from("event_assignments").select("session_id, staff_id").eq("id", assignmentId).maybeSingle();
+  const asg = a as { session_id: string; staff_id: string } | null;
+  if (!asg) return null;
+  const now = await rateNow(asg.session_id, asg.staff_id, { accepted: true, stored: false });
+  if (!now || sessionPricingModel(now.session) !== "service_fee") return null;
+  return { rate_cents: now.rate.cents, rate_reason: now.rate.reason ?? null };
 }
 
 /** The roles of these people, for the service fee rates. Missing reads as bartender. */
@@ -89,10 +235,11 @@ export async function ratesFor(admin: StaffMember, staffIds: string[]): Promise<
 export async function rowRates(admin: StaffMember, rows: Pick<TimesheetRow, "assignmentId" | "staffId" | "sessionId">[]): Promise<Map<string, number>> {
   if (!isAdminRole(admin.role) || rows.length === 0) return new Map();
   const [own, rates, sessions, roles] = await Promise.all([ratesFor(admin, rows.map((r) => r.staffId)), packageRates(), sessionsById(rows.map((r) => r.sessionId)), rolesOf(rows.map((r) => r.staffId))]);
+  const standings = await payStandings(sessions, rows);
   const out = new Map<string, number>();
   for (const r of rows) {
     const s = sessions.get(r.sessionId);
-    out.set(r.assignmentId, s ? rateForEvent(own.get(r.staffId), s, rates, roles.get(r.staffId)).cents : lineRate(own.get(r.staffId), "", rates).cents);
+    out.set(r.assignmentId, s ? rateForEvent(own.get(r.staffId), s, rates, roles.get(r.staffId), standings.get(standingKey(r.sessionId, r.staffId))).cents : lineRate(own.get(r.staffId), "", rates).cents);
   }
   return out;
 }
@@ -121,8 +268,8 @@ export async function setRate(admin: StaffMember, staffId: string, raw: unknown,
 
 /** "$187.50" for this person on one event, or null without times. */
 export async function myEstimate(staffId: string, session: SessionLite): Promise<string | null> {
-  const [own, rates, role] = await Promise.all([rateOnFile(staffId), packageRates(), roleOf(staffId)]);
-  const c = estimatedPayCents(rateForEvent(own, session, rates, role).cents, eventData(session));
+  const [own, rates, role, standings] = await Promise.all([rateOnFile(staffId), packageRates(), roleOf(staffId), payStandings(new Map([[session.id, session]]), [{ sessionId: session.id, staffId }])]);
+  const c = estimatedPayCents(rateForEvent(own, session, rates, role, standings.get(standingKey(session.id, staffId))).cents, eventData(session));
   return c === null ? null : money(c);
 }
 
@@ -130,9 +277,10 @@ export async function myEstimate(staffId: string, session: SessionLite): Promise
 export async function myEstimates(staffId: string, sessionIds: string[]): Promise<Record<string, string>> {
   if (sessionIds.length === 0) return {};
   const [own, rates, sessions, role] = await Promise.all([rateOnFile(staffId), packageRates(), sessionsById(sessionIds), roleOf(staffId)]);
+  const standings = await payStandings(sessions, [...sessions.keys()].map((sessionId) => ({ sessionId, staffId })));
   const out: Record<string, string> = {};
   for (const s of sessions.values()) {
-    const c = estimatedPayCents(rateForEvent(own, s, rates, role).cents, eventData(s));
+    const c = estimatedPayCents(rateForEvent(own, s, rates, role, standings.get(standingKey(s.id, staffId))).cents, eventData(s));
     if (c !== null) out[s.id] = money(c);
   }
   return out;
@@ -162,9 +310,11 @@ export async function myPayRows(staffId: string, from: string, to: string): Prom
   if (sheet.length === 0) return { rows: [] };
   const ids = [...new Set(sheet.map((r) => r.sessionId))];
   const [own, rates, sessions, crews, reimb, role] = await Promise.all([rateOnFile(staffId), packageRates(), sessionsById(ids), bartenderCounts(ids), myReimbursements(staffId, ids), roleOf(staffId)]);
+  const standings = await payStandings(sessions, ids.map((sessionId) => ({ sessionId, staffId })));
   const rows = sheet.map((r): PayRow => {
     const s = sessions.get(r.sessionId);
-    const rate = s ? rateForEvent(own, s, rates, role) : lineRate(own, "", rates);
+    // Only the rate leaves here, never why: no tier, rank or new hire rate on a staff page.
+    const rate = s ? rateForEvent(own, s, rates, role, standings.get(standingKey(s.id, staffId))) : lineRate(own, "", rates);
     const sched = s ? scheduledMinutes(eventData(s)) : null;
     const approvedMinutes = r.approved && r.minutes !== null ? r.minutes : null;
     const tips = s ? tipsShare(gratuityOf(s), crews.get(s.id) ?? 1, role === "bartender", s.pricing_model) : null;
@@ -277,6 +427,8 @@ async function acceptedAssignment(sessionId: string, staffId: string): Promise<{
  * number. Never throws, never blocks the accept.
  */
 export async function lockMileage(sessionId: string, staffId: string, now: Date = new Date()): Promise<void> {
+  // Every accept path runs this: the service fee rate that applies now is stored with the miles.
+  await lockAcceptedRate(sessionId, staffId);
   try {
     const asg = await acceptedAssignment(sessionId, staffId);
     if (!asg) return;
@@ -409,15 +561,24 @@ function gratuityOf(session: SessionLite): number | null {
  * are on the event (an open shift), they are counted in the tips split.
  */
 export async function myPayEstimate(staffId: string, session: SessionRow): Promise<StaffEstimate> {
-  const [own, rates, settings, crew, miles, role] = await Promise.all([rateOnFile(staffId), packageRates(), mileageSettings(), acceptedCrew(session.id), mileageInputs(session, [staffId]), roleOf(staffId)]);
+  const [own, rates, settings, crew, miles, role, standings] = await Promise.all([
+    rateOnFile(staffId),
+    packageRates(),
+    mileageSettings(),
+    acceptedCrew(session.id),
+    mileageInputs(session, [staffId]),
+    roleOf(staffId),
+    payStandings(new Map([[session.id, session as SessionLite]]), [{ sessionId: session.id, staffId }]),
+  ]);
   const isBartender = role === "bartender";
   const bartenders = crew.filter((c) => c.role === "bartender" && c.staffId !== staffId).length + (isBartender ? 1 : 0);
-  return staffEstimate({
-    rate: rateForEvent(own, session, rates, role),
+  // The person's own estimate: the rate, never why (forStaff).
+  return forStaff(staffEstimate({
+    rate: rateForEvent(own, session, rates, role, standings.get(standingKey(session.id, staffId))),
     minutes: scheduledMinutes(eventData(session)),
     mileage: mileageLine(miles.get(staffId)!, settings, sessionMarket(session) === "los_angeles"),
     tips: tipsShare(gratuityOf(session), bartenders, isBartender, session.pricing_model),
-  });
+  }));
 }
 
 /** The same for a posted shift, for the person looking at it. */
@@ -442,7 +603,13 @@ export async function crewEstimates(viewer: StaffMember, session: SessionRow): P
   const crew = await acceptedCrew(session.id);
   if (crew.length === 0) return [];
   const ids = crew.map((c) => c.staffId);
-  const [own, rates, settings, miles] = await Promise.all([ratesFor(viewer, ids), packageRates(), mileageSettings(), mileageInputs(session, ids)]);
+  const [own, rates, settings, miles, standings] = await Promise.all([
+    ratesFor(viewer, ids),
+    packageRates(),
+    mileageSettings(),
+    mileageInputs(session, ids),
+    payStandings(new Map([[session.id, session as SessionLite]]), ids.map((staffId) => ({ sessionId: session.id, staffId }))),
+  ]);
   const minutes = scheduledMinutes(eventData(session));
   const bartenders = crew.filter((c) => c.role === "bartender").length;
   const ca = sessionMarket(session) === "los_angeles";
@@ -451,7 +618,7 @@ export async function crewEstimates(viewer: StaffMember, session: SessionRow): P
     assignmentId: c.assignmentId,
     role: c.role,
     estimate: staffEstimate({
-      rate: rateForEvent(own.get(c.staffId), session, rates, c.role),
+      rate: rateForEvent(own.get(c.staffId), session, rates, c.role, standings.get(standingKey(session.id, c.staffId))),
       minutes,
       mileage: mileageLine(miles.get(c.staffId)!, settings, ca),
       tips: tipsShare(gratuityOf(session), bartenders, c.role === "bartender", session.pricing_model),

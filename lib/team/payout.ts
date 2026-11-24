@@ -5,7 +5,7 @@
 // are added to the person's total in their own column; they are never wages.
 // Admins and managers only.
 
-import { hoursText, money, payCents, type MileageLine, type PayPackage, type RateSource, type StaffEstimate } from "@/lib/team/pay";
+import { hoursText, money, payCents, type MileageLine, type PayPackage, type PayReason, type RateSource, type StaffEstimate } from "@/lib/team/pay";
 import type { TimesheetRow } from "@/lib/team/timesheet";
 import { reimbursementsCents, type Reimbursement } from "@/lib/team/reimbursements";
 
@@ -40,6 +40,8 @@ export interface PayoutRow {
   rateSource: RateSource;
   ratePkg: PayPackage | null;
   serviceFee: boolean; // a service fee event: no gratuity share, tips are 0
+  reason: PayReason | null; // service fee events: why this rate (Top, New hire, Personal rate). Admins and managers only
+  rateStored: boolean; // the rate stored when the hours were approved
   estMinutes: number | null;
   estPayCents: number | null;
   actualMinutes: number | null; // null until clocked in and out
@@ -82,6 +84,8 @@ export function payoutRow(p: PayoutPerson): PayoutRow {
     rateSource: e.rateSource,
     ratePkg: e.ratePkg,
     serviceFee: e.serviceFee,
+    reason: e.reason ?? null,
+    rateStored: !!e.rateStored,
     estMinutes: e.minutes,
     estPayCents: e.hourlyCents,
     actualMinutes,

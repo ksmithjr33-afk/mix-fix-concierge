@@ -381,7 +381,10 @@ const walk = (dir: string): string[] =>
 const staffFacing = [...walk("app/team"), ...walk("app/api/team"), ...walk("app/s")].filter((p) => !p.startsWith("app/team/admin/") && !p.startsWith("app/api/team/admin/"));
 const leaks = staffFacing.filter((p) => /scorecard|TierBadge|staff_ratings|staff_reviews|checkin_calls/i.test(src(p)));
 check("No staff facing page or route imports or reads scorecard data", leaks.length === 0, leaks.join(", "));
-const libLeaks = walk("lib").filter((p) => !p.includes("scorecard") && p !== "lib/team/header-nav.ts" && /scorecard|staff_ratings|staff_reviews|staff_checkin_calls/.test(src(p)));
+// One exception: service fee pay needs each bartender's tier (lib/team/pay-db.ts imports tiersForPay, and only that).
+const payDbOk = (p: string) => p === "lib/team/pay-db.ts" && [...src(p).matchAll(/scorecard[\w-]*/g)].every((m) => m[0] === "scorecard-pay-db") && !/staff_ratings|staff_reviews|staff_checkin_calls/.test(src(p));
+const libLeaks = walk("lib").filter((p) => !p.includes("scorecard") && p !== "lib/team/header-nav.ts" && !payDbOk(p) && /scorecard|staff_ratings|staff_reviews|staff_checkin_calls/.test(src(p)));
+check("Pay reads only tiers from the scorecard side, never ratings or reviews", src("lib/team/pay-db.ts").includes('import { tiersForPay, type TierChange, type TierNow } from "@/lib/team/scorecard-pay-db";') && !/staff_ratings|staff_reviews|staff_checkin_calls|scorecard-db|scorecard-ranks/.test(src("lib/team/scorecard-pay-db.ts") + src("lib/team/pay-db.ts")));
 check("No other server code (texts, staff exports) reads scorecard tables", libLeaks.length === 0, libLeaks.join(", "));
 // Ranked shift offers: tiers, ranks and the offer order are Scorecard data too.
 const offerLeaks = staffFacing.filter((p) => /staff_rank|offer_steps|offer_runs|offer_claims|scorecard-ranks|scorecard-offers|\bgrp\b|offerOrder|rankBoard|runView|offersPanel/.test(src(p)));

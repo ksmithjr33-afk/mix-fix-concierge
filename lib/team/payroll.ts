@@ -17,7 +17,7 @@
 // Totals come from payoutTotals. The 40 hour flag is overWeekLimit on the Time
 // page's week totals. Overtime pay is left to the payroll provider.
 
-import { hoursText, money, rateSourceText, type PayPackage, type RateSource } from "@/lib/team/pay";
+import { hoursText, money, payReasonText, rateSourceText, type PayPackage, type PayReason, type RateSource } from "@/lib/team/pay";
 import { overWeekLimit, payoutTotals, WEEK_FLAG_MIN, type PayoutRow } from "@/lib/team/payout";
 import { csvCell, csvHours, csvTime, isYmd, staffTotals, weekRange, weekStart, type TimesheetRow } from "@/lib/team/timesheet";
 import { roleLabel } from "@/lib/team/roles";
@@ -133,6 +133,8 @@ export interface PayrollLine {
   rateCents: number;
   rateSource: RateSource; // own rate on the profile, or the package rate
   ratePkg: PayPackage | null;
+  reason: PayReason | null; // service fee events: the tier, New hire, Personal rate (admins only)
+  rateStored: boolean; // the rate stored when the hours were approved: what Payroll pays
   wagesCents: number; // the hourly total: actual, else the estimate
   mileageMiles: number;
   mileageCents: number; // gas
@@ -187,6 +189,8 @@ export function lineFrom(
     rateCents: p.rateCents,
     rateSource: p.rateSource,
     ratePkg: p.ratePkg,
+    reason: p.reason,
+    rateStored: p.rateStored,
     wagesCents: p.totalCents - p.mileageCents - tips - p.reimbursementsCents,
     mileageMiles: p.mileageMiles,
     mileageCents: p.mileageCents,
@@ -256,7 +260,8 @@ export function validateMark(raw: { paidOn?: unknown; note?: unknown }, today: s
 }
 
 /** "Full Bar rate", "own rate": which rule set the line's rate. */
-export const lineRateText = (l: Pick<PayrollLine, "rateSource" | "ratePkg">) => rateSourceText({ source: l.rateSource, pkg: l.ratePkg });
+export const lineRateText = (l: Pick<PayrollLine, "rateSource" | "ratePkg"> & Partial<Pick<PayrollLine, "reason" | "rateStored">>) =>
+  l.reason ? payReasonText(l.reason, l.rateStored) : rateSourceText({ source: l.rateSource, pkg: l.ratePkg });
 
 /** The hours to show: clocked, else the estimate (marked). */
 export function lineHours(l: Pick<PayrollLine, "minutes" | "estMinutes">): { minutes: number | null; estimate: boolean } {

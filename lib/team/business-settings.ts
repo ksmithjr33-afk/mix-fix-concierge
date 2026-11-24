@@ -3,6 +3,7 @@
 // never a manager) changes them, from the Business settings section.
 
 import {
+  MAX_NEW_HIRE_EVENTS,
   MAX_RATE_CENTS,
   MILEAGE_DEFAULTS,
   PACKAGE_RATE_DEFAULTS,
@@ -136,21 +137,37 @@ export function validatePackageRates(raw: Record<string, unknown>): Checked<Pack
 }
 
 // ----- Hourly rate on service fee events -----
-// Bartenders by service fee package ($45 by default), and one support rate for
-// bar backs, servers and event helpers ($30). lineRate uses them.
+// Bartenders by tier (Top $45, Core $40, Developing $35), the new hire rate
+// ($30) and how many approved events someone is a new hire for (1; 0 turns it
+// off), and one support rate for bar backs, servers and event helpers ($30).
+// lineRate uses them. The old per package rates saved under the same key are ignored.
+
+const validCount = (n: unknown) => typeof n === "number" && Number.isInteger(n) && n >= 0 && n <= MAX_NEW_HIRE_EVENTS;
 
 export function readServiceFeeRates(v: unknown): ServiceFeeRates {
   const o = (v && typeof v === "object" ? v : {}) as Record<string, unknown>;
   return Object.fromEntries(
-    SERVICE_FEE_RATE_KEYS.map((k) => [k, typeof o[k] === "number" && (o[k] as number) > 0 && (o[k] as number) <= MAX_RATE_CENTS ? (o[k] as number) : SERVICE_FEE_RATE_DEFAULTS[k]])
+    SERVICE_FEE_RATE_KEYS.map((k) => [
+      k,
+      k === "newHireEvents"
+        ? validCount(o[k]) ? (o[k] as number) : SERVICE_FEE_RATE_DEFAULTS[k]
+        : typeof o[k] === "number" && (o[k] as number) > 0 && (o[k] as number) <= MAX_RATE_CENTS ? (o[k] as number) : SERVICE_FEE_RATE_DEFAULTS[k],
+    ])
   ) as unknown as ServiceFeeRates;
 }
 
 export function validateServiceFeeRates(raw: Record<string, unknown>): Checked<ServiceFeeRates> {
   const out = {} as ServiceFeeRates;
   for (const k of SERVICE_FEE_RATE_KEYS) {
+    if (k === "newHireEvents") {
+      const s = String(raw[k] ?? "").trim();
+      const n = /^\d+$/.test(s) ? Number(s) : null;
+      if (n === null || !validCount(n)) return { ok: false, error: `Enter the new hire event count as a whole number from 0 to ${MAX_NEW_HIRE_EVENTS}. 0 turns the new hire rate off.` };
+      out[k] = n;
+      continue;
+    }
     const n = num(raw[k]);
-    if (n === null || n <= 0 || n * 100 > MAX_RATE_CENTS) return { ok: false, error: `Enter the ${SERVICE_FEE_RATE_LABEL[k]} rate in dollars an hour, like 45.` };
+    if (n === null || n <= 0 || n * 100 > MAX_RATE_CENTS) return { ok: false, error: `Enter the ${SERVICE_FEE_RATE_LABEL[k]} in dollars an hour, like 45.` };
     out[k] = Math.round(n * 100);
   }
   return { ok: true, value: out };

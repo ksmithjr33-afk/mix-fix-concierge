@@ -324,8 +324,18 @@ export async function approveRows(actor: StaffMember, assignmentIds: string[]): 
   }
   const { approve, skipped } = weekApproval(actor.id, rows);
   const failures: string[] = [];
+  // Service fee events store the rate used on the approval, so a later tier or
+  // settings change never rewrites past pay (Payroll reads it). Gratuity events store nothing new.
+  const { rateToStore } = await import("@/lib/team/pay-db");
   for (const id of approve) {
-    const { error } = await supabase.from("time_approvals").insert({ assignment_id: id, staff_id: rows.find((r) => r.assignmentId === id)!.staffId, approved_by: actor.id });
+    const base = { assignment_id: id, staff_id: rows.find((r) => r.assignmentId === id)!.staffId, approved_by: actor.id };
+    const rate = await rateToStore(id).catch(() => null);
+    let { error } = await supabase.from("time_approvals").insert(rate ? { ...base, ...rate } : base);
+    if (error && rate && /rate_cents|rate_reason|column/i.test(error.message)) {
+      // Before 20270105_tier_pay.sql runs: approve without the stored rate, never block the approval.
+      console.error("[time] approval saved without the stored rate (run 20270105_tier_pay.sql):", error.message);
+      ({ error } = await supabase.from("time_approvals").insert(base));
+    }
     if (error) failures.push(refusal(error.message, "approve") || "Could not save.");
   }
   const own = skipped.filter((s) => s.reason === OWN_APPROVE_MESSAGE).length;

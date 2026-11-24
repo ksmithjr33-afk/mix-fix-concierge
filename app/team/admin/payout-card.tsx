@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import CopyButton from "./copy-button";
-import { hoursText, mileageText, money, rateSourceText, rateText } from "@/lib/team/pay";
+import { hoursText, mileageText, money, payReasonText, rateSourceText, rateText, NOT_PLACED_WARNING } from "@/lib/team/pay";
 import { reimbursementText } from "@/lib/team/reimbursements";
 import { PAYOUT_FLAG_LABEL, diffHours, diffMoney, payoutText, type PayoutRow, type PayoutTotals } from "@/lib/team/payout";
 
@@ -105,7 +105,8 @@ function PayoutLine({ sessionId, r }: { sessionId: string; r: PayoutRow }) {
       <dl className="grid grid-cols-[auto_1fr] gap-x-3 text-sm text-[#2C2420] tabular-nums">
         <dt className="text-[#6B5D52]">Rate</dt>
         <dd>
-          {rateText(r.rateCents)} · {rateSourceText({ source: r.rateSource, pkg: r.ratePkg, serviceFee: r.serviceFee })}
+          {rateText(r.rateCents)} · {r.reason ? payReasonText(r.reason, r.rateStored) : rateSourceText({ source: r.rateSource, pkg: r.ratePkg, serviceFee: r.serviceFee })}
+          {r.reason === "not_placed" && <span className="block text-xs text-[#A0412D]">{NOT_PLACED_WARNING}</span>}
         </dd>
         <dt className="text-[#6B5D52]">Estimated</dt>
         <dd>

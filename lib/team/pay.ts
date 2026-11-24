@@ -12,7 +12,6 @@ import { BREAKDOWN_MIN } from "@/lib/team/clock";
 import { eventSchedule } from "@/lib/team/time";
 import { packageKey } from "@/lib/pricing";
 import { sessionPricingModel } from "@/lib/pricing-model";
-import { serviceFeePackage, type ServiceFeePackage } from "@/lib/service-fee";
 
 export const PAY_LABEL = "Estimated pay, before taxes and tips";
 export const PAY_NOTE = "These are estimates, before taxes and tips. Payroll is the final record.";
@@ -50,31 +49,91 @@ export type PackageRates = Record<PayPackage, number> & { serviceFee?: ServiceFe
 
 // ----- Service fee events -----
 //
-// Bartenders: a rate per service fee package, $45 by default. Bar backs,
+// Bartenders: a rate by tier (Top $45, Core $40, Developing $35), using their
+// tier on the day of the event. A new hire (fewer approved bartender events
+// than the new hire count, on either model) gets the new hire rate ($30)
+// whatever their tier; a count of 0 turns that off. Someone past it who is not
+// placed in a tier gets the Core rate. Never less than the rate stored when they
+// accepted the event, and once hours are approved the rate stored on the
+// approval is the rate, so later changes never rewrite past pay. Bar backs,
 // servers and event helpers: one support rate, $30. A person's own rate counts
 // only when it is higher. No gratuity share. Gratuity model events keep every
 // rule above exactly as it was.
+//
+// The tier and why a rate applies are for admins only: staff are only ever
+// told "your rate" (forStaff strips the reason).
 
-export type ServiceFeeRates = Record<ServiceFeePackage, number> & { support: number };
-export const SERVICE_FEE_BARTENDER_CENTS = 45_00;
+export type PayTier = "top" | "core" | "developing";
+export interface ServiceFeeRates {
+  top: number; // cents an hour
+  core: number;
+  developing: number;
+  newHire: number;
+  newHireEvents: number; // a count of approved events, not cents; 0 turns the new hire rate off
+  support: number;
+}
+export const SERVICE_FEE_BARTENDER_CENTS = 45_00; // the Top rate
 export const SUPPORT_RATE_CENTS = 30_00;
 export const SERVICE_FEE_RATE_DEFAULTS: ServiceFeeRates = {
-  beerwine: SERVICE_FEE_BARTENDER_CENTS,
-  dive: SERVICE_FEE_BARTENDER_CENTS,
-  wedding: SERVICE_FEE_BARTENDER_CENTS,
-  full: SERVICE_FEE_BARTENDER_CENTS,
-  premium: SERVICE_FEE_BARTENDER_CENTS,
+  top: SERVICE_FEE_BARTENDER_CENTS,
+  core: 40_00,
+  developing: 35_00,
+  newHire: 30_00,
+  newHireEvents: 1,
   support: SUPPORT_RATE_CENTS,
 };
-export const SERVICE_FEE_RATE_KEYS: (keyof ServiceFeeRates)[] = ["beerwine", "dive", "wedding", "full", "premium", "support"];
+export const SERVICE_FEE_RATE_KEYS: (keyof ServiceFeeRates)[] = ["top", "core", "developing", "newHire", "newHireEvents", "support"];
 export const SERVICE_FEE_RATE_LABEL: Record<keyof ServiceFeeRates, string> = {
-  beerwine: "Bartender Only",
-  dive: "Dive Bar",
-  wedding: "The Big Day Bar",
-  full: "Full Bar",
-  premium: "Premium Bar",
+  top: "Top tier bartenders",
+  core: "Core tier bartenders",
+  developing: "Developing tier bartenders",
+  newHire: "New hire rate",
+  newHireEvents: "New hire event count",
   support: "Bar backs, servers and event helpers",
 };
+export const MAX_NEW_HIRE_EVENTS = 50;
+
+/** Why a service fee rate applies. Admins only, never shown or sent to staff. */
+export type PayReason = "top" | "core" | "developing" | "not_placed" | "new_hire" | "accepted" | "own" | "support";
+export const PAY_REASON_LABEL: Record<PayReason, string> = {
+  top: "Top",
+  core: "Core",
+  developing: "Developing",
+  not_placed: "Not placed, Core rate",
+  new_hire: "New hire",
+  accepted: "Rate when accepted",
+  own: "Personal rate",
+  support: "Support rate",
+};
+export const isPayReason = (v: unknown): v is PayReason => typeof v === "string" && v in PAY_REASON_LABEL;
+export const NOT_PLACED_WARNING = "Not placed in a tier. Paid at the Core rate until placed.";
+
+/** One bartender on one service fee event: what decides their rate. */
+export interface PayStanding {
+  tier: PayTier | null; // their tier on the day of the event; null: not placed yet
+  approvedEvents: number; // events with approved hours before this one, on either model
+  acceptedCents?: number | null; // the rate stored when they accepted this event: never paid less
+  stored?: { cents: number; reason: PayReason | null } | null; // stored when this event's hours were approved: that is the rate
+}
+
+/** A new hire under the settings: fewer approved events than the count. */
+export const isNewHire = (sf: ServiceFeeRates, approvedEvents: number): boolean => sf.newHireEvents > 0 && approvedEvents < sf.newHireEvents;
+
+/**
+ * The service fee rate before a personal rate: support, new hire, tier (Core
+ * when not placed), raised to the rate stored when they accepted. With no
+ * standing (the Business estimate before anyone accepts) a bartender is the Top rate.
+ */
+export function serviceFeeBase(sf: ServiceFeeRates, role: string | null | undefined, standing?: PayStanding | null): { cents: number; reason: PayReason } {
+  if (isSupportRole(role)) return { cents: sf.support, reason: "support" };
+  let base: { cents: number; reason: PayReason };
+  if (!standing) base = { cents: sf.top, reason: "top" };
+  else if (isNewHire(sf, standing.approvedEvents)) base = { cents: sf.newHire, reason: "new_hire" };
+  else if (!standing.tier) base = { cents: sf.core, reason: "not_placed" };
+  else base = { cents: sf[standing.tier], reason: standing.tier };
+  const floor = standing?.acceptedCents ?? null;
+  return floor && floor > base.cents ? { cents: floor, reason: "accepted" } : base;
+}
 /** The roles paid the support rate on a service fee event. Everyone else on the event is paid as a bartender. */
 export const SUPPORT_ROLES = ["bar_back", "server", "event_helper"] as const;
 export const isSupportRole = (role: unknown): boolean => (SUPPORT_ROLES as readonly unknown[]).includes(role);
@@ -83,6 +142,7 @@ export const isSupportRole = (role: unknown): boolean => (SUPPORT_ROLES as reado
 export interface RateContext {
   model?: unknown; // sessions.pricing_model
   role?: string | null;
+  standing?: PayStanding | null; // service fee events: tier, approved events, the accepted and approved rates
 }
 export const PACKAGE_RATE_DEFAULTS: PackageRates = {
   beerwine: 25_00,
@@ -119,6 +179,8 @@ export interface LineRate {
   source: RateSource;
   pkg: PayPackage | null;
   serviceFee?: boolean; // the line is on a service fee event
+  reason?: PayReason; // service fee events: why this rate, for admins only (forStaff strips it)
+  stored?: boolean; // the rate stored when the hours were approved
 }
 
 /**
@@ -131,21 +193,27 @@ export function lineRate(ownCents: number | null | undefined, packageName: unkno
   if (ctx && sessionPricingModel({ pricing_model: ctx.model }) === "service_fee") {
     const sf = rates.serviceFee ?? SERVICE_FEE_RATE_DEFAULTS;
     const support = isSupportRole(ctx.role);
-    const key = serviceFeePackage(packageName);
-    const base = support ? sf.support : key ? sf[key] : SERVICE_FEE_BARTENDER_CENTS;
-    if (ownCents && ownCents > base) return { cents: ownCents, source: "own", pkg, serviceFee: true };
-    return { cents: base, source: support ? "support" : "service_fee", pkg, serviceFee: true };
+    const stored = ctx.standing?.stored;
+    if (stored && stored.cents > 0) {
+      const reason = stored.reason ?? undefined;
+      return { cents: stored.cents, source: reason === "own" ? "own" : support ? "support" : "service_fee", pkg, serviceFee: true, reason, stored: true };
+    }
+    const base = serviceFeeBase(sf, ctx.role, ctx.standing);
+    if (ownCents && ownCents > base.cents) return { cents: ownCents, source: "own", pkg, serviceFee: true, reason: "own" };
+    return { cents: base.cents, source: support ? "support" : "service_fee", pkg, serviceFee: true, reason: base.reason };
   }
   if (ownCents && ownCents > 0) return { cents: ownCents, source: "own", pkg };
   if (pkg) return { cents: rates[pkg] ?? DEFAULT_RATE_CENTS, source: "package", pkg };
   return { cents: DEFAULT_RATE_CENTS, source: "default", pkg: null };
 }
 
-/** Which rule applied: "own rate", "Tailored rate", "standard rate", "service fee event". */
+/** The words staff see beside a rate on a service fee event: nothing about a tier, a rank, or a new hire rate. */
+export const YOUR_RATE = "your rate";
+
+/** Which rule applied: "own rate", "Tailored rate", "standard rate"; on a service fee event only "your rate". */
 export function rateSourceText(r: Pick<LineRate, "source" | "pkg"> & { serviceFee?: boolean }): string {
-  if (r.source === "service_fee") return "service fee event, no gratuity share";
-  if (r.source === "support") return "support rate, service fee event";
-  if (r.source === "own") return r.serviceFee ? "own rate, service fee event, no gratuity share" : "own rate";
+  if (r.source === "service_fee" || r.source === "support" || (r.source === "own" && r.serviceFee)) return YOUR_RATE;
+  if (r.source === "own") return "own rate";
   if (r.source === "package" && r.pkg) return `${PAY_PACKAGE_LABEL[r.pkg]} rate`;
   return "standard rate";
 }
@@ -351,6 +419,8 @@ export interface StaffEstimate {
   rateSource: RateSource;
   ratePkg: PayPackage | null;
   serviceFee: boolean;
+  reason?: PayReason; // admins only: the Payout card shows it; forStaff takes it off
+  rateStored?: boolean; // admins only: the rate stored when the hours were approved
   minutes: number | null;
   hourlyCents: number | null;
   mileage: MileageLine;
@@ -368,12 +438,28 @@ export function staffEstimate(o: { rate: LineRate; minutes: number | null; milea
     rateSource: o.rate.source,
     ratePkg: o.rate.pkg,
     serviceFee: !!o.rate.serviceFee,
+    ...(o.rate.reason ? { reason: o.rate.reason } : {}),
+    ...(o.rate.stored ? { rateStored: true } : {}),
     minutes: o.minutes,
     hourlyCents,
     mileage: o.mileage,
     tips: o.tips,
     totalCents: (hourlyCents ?? 0) + mileageCents + tipsCents,
   };
+}
+
+/** An estimate for the person it belongs to: the rate, never why (no tier, rank or new hire rate). */
+export function forStaff(e: StaffEstimate): StaffEstimate {
+  const { reason: _reason, rateStored: _stored, ...rest } = e;
+  void _reason;
+  void _stored;
+  return rest;
+}
+
+/** The reason beside a rate on the Payout card and in Payroll: "Top", "New hire", "Personal rate". Admins only. */
+export function payReasonText(reason: PayReason | null | undefined, stored = false): string {
+  if (!reason) return "";
+  return stored ? `${PAY_REASON_LABEL[reason]}, stored at approval` : PAY_REASON_LABEL[reason];
 }
 
 /** A typed override: one way miles and/or a mileage amount in dollars, and a note. */

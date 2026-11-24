@@ -206,6 +206,7 @@ function PersonRow({
             {p.roleNote && <span className="ml-2 text-xs text-[#A39585]">{p.roleNote}</span>}
             {!p.placed && <span className="ml-2 rounded-full bg-[#FFF3DF] text-[#9A7049] px-2 py-0.5 text-xs">Not placed yet</span>}
           </p>
+          {p.payWarning && <p className="text-sm text-[#A0412D]">{p.payWarning}</p>}
           <p className="text-sm text-[#2C2420]">{p.line}</p>
           <p className="text-sm text-[#6B5D52]">
             Solo guests: {p.solo ?? "no limit"} · Weddings: {p.weddings ? "yes" : "no"}

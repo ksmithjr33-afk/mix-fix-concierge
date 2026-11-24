@@ -192,15 +192,15 @@ check("Gratuity model engine unchanged: Full 100/4 tip jar $1,749", old.priceEve
   const rates = { ...pay.PACKAGE_RATE_DEFAULTS, serviceFee: pay.SERVICE_FEE_RATE_DEFAULTS };
   const sfCtx = (role: string) => ({ model: "service_fee", role });
   const r = (own: number | null, pkg: string, role: string) => pay.lineRate(own, pkg, rates, sfCtx(role));
-  check("Service fee bartender: $45 on every package", ["Bartender Only", "Dive Bar", "The Big Day Bar", "Full Bar", "Premium Bar"].every((p) => r(null, p, "bartender").cents === 4500 && r(null, p, "bartender").source === "service_fee"));
+  check("Service fee bartender with no standing (the Business estimate): the Top rate, $45, on every package", ["Bartender Only", "Dive Bar", "The Big Day Bar", "Full Bar", "Premium Bar"].every((p) => r(null, p, "bartender").cents === 4500 && r(null, p, "bartender").source === "service_fee"));
   check("Service fee bar back, server, event helper: $30", ["bar_back", "server", "event_helper"].every((role) => r(null, "Full Bar", role).cents === 3000 && r(null, "Full Bar", role).source === "support"));
   check("Personal rate only when higher: $50 wins, $35 does not", r(5000, "Full Bar", "bartender").cents === 5000 && r(5000, "Full Bar", "bartender").source === "own" && r(3500, "Full Bar", "bartender").cents === 4500);
   check("Support role with a $35 personal rate gets $35 (higher than $30)", r(3500, "Full Bar", "bar_back").cents === 3500);
-  check("Per package rate from settings", pay.lineRate(null, "Premium Bar", { ...rates, serviceFee: { ...pay.SERVICE_FEE_RATE_DEFAULTS, premium: 5200 } }, sfCtx("bartender")).cents === 5200);
+  check("Top rate from settings", pay.lineRate(null, "Premium Bar", { ...rates, serviceFee: { ...pay.SERVICE_FEE_RATE_DEFAULTS, top: 5200 } }, sfCtx("bartender")).cents === 5200);
   check("Gratuity events unchanged: $25 Beer and Wine bar back, own rate always wins", pay.lineRate(null, "Beer and Wine", rates, { model: "gratuity", role: "bar_back" }).cents === 2500 && pay.lineRate(2000, "Full Bar", rates, { model: "gratuity", role: "bartender" }).cents === 2000);
   check("No context means the gratuity rules (older callers)", pay.lineRate(null, "Full Bar", rates).cents === 3000);
   check("A session with no model is a gratuity event", pay.lineRate(null, "Full Bar", rates, { model: null, role: "bartender" }).cents === 3000);
-  check("Rate text: service fee event, no gratuity share", pay.rateSourceText({ source: "service_fee", pkg: "full" }) === "service fee event, no gratuity share" && pay.rateSourceText({ source: "own", pkg: "full", serviceFee: true }) === "own rate, service fee event, no gratuity share");
+  check("Rate text on a service fee event: only \"your rate\"", pay.rateSourceText({ source: "service_fee", pkg: "full" }) === "your rate" && pay.rateSourceText({ source: "support", pkg: "full" }) === "your rate" && pay.rateSourceText({ source: "own", pkg: "full", serviceFee: true }) === "your rate");
   const tips = pay.tipsShare(164, 2, true, "service_fee");
   check("No gratuity split on a service fee event, even with a gratuity stored", tips.state === "service_fee" && !pay.tipsText(tips).includes("$"));
   check("Gratuity events still split the gratuity", pay.tipsShare(164, 2, true, "gratuity").state === "on_file");
@@ -209,7 +209,7 @@ check("Gratuity model engine unchanged: Full 100/4 tip jar $1,749", old.priceEve
   const row = payout.payoutRow({ staffId: "s", assignmentId: "a", name: "A", role: "bartender", estimate: est, sheet: null });
   check("Payout row: tips $0, flagged service fee, total $315", row.tipsCents === 0 && row.serviceFee === true && row.totalCents === 31500);
   check("Payout copy says no gratuity share", payout.payoutText("T", [row], payout.payoutTotals([row])).includes("no gratuity share"));
-  check("Service fee rate settings: defaults and validation", bs.readServiceFeeRates(null).full === 4500 && bs.readServiceFeeRates({ support: 3200 }).support === 3200 && !bs.validateServiceFeeRates({ beerwine: "45" }).ok);
+  check("Service fee rate settings: defaults and validation", bs.readServiceFeeRates(null).top === 4500 && bs.readServiceFeeRates({ support: 3200 }).support === 3200 && !bs.validateServiceFeeRates({ beerwine: "45" }).ok);
 }
 
 // ---------- price changes on service fee events ----------

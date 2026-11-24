@@ -28,7 +28,7 @@ export default function SettingsForm({
   const [g, setG] = useState<Record<string, string>>(Object.fromEntries(SUPPLY_PACKAGES.map((k) => [k, perGuest[k] === null ? "" : (perGuest[k]! / 100).toFixed(2)])));
   const [r, setR] = useState<Record<string, string>>(Object.fromEntries(PAY_PACKAGES.map((k) => [k, (rates[k] / 100).toFixed(2)])));
   const sfRates = rates.serviceFee ?? SERVICE_FEE_RATE_DEFAULTS;
-  const [sf, setSf] = useState<Record<string, string>>(Object.fromEntries(SERVICE_FEE_RATE_KEYS.map((k) => [k, (sfRates[k] / 100).toFixed(2)])));
+  const [sf, setSf] = useState<Record<string, string>>(Object.fromEntries(SERVICE_FEE_RATE_KEYS.map((k) => [k, k === "newHireEvents" ? String(sfRates[k]) : (sfRates[k] / 100).toFixed(2)])));
   const [sg, setSg] = useState<Record<string, string>>(Object.fromEntries(SF_SUPPLY_PACKAGES.map((k) => [k, (sfPerGuest[k] / 100).toFixed(2)])));
   const [msg, setMsg] = useState<{ which: string; text: string; error: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -72,13 +72,13 @@ export default function SettingsForm({
       <div className="space-y-2" id="sf-rates">
         <h3 className="text-sm font-semibold text-[#2C2420]">Hourly rate, service fee model events</h3>
         <p className="text-xs text-[#6B5D52]">
-          Bartenders get the rate for the event&apos;s package. Bar backs, servers and event helpers get the support rate. A person&apos;s own rate counts only when it is higher. No gratuity share on these events.
+          Bartenders get the rate for their tier on the day of the event, and someone not placed in a tier gets the Core rate. A bartender with fewer approved events than the new hire count gets the new hire rate, whatever their tier (0 turns it off). Never less than the rate when they accepted the event, and approved hours keep the rate they were approved at. Bar backs, servers and event helpers get the support rate. A person&apos;s own rate counts only when it is higher. No gratuity share on these events.
         </p>
         <div className="grid grid-cols-2 gap-2">
           {SERVICE_FEE_RATE_KEYS.map((k) => (
             <label key={k} className="text-sm text-[#2C2420]">
-              {k === "support" ? SERVICE_FEE_RATE_LABEL[k] : `${SERVICE_FEE_RATE_LABEL[k]} bartenders`}, $ an hour
-              <input className={input} inputMode="decimal" value={sf[k]} onChange={(e) => setSf({ ...sf, [k]: e.target.value })} />
+              {k === "newHireEvents" ? `${SERVICE_FEE_RATE_LABEL[k]}, approved events` : `${SERVICE_FEE_RATE_LABEL[k]}, $ an hour`}
+              <input className={input} inputMode={k === "newHireEvents" ? "numeric" : "decimal"} value={sf[k]} onChange={(e) => setSf({ ...sf, [k]: e.target.value })} />
             </label>
           ))}
         </div>

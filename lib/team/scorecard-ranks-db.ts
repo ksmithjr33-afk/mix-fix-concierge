@@ -13,6 +13,9 @@ import { marketLabel, MARKETS, staffMarketsOf, type Market } from "@/lib/team/ma
 import { isFullAdmin } from "@/lib/team/roles";
 import { includedInOffers, WEEKDAY_NAMES, cleanWeekdays, type Group, type Mode, type Ranked, type Reviewed } from "@/lib/team/offers";
 import { offerSettings } from "@/lib/team/offers-db";
+import { approvedEventCounts } from "@/lib/team/pay-db";
+import { packageRates } from "@/lib/team/business-settings-db";
+import { isNewHire, isSupportRole, NOT_PLACED_WARNING, SERVICE_FEE_RATE_DEFAULTS } from "@/lib/team/pay";
 import {
   RANK_TIER_LABEL,
   RANK_TIERS,
@@ -137,6 +140,7 @@ export interface BoardPerson {
   weddings: boolean;
   note: string;
   placed: boolean;
+  payWarning: string; // NOT_PLACED_WARNING when they are past the new hire count and not placed, else ""
   suggested: string; // the reviews' tier, "" when there are not enough reviews
   line: string; // "Rank: Top 2. Reviews suggest: Core."
   daysOff: string; // "Never Sundays", for context
@@ -162,6 +166,28 @@ export interface Board {
 const shortWhen = (iso: string | null | undefined) =>
   iso ? new Date(iso).toLocaleDateString("en-US", { timeZone: "America/Chicago", month: "short", day: "numeric", year: "numeric" }) : "";
 
+/**
+ * Of these people who are not placed in a tier, the ones a service fee event
+ * pays at the Core rate: bartenders (not support roles) past the new hire count.
+ */
+async function paidAtCoreUnplaced(people: { id: string; role?: string | null }[]): Promise<Set<string>> {
+  const bartenders = people.filter((p) => !isSupportRole(p.role));
+  if (bartenders.length === 0) return new Set();
+  const [counts, rates] = await Promise.all([approvedEventCounts(bartenders.map((p) => p.id)), packageRates()]);
+  const sf = rates.serviceFee ?? SERVICE_FEE_RATE_DEFAULTS;
+  return new Set(bartenders.filter((p) => !isNewHire(sf, counts.get(p.id) ?? 0)).map((p) => p.id));
+}
+
+/** For the Scorecard: everyone included in offers, not placed in a tier, and paid at the Core rate. Never the viewer. Admins and managers only. */
+export async function unplacedAtCore(viewer: StaffMember): Promise<{ staffId: string; name: string }[]> {
+  if (!canViewRanks(viewer)) return [];
+  const people = (await activeStaff()).filter((p) => includedInOffers(p) && p.id !== viewer.id);
+  const { ready, ranks } = await ensureRanks(people);
+  if (!ready) return [];
+  const paid = await paidAtCoreUnplaced(people.filter((p) => !ranks.get(p.id)?.placed));
+  return people.filter((p) => paid.has(p.id)).map((p) => ({ staffId: p.id, name: p.name })).sort((a, b) => a.name.localeCompare(b.name));
+}
+
 /** The offer order for each market. Never the viewer's own row. Null for anyone but admins and managers. */
 export async function rankBoard(viewer: StaffMember): Promise<Board | null> {
   if (!canViewRanks(viewer)) return null;
@@ -169,7 +195,7 @@ export async function rankBoard(viewer: StaffMember): Promise<Board | null> {
   const people = staff.filter((p) => includedInOffers(p));
   const [{ ready, ranks }, settings] = await Promise.all([ensureRanks(people), offerSettings()]);
   const shown = people.filter((p) => p.id !== viewer.id);
-  const badges = await tierBadges(viewer, shown.map((p) => p.id));
+  const [badges, unplacedPaid] = await Promise.all([tierBadges(viewer, shown.map((p) => p.id)), paidAtCoreUnplaced(shown.filter((p) => !ranks.get(p.id)?.placed))]);
   const markets: BoardMarket[] = MARKETS.map((m) => {
     const inMarket = sortRanks(
       shown.filter((p) => staffMarketsOf(p).includes(m) && ranks.has(p.id)).map((p) => ({ ...ranks.get(p.id)!, name: p.name, person: p }))
@@ -197,6 +223,7 @@ export async function rankBoard(viewer: StaffMember): Promise<Board | null> {
               weddings: r.weddings,
               note: r.note,
               placed: r.placed,
+              payWarning: unplacedPaid.has(r.staff_id) ? NOT_PLACED_WARNING : "",
               suggested: sug ? RANK_TIER_LABEL[sug] : "",
               line: rankLine(tier, i + 1, sug),
               daysOff: off.length ? `Never ${off.map((d) => WEEKDAY_NAMES[d]).join(", ")}` : "",
