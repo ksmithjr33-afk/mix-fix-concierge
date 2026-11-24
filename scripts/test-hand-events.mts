@@ -201,14 +201,89 @@ check("The Big Day Bar is for weddings only", bad({ package: "The Big Day Bar", 
 check("Price fields are optional", bad({}) === "" && bad({ total: "$1,749" }) === "" && bad({ total: "lots" }).includes("amounts"));
 
 // ----- Package rules for drinks, the same as the concierge -----
-check("Essentials Bar: a classic is not on its menu", bad({ package: "Essentials Bar", drinks: [{ key: "classic:Old Fashioned" }] }).includes("not on the Essentials Bar menu"));
-check("Essentials Bar: no mocktails", bad({ package: "Essentials Bar", drinks: [{ name: "Fizz", ingredients: "soda", is_mocktail: true }] }).includes("Mocktails are only"));
+const GRAT = { booked_on: "2026-11-01" }; // retired packages are on the gratuity model only
+check("Essentials Bar: a classic is not on its menu", bad({ ...GRAT, package: "Essentials Bar", drinks: [{ key: "classic:Old Fashioned" }] }).includes("not on the Essentials Bar menu"));
+check("Essentials Bar: no mocktails", bad({ ...GRAT, package: "Essentials Bar", drinks: [{ name: "Fizz", ingredients: "soda", is_mocktail: true }] }).includes("Mocktails are only"));
 check("Full Bar: a mocktail is fine", bad({ drinks: [{ name: "Fizz", ingredients: "4 oz soda\n1 oz lime juice", is_mocktail: true }] }) === "");
-check("Beer and Wine: no signature drinks", bad({ package: "Beer and Wine", drinks: [{ key: "craft:French Martini" }] }).includes("no signature drinks"));
+check("Beer and Wine: no signature drinks", bad({ ...GRAT, package: "Beer and Wine", drinks: [{ key: "craft:French Martini" }] }).includes("no signature drinks"));
 check("The Big Day Bar: at most 2 plus 3 more", bad({ package: "The Big Day Bar", event_type: "Wedding", drinks: Array(6).fill({ key: "craft:French Martini" }) }).includes("at most 5"));
 const dive = manual.cleanManualEvent(form({ package: "Dive Bar", drinks: [{ key: "craft:French Martini" }] }), today2);
 check("Dive Bar gets its set menu of five, whatever was picked", dive.ok && (dive.value.eventData.signature_drinks as { name: string }[]).map((d) => d.name).join() === "Margarita,Old Fashioned,Cosmopolitan,Lemon Drop,Moscow Mule" && dive.value.eventData.dive_set_menu === true);
 check("The pools match the concierge's sourcing rules", catalog.menuPool("Essentials Bar") === "craft" && catalog.menuPool("The Big Day Bar") === "craft_classics" && catalog.menuPool("Full Bar") === "craft_classics" && catalog.menuPool("Premium Bar") === "craft_classics" && catalog.menuPool("Dive Bar") === "set" && catalog.menuPool("Beer and Wine") === "none");
 check("The craft menu is read from the concierge's menu text", catalog.craftDrinks().some((d) => d.name === "Tequila Mucho" && d.ingredients[0] === "2 oz tequila reposado"));
+
+// ----- Booked on and the pricing model -----
+{
+  const model = (extra: Record<string, unknown>) => {
+    const c = manual.cleanManualEvent(form(extra), today2);
+    return c.ok ? c.value.pricingModel : `error: ${c.error}`;
+  };
+  check("Booked on November 23, 2026 defaults to the gratuity model", model({ booked_on: "2026-11-23" }) === "gratuity");
+  check("Booked on November 24, 2026 defaults to the service fee model", model({ booked_on: "2026-11-24" }) === "service_fee");
+  check("No booked on date: today, so the service fee model", model({}) === "service_fee");
+  check("The admin can pick the gratuity model on a new booking", model({ booked_on: "2026-11-24", pricing_model: "gratuity" }) === "gratuity");
+  check("The admin can pick the service fee model on an old booking", model({ booked_on: "2026-10-01", pricing_model: "service_fee" }) === "service_fee");
+  check("A future booked on date is refused", String(model({ booked_on: addDays(today2, 1) })).includes("future"));
+  check("A bad booked on date is refused", String(model({ booked_on: "2026-13-40" })).includes("booked on"));
+  check("A made up model is refused", String(model({ pricing_model: "flat" })).includes("pricing model"));
+  check("Beer and Wine is not a service fee package", String(model({ package: "Beer and Wine", drinks: [] })).includes("service fee model package"));
+  check("Bartender Only is a service fee package", model({ package: "Bartender Only", drinks: [] }) === "service_fee");
+  check("Bartender Only is not offered on the gratuity model", String(model({ booked_on: "2026-11-01", package: "Bartender Only", drinks: [] })).includes("Pick a package"));
+
+  const sfPrice = manualDb.bookedPrice({ total: "1500", addons_total: "300", deposit_paid: "250" }, "service_fee", "Full Bar", "2026-11-24T12:00:00Z");
+  check("Service fee model price: the fee is carved out of the total less add ons", sfPrice?.pricing_model === "service_fee" && sfPrice.total === 1500 && sfPrice.addons_total === 300 && sfPrice.package_price === 1000 && sfPrice.service_fee === 200 && sfPrice.gratuity === null, JSON.stringify(sfPrice));
+  const premium = manualDb.bookedPrice({ total: "1100" }, "service_fee", "Premium Bar");
+  check("Premium is 10%", premium?.service_fee === 100 && premium.package_price === 1000 && premium.service_fee_rate === 0.1, JSON.stringify(premium));
+  const grat = manualDb.bookedPrice({ package_price: "1000", gratuity: "200", total: "1200" });
+  check("Gratuity model price is stored as before", grat?.gratuity === 200 && grat.package_price === 1000 && grat.pricing_model === undefined && grat.service_fee === undefined);
+
+  reset();
+  const sf = await manualDb.addManualEvent(admin, form({ booked_on: "2026-11-24", package: "Bartender Only", drinks: [], total: "600" }));
+  const sfRow = sf.ok ? session(sf.id) : undefined;
+  check("Saved: the session has the service fee model and the booked on date", sfRow?.pricing_model === "service_fee" && sfRow?.booked_on === "2026-11-24", JSON.stringify({ m: sfRow?.pricing_model, b: sfRow?.booked_on }));
+  check("Saved: the booked price is split on the service fee model", (sfRow?.booked_price as Record<string, unknown>)?.service_fee === 100);
+  reset();
+  const old = await manualDb.addManualEvent(admin, form({ booked_on: "2026-09-01" }));
+  const oldRow = old.ok ? session(old.id) : undefined;
+  check("Saved: an old booking is on the gratuity model", oldRow?.pricing_model === "gratuity" && oldRow?.booked_on === "2026-09-01");
+
+  // Edit event: Booked on and the model.
+  const bm = await import("../lib/booking-model-db.ts");
+  const who = { id: admin.id, name: "Kenneth" };
+  const before = { package_type: "Full Bar", pricing_model: "gratuity" as const, booked_price: { total: 1200, package_price: 1000, gratuity: 200, addons_total: 0 } as never };
+  const toSf = bm.bookedForModel(before, "service_fee", who, "2026-11-24T12:00:00Z");
+  check("Edit event, to the service fee model: the fee is carved out of the total, no gratuity", toSf?.pricing_model === "service_fee" && toSf.service_fee === 200 && toSf.package_price === 1000 && toSf.gratuity === null && toSf.total === 1200, JSON.stringify(toSf));
+  const back = bm.bookedForModel({ ...before, pricing_model: "service_fee" as const, booked_price: toSf as never }, "gratuity", who, "2026-11-24T12:00:00Z");
+  check("Edit event, back to the gratuity model: the total is kept and the fee cleared", back?.pricing_model === "gratuity" && back.total === 1200 && back.service_fee === null);
+  check("Edit event, no total yet: only the model moves", bm.bookedForModel({ ...before, booked_price: { tip_jar: true } as never }, "service_fee", who, "x")?.pricing_model === "service_fee");
+  check("Edit event, no booked price: stays empty", bm.bookedForModel({ ...before, booked_price: null }, "service_fee", who, "x") === null);
+
+  const id = oldRow?.id as string;
+  const today3 = today2;
+  const sameModel = await bm.setBookedOnAndModel(id, { booked_on: "2026-09-02", pricing_model: "gratuity" }, who, today3);
+  check("Edit event: a new booked on date saves without changing the model", sameModel.ok && !sameModel.changedModel && session(id)?.booked_on === "2026-09-02" && session(id)?.pricing_model === "gratuity");
+  const moved = await bm.setBookedOnAndModel(id, { booked_on: "2026-11-24", pricing_model: "service_fee" }, who, today3);
+  check("Edit event: changing the model saves it", moved.ok && moved.changedModel && session(id)?.pricing_model === "service_fee");
+  check("Edit event: a future booked on date is refused", !(await bm.setBookedOnAndModel(id, { booked_on: addDays(today3, 2), pricing_model: "gratuity" }, who, today3)).ok);
+  check("Edit event: a model is required", !(await bm.setBookedOnAndModel(id, { booked_on: "2026-11-01" }, who, today3)).ok);
+  db.sessions!.find((s: Record<string, unknown>) => s.id === id)!.price_check = { reason: "x", at: "y" };
+  await bm.setBookedOnAndModel(id, { pricing_model: "service_fee" }, who, today3);
+  check("Edit event: picking the model clears Price needs a check", session(id)?.price_check === null);
+
+  const bmRoute = await import("../app/api/team/admin/booking-model/route.ts");
+  signIn("bart-1", "bart-token-2");
+  const r403 = await bmRoute.POST(new Request("http://x/api/team/admin/booking-model", { method: "POST", body: JSON.stringify({ sessionId: id, pricing_model: "gratuity" }) }));
+  check("Edit event: only admins can change the model", r403.status === 403);
+
+  const ui = src("app/team/admin/e/[id]/booking-model.tsx");
+  check("Edit event: changing the model asks first and says staff pay and the price breakdown will change", ui.includes("window.confirm(") && ui.includes("Staff pay and the price breakdown will change."));
+  check("Edit event: a new booked on date sets the default model", ui.includes("setPick(defaultModelFor(e.target.value))") && ui.includes('"2026-11-23"'));
+  const form2 = src("app/team/admin/events/new/add-event-form.tsx");
+  check("Add event form: Booked on and Pricing model fields", form2.includes('label="Booked on"') && form2.includes('label="Pricing model"') && form2.includes('"2026-11-23"'));
+  check("Add event form: the service fee model shows its own packages and no gratuity field", form2.includes("sfPackages") && form2.includes('model === "service_fee" ? (') && form2.includes("Add ons inside the total"));
+  const edit = await import("../lib/team/admin-edit.ts");
+  check("Edit event: a service fee event offers Bartender Only, not Beer and Wine", edit.packageChoices("service_fee").includes("Bartender Only") && !edit.packageChoices("service_fee").includes("Beer and Wine") && edit.packageChoices("gratuity").includes("Beer and Wine"));
+  check("Edit event: Bartender Only is refused on a gratuity event", !edit.cleanAdminEdit({ package: "Bartender Only" }, "Full Bar", "gratuity").ok && edit.cleanAdminEdit({ package: "Bartender Only" }, "Full Bar", "service_fee").ok);
+}
 
 done("hand added event");

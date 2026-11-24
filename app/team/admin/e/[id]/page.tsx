@@ -16,8 +16,8 @@ import { adminMenuView } from "@/lib/team/approved-menu-db";
 import { distancesToEvent } from "@/lib/team/profile-db";
 import HideAction from "./hide-action";
 import EditEvent, { type EditValues } from "./edit-event";
-import { formValue, PACKAGE_CHOICES } from "@/lib/team/admin-edit";
-import { chicagoStamp, eventSchedule, todayIn } from "@/lib/team/time";
+import { formValue, packageChoices } from "@/lib/team/admin-edit";
+import { chicagoStamp, eventSchedule, todayIn, TZ } from "@/lib/team/time";
 import BartendersNeeded from "./bartenders-needed";
 import { bartendersFix, bookedBartenders, estimateNote, staffingLog } from "@/lib/team/staffing-fix";
 import { isHidden } from "@/lib/team/hidden";
@@ -357,7 +357,12 @@ async function AdminEventPage({
           barSetup={bar.flatMap((e) => e.photos.map((p) => ({ id: p.id, url: p.url, who: e.staffFirstName, at: p.createdAt })))}
         />
       ) : null;
-      const packages = PACKAGE_CHOICES.includes(editValues.package) || !editValues.package ? PACKAGE_CHOICES : [editValues.package, ...PACKAGE_CHOICES];
+      // Booked on and the pricing model, admins only: webhook bookings were booked the day the row was made.
+      const bookingModel = isAdminRole(me.role)
+        ? { bookedOn: session.booked_on ?? (session.created_at ? todayIn(TZ, new Date(session.created_at)) : ""), model: sessionPricingModel(session), today: todayIn(TZ) }
+        : undefined;
+      const choices = packageChoices(session.pricing_model);
+      const packages = choices.includes(editValues.package) || !editValues.package ? choices : [editValues.package, ...choices];
       return (
         <>
           {/* "Price needs a check" from the booking: admins and managers only, like the price it names. */}
@@ -408,7 +413,7 @@ async function AdminEventPage({
             </div>
           )}
           <PackageCard packageName={v.package} booking={bookingShortOf(session)} />
-          {!hidden && <EditEvent sessionId={id} version={session.version} initial={editValues} packages={packages} />}
+          {!hidden && <EditEvent sessionId={id} version={session.version} initial={editValues} packages={packages} booking={bookingModel} />}
           <HideAction sessionId={id} hidden={hidden} />
           {session.calendar_only && <CalendarOnlyCard sessionId={id} />}
         </>

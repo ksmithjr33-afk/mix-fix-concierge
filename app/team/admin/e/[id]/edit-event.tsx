@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import BookingModel from "./booking-model";
 import { editInput, ListFieldset, priceChosen, PriceFieldset, type Mode, type Preview } from "./edit-price";
 
 export interface EditValues {
@@ -29,11 +30,13 @@ export default function EditEvent({
   version,
   initial,
   packages,
+  booking,
 }: {
   sessionId: string;
   version: number;
   initial: EditValues;
   packages: string[];
+  booking?: { bookedOn: string; model: "gratuity" | "service_fee"; today: string }; // admins only
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -143,6 +146,8 @@ export default function EditEvent({
           Cancel
         </button>
       </div>
+      {booking && <BookingModel sessionId={sessionId} bookedOn={booking.bookedOn} model={booking.model} today={booking.today} />}
+
       <p className="text-sm text-[#6B5D52]">Saves like a client update. The client is not messaged. Signature drinks are not changed here.</p>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">

@@ -50,7 +50,7 @@ export type PreviewResult = { ok: true; preview: AdminPreview } | { ok: false; e
 export async function previewAdminEdit(sessionId: string, rawChanges: unknown): Promise<PreviewResult> {
   const session = await getSession(sessionId);
   if (!session || session.status !== "submitted" || !session.event_data) return { ok: false, error: "We could not find that event.", status: 404 };
-  const clean = cleanAdminEdit(rawChanges, session.event_data.package);
+  const clean = cleanAdminEdit(rawChanges, session.event_data.package, session.pricing_model);
   if (!clean.ok) return { ok: false, error: clean.error, status: 400 };
   const quote = await quoteEventUpdate(sessionId, clean.partial, undefined, { ignoreCutoff: true });
   const p = quote?.price ?? null;
@@ -94,7 +94,7 @@ export async function saveAdminEdit(opts: {
 }): Promise<SaveEditResult> {
   const session = await getSession(opts.sessionId);
   if (!session || session.status !== "submitted" || !session.event_data) return { ok: false, error: "We could not find that event.", status: 404 };
-  const clean = cleanAdminEdit(opts.changes, session.event_data.package);
+  const clean = cleanAdminEdit(opts.changes, session.event_data.package, session.pricing_model);
   if (!clean.ok) return { ok: false, error: clean.error, status: 400 };
   // A surprise event: the guest of honor's number is never the day of contact.
   const sx = session as typeof session & SurpriseColumns;

@@ -88,6 +88,9 @@ export interface SessionRow {
   pricing_model?: "gratuity" | "service_fee" | null;
   price_check?: { reason: string; at: string } | null;
   price_check_at?: string | null;
+  // The day the client booked, set on events added by hand (supabase/migrations/20270104_booked_on.sql).
+  booked_on?: string | null;
+  created_at?: string | null;
 }
 
 export interface EventUpdateRow {

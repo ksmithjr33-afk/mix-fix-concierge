@@ -6,9 +6,14 @@ import { formDateToEvent, formTimeToEvent } from "@/lib/team/admin-edit";
 import { applyDiveSetMenu } from "@/lib/dive-menu";
 import { toMoney } from "@/lib/price-change";
 import { allowsMocktails, drinkLimits, drinksFor, menuPool } from "@/lib/menu-catalog";
+import { defaultModelForBookedOn, type PricingModel } from "@/lib/pricing-model";
 
 /** The packages new clients book, in the concierge's order. */
 export const MANUAL_PACKAGES = ["Beer and Wine", "Dive Bar", "Essentials Bar", "The Big Day Bar", "Full Bar", "Premium Bar"] as const;
+/** The packages on the service fee model. Bartender Only here is the new package, never the legacy Tailored one. */
+export const SF_MANUAL_PACKAGES = ["Bartender Only", "Dive Bar", "The Big Day Bar", "Full Bar", "Premium Bar"] as const;
+/** The package list for a pricing model. */
+export const manualPackages = (model: PricingModel): readonly string[] => (model === "service_fee" ? SF_MANUAL_PACKAGES : MANUAL_PACKAGES);
 
 export type SaveMode = "confirmed" | "link";
 
@@ -38,6 +43,8 @@ export interface CleanManual {
   priceFields: Record<string, unknown>; // for the booked price, like /api/create-session
   sendList: boolean; // "Send the client their list"; always false for calendar only
   calendarOnly: boolean; // "Already confirmed, add to our calendar only": nothing to GHL or the client
+  bookedOn: string; // YYYY-MM-DD, the day the client booked
+  pricingModel: PricingModel; // from the admin's pick, defaulting by bookedOn
 }
 
 export type ManualResult = { ok: true; value: CleanManual } | { ok: false; error: string };
@@ -139,8 +146,16 @@ export function cleanManualEvent(raw: unknown, today: string): ManualResult {
   if (!date) return { ok: false, error: "Enter a valid event date." };
   if (day < today) return { ok: false, error: "The event date is in the past." };
 
+  // Booked on: the default for the pricing model. On or before 2026-11-23 is the gratuity model.
+  const bookedOn = str(f.booked_on) || today;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(bookedOn) || !formDateToEvent(bookedOn)) return { ok: false, error: "Enter a valid booked on date." };
+  if (bookedOn > today) return { ok: false, error: "The booked on date cannot be in the future." };
+  const modelRaw = str(f.pricing_model);
+  if (modelRaw && modelRaw !== "gratuity" && modelRaw !== "service_fee") return { ok: false, error: "Pick a pricing model." };
+  const pricingModel: PricingModel = (modelRaw as PricingModel) || defaultModelForBookedOn(bookedOn);
+
   const pkg = str(f.package);
-  if (!(MANUAL_PACKAGES as readonly string[]).includes(pkg)) return { ok: false, error: "Pick a package." };
+  if (!manualPackages(pricingModel).includes(pkg)) return { ok: false, error: pricingModel === "service_fee" ? "Pick a service fee model package." : "Pick a package." };
   if (pkg === "The Big Day Bar" && !/wedding|reception/i.test(eventType)) return { ok: false, error: "The Big Day Bar is for weddings and receptions only." };
 
   const guests = whole(f.guest_count, 1, 2000);
@@ -182,7 +197,7 @@ export function cleanManualEvent(raw: unknown, today: string): ManualResult {
   const drinks = cleanDrinks(f.drinks, pkg);
   if (!drinks.ok) return { ok: false, error: drinks.error };
 
-  for (const k of ["package_price", "gratuity", "total", "deposit_paid", "discount_amount"]) {
+  for (const k of ["package_price", "gratuity", "total", "deposit_paid", "discount_amount", "addons_total"]) {
     if (str(f[k]) && toMoney(f[k]) === null) return { ok: false, error: "Price fields must be amounts, like 1749 or $1,749." };
   }
 
@@ -242,10 +257,13 @@ export function cleanManualEvent(raw: unknown, today: string): ManualResult {
         deposit_paid: f.deposit_paid,
         promo_code: f.promo_code,
         discount_amount: f.discount_amount,
+        addons_total: f.addons_total,
         bartenders: bartenders ?? undefined,
       },
       sendList: !calendarOnly && f.send_list === true,
       calendarOnly,
+      bookedOn,
+      pricingModel,
     },
   };
 }

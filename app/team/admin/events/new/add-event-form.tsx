@@ -38,21 +38,35 @@ function Field({ label, children, hint }: { label: string; children: React.React
 const blankDrink = (): DrinkRow => ({ kind: "menu", key: "", name: "", ingredients: "", is_mocktail: false });
 
 /** The Add event form: client, event, drinks, optional prices, and the two ways to save. */
+const LAST_GRATUITY_DAY = "2026-11-23";
+type Model = "gratuity" | "service_fee";
+const modelFor = (day: string): Model => (day && day <= LAST_GRATUITY_DAY ? "gratuity" : "service_fee");
+
 export default function AddEventForm({
   packages,
+  sfPackages,
   menus,
   diveSetMenu,
   initialDate = "",
   today = "",
 }: {
-  packages: string[];
+  packages: string[]; // gratuity model
+  sfPackages: string[]; // service fee model
   menus: Record<string, PackageMenu>;
   diveSetMenu: string[];
   initialDate?: string; // YYYY-MM-DD, from a tap on the calendar
   today?: string; // YYYY-MM-DD: past dates stay refused (the server checks too)
 }) {
   const router = useRouter();
-  const [v, setV] = useState<Record<string, string>>({ package: "", ...(initialDate ? { event_date: initialDate } : {}) });
+  const [v, setV] = useState<Record<string, string>>({ package: "", booked_on: today, ...(initialDate ? { event_date: initialDate } : {}) });
+  // The pricing model defaults from Booked on; the admin can pick the other one.
+  const [model, setModel] = useState<Model>(modelFor(today));
+  const modelPackages = model === "service_fee" ? sfPackages : packages;
+  const changeModel = (m: Model) => {
+    setModel(m);
+    const list = m === "service_fee" ? sfPackages : packages;
+    if (v.package && !list.includes(v.package)) pickPackage("");
+  };
   // "New booking" (today's behavior) or "Already confirmed, add to our calendar only".
   const [calendarOnly, setCalendarOnly] = useState(false);
   const [flags, setFlags] = useState({ beer: false, wine: false, client_providing_beer_wine: false, send_list: false });
@@ -81,6 +95,8 @@ export default function AddEventForm({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ...v,
+          pricing_model: model,
+          ...(model === "service_fee" ? { package_price: "", gratuity: "" } : { addons_total: "" }),
           ...flags,
           ...(calendarOnly ? { send_list: false, calendar_only: true } : {}),
           mode,
@@ -209,10 +225,32 @@ export default function AddEventForm({
 
       <section className={card}>
         <h2 className="font-heading text-base font-bold text-[#2C2420]">Package and drinks</h2>
+        <div className="grid gap-3 grid-cols-2">
+          <Field label="Booked on">
+            <input
+              className={input}
+              type="date"
+              max={today || undefined}
+              value={v.booked_on ?? ""}
+              onChange={(e) => {
+                const day = e.target.value;
+                setV((o) => ({ ...o, booked_on: day }));
+                if (day) changeModel(modelFor(day));
+              }}
+            />
+          </Field>
+          <Field label="Pricing model">
+            <select className={input} value={model} onChange={(e) => changeModel(e.target.value as Model)}>
+              <option value="gratuity">Gratuity model</option>
+              <option value="service_fee">Service fee model</option>
+            </select>
+          </Field>
+        </div>
+        <p className="text-xs text-[#A39585]">Booked on November 23, 2026 or earlier is the gratuity model, after that the service fee model. Pick the other one if this booking is different.</p>
         <Field label="Package">
           <select className={input} value={v.package} onChange={(e) => pickPackage(e.target.value)}>
             <option value="">Pick a package</option>
-            {packages.map((p) => (
+            {modelPackages.map((p) => (
               <option key={p} value={p}>
                 {p}
               </option>
@@ -291,13 +329,24 @@ export default function AddEventForm({
 
       <section className={card}>
         <h2 className="font-heading text-base font-bold text-[#2C2420]">Price (optional)</h2>
+        {model === "service_fee" && (
+          <p className="text-xs text-[#A39585]">Service fee model: the service fee (20%, 10% on Premium) is carved out of the total less add ons.</p>
+        )}
         <div className="grid gap-3 grid-cols-2">
-          <Field label="Package price">
-            <input className={input} inputMode="decimal" value={v.package_price ?? ""} onChange={set("package_price")} />
-          </Field>
-          <Field label="Gratuity">
-            <input className={input} inputMode="decimal" value={v.gratuity ?? ""} onChange={set("gratuity")} />
-          </Field>
+          {model === "service_fee" ? (
+            <Field label="Add ons inside the total">
+              <input className={input} inputMode="decimal" value={v.addons_total ?? ""} onChange={set("addons_total")} />
+            </Field>
+          ) : (
+            <>
+              <Field label="Package price">
+                <input className={input} inputMode="decimal" value={v.package_price ?? ""} onChange={set("package_price")} />
+              </Field>
+              <Field label="Gratuity">
+                <input className={input} inputMode="decimal" value={v.gratuity ?? ""} onChange={set("gratuity")} />
+              </Field>
+            </>
+          )}
           <Field label="Total">
             <input className={input} inputMode="decimal" value={v.total ?? ""} onChange={set("total")} />
           </Field>

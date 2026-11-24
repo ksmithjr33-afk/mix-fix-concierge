@@ -35,17 +35,48 @@ import { eventDay, todayIn, TZ } from "@/lib/team/time";
 import { cleanManualEvent, type CleanManual } from "@/lib/manual-event";
 import { isAdminRole } from "@/lib/team/roles";
 import { isCalendarOnly } from "@/lib/calendar-only";
+import type { PricingModel } from "@/lib/pricing-model";
+import { FEE_BP_STANDARD, feeBp, serviceFeePackage, splitFromCustom } from "@/lib/service-fee";
 
 export type AddResult =
   | { ok: true; id: string; mode: "confirmed"; managerUrl: string }
   | { ok: true; id: string; mode: "link"; link: string }
   | { ok: false; error: string; status: number; duplicate?: { id: string; title: string; status: string }[] };
 
-/** The booked price from the optional price fields, the same way /api/create-session reads them. */
-function bookedPrice(f: Record<string, unknown>): BookedPrice | null {
-  const keys = ["package_price", "gratuity", "total", "promo_code", "discount_amount", "deposit_paid"];
+/**
+ * The booked price from the optional price fields, the same way /api/create-session reads them.
+ * On the service fee model the total is split like a booking with a custom price: the
+ * service fee is carved out of the total less add ons (20%, 10% on Premium). No gratuity.
+ */
+export function bookedPrice(f: Record<string, unknown>, model: PricingModel = "gratuity", pkg: unknown = null, nowIso: string = new Date().toISOString()): BookedPrice | null {
+  const keys = ["package_price", "gratuity", "total", "promo_code", "discount_amount", "deposit_paid", "addons_total"];
   if (!keys.some((k) => f[k] !== undefined && f[k] !== null && String(f[k]).trim() !== "")) return null;
   const promo = typeof f.promo_code === "string" && f.promo_code.trim() ? f.promo_code.trim().toUpperCase() : null;
+  if (model === "service_fee") {
+    const total = toMoney(f.total);
+    const addons = toMoney(f.addons_total) ?? 0;
+    const key = serviceFeePackage(pkg);
+    const bp = key ? feeBp(key) : FEE_BP_STANDARD;
+    const split = total !== null && total > 0 ? splitFromCustom(Math.max(0, Math.round(total * 100) - Math.round(addons * 100)), bp, Math.round(addons * 100)) : null;
+    return {
+      pricing_model: "service_fee",
+      total,
+      package_price: split ? split.packageCents / 100 : null,
+      service_fee: split ? split.feeCents / 100 : null,
+      service_fee_rate: bp / 10000,
+      addons_total: addons,
+      gratuity: null,
+      bartenders: toMoney(f.bartenders),
+      promo_code: promo,
+      custom_price: null,
+      discount_amount: toMoney(f.discount_amount),
+      tip_jar: toBool(f.tip_jar, true),
+      deposit_paid: toMoney(f.deposit_paid) ?? DEFAULT_DEPOSIT,
+      split_method: split ? "carved" : null,
+      source: "create-session",
+      updated_at: nowIso,
+    } as BookedPrice;
+  }
   return {
     package_price: toMoney(f.package_price),
     gratuity: toMoney(f.gratuity),
@@ -57,7 +88,7 @@ function bookedPrice(f: Record<string, unknown>): BookedPrice | null {
     tip_jar: toBool(f.tip_jar, true),
     deposit_paid: toMoney(f.deposit_paid) ?? DEFAULT_DEPOSIT,
     source: "create-session",
-    updated_at: new Date().toISOString(),
+    updated_at: nowIso,
   };
 }
 
@@ -163,17 +194,25 @@ export async function addManualEvent(admin: StaffMember, raw: unknown, now: Date
 
   const id = await newId();
   const byName = firstName(admin.name) || admin.name || "Admin";
-  const price = bookedPrice({ ...v.priceFields });
-  const { error } = await supabase.from("sessions").insert({
+  const price = bookedPrice({ ...v.priceFields }, v.pricingModel, v.booking.package_type, now.toISOString());
+  const row = {
     id,
     ...v.booking,
     ...(price ? { booked_price: price } : {}),
+    pricing_model: v.pricingModel,
+    booked_on: v.bookedOn,
     created_by: "admin",
     created_by_name: byName,
     created_by_staff_id: admin.id,
     send_client_list: v.sendList,
     ...(v.calendarOnly ? { calendar_only: true } : {}),
-  });
+  };
+  let { error } = await supabase.from("sessions").insert(row);
+  if (error && /booked_on/.test(error.message ?? "")) {
+    // supabase/migrations/20270104_booked_on.sql not run yet: save without the date, the model is still stored.
+    console.error("[manual-event] sessions.booked_on missing (run supabase/migrations/20270104_booked_on.sql). Saved without it.");
+    ({ error } = await supabase.from("sessions").insert({ ...row, booked_on: undefined }));
+  }
   if (error) {
     console.error("[manual-event] session insert failed:", error.message);
     return { ok: false, error: "Could not save. Try again.", status: 500 };

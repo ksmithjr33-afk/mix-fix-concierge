@@ -146,6 +146,10 @@ export function formValue(field: AdminEditField, ed: Record<string, unknown>, se
 
 /** Packages offered on the form. An event's current package is always offered too, even a retired one. */
 export const PACKAGE_CHOICES = ["Dive Bar", "Full Bar", "Premium Bar", "The Big Day Bar", "Beer and Wine"];
+/** The packages on a service fee model event: Bartender Only replaces Beer and Wine. */
+export const SF_PACKAGE_CHOICES = ["Bartender Only", "Dive Bar", "Full Bar", "Premium Bar", "The Big Day Bar"];
+/** The package list for an event on this pricing model. */
+export const packageChoices = (model: unknown): string[] => (model === "service_fee" ? SF_PACKAGE_CHOICES : PACKAGE_CHOICES);
 
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
@@ -182,7 +186,7 @@ export type CleanEdit = { ok: true; partial: Record<string, unknown> } | { ok: f
  * The fields an admin changed, cleaned. Unknown fields (signature drinks
  * included) are dropped. Each value is checked and put in the stored format.
  */
-export function cleanAdminEdit(raw: unknown, currentPackage: unknown): CleanEdit {
+export function cleanAdminEdit(raw: unknown, currentPackage: unknown, model?: unknown): CleanEdit {
   if (!raw || typeof raw !== "object") return { ok: false, error: "Nothing to save." };
   const input = raw as Record<string, unknown>;
   const partial: Record<string, unknown> = {};
@@ -217,7 +221,7 @@ export function cleanAdminEdit(raw: unknown, currentPackage: unknown): CleanEdit
       }
       case "package": {
         const p = String(v ?? "").trim();
-        if (!PACKAGE_CHOICES.includes(p) && p !== String(currentPackage ?? "").trim()) return { ok: false, error: "Pick a package from the list." };
+        if (!packageChoices(model).includes(p) && p !== String(currentPackage ?? "").trim()) return { ok: false, error: "Pick a package from the list." };
         partial[field] = p;
         break;
       }
