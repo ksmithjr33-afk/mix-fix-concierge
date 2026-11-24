@@ -25,6 +25,8 @@ import {
   buildPriceChange,
   computeBaseline,
   priceText,
+  isServiceFeeEvent,
+  serviceFeePriceText,
   withImpliedChanges,
   toCount,
   withHoursBooked,
@@ -347,7 +349,7 @@ function prepareUpdate(
     });
     // While an earlier change waits for its price, the total this would build on is unknown.
     if (session.price_pending && price.new_total !== null) {
-      price = { ...price, amount: null, new_total: null, package_price: null, gratuity: null, price_text: priceText(null, null) };
+      price = { ...price, amount: null, new_total: null, package_price: null, gratuity: null, service_fee: null, price_text: priceText(null, null) };
     }
     // Hours follow new times, and bartenders follow what the change was priced with.
     const all = withImpliedChanges(current, { changes: asked, basis: price.basis }, booked?.bartenders ?? original?.bartenders ?? null);
@@ -387,6 +389,35 @@ export function extraDrinksPrice(
   const amount = known ? baseAmount! + add : null;
   const newTotal = known ? baseTotal! + add : null;
   const pkg = other ? other.package_price : (booked?.package_price ?? null);
+  // Service fee events: extra drinks are add ons, outside the package and the fee.
+  if (isServiceFeeEvent(booked)) {
+    const baseAddons = other?.addons_total ?? booked?.addons_total ?? 0;
+    const split = {
+      package_price: pkg,
+      service_fee: other ? (other.service_fee ?? booked?.service_fee ?? null) : (booked?.service_fee ?? null),
+      service_fee_rate: other ? (other.service_fee_rate ?? booked?.service_fee_rate ?? null) : (booked?.service_fee_rate ?? null),
+      addons_total: known ? baseAddons + add : null,
+    };
+    return {
+      changes: [...(other?.changes ?? []), change],
+      ...(other?.implied ? { implied: other.implied } : {}),
+      requested_at: other?.requested_at ?? (o.now ?? new Date()).toISOString(),
+      base_version: other?.base_version ?? o.version,
+      amount,
+      new_total: newTotal,
+      package_price: known ? pkg : null,
+      gratuity: null,
+      service_fee: known ? split.service_fee : null,
+      service_fee_rate: split.service_fee_rate,
+      addons_total: split.addons_total,
+      price_text: serviceFeePriceText(amount, newTotal, split),
+      summary: [other?.summary, label].filter(Boolean).join("; "),
+      basis: other?.basis ?? booked?.basis ?? null,
+      class49_applied: other?.class49_applied ?? false,
+      booked_total: other?.booked_total ?? booked?.total ?? null,
+      deposit_paid: other?.deposit_paid ?? booked?.deposit_paid ?? DEFAULT_DEPOSIT,
+    };
+  }
   return {
     changes: [...(other?.changes ?? []), change],
     ...(other?.implied ? { implied: other.implied } : {}),

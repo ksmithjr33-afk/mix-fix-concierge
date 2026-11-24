@@ -2,6 +2,7 @@
 // values are cleaned into the shapes event_data already uses, and the three
 // price choices. Pure, no database.
 
+import { splitFromCustom } from "@/lib/service-fee";
 import type { PriceChange } from "@/lib/price-change";
 import { eventDay, parseClock } from "@/lib/team/time";
 
@@ -298,17 +299,29 @@ export function adminPrice(engine: PriceChange, mode: PriceMode, manualTotal: nu
       new_total: booked,
       package_price: null,
       gratuity: null,
+      service_fee: null,
+      addons_total: null,
       price_text: booked === null ? `${who} kept the booked total. No booked total on file.` : `${who} kept the booked total at ${money(booked)}.`,
     };
   }
   const total = manualTotal ?? 0;
   const amount = booked === null ? null : Math.round((total - booked) * 100) / 100;
+  // Service fee events: the fee is carved out of the typed total less add ons, at the event's rate.
+  const sf =
+    engine.service_fee_rate !== undefined && engine.service_fee_rate !== null
+      ? (() => {
+          const addons = Math.round((engine.addons_total ?? 0) * 100);
+          const s = splitFromCustom(Math.max(0, Math.round(total * 100) - addons), Math.round(engine.service_fee_rate * 10000), addons);
+          return { package_price: s.packageCents / 100, service_fee: s.feeCents / 100 };
+        })()
+      : null;
   return {
     ...engine,
     amount,
     new_total: total,
-    package_price: null,
+    package_price: sf ? sf.package_price : null,
     gratuity: null,
+    ...(sf ? { service_fee: sf.service_fee } : {}),
     price_text:
       amount === null
         ? `${who} set the new total to ${money(total)}.`

@@ -15,6 +15,12 @@ export interface Preview {
   engineText: string;
   listChanges: string;
   autoSend: boolean;
+  serviceFee?: boolean;
+  bookedBreakdown?: string | null; // "Package $1,572.25 · Service fee (20%) $314.45 · Add ons $150"
+  engineBreakdown?: string | null;
+  paidCents?: number | null; // payments recorded, null when none
+  balanceNow?: number | null;
+  balanceAfter?: number | null;
 }
 
 export type Mode = "" | PriceMode;
@@ -73,6 +79,7 @@ export function PriceFieldset({
         <span>
           Keep the booked total as is
           <span className="block text-sm text-[#6B5D52]">Booked total {money(preview?.bookedTotal ?? null)}</span>
+          {preview?.bookedBreakdown && <span className="block text-sm text-[#6B5D52]">{preview.bookedBreakdown}</span>}
         </span>
       </label>
       <label className={row}>
@@ -88,6 +95,7 @@ export function PriceFieldset({
                   ? "The engine cannot price this change. Leave it price pending, keep the total, or enter one by hand."
                   : `${preview.engineAmount !== null && preview.engineAmount >= 0 ? "+" : "-"}${money(Math.abs(preview.engineAmount ?? 0))}, new total ${money(preview.engineNewTotal)}`}
           </span>
+          {preview?.engineBreakdown && preview.engineNewTotal !== null && <span className="block text-sm text-[#6B5D52]">{preview.engineBreakdown}</span>}
         </span>
       </label>
       {engineCannotPrice(preview) && (
@@ -106,8 +114,16 @@ export function PriceFieldset({
           {mode === "manual" && (
             <input type="text" inputMode="decimal" placeholder="New total, like 1850" value={manual} onChange={(e) => setManual(e.target.value)} className={`${editInput} mt-1`} autoFocus />
           )}
+          {mode === "manual" && preview?.serviceFee && <span className="block text-sm text-[#6B5D52]">The service fee is carved out of the new total less add ons.</span>}
         </span>
       </label>
+      {preview && (
+        <p className="text-sm text-[#6B5D52]">
+          {preview.paidCents === null || preview.paidCents === undefined
+            ? "Remaining balance: no payments recorded yet, so no balance is stated."
+            : `Paid so far ${money(preview.paidCents / 100)}. Remaining balance now ${money(preview.balanceNow ?? null)}${preview.balanceAfter !== null && preview.balanceAfter !== undefined ? `, after the engine's change ${money(preview.balanceAfter)}` : ""}.`}
+        </p>
+      )}
     </fieldset>
   );
 }

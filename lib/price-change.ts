@@ -9,8 +9,29 @@
 //   gratuity   = recomputed only when guests or bartenders went up, never
 //                lower than the booked gratuity
 //   new total  = booked total + delta, never below the deposit paid
+//
+// Service fee model events (booked_price.pricing_model or the session's model):
+//   package    = booked package + (engine(new) − engine(original)) package
+//                prices at standard, with the promo applied the same way
+//                (RETURN5 5% of the difference, CLASS49 $49 once). A custom
+//                or owner price keeps its deal: the standard difference only.
+//   fee        = refigured on the new package, up or down (20%, 10% on Premium)
+//   add ons    = unchanged (extra drinks are add ons: no fee, no discount)
+//   new total  = package + fee + add ons, rounded to the dollar, never below the deposit
 
 import { priceEvent, bookedPrice, staffingFor, packageKey, PROMOS } from "@/lib/pricing";
+import {
+  SERVICE_FEE_TEXT,
+  bookedServiceFee,
+  feeBp,
+  feeOn,
+  feeRateText,
+  quoteServiceFee,
+  serviceFeePackage,
+  splitFromCustom,
+  toDollar,
+  type ServiceFeeQuote,
+} from "@/lib/service-fee";
 import { calculateHours } from "@/lib/shopping-list";
 import {
   applyChanges,
@@ -101,6 +122,10 @@ export interface PriceChange {
   class49_applied: boolean;
   booked_total: number | null;
   deposit_paid: number;
+  // Service fee model only: the new split. package_price is the package alone.
+  service_fee?: number | null;
+  service_fee_rate?: number | null;
+  addons_total?: number | null;
 }
 
 /** A change order held for signature, from before every update applied right away. Read only by /api/manager-update. */
@@ -155,6 +180,12 @@ interface SessionFields {
   package_type?: string | null;
   guest_count?: string | null;
   hours_booked?: string | null;
+  pricing_model?: string | null;
+}
+
+/** True when the event is priced on the service fee model: the booked price says so, or the session does. */
+export function isServiceFeeEvent(booked: { pricing_model?: unknown } | null | undefined, session?: { pricing_model?: unknown } | null): boolean {
+  return booked?.pricing_model === "service_fee" || session?.pricing_model === "service_fee";
 }
 
 /**
@@ -251,7 +282,8 @@ export function basisFromEvent(
       ? calculateHours(ed.bar_service_start as string, ed.bar_service_end as string)
       : null;
   const hours = opts.preferHoursBooked ? booked ?? fromTimes : fromTimes ?? booked;
-  if (!packageKey(pkg) || !guests || !hours) return null;
+  const priceable = session.pricing_model === "service_fee" ? serviceFeePackage(pkg) !== null : packageKey(pkg) !== null;
+  if (!priceable || !guests || !hours) return null;
   const bartenders = toCount(ed.bartenders) ?? opts.bartenders ?? staffingFor(guests);
   return {
     package: pkg,
@@ -277,6 +309,27 @@ export function computeBaseline(
   const tipJar = opts.tipJar ?? true;
   const basis = basisFromEvent(original, session, { tipJar });
   if (!basis) return null;
+  if (session.pricing_model === "service_fee") {
+    const sf = bookedServiceFee(sfInput(basis), { promoCode: opts.promoCode });
+    if (!sf) return null;
+    return {
+      pricing_model: "service_fee",
+      package_price: sf.packageCents / 100,
+      service_fee: sf.feeCents / 100,
+      service_fee_rate: sf.feeBp / 10000,
+      addons_total: 0,
+      gratuity: null,
+      total: sf.totalCents / 100,
+      bartenders: sf.standard.bartenders,
+      promo_code: opts.promoCode ?? null,
+      custom_price: null,
+      discount_amount: sf.discountCents / 100,
+      tip_jar: tipJar,
+      deposit_paid: DEFAULT_DEPOSIT,
+      source: "computed",
+      basis: { ...basis, bartenders: sf.standard.bartenders },
+    };
+  }
   const p = bookedPrice(basis, opts.promoCode);
   if (!p) return null;
   return {
@@ -295,6 +348,29 @@ export function computeBaseline(
 }
 
 // ---------- pricing a change ----------
+
+/** A price basis as the service fee engine reads it. */
+export function sfInput(b: PriceBasis) {
+  return { package: b.package, guests: b.guests, hours: b.hours, isWedding: b.isWedding, bartenders: b.bartenders, woodenBar: b.woodenBar, barback: b.barback !== false };
+}
+
+const usdCents = (cents: number) => `$${(cents / 100).toLocaleString("en-US", { minimumFractionDigits: cents % 100 ? 2 : 0, maximumFractionDigits: 2 })}`;
+
+/** "Package $1,572.25 · Service fee (20%) $314.45 · Add ons $150": the fee as its own line. */
+export function serviceFeeBreakdown(p: { package_price?: number | null; service_fee?: number | null; service_fee_rate?: number | null; addons_total?: number | null }): string | null {
+  if (typeof p.package_price !== "number" || typeof p.service_fee !== "number") return null;
+  const parts = [`Package ${usdCents(Math.round(p.package_price * 100))}`, `Service fee${typeof p.service_fee_rate === "number" ? ` (${feeRateText(Math.round(p.service_fee_rate * 10000))})` : ""} ${usdCents(Math.round(p.service_fee * 100))}`];
+  if (typeof p.addons_total === "number" && p.addons_total > 0) parts.push(`Add ons ${usdCents(Math.round(p.addons_total * 100))}`);
+  return parts.join(" · ");
+}
+
+/** The client facing price text on a service fee event: the difference, the fee on its own line, and the fee sentence. */
+export function serviceFeePriceText(amount: number | null, newTotal: number | null, split: Parameters<typeof serviceFeeBreakdown>[0]): string {
+  const base = priceText(amount, newTotal);
+  if (amount === null || newTotal === null) return base;
+  const line = serviceFeeBreakdown(split);
+  return [base, line, SERVICE_FEE_TEXT].filter(Boolean).join("\n");
+}
 
 export function priceText(amount: number | null, newTotal: number | null): string {
   if (amount === null || newTotal === null) return "We could not price this change automatically. Our team will confirm the price with you.";
@@ -329,6 +405,9 @@ export function buildPriceChange(args: {
   let next: PriceBasis | null = null;
   let class49 = false;
 
+  const serviceFee = isServiceFeeEvent(booked, session);
+  let sfSplit: { service_fee: number; service_fee_rate: number; addons_total: number } | null = null;
+
   if (original && booked.total !== null) {
     const nextGuests = toCount(nextEvent.guest_count) ?? original.guests;
     // Bartenders: what the client asked for, else the booked count, raised to the
@@ -343,8 +422,37 @@ export function buildPriceChange(args: {
     });
     if (next) next.woodenBar = original.woodenBar;
 
-    const before = priceEvent(original);
-    const after = next ? priceEvent(next) : null;
+    if (serviceFee) {
+      const before: ServiceFeeQuote | null = quoteServiceFee(sfInput(original));
+      const after: ServiceFeeQuote | null = next ? quoteServiceFee(sfInput(next)) : null;
+      if (before && after) {
+        const addonsCents = Math.round((booked.addons_total ?? 0) * 100);
+        const totalCents = Math.round(booked.total * 100);
+        // The package as booked: stored on the webhook split, else carved out of the total.
+        const bookedPkgCents =
+          typeof booked.package_price === "number" ? Math.round(booked.package_price * 100) : splitFromCustom(Math.max(0, totalCents - addonsCents), before.feeBp).packageCents;
+        let pkgDelta = after.packageCents - before.packageCents;
+        const code = String(booked.promo_code ?? "").trim().toUpperCase();
+        const custom = (booked.custom_price ?? 0) > 0 || booked.owner_override === true;
+        if (!custom && code === "RETURN5") pkgDelta = Math.round(pkgDelta * (1 - (PROMOS.RETURN5.pct ?? 0) / 100));
+        if (!custom && code === "CLASS49" && !booked.class49_used && pkgDelta > 0) {
+          pkgDelta -= Math.min((PROMOS.CLASS49.amount ?? 0) * 100, pkgDelta);
+          class49 = true;
+        }
+        const pkgCents = Math.max(0, bookedPkgCents + pkgDelta);
+        const bp = feeBp(after.key);
+        const feeCents = feeOn(pkgCents, bp);
+        const depositCents = Math.round(deposit * 100);
+        const newTotalCents = Math.max(depositCents, toDollar(pkgCents + feeCents + addonsCents));
+        newTotal = newTotalCents / 100;
+        amount = Math.round((newTotalCents - totalCents)) / 100;
+        newPackage = pkgCents / 100;
+        newGratuity = null;
+        sfSplit = { service_fee: feeCents / 100, service_fee_rate: bp / 10000, addons_total: addonsCents / 100 };
+      }
+    }
+    const before = serviceFee ? null : priceEvent(original);
+    const after = !serviceFee && next ? priceEvent(next) : null;
     if (before && after) {
       let pkgDelta = after.packagePrice - before.packagePrice;
       const code = String(booked.promo_code ?? "").trim().toUpperCase();
@@ -380,12 +488,20 @@ export function buildPriceChange(args: {
     new_total: newTotal,
     package_price: newPackage,
     gratuity: newGratuity,
-    price_text: priceText(amount, newTotal),
+    price_text: serviceFee ? serviceFeePriceText(amount, newTotal, { package_price: newPackage, ...sfSplit }) : priceText(amount, newTotal),
     summary: changeBlocks([...changes, ...implied]).join("\n\n"),
     basis: next,
     class49_applied: class49,
     booked_total: booked.total,
     deposit_paid: deposit,
+    // Unpriced on a service fee event: the rate and add ons still ride along, so a total set by hand is split the same way.
+    ...(serviceFee
+      ? {
+          service_fee: sfSplit?.service_fee ?? null,
+          service_fee_rate: sfSplit?.service_fee_rate ?? booked.service_fee_rate ?? 0.2,
+          addons_total: sfSplit?.addons_total ?? booked.addons_total ?? 0,
+        }
+      : {}),
   };
 }
 
@@ -397,6 +513,10 @@ export function bookedAfter(prior: BookedPrice, p: PriceChange, bartenders: numb
     gratuity: p.gratuity ?? prior.gratuity,
     total: p.new_total ?? prior.total,
     bartenders: bartenders ?? prior.bartenders,
+    // Service fee events: the fee and add ons move with the price (a kept total keeps them).
+    ...(p.service_fee !== undefined && p.service_fee !== null ? { service_fee: p.service_fee } : {}),
+    ...(p.service_fee_rate !== undefined && p.service_fee_rate !== null ? { service_fee_rate: p.service_fee_rate } : {}),
+    ...(p.addons_total !== undefined && p.addons_total !== null ? { addons_total: p.addons_total } : {}),
     source: "update",
     // The next change is priced against the event as it is now.
     basis: p.basis ?? prior.basis ?? null,

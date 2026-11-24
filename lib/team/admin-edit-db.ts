@@ -15,7 +15,9 @@ import { eventTimeZone } from "@/lib/team/markets";
 import { honoreeRefusal, isHonoree, surpriseActive, type SurpriseColumns } from "@/lib/partners/surprise";
 import { deliverEventUpdates } from "@/lib/update-delivery";
 import { applyChanges, isPricedField } from "@/lib/event-diff";
-import { withHoursBooked } from "@/lib/price-change";
+import { isServiceFeeEvent, serviceFeeBreakdown, withHoursBooked } from "@/lib/price-change";
+import { recordedPayments } from "@/lib/team/business-db";
+import { knownBalance } from "@/lib/balance";
 import { autoSendOn, listWouldChange } from "@/lib/client-list-db";
 import { firstName, type StaffMember } from "@/lib/team/event-view";
 import { adminPrice, cleanAdminEdit, cleanPriceChoice } from "@/lib/team/admin-edit";
@@ -32,6 +34,14 @@ export interface AdminPreview {
   engineText: string;
   listChanges: string; // what the edit would change on the client's shopping list, empty when nothing
   autoSend: boolean; // the team setting, so the form can say the list will not go out while it is off
+  // Service fee model events: the fee as its own line, before and after.
+  serviceFee?: boolean;
+  bookedBreakdown?: string | null;
+  engineBreakdown?: string | null;
+  // The remaining balance: the total less payments recorded. Null when nothing is recorded.
+  paidCents?: number | null;
+  balanceNow?: number | null;
+  balanceAfter?: number | null;
 }
 
 export type PreviewResult = { ok: true; preview: AdminPreview } | { ok: false; error: string; status: number };
@@ -46,6 +56,10 @@ export async function previewAdminEdit(sessionId: string, rawChanges: unknown): 
   const p = quote?.price ?? null;
   const current = withHoursBooked(session.event_data, session);
   const list = listWouldChange(current, applyChanges(current, quote?.changes ?? []));
+  const bp = session.booked_price ?? null;
+  const serviceFee = isServiceFeeEvent(bp, session);
+  const recorded = await recordedPayments(sessionId);
+  const bookedTotal = p?.booked_total ?? (typeof bp?.total === "number" ? bp.total : null);
   return {
     ok: true,
     preview: {
@@ -57,6 +71,12 @@ export async function previewAdminEdit(sessionId: string, rawChanges: unknown): 
       engineText: p?.price_text ?? "",
       listChanges: list.changed ? list.changes || "The list changes." : "",
       autoSend: await autoSendOn(),
+      serviceFee,
+      bookedBreakdown: serviceFee && bp ? serviceFeeBreakdown(bp) : null,
+      engineBreakdown: serviceFee && p ? serviceFeeBreakdown(p) : null,
+      paidCents: recorded?.any ? recorded.cents : null,
+      balanceNow: knownBalance(bookedTotal, recorded),
+      balanceAfter: p?.new_total != null ? knownBalance(p.new_total, recorded) : null,
     },
   };
 }

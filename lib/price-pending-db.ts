@@ -10,7 +10,8 @@
 import { supabase } from "@/lib/supabase";
 import { getSession, type EventUpdateRow, type SessionRow } from "@/lib/event-updates";
 import { changeBlocks } from "@/lib/event-diff";
-import { DEFAULT_DEPOSIT, money, priceText, type BookedPrice, type PriceChange } from "@/lib/price-change";
+import { DEFAULT_DEPOSIT, isServiceFeeEvent, money, priceText, serviceFeePriceText, type BookedPrice, type PriceChange } from "@/lib/price-change";
+import { splitFromCustom } from "@/lib/service-fee";
 import { pendingAdminText, pendingSummary, type PricePendingInfo } from "@/lib/price-pending";
 import { deliverEventUpdates } from "@/lib/update-delivery";
 import { alertAdmins } from "@/lib/team/events";
@@ -76,6 +77,15 @@ export async function setPendingPrice(
   const oldTotal = info.old_total ?? prior.total ?? null;
   const amount = oldTotal !== null ? Math.round((newTotal - oldTotal) * 100) / 100 : null;
   const nowIso = now.toISOString();
+  // Service fee events: the fee carved out of the new total less add ons, at the event's rate.
+  const sf = isServiceFeeEvent(prior, session)
+    ? (() => {
+        const rate = prior.service_fee_rate ?? 0.2;
+        const addons = Math.round((prior.addons_total ?? 0) * 100);
+        const sp = splitFromCustom(Math.max(0, Math.round(newTotal * 100) - addons), Math.round(rate * 10000), addons);
+        return { package_price: sp.packageCents / 100, service_fee: sp.feeCents / 100, service_fee_rate: rate, addons_total: addons / 100 };
+      })()
+    : null;
   const price: PriceChange = {
     changes,
     implied: [],
@@ -83,9 +93,10 @@ export async function setPendingPrice(
     base_version: session.version,
     amount,
     new_total: newTotal,
-    package_price: null,
-    gratuity: prior.gratuity,
-    price_text: amount !== null ? priceText(amount, newTotal) : `Your new total is ${money(newTotal)}.`,
+    package_price: sf ? sf.package_price : null,
+    gratuity: sf ? null : prior.gratuity,
+    ...(sf ? { service_fee: sf.service_fee, service_fee_rate: sf.service_fee_rate, addons_total: sf.addons_total } : {}),
+    price_text: sf && amount !== null ? serviceFeePriceText(amount, newTotal, sf) : amount !== null ? priceText(amount, newTotal) : `Your new total is ${money(newTotal)}.`,
     summary: changeBlocks(changes).join("\n\n"),
     basis: null,
     class49_applied: false,
@@ -98,7 +109,7 @@ export async function setPendingPrice(
   const { data, error } = await supabase
     .from("sessions")
     .update({
-      booked_price: { ...prior, total: newTotal, custom_price: newTotal, source: "update", updated_at: nowIso },
+      booked_price: { ...prior, ...(sf ? { package_price: sf.package_price, service_fee: sf.service_fee } : {}), total: newTotal, custom_price: sf ? Math.round((newTotal - sf.addons_total) * 100) / 100 : newTotal, source: "update", updated_at: nowIso },
       price_pending: false,
       price_set_at: nowIso,
       price_set_by: admin.id,

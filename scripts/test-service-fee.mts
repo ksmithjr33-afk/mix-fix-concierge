@@ -212,4 +212,46 @@ check("Gratuity model engine unchanged: Full 100/4 tip jar $1,749", old.priceEve
   check("Service fee rate settings: defaults and validation", bs.readServiceFeeRates(null).full === 4500 && bs.readServiceFeeRates({ support: 3200 }).support === 3200 && !bs.validateServiceFeeRates({ beerwine: "45" }).ok);
 }
 
+// ---------- price changes on service fee events ----------
+
+{
+  const pc = await import("../lib/price-change.ts");
+  const ae = await import("../lib/team/admin-edit.ts");
+  const eu = await import("../lib/event-updates.ts");
+  const basis = { package: "full", guests: 100, hours: 4, isWedding: false, bartenders: 2, tipJar: true, woodenBar: true };
+  const booked = {
+    pricing_model: "service_fee" as const, total: 2037, package_price: 1572.25, service_fee: 314.45, service_fee_rate: 0.2, addons_total: 150,
+    gratuity: null, bartenders: 2, promo_code: "RETURN5", custom_price: null, discount_amount: 82.75, tip_jar: true, deposit_paid: 0, source: "create-session" as const, basis,
+  };
+  const stored = { package: "Full Bar", guest_count: 100, hours_booked: 4, bartenders: 2, event_type: "Birthday" };
+  const session = { package_type: "Full Bar", guest_count: "100", hours_booked: "4", pricing_model: "service_fee" };
+  const change = (next: Record<string, unknown>, changes: { field: string; old: unknown; new: unknown }[], b: Record<string, unknown> = booked) =>
+    pc.buildPriceChange({ booked: b as never, original: basis, stored: stored as never, nextEvent: { ...stored, ...next } as never, session, changes: changes as never });
+
+  const up = change({ guest_count: 150 }, [{ field: "guest_count", old: 100, new: 150 }]);
+  check("100 → 150 guests with RETURN5: package $1,786.00 (+$213.75), fee $357.20, add ons $150", up.package_price === 1786 && up.service_fee === 357.2 && up.addons_total === 150 && up.service_fee_rate === 0.2, JSON.stringify(up));
+  check("100 → 150 guests: new total $2,293 (rounded), difference $256", up.new_total === 2293 && up.amount === 256);
+  check("No gratuity on a service fee change", up.gratuity === null);
+  check("Price text: the difference, the fee on its own line, and the fee sentence", up.price_text.includes("brings your new total to $2,293") && up.price_text.includes("Service fee (20%) $357.20") && up.price_text.includes("It is not a gratuity.") && !/gratuity is included|gratuity of/i.test(up.price_text));
+  const down = change({ guest_count: 80 }, [{ field: "guest_count", old: 100, new: 80 }]);
+  check("Fewer guests: the fee goes down with the package", down.package_price! < 1572.25 && down.service_fee! < 314.45 && down.amount! < 0);
+  const prem = change({ package: "Premium Bar" }, [{ field: "package", old: "Full Bar", new: "Premium Bar" }]);
+  check("Full Bar → Premium: the fee rate drops to 10%", prem.service_fee_rate === 0.1 && Math.abs(prem.service_fee! - Math.round(prem.package_price! * 10) / 100) < 0.01);
+  const custom = change({ guest_count: 150 }, [{ field: "guest_count", old: 100, new: 150 }], { ...booked, promo_code: null, custom_price: 1800, package_price: 1500, service_fee: 300, total: 1950 });
+  check("Custom price keeps its deal: the standard difference only ($1,500 + $225)", custom.package_price === 1725 && custom.service_fee === 345 && custom.new_total === 2220);
+  const after = pc.bookedAfter(booked as never, up, 2, "t");
+  check("Booked price after the change: total, package, fee and add ons move together", after.total === 2293 && after.package_price === 1786 && after.service_fee === 357.2 && after.addons_total === 150 && after.gratuity === null);
+  const manual = ae.adminPrice(up, "manual", 2400, "Kim");
+  check("Edit price by hand: the fee is carved out of $2,400 less $150 add ons ($1,875 + $375)", manual.new_total === 2400 && manual.package_price === 1875 && manual.service_fee === 375);
+  const kept = ae.adminPrice(up, "keep", null, "Kim");
+  check("Keep the booked total: package and fee stay as booked", kept.new_total === 2037 && pc.bookedAfter(booked as never, kept, 2, "t").service_fee === 314.45);
+  const drinks = eu.extraDrinksPrice([{ name: "Paloma" }], null, booked as never, { pending: false });
+  check("Extra drink on a service fee event: an add on, no fee, package untouched", drinks.new_total === 2087 && drinks.addons_total === 200 && drinks.package_price === 1572.25 && drinks.service_fee === 314.45);
+  check("Breakdown line", pc.serviceFeeBreakdown(booked) === "Package $1,572.25 · Service fee (20%) $314.45 · Add ons $150");
+  const grat = pc.buildPriceChange({ booked: { ...booked, pricing_model: undefined, package_price: 1585, gratuity: 164, total: 1749, promo_code: null } as never, original: basis, stored: stored as never, nextEvent: { ...stored, guest_count: 150 } as never, session: { ...session, pricing_model: "gratuity" }, changes: [{ field: "guest_count", old: 100, new: 150 }] as never });
+  check("Gratuity events still price with the old engine (no fee fields)", grat.service_fee === undefined && grat.gratuity !== null && grat.new_total !== null);
+  const baseline = pc.computeBaseline(stored as never, session, { promoCode: "CLASS49" });
+  check("A service fee event with no booked price gets a service fee baseline ($1,927)", baseline?.pricing_model === "service_fee" && baseline.total === 1927 && baseline.gratuity === null);
+}
+
 done("service fee");
