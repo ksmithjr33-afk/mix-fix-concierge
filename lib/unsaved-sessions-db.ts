@@ -9,6 +9,7 @@ import { pricePendingList, type PricePendingAlert } from "@/lib/price-pending-db
 import { priceCheckList, type PriceCheckAlert } from "@/lib/price-check-db";
 import { staleBookings, type ClientRow, type StaleBooking } from "@/lib/client-history";
 import { guestCountFlag } from "@/lib/intake-guests";
+import { orderWindowAlerts, type OrderWindowAlert } from "@/lib/team/order-window-db";
 import type { SessionRow } from "@/lib/event-updates";
 import { bookedWithPastDate, finishedNotSaved, sentClosing, type LogTail, type PastDateSession, type SessionState, type UnsavedSession } from "@/lib/unsaved-sessions";
 
@@ -21,6 +22,7 @@ export interface SaveAlerts {
   pricePending: PricePendingAlert[]; // saved changes waiting for an admin to set the new total
   priceCheck: PriceCheckAlert[]; // bookings saved with "Price needs a check"
   guestCount: GuestCountAlert[]; // guest count differs from the booking with no price change applied or pending
+  orderWindows: OrderWindowAlert[]; // upcoming events with someone's order window still needed
 }
 
 export interface GuestCountAlert {
@@ -32,13 +34,17 @@ export interface GuestCountAlert {
 /** `sharedRows` lets the Staffing page share its one read of every session with the repeat client tags. */
 export async function saveAlerts(now: Date = new Date(), sharedRows?: Promise<ClientRow[]>): Promise<SaveAlerts> {
   const since = new Date(now.getTime() - LOOKBACK_DAYS * 86_400_000).toISOString();
-  const [logsRes, submittedRes, hidden, clientRows, pricePending, priceCheck] = await Promise.all([
+  const [logsRes, submittedRes, hidden, clientRows, pricePending, priceCheck, orderWindows] = await Promise.all([
     supabase.from("conversation_logs").select("session_id, client_name, status, updated_at, messages").gte("updated_at", since),
     supabase.from("sessions").select("id, name, status, event_data, event_date, submitted_at, created_at, guest_count, price_pending").eq("status", "submitted").gte("submitted_at", since),
     hiddenEventIds(),
     sharedRows ?? allClientRows(),
     pricePendingList(),
     priceCheckList(),
+    orderWindowAlerts(now).catch((err) => {
+      console.error("[order window] alerts failed:", err);
+      return [] as OrderWindowAlert[];
+    }),
   ]);
   if (logsRes.error) throw new Error(`conversation_logs read failed: ${logsRes.error.message}`);
   if (submittedRes.error) throw new Error(`sessions read failed: ${submittedRes.error.message}`);
@@ -67,5 +73,6 @@ export async function saveAlerts(now: Date = new Date(), sharedRows?: Promise<Cl
         const flag = guestCountFlag({ ...s, status: "submitted", event_data: s.event_data as SessionRow["event_data"] });
         return flag ? [{ sessionId: s.id, name: String(s.event_data?.client_name ?? s.name ?? "Unknown client"), text: flag.text }] : [];
       }),
+    orderWindows,
   };
 }

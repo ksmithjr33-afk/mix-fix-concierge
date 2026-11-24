@@ -4,7 +4,6 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import type { DeliveryView } from "@/lib/team/delivery-availability-db";
 import {
-  CONFIRM_BUTTON,
   DAY_KEYS,
   DAY_LABEL,
   emptyWeek,
@@ -34,50 +33,9 @@ function toForm(w: WeekWindows | null): FormWeek {
   ) as FormWeek;
 }
 
-/** Status line and the one tap confirm, for the person themself. */
-function ConfirmBar({ view, onConfirmed }: { view: DeliveryView; onConfirmed: (v: DeliveryView) => void }) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  const router = useRouter();
-  if (!view.asked) return null;
-  if (view.status.confirmed) return <p className="text-sm text-[#55684A]">Confirmed for this week. Thank you.</p>;
-  const confirm = async () => {
-    setBusy(true);
-    setError("");
-    try {
-      const res = await fetch("/api/team/delivery", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "confirm" }) });
-      const d = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(d.error ?? "Could not save.");
-      onConfirmed(d.delivery);
-      router.refresh();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not save.");
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <div className={`rounded-xl px-3 py-2 space-y-2 ${view.status.overdue ? "bg-[#F6E3DC] text-[#A0412D]" : "bg-[#FFF8EC] border border-[#E3C9A0] text-[#2C2420]"}`}>
-      <p className="text-[15px]">
-        {view.status.overdue ? "Past the deadline: " : "Confirm by "}
-        <strong>{view.status.deadline}</strong>
-        {view.self ? "." : ". Only they can confirm."}
-      </p>
-      {view.self && view.status.set && (
-        <button type="button" onClick={confirm} disabled={busy} className="rounded-lg bg-[#B5845A] text-white px-4 py-2 text-sm font-medium disabled:opacity-40">
-          {busy ? "Saving..." : CONFIRM_BUTTON}
-        </button>
-      )}
-      {view.self && !view.status.set && <p className="text-sm">Fill in your times below and save. Saving confirms this week.</p>}
-      {error && <p className="text-sm text-[#A0412D]">{error}</p>}
-    </div>
-  );
-}
-
-/** The "Deliveries and pickups" section: on the person's own profile and on the admin staff page. */
+/** The "Usual order windows" section (optional): on the person's own profile and on the admin staff page. */
 export default function DeliveryForm({ initial, staffId }: { initial: DeliveryView; staffId?: string }) {
   const router = useRouter();
-  const [view, setView] = useState(initial);
   const [week, setWeek] = useState<FormWeek>(toForm(initial.windows));
   const [home, setHome] = useState<string>(initial.homeType ?? "");
   const [pref, setPref] = useState<string>(initial.handoffPref ?? "");
@@ -101,8 +59,7 @@ export default function DeliveryForm({ initial, staffId }: { initial: DeliveryVi
       });
       const d = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(d.error ?? "Could not save.");
-      setView(d.delivery);
-      setSaved(d.delivery?.self && d.delivery?.asked ? "Saved and confirmed for this week." : "Saved.");
+      setSaved("Saved.");
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not save.");
@@ -112,15 +69,14 @@ export default function DeliveryForm({ initial, staffId }: { initial: DeliveryVi
   };
 
   return (
-    <form onSubmit={save} className="space-y-3" id="deliveries">
+    <form onSubmit={save} className="space-y-3" id="order-windows">
       <div>
         <h2 className="font-heading text-base font-bold text-[#2C2420]">{SECTION_TITLE}</h2>
         <p className="text-[15px] text-[#6B5D52]">{SECTION_LINE}</p>
       </div>
-      <ConfirmBar view={view} onConfirmed={setView} />
-      {view.oldNote && (
+      {initial.oldNote && (
         <p className="text-sm text-[#6B5D52]">
-          Your old note: &ldquo;{view.oldNote}&rdquo;. Saving this section replaces it.
+          Your old note: &ldquo;{initial.oldNote}&rdquo;. Saving this section replaces it.
         </p>
       )}
       <div className="space-y-2">
@@ -175,7 +131,7 @@ export default function DeliveryForm({ initial, staffId }: { initial: DeliveryVi
       {error && <p className="text-sm text-[#A0412D]">{error}</p>}
       <div className="flex flex-wrap items-center gap-3">
         <button type="submit" disabled={busy} className="rounded-xl bg-[#B5845A] text-white px-5 py-2.5 font-medium disabled:opacity-40">
-          {busy ? "Saving..." : "Save deliveries and pickups"}
+          {busy ? "Saving..." : "Save usual order windows"}
         </button>
         {saved && <span className="text-sm text-[#55684A]">{saved}</span>}
       </div>

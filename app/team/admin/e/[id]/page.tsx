@@ -47,10 +47,10 @@ import EditableDetails from "./editable-details";
 import { editCards } from "@/lib/team/edit-cards";
 import PackageCard from "../../../package-card";
 import { barbackStatus, bookingShortOf } from "@/lib/package-extras";
-import DeliveryStrip from "./delivery-strip";
+import OrderWindowStrip from "./order-window-strip";
 import HeldChangesBar from "./held-changes-bar";
 import { heldSummary } from "@/lib/team/held-changes-db";
-import { availabilityFor } from "@/lib/team/delivery-availability-db";
+import { orderWindowsFor } from "@/lib/team/order-window-db";
 import { AssignPanel, BarReadyCard, ClientListPanel, Closeouts, ManagerChat, OffersPanel, OrderSheet, ShiftPanel } from "./lazy-panels";
 import ManagerTabs from "./manager-tabs";
 import { BartenderLists, ClockStatus, MissingReports, TimePunches } from "./day-of";
@@ -201,14 +201,15 @@ async function AdminEventPage({
           {} as Record<string, string>,
         ];
   const offers = offersP ? await offersP : null;
-  // Deliveries and pickups for everyone on the event: Team and Shopping list tabs only.
+  // Order windows for everyone on the event: Team and Shopping list tabs only.
   const onEventPeople = people.filter((p) => p.status !== "declined");
-  const delivery =
+  const orderWindows =
     on("team") || on("order")
-      ? await availabilityFor(onEventPeople.map((p) => p.staffId), eventSchedule(session.event_data ?? {}).day)
-          .then((m) => onEventPeople.map((p) => ({ staffId: p.staffId, name: p.name || p.phone, availability: m.get(p.staffId)! })))
-          .catch(() => [])
-      : [];
+      ? await orderWindowsFor(session, onEventPeople.map((p) => ({ staffId: p.staffId, name: p.name || p.phone, status: p.status }))).catch((err) => {
+          console.error(`[order window] ${id}: could not load:`, err);
+          return null;
+        })
+      : null;
   // Details, Client list and Chat only.
   const [links, autoSend, listEntries, messages, muted, history, eventNumber, agreements, clockRows, payout, business, supplyCosts, lowStock, rateCard, venue, receipts, booking] = await Promise.all([
     on("details") ? clientLinks(session, me) : null, // admins only: null for anyone else
@@ -465,7 +466,7 @@ async function AdminEventPage({
               log: staffingLog(session).slice(0, 10).map((e) => ({ at: chicagoStamp(e.at, v.timeZone), by: e.by, text: e.text })),
             }}
           />
-          <DeliveryStrip people={delivery} />
+          <OrderWindowStrip data={orderWindows} />
           <AssignPanel
             sessionId={id}
             summary={`Bartenders ${staffingLabel(counts)}${counts.accepted ? `, ${counts.accepted} accepted` : ""}${counts.stillNeeded ? ` · ${counts.stillNeeded} still needed` : ""}`}
@@ -485,7 +486,7 @@ async function AdminEventPage({
     },
     order: () => (
       <>
-      <DeliveryStrip people={delivery} />
+      <OrderWindowStrip data={orderWindows} />
       <OrderSheet
         initial={sheet}
         timeZone={v.timeZone}

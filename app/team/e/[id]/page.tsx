@@ -31,6 +31,7 @@ import { canSeeList, staffListFor } from "@/lib/team/staff-list-db";
 import { notReadyView } from "@/lib/team/staff-list";
 import SurpriseBanner from "../../surprise-banner";
 import { surpriseBannerText } from "@/lib/partners/surprise-banner";
+import { orderWindowView } from "@/lib/team/order-window-db";
 
 export const dynamic = "force-dynamic";
 
@@ -120,7 +121,15 @@ async function TeamEventPage({
     console.error(`[shopping list] ${id}: could not load, showing not ready:`, err);
     return listAllowed ? notReadyView({ sessionId: id }) : null;
   });
-  const [venuePhotos, receipts, shoppingList] = await Promise.all([venueP, receiptsP, shoppingListP]);
+  // Order window: the person's own, once accepted (any role). Never breaks the page.
+  const orderWindowP =
+    assignment?.status === "accepted"
+      ? orderWindowView(access.session, staff.id).catch((err) => {
+          console.error(`[order window] ${id}: could not load:`, err);
+          return null;
+        })
+      : Promise.resolve(null);
+  const [venuePhotos, receipts, shoppingList, orderWindow] = await Promise.all([venueP, receiptsP, shoppingListP, orderWindowP]);
   if (chatTab) await markThreadRead(id, staff.id);
   const accepted = assignment?.status === "accepted";
   const renderedAt = serverNow();
@@ -189,6 +198,8 @@ async function TeamEventPage({
         receipts={receipts}
         packageBooking={bookingShortOf(access.session)}
         shoppingList={shoppingList}
+        orderWindow={orderWindow}
+        justAccepted={query.accepted === "1"}
       />
     </>
   );

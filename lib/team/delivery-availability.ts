@@ -1,21 +1,17 @@
-// Deliveries and pickups: when a staff member can receive supplies at home and
-// when they can do a store pickup. The rules, no database.
+// Usual order windows (was "Deliveries and pickups"): when a staff member can
+// usually receive supplies at home and when they can usually do a store
+// pickup. The rules, no database.
 //
-// This is about receiving supplies, not about working shifts: it never touches
-// "Days I never work" (staff.off_weekdays) or the unavailable days.
+// Optional. It only prefills the per event Order window item
+// (lib/team/order-window.ts), which replaced the weekly confirm. This is about
+// receiving supplies, not about working shifts: it never touches "Days I never
+// work" (staff.off_weekdays) or the unavailable days.
 //
 // Per day of the week: can receive deliveries (yes or no, from and to) and can
 // do pickups (yes or no, from and to). Plus house or apartment, delivery,
 // pickup or either, and one short notes line.
-//
-// Each week (Monday to Sunday, Chicago) the person confirms it by a deadline:
-// Wednesday 6 PM Central unless an admin changed it in settings. One tap
-// ("Still correct for this week") or saving an edit confirms. Admins and
-// managers see who has and has not. Nobody is reassigned automatically. One
-// reminder text on Wednesday from 9 AM Central to anyone not confirmed,
-// never in quiet hours in the person's own time zone.
 
-import { formatClock, zonedInstant, TZ, todayIn } from "@/lib/team/time";
+import { formatClock } from "@/lib/team/time";
 
 export const DAY_KEYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
 export type DayKey = (typeof DAY_KEYS)[number];
@@ -43,9 +39,8 @@ export const HANDOFF_LABEL: Record<HandoffPref, string> = { delivery: "Prefers d
 
 export const NOTES_MAX = 120;
 
-export const SECTION_TITLE = "Deliveries and pickups";
-export const SECTION_LINE = "This is about receiving supplies for events, not about working shifts.";
-export const CONFIRM_BUTTON = "Still correct for this week";
+export const SECTION_TITLE = "Usual order windows";
+export const SECTION_LINE = "Optional. When you can usually receive supplies for events. We use it to fill in the order window on each event you accept, so you can confirm it in one tap. This is not about working shifts.";
 
 /** The columns on staff_profiles. */
 export interface DeliveryColumns {
@@ -53,7 +48,6 @@ export interface DeliveryColumns {
   home_type?: string | null;
   handoff_pref?: string | null;
   delivery_notes?: string | null;
-  availability_confirmed_at?: string | null;
 }
 
 export interface DeliveryInput {
@@ -150,147 +144,9 @@ export function weekSummary(week: WeekWindows | null, kind: "receive" | "pickup"
   return parts.length ? parts.join(", ") : "none";
 }
 
-// ----- The weekly deadline -----
-
-export const DEADLINE_KEY = "delivery_confirm_deadline";
-export interface Deadline {
-  day: DayKey;
-  minutes: number; // Central time
-}
-export const DEADLINE_DEFAULT: Deadline = { day: "wed", minutes: 18 * 60 };
-export const REMINDER_DAY: DayKey = "wed";
-export const REMINDER_HOUR = 9; // Central
-
-export function readDeadline(v: unknown): Deadline {
-  const o = (v ?? {}) as Record<string, unknown>;
-  const day = (DAY_KEYS as readonly unknown[]).includes(o.day) ? (o.day as DayKey) : DEADLINE_DEFAULT.day;
-  const m = typeof o.minutes === "number" && Number.isInteger(o.minutes) && o.minutes >= 0 && o.minutes < 1440 ? o.minutes : DEADLINE_DEFAULT.minutes;
-  return { day, minutes: m };
-}
-
-export function cleanDeadline(raw: Record<string, unknown>): { ok: true; value: Deadline } | { ok: false; error: string } {
-  if (!(DAY_KEYS as readonly unknown[]).includes(raw.day)) return { ok: false, error: "Pick a day." };
-  const m = minutes(raw.time ?? raw.minutes);
-  if (m === null) return { ok: false, error: "Pick a time." };
-  return { ok: true, value: { day: raw.day as DayKey, minutes: m } };
-}
-
-function addDays(ymd: string, n: number): string {
-  const [y, m, d] = ymd.split("-").map(Number);
-  return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10);
-}
-
 /** Monday to Sunday is index 0 to 6. */
 export function dayKeyOf(ymd: string): DayKey {
   const [y, m, d] = ymd.split("-").map(Number);
   const js = new Date(Date.UTC(y, m - 1, d)).getUTCDay(); // 0 Sunday
   return DAY_KEYS[(js + 6) % 7];
-}
-
-/** The Monday (Chicago) of the week `now` falls in. */
-export function weekStart(now: Date): string {
-  const today = todayIn(TZ, now);
-  return addDays(today, -DAY_KEYS.indexOf(dayKeyOf(today)));
-}
-
-/** This week's deadline as an instant. */
-export function deadlineAt(now: Date, d: Deadline): Date {
-  return zonedInstant(addDays(weekStart(now), DAY_KEYS.indexOf(d.day)), d.minutes, TZ);
-}
-
-/** "Wednesday, Nov 25 at 6:00 PM Central". */
-export function deadlineText(now: Date, d: Deadline): string {
-  const ymd = addDays(weekStart(now), DAY_KEYS.indexOf(d.day));
-  const [y, m, dd] = ymd.split("-").map(Number);
-  const md = new Date(Date.UTC(y, m - 1, dd)).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
-  return `${DAY_LABEL[d.day]}, ${md} at ${formatClock(d.minutes)} Central`;
-}
-
-/** "Every Wednesday at 6:00 PM Central", for settings. */
-export function deadlineRule(d: Deadline): string {
-  return `Every ${DAY_LABEL[d.day]} at ${formatClock(d.minutes)} Central`;
-}
-
-/** Confirmed for the week `now` is in: a confirmation on or after this Monday, Chicago. */
-export function confirmedThisWeek(confirmedAt: string | null | undefined, now: Date): boolean {
-  if (!confirmedAt) return false;
-  const t = new Date(confirmedAt);
-  if (Number.isNaN(t.getTime())) return false;
-  return todayIn(TZ, t) >= weekStart(now) && t.getTime() <= now.getTime() + 60_000;
-}
-
-export interface WeekStatus {
-  confirmed: boolean;
-  confirmedAt: string | null;
-  deadline: string; // "Wednesday, Nov 25 at 6:00 PM Central"
-  overdue: boolean; // past the deadline and not confirmed
-  set: boolean; // windows have been filled in at least once
-}
-
-export function weekStatus(row: DeliveryColumns | null, now: Date, d: Deadline): WeekStatus {
-  const confirmed = confirmedThisWeek(row?.availability_confirmed_at, now);
-  return {
-    confirmed,
-    confirmedAt: confirmed ? (row?.availability_confirmed_at ?? null) : null,
-    deadline: deadlineText(now, d),
-    overdue: !confirmed && now.getTime() > deadlineAt(now, d).getTime(),
-    set: readWeek(row?.delivery_windows) !== null,
-  };
-}
-
-/** Who is asked to confirm: active field staff (bartenders, bar backs, servers, event helpers). */
-export function mustConfirm(p: { role: string; active: boolean }): boolean {
-  return p.active && ["bartender", "bar_back", "server", "event_helper"].includes(p.role);
-}
-
-/** The reminder is due on the reminder day, from 9 AM Central, while the person is out of quiet hours. */
-export function reminderDue(now: Date): boolean {
-  const today = todayIn(TZ, now);
-  if (dayKeyOf(today) !== REMINDER_DAY) return false;
-  const hour = Number(new Intl.DateTimeFormat("en-US", { timeZone: TZ, hour: "numeric", hourCycle: "h23" }).format(now));
-  return hour >= REMINDER_HOUR;
-}
-
-export const reminderKey = (now: Date, staffId: string) => `delivery_confirm:${weekStart(now)}:${staffId}`;
-
-/** The one reminder text. No client details, no prices. */
-export function reminderText(o: { firstName: string; deadline: string; link: string }): string {
-  const hi = o.firstName ? `${o.firstName}, ` : "";
-  return `The Mix Fix: ${hi}please confirm your deliveries and pickups times for this week by ${o.deadline}. One tap if nothing changed: ${o.link}`;
-}
-
-// ----- On the event -----
-
-export interface EventAvailability {
-  staffId: string;
-  receive: string; // "Fri 9a–5p, Sat 10a–2p" for the event day and the day before, "none", or "not set"
-  pickup: string;
-  home: string; // "Apartment" or ""
-  pref: string; // "Prefers pickup" or ""
-  notes: string;
-  confirmed: boolean;
-  set: boolean;
-  full: { day: string; receive: string; pickup: string }[]; // the whole week, for "see all"
-}
-
-/** The days that matter for an event: the day before and the day of. */
-export function eventDays(eventYmd: string | null): DayKey[] {
-  if (!eventYmd) return [...DAY_KEYS];
-  return [dayKeyOf(addDays(eventYmd, -1)), dayKeyOf(eventYmd)];
-}
-
-export function eventAvailability(staffId: string, row: DeliveryColumns | null, eventYmd: string | null, now: Date): EventAvailability {
-  const week = readWeek(row?.delivery_windows);
-  const days = eventDays(eventYmd);
-  return {
-    staffId,
-    receive: weekSummary(week, "receive", days),
-    pickup: weekSummary(week, "pickup", days),
-    home: row?.home_type && (HOME_TYPES as readonly string[]).includes(row.home_type) ? HOME_LABEL[row.home_type as HomeType] : "",
-    pref: row?.handoff_pref && (HANDOFF_PREFS as readonly string[]).includes(row.handoff_pref) ? HANDOFF_LABEL[row.handoff_pref as HandoffPref] : "",
-    notes: row?.delivery_notes ?? "",
-    confirmed: confirmedThisWeek(row?.availability_confirmed_at, now),
-    set: week !== null,
-    full: week ? DAY_KEYS.map((d) => ({ day: DAY_SHORT[d], receive: windowText(week[d].receive), pickup: windowText(week[d].pickup) })) : [],
-  };
 }

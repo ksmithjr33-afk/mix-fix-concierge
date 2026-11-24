@@ -11,7 +11,7 @@ function when(iso: string | null): string {
 // not save, and saved events whose date was already past when they booked.
 // Renders nothing when there is nothing to check.
 export default function SaveAlerts({ alerts }: { alerts: Alerts | null }) {
-  if (!alerts || (alerts.unsaved.length === 0 && alerts.pastDate.length === 0 && alerts.stale.length === 0 && alerts.pricePending.length === 0 && (alerts.priceCheck ?? []).length === 0 && (alerts.guestCount ?? []).length === 0)) return null;
+  if (!alerts || (alerts.unsaved.length === 0 && alerts.pastDate.length === 0 && alerts.stale.length === 0 && alerts.pricePending.length === 0 && (alerts.priceCheck ?? []).length === 0 && (alerts.guestCount ?? []).length === 0 && (alerts.orderWindows ?? []).length === 0)) return null;
   return (
     <div className="space-y-3" role="alert">
       {alerts.unsaved.length > 0 && (
@@ -83,6 +83,24 @@ export default function SaveAlerts({ alerts }: { alerts: Alerts | null }) {
                   {g.name}
                 </Link>{" "}
                 · {g.text}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+      {(alerts.orderWindows ?? []).length > 0 && (
+        <section className={`rounded-xl p-4 space-y-2 ${alerts.orderWindows.some((o) => o.urgent) ? "border-2 border-[#B3261E] bg-[#FDECEA]" : "border border-[#E0B04A] bg-[#FFF8EC]"}`} data-order-window-alert>
+          <h2 className={`font-semibold ${alerts.orderWindows.some((o) => o.urgent) ? "text-[#8C1D18]" : "text-[#2C2420]"}`}>
+            Order window needed: {alerts.orderWindows.length} {alerts.orderWindows.length === 1 ? "event" : "events"}
+          </h2>
+          <p className="text-sm text-[#6B5D52]">Someone on the event has not said when they can receive the order. Events within 5 days are in red.</p>
+          <ul className="text-sm space-y-1">
+            {alerts.orderWindows.map((o) => (
+              <li key={o.sessionId} className={o.urgent ? "text-[#8C1D18]" : ""}>
+                <Link href={`/team/admin/e/${o.sessionId}?tab=team`} className="text-[#B5845A] underline">
+                  {o.name}
+                </Link>{" "}
+                · {o.date} · {o.people.join(", ")}
               </li>
             ))}
           </ul>

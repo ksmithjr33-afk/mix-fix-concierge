@@ -24,7 +24,12 @@ export default function RespondBanner({ sessionId, workingAs = "" }: { sessionId
       if (response === "decline") {
         router.replace("/team/events");
         router.refresh();
-      } else setState("accepted");
+      } else {
+        // The next screen asks for the order window (shown at the top of the event once accepted).
+        setState("accepted");
+        router.replace(`/team/e/${encodeURIComponent(sessionId)}?accepted=1`);
+        router.refresh();
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not save.");
     } finally {

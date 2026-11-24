@@ -6,6 +6,9 @@ import ShiftCard from "../../shifts/shift-card";
 import OfferButtons from "./offer-buttons";
 import { isAdminRole } from "@/lib/team/roles";
 import { workingAsText } from "@/lib/team/event-roles";
+import { getSubmittedSession } from "@/lib/team/events";
+import { orderWindowView } from "@/lib/team/order-window-db";
+import OrderWindowCard from "../../e/[id]/order-window-card";
 
 export const dynamic = "force-dynamic";
 
@@ -16,6 +19,13 @@ export default async function OfferPage({ params }: { params: Promise<{ id: stri
   const { id } = await params;
   const staff = await requireStaff(`/team/offer/${encodeURIComponent(id)}`);
   const page = await offerForStaff(id, staff);
+  // Once they have the shift, the next thing asked is the order window.
+  const orderWindow =
+    page.state === "got"
+      ? await getSubmittedSession(page.sessionId)
+          .then((s) => (s ? orderWindowView(s, staff.id) : null))
+          .catch(() => null)
+      : null;
   return (
     <>
       <TeamHeader signedIn admin={isAdminRole(staff.role)} back={{ href: "/team/events", label: "Events" }} />
@@ -26,6 +36,11 @@ export default async function OfferPage({ params }: { params: Promise<{ id: stri
         {page.state === "got" && (
           <div className="text-center py-6 space-y-2">
             <p className="text-[15px] text-[#2C2420]">You have this shift.</p>
+            {orderWindow && (
+              <div className="text-left">
+                <OrderWindowCard initial={orderWindow} />
+              </div>
+            )}
             <Link href={`/team/e/${page.sessionId}`} className="text-sm text-[#B5845A] underline">
               Open the event page
             </Link>

@@ -38,6 +38,8 @@ import RunningLowButton from "../../running-low";
 import Receipts from "./receipts";
 import type { StaffReceiptsView } from "@/lib/team/receipts-db";
 import { RECEIPTS_TAB } from "@/lib/team/receipts";
+import OrderWindowCard from "./order-window-card";
+import type { OrderWindowView } from "@/lib/team/order-window-db";
 
 export { Details };
 
@@ -534,7 +536,11 @@ export default function EventTabs({
   receipts = null,
   packageBooking = null,
   shoppingList = null,
+  orderWindow = null,
+  justAccepted = false,
 }: {
+  orderWindow?: OrderWindowView | null; // the Order window item: accepted, any role, on events where we buy something
+  justAccepted?: boolean; // they just tapped Accept: the item is the next thing they see
   packageBooking?: BookingShort | null; // this booking's barback and cups, for the Package card
   shoppingList?: StaffListView | null; // the Shopping list tab: accepted staff and admins in Bartender view only
   receipts?: StaffReceiptsView | null; // the Receipts tab: on the event, not declined, until 14 days after it
@@ -623,6 +629,8 @@ export default function EventTabs({
       {clock.canPunch && (
         <ClockCard sessionId={view.sessionId} initial={clock} renderedAt={renderedAt} wrapUp={closeout && !wrapped ? () => setTab("wrapup") : undefined} />
       )}
+
+      {orderWindow && <OrderWindowCard initial={orderWindow} justAccepted={justAccepted} />}
 
       <PrepStrip tools={!!toolsAt} supplies={!!suppliesAt} onOpen={setTab} />
 

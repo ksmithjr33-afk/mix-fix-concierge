@@ -93,13 +93,13 @@ reset();
 const empty = await prDb.viewProfile(taylor, "b1", morning);
 check("Certificates on a profile: TABC and Food Handler at minimum", cfg.profileCertTypes(["dallas"]).join(",") === "TABC,Food Handler" && empty?.certTypes.join(",") === "TABC,Food Handler");
 check("Los Angeles needs California RBS and Food Handler", cfg.profileCertTypes(["los_angeles"]).join(",") === "California RBS,Food Handler");
-check("An empty profile lists what is missing", empty?.missing.join(",") === "Email,Home address,Deliveries and pickups,Farthest you will drive,TABC,Food Handler" && empty.done === 2 && empty.total === 8);
+check("An empty profile lists what is missing", empty?.missing.join(",") === "Email,Home address,Farthest you will drive,TABC,Food Handler" && empty.done === 2 && empty.total === 7);
 const goTo = await prDb.profilePromptPath("b1", "/team/events", morning);
 check("A bartender with gaps is sent to their profile once after sign in", goTo === "/team/me/profile?first=1&next=%2Fteam%2Fevents");
 check("Only once", (await prDb.profilePromptPath("b1", "/team/events", morning)) === null);
 check("Admins are not asked", (await prDb.profilePromptPath("a1", "/team/events", morning)) === null);
 await prDb.saveProfile(sam, "b2", { email: "s@x.co", home_address: "1 Main St, Houston, TX", dropoff_time: "Any time", max_miles: 40 }, morning);
-// Deliveries and pickups replaced the drop off time on the completeness list.
+// Usual order windows are optional: not on the completeness list.
 db.staff_profiles.find((r) => r.staff_id === "b2")!.delivery_windows = { mon: { receive: { on: true, from: 540, to: 1020 }, pickup: { on: false } } };
 db.staff_certifications = [cert({ id: "t2", staff_id: "b2" }), cert({ id: "f2", staff_id: "b2", cert_type: "Food Handler" })];
 check("A complete profile is not asked", (await prDb.profilePromptPath("b2", "/team/events", morning)) === null && (await prDb.viewProfile(sam, "b2", morning))?.missing.length === 0);
@@ -161,7 +161,7 @@ const ov = await prDb.staffOverview(admin, db.staff as never, morning);
 check("At a glance: markets, drop off time, max distance", ov.b1.markets === "Dallas" && ov.b1.dropoffTime === "Weekday evenings" && ov.b1.maxMiles === 30 && ov.b2.markets === "Dallas, Austin");
 check("At a glance: certificate status", ov.b1.certs.find((c) => c.certType === "TABC")?.text === "expires in 23 days" && ov.b1.certs.find((c) => c.certType === "Food Handler")?.tone === "red");
 check("Expiring soon is flagged for the filter", ov.b1.expiringSoon && !ov.b2.expiringSoon);
-check("Profile completeness marker", ov.b1.done === 7 && ov.b1.total === 8 && ov.b1.missing.join() === "Food Handler" && ov.b2.done < ov.b2.total);
+check("Profile completeness marker", ov.b1.done === 6 && ov.b1.total === 7 && ov.b1.missing.join() === "Food Handler" && ov.b2.done < ov.b2.total);
 const mgr = src("app/team/admin/staff/staff-manager.tsx");
 check("The Staff page has the Expiring soon filter and amber and red badges", mgr.includes("Expiring soon") && mgr.includes("amber:") && mgr.includes("red:"));
 const csv = (await prDb.staffCsv(admin, morning))!;

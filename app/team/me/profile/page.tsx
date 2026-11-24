@@ -36,7 +36,7 @@ export default async function MyProfilePage({ searchParams }: { searchParams: Pr
           </section>
         )}
         {delivery && (
-          <section className={card} aria-label="Deliveries and pickups">
+          <section className={card} aria-label="Usual order windows">
             <DeliveryForm initial={delivery} />
           </section>
         )}

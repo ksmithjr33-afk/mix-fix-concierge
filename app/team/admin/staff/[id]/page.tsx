@@ -85,7 +85,7 @@ export default async function StaffDetailPage({ params }: { params: Promise<{ id
         )}
 
         {delivery && (
-          <section className={card} aria-label="Deliveries and pickups">
+          <section className={card} aria-label="Usual order windows">
             <DeliveryForm initial={delivery} staffId={id} />
           </section>
         )}

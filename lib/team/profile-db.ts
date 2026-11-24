@@ -35,7 +35,7 @@ import {
   type ProfileView,
 } from "@/lib/team/profile";
 import { roleLabel, isAdminRole } from "@/lib/team/roles";
-import { confirmedThisWeek, readWeek, weekSummary } from "@/lib/team/delivery-availability";
+import { readWeek, weekSummary } from "@/lib/team/delivery-availability";
 
 type Result<T = object> = ({ ok: true } & T) | { ok: false; error: string; status: number };
 
@@ -109,7 +109,7 @@ export async function saveProfile(actor: StaffMember, staffId: string, raw: Reco
   const before = await getProfile(staffId);
   const v = clean.value;
   const patch: Record<string, unknown> = { staff_id: staffId, ...v, updated_by: actor.id, updated_at: now.toISOString() };
-  // The old free text drop off time is only written when it is sent: the form now uses Deliveries and pickups.
+  // The old free text drop off time is only written when it is sent: the form now uses Usual order windows.
   if (!("dropoff_time" in raw)) delete patch.dropoff_time;
   if ((v.home_address ?? "") !== (before?.home_address ?? "")) {
     const geo = v.home_address ? await geocodeAddress(v.home_address) : null;
@@ -152,10 +152,9 @@ export interface CertBadge {
 
 export interface StaffOverview {
   markets: string; // "Dallas, Austin"
-  dropoffTime: string; // the old free text, until Deliveries and pickups is saved
-  deliveries: string; // "Mon 9a–5p, Sat 10a–2p", "none", or "not set"
+  dropoffTime: string; // the old free text, until Usual order windows is saved
+  deliveries: string; // usual order windows: "Mon 9a–5p, Sat 10a–2p", "none", or "not set"
   pickups: string;
-  deliveryConfirmed: boolean; // confirmed this week
   maxMiles: number | null;
   certs: CertBadge[];
   done: number;
@@ -184,7 +183,6 @@ export async function staffOverview(viewer: StaffMember, staff: Person[], now: D
       dropoffTime: row?.dropoff_time ?? "",
       deliveries: weekSummary(readWeek(row?.delivery_windows), "receive"),
       pickups: weekSummary(readWeek(row?.delivery_windows), "pickup"),
-      deliveryConfirmed: confirmedThisWeek((row as { availability_confirmed_at?: string | null } | null)?.availability_confirmed_at, now),
       maxMiles: row?.max_miles ?? null,
       certs: badges,
       done: c.done,
@@ -207,7 +205,7 @@ export async function staffCsv(viewer: StaffMember, now: Date = new Date()): Pro
   const { data } = await supabase.from("staff").select("*").order("name");
   const staff = (data as Person[]) ?? [];
   const [profiles, overview] = await Promise.all([profilesFor(staff.map((s) => s.id)), staffOverview(viewer, staff, now)]);
-  const header = ["Name", "Role", "Active", "Phone", "Email", "Home address", "Markets", "Drop off time", "Max miles", "Certificates", "Profile complete", "Missing", "Deliveries", "Pickups", "Confirmed this week"];
+  const header = ["Name", "Role", "Active", "Phone", "Email", "Home address", "Markets", "Drop off time", "Max miles", "Certificates", "Profile complete", "Missing", "Usual deliveries", "Usual pickups"];
   const rows = staff.map((s) => {
     const p = profiles.get(s.id);
     const o = overview[s.id];
@@ -226,7 +224,6 @@ export async function staffCsv(viewer: StaffMember, now: Date = new Date()): Pro
       (o?.missing ?? []).join("; "),
       o?.deliveries ?? "",
       o?.pickups ?? "",
-      o?.deliveryConfirmed ? "Yes" : "No",
     ];
   });
   return toCsv(header, rows);

@@ -22,8 +22,6 @@ import MyPickupCard from "../menu-pickup-card";
 import { isAdminRole } from "@/lib/team/roles";
 import { pastEventsFor } from "@/lib/team/past-events-db";
 import PastEvents from "./past-events";
-import { myDeliveryReminder } from "@/lib/team/delivery-availability-db";
-import DeliveryReminderCard from "../delivery-reminder-card";
 
 export const dynamic = "force-dynamic";
 
@@ -49,7 +47,7 @@ async function TeamEventsPage({
   const calendarP = prefsP.then((prefs) => tab === "mine" && pickLayout(params.layout, prefs.eventsLayout) === "calendar");
   // Admins: every event. Bartenders: only their own events. Hidden events never.
   const visibleP = tab === "mine" ? eventsForViewer(staff) : Promise.resolve([]);
-  const [prefs, calendar, shifts, certNotes, visible, pay, pickups, unavailable, filterMarkets, icePickups, pastPage, deliveryDue] = await Promise.all([
+  const [prefs, calendar, shifts, certNotes, visible, pay, pickups, unavailable, filterMarkets, icePickups, pastPage] = await Promise.all([
     prefsP,
     calendarP,
     openShiftsFor(staff),
@@ -65,8 +63,6 @@ async function TeamEventsPage({
     tab === "mine" ? myIcePickups(staff) : [],
     // Past events: the first 30 this person may see, decided on the server.
     tab === "past" ? pastEventsFor(staff, { today }) : null,
-    // Deliveries and pickups: shown until this week is confirmed. Field staff only.
-    myDeliveryReminder(staff).catch(() => null),
   ]);
   const events = visible.map((e) => (pay[e.id] && (e.status === "accepted" || e.status === "offered") ? { ...e, pay: pay[e.id] } : e));
   const sections = upcomingSections(events, today);
@@ -94,7 +90,6 @@ async function TeamEventsPage({
             Past events
           </Link>
         </nav>
-        {deliveryDue && <DeliveryReminderCard status={deliveryDue} />}
         {pickups.map((p) => (
           <MyPickupCard key={p.sessionId} pickup={p} />
         ))}

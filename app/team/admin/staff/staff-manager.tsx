@@ -14,12 +14,12 @@ const CERT_TONE: Record<string, string> = {
   missing: "bg-[#E8DDD5] text-[#6B5D52]",
 };
 
-/** Markets, deliveries and pickups, max distance, certificates and completeness, at a glance. */
+/** Markets, usual order windows, max distance, certificates and completeness, at a glance. */
 function Glance({ o }: { o: StaffOverview }) {
   return (
     <div className="space-y-1">
       <p className="text-sm text-[#6B5D52]">
-        Deliveries: {o.deliveries} · Pickups: {o.pickups}
+        Usual deliveries: {o.deliveries} · Usual pickups: {o.pickups}
         {o.deliveries === "not set" && o.dropoffTime ? ` (old note: ${o.dropoffTime})` : ""} · Drives up to {o.maxMiles ? `${o.maxMiles} mi` : "not set"}
       </p>
       <div className="flex flex-wrap gap-1.5">
