@@ -3,6 +3,8 @@ import { requireStaff } from "@/lib/team/auth";
 import { viewProfile } from "@/lib/team/profile-db";
 import TeamHeader from "../../team-header";
 import ProfileForm from "./profile-form";
+import DeliveryForm from "./delivery-form";
+import { viewDelivery } from "@/lib/team/delivery-availability-db";
 import { isAdminRole } from "@/lib/team/roles";
 
 export const dynamic = "force-dynamic";
@@ -16,7 +18,7 @@ export default async function MyProfilePage({ searchParams }: { searchParams: Pr
   const first = q.first === "1";
   const next = typeof q.next === "string" && q.next.startsWith("/team/") ? q.next : undefined;
   const staff = await requireStaff("/team/me/profile");
-  const profile = await viewProfile(staff, staff.id);
+  const [profile, delivery] = await Promise.all([viewProfile(staff, staff.id), viewDelivery(staff, staff.id)]);
   const certsMissing = profile ? profile.certTypes.filter((t) => profile.missing.includes(t)) : [];
   return (
     <>
@@ -31,6 +33,11 @@ export default async function MyProfilePage({ searchParams }: { searchParams: Pr
         {profile && (
           <section className={card}>
             <ProfileForm initial={profile} next={first ? (next ?? "/team/events") : undefined} />
+          </section>
+        )}
+        {delivery && (
+          <section className={card} aria-label="Deliveries and pickups">
+            <DeliveryForm initial={delivery} />
           </section>
         )}
         <section className={card}>

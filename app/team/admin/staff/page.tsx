@@ -19,6 +19,9 @@ import { rangeLabel } from "@/lib/team/availability";
 import { chicagoToday } from "@/lib/team/time";
 import { staffOverview } from "@/lib/team/profile-db";
 import { inviteStatuses } from "@/lib/team/invites-db";
+import { confirmationList } from "@/lib/team/delivery-availability-db";
+import DeliveryConfirmations from "./delivery-confirmations";
+import { isFullAdmin } from "@/lib/team/roles";
 
 export const dynamic = "force-dynamic";
 
@@ -27,7 +30,7 @@ async function AdminStaffPage() {
   // The staff list first; everything about each person is then read together, with the settings alongside.
   const staffP = listStaff();
   const ids = staffP.then((staff) => staff.map((s) => s.id));
-  const [staff, away, records, onboard, enforced, autoSend, suggestStores, rates, overview, iceRule, popularCocktails, popularMocktails, popular, invites] = await Promise.all([
+  const [staff, away, records, onboard, enforced, autoSend, suggestStores, rates, overview, iceRule, popularCocktails, popularMocktails, popular, invites, deliveries] = await Promise.all([
     staffP,
     upcomingUnavailableByStaff(chicagoToday()),
     ids.then(compactLines),
@@ -43,6 +46,8 @@ async function AdminStaffPage() {
     currentPopularDrinks(),
     // Last sign in and last invite, for Resend invite.
     staffP.then((list) => inviteStatuses(list.filter((s) => s.active))),
+    // Deliveries and pickups: who has and has not confirmed this week.
+    confirmationList(me),
   ]);
   // One line per person per topic, shown under their name.
   const notes: Record<string, string[]> = {};
@@ -64,6 +69,7 @@ async function AdminStaffPage() {
           <h1 className="font-heading text-2xl font-bold text-[#2C2420]">Staff</h1>
           <p className="text-[15px] text-[#6B5D52]">Add, edit, or deactivate. Admins with alerts on get texts about declines, missing items, and bar check ins.</p>
         </div>
+        {deliveries && <DeliveryConfirmations initial={deliveries} canSetDeadline={isFullAdmin(me.role)} />}
         <EnforceToggle initial={enforced} />
         <SettingToggle
           settingKey={AUTO_SEND_KEY}

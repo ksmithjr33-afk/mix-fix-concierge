@@ -20,6 +20,8 @@ import { rateOnFile } from "@/lib/team/pay-db";
 import { PAY_LABEL } from "@/lib/team/pay";
 import { viewProfile } from "@/lib/team/profile-db";
 import ProfileForm from "../../../me/profile/profile-form";
+import DeliveryForm from "../../../me/profile/delivery-form";
+import { viewDelivery } from "@/lib/team/delivery-availability-db";
 import { roleLabel } from "@/lib/team/roles";
 import { inviteStatuses } from "@/lib/team/invites-db";
 import ResendInvite from "../resend-invite";
@@ -55,7 +57,7 @@ export default async function StaffDetailPage({ params }: { params: Promise<{ id
   const invite = (invites as Awaited<ReturnType<typeof inviteStatuses>>)[id];
   const needed = [...new Set(standings.map((s) => s.standing.certType))];
   const rate = await rateOnFile(id); // admins only: this page is behind requireAdmin
-  const profile = await viewProfile(me, id);
+  const [profile, delivery] = await Promise.all([viewProfile(me, id), viewDelivery(me, id)]);
   return (
     <>
       <TeamHeader signedIn admin back={back} />
@@ -79,6 +81,12 @@ export default async function StaffDetailPage({ params }: { params: Promise<{ id
           <section className={card} aria-label="Profile">
             <h2 className="font-heading text-base font-bold text-[#2C2420] mb-1">Profile</h2>
             <ProfileForm initial={profile} staffId={id} admin />
+          </section>
+        )}
+
+        {delivery && (
+          <section className={card} aria-label="Deliveries and pickups">
+            <DeliveryForm initial={delivery} staffId={id} />
           </section>
         )}
 

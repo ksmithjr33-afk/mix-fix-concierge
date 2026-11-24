@@ -93,12 +93,14 @@ reset();
 const empty = await prDb.viewProfile(taylor, "b1", morning);
 check("Certificates on a profile: TABC and Food Handler at minimum", cfg.profileCertTypes(["dallas"]).join(",") === "TABC,Food Handler" && empty?.certTypes.join(",") === "TABC,Food Handler");
 check("Los Angeles needs California RBS and Food Handler", cfg.profileCertTypes(["los_angeles"]).join(",") === "California RBS,Food Handler");
-check("An empty profile lists what is missing", empty?.missing.join(",") === "Email,Home address,Drop off time,Farthest you will drive,TABC,Food Handler" && empty.done === 2 && empty.total === 8);
+check("An empty profile lists what is missing", empty?.missing.join(",") === "Email,Home address,Deliveries and pickups,Farthest you will drive,TABC,Food Handler" && empty.done === 2 && empty.total === 8);
 const goTo = await prDb.profilePromptPath("b1", "/team/events", morning);
 check("A bartender with gaps is sent to their profile once after sign in", goTo === "/team/me/profile?first=1&next=%2Fteam%2Fevents");
 check("Only once", (await prDb.profilePromptPath("b1", "/team/events", morning)) === null);
 check("Admins are not asked", (await prDb.profilePromptPath("a1", "/team/events", morning)) === null);
 await prDb.saveProfile(sam, "b2", { email: "s@x.co", home_address: "1 Main St, Houston, TX", dropoff_time: "Any time", max_miles: 40 }, morning);
+// Deliveries and pickups replaced the drop off time on the completeness list.
+db.staff_profiles.find((r) => r.staff_id === "b2")!.delivery_windows = { mon: { receive: { on: true, from: 540, to: 1020 }, pickup: { on: false } } };
 db.staff_certifications = [cert({ id: "t2", staff_id: "b2" }), cert({ id: "f2", staff_id: "b2", cert_type: "Food Handler" })];
 check("A complete profile is not asked", (await prDb.profilePromptPath("b2", "/team/events", morning)) === null && (await prDb.viewProfile(sam, "b2", morning))?.missing.length === 0);
 check("The sign in route asks for the prompt and never blocks", src("app/api/team/verify-code/route.ts").includes("profilePromptPath(result.staffId") && src("app/api/team/verify-code/route.ts").includes(".catch(() => null)"));
@@ -153,6 +155,7 @@ check("Past the date reads 'expired' in red", JSON.stringify(pr.expiryLabel(plus
 check("Far off is fine", pr.expiryLabel(plus(90), today).tone === "ok");
 reset();
 await prDb.saveProfile(admin, "b1", FULL, morning);
+db.staff_profiles.find((r) => r.staff_id === "b1")!.delivery_windows = { sat: { receive: { on: true, from: 600, to: 840 }, pickup: { on: false } } };
 db.staff_certifications = [cert({ id: "t1", expires_on: plus(23) }), cert({ id: "f1", cert_type: "Food Handler", expires_on: plus(-3), status: "approved" })];
 const ov = await prDb.staffOverview(admin, db.staff as never, morning);
 check("At a glance: markets, drop off time, max distance", ov.b1.markets === "Dallas" && ov.b1.dropoffTime === "Weekday evenings" && ov.b1.maxMiles === 30 && ov.b2.markets === "Dallas, Austin");

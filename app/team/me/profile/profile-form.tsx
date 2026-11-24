@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import type { ProfilePage } from "@/lib/team/profile-db";
-import { DROPOFF_CHOICES } from "@/lib/team/profile";
 
 const field =
   "w-full rounded-xl border border-[#DDD5CC] bg-white px-3 py-2.5 text-[16px] text-[#2C2420] placeholder:text-[#A39585] focus:outline-none focus:ring-2 focus:ring-[#B5845A]/30 focus:border-[#B5845A]";
@@ -31,7 +30,6 @@ export default function ProfileForm({ initial, staffId, next, admin = false }: {
   const [name, setName] = useState(splitName(v0.name));
   const [email, setEmail] = useState(v0.email ?? "");
   const [home, setHome] = useState(v0.homeAddress ?? "");
-  const [dropoff, setDropoff] = useState(v0.dropoffTime);
   const [miles, setMiles] = useState(v0.maxMiles ? String(v0.maxMiles) : "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -46,7 +44,7 @@ export default function ProfileForm({ initial, staffId, next, admin = false }: {
       const res = await fetch("/api/team/profile", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...(staffId ? { staffId } : {}), first: name.first, last: name.last, email, home_address: home, dropoff_time: dropoff, max_miles: miles }),
+        body: JSON.stringify({ ...(staffId ? { staffId } : {}), first: name.first, last: name.last, email, home_address: home, max_miles: miles }),
       });
       const d = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(d.error ?? "Could not save.");
@@ -96,15 +94,6 @@ export default function ProfileForm({ initial, staffId, next, admin = false }: {
         Home address
         <input className={`${field} mt-1`} autoComplete="street-address" value={home} onChange={(e) => setHome(e.target.value)} maxLength={300} placeholder="Street, city, state" />
         <span className="block normal-case tracking-normal text-xs text-[#6B5D52] mt-1">Only you and the Mix Fix admins see your address and email. It is used to see how far events are from you.</span>
-      </label>
-      <label className={label}>
-        Best time for material drop offs
-        <input className={`${field} mt-1`} list="dropoff-choices" value={dropoff} onChange={(e) => setDropoff(e.target.value)} maxLength={100} placeholder="e.g. Weekday evenings after 5" />
-        <datalist id="dropoff-choices">
-          {DROPOFF_CHOICES.map((c) => (
-            <option key={c} value={c} />
-          ))}
-        </datalist>
       </label>
       <label className={label}>
         Farthest you will drive to an event (miles)

@@ -1,14 +1,16 @@
 // Staff profiles: the rules. Pure, no database.
 //
 // A profile holds name and phone (on the staff row), and email, home address,
-// preferred time for material drop offs, the farthest someone will drive to an
-// event, and their certificates. Home address and email are private: only
+// deliveries and pickups (lib/team/delivery-availability.ts, which replaced the
+// old free text drop off time), the farthest someone will drive to an event,
+// and their certificates. Home address and email are private: only
 // admins and the person themself ever see them.
 
 import { daysLeft, type CertRow, certStanding } from "@/lib/team/certs";
 import { isAdminRole } from "@/lib/team/roles";
 
 export interface ProfileRow {
+  delivery_windows?: unknown; // Deliveries and pickups (lib/team/delivery-availability.ts)
   staff_id: string;
   email: string | null;
   home_address: string | null;
@@ -112,7 +114,7 @@ export function missingItems(person: { name: string; phone: string }, row: Profi
   if (!person.phone.trim()) out.push("Phone");
   if (!row?.email) out.push("Email");
   if (!row?.home_address) out.push("Home address");
-  if (!row?.dropoff_time) out.push("Drop off time");
+  if (!row?.delivery_windows) out.push("Deliveries and pickups");
   if (!row?.max_miles) out.push("Farthest you will drive");
   for (const t of certTypes) if (!certOnFile(certs, t, today)) out.push(t);
   return out;
