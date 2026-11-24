@@ -98,7 +98,7 @@ check("Unpaid balances already inside 14 days, with the readable status", cv.ove
 // ----- 20. CSV -----
 const partly = mk("p", "2026-12-30", { payments: [payment(50000)] });
 const csv = ov.eventsCsv([a, noTotal, partly]).trim().split("\r\n");
-check("20. The CSV carries collected, remaining balance, status, labor basis and supplies method", csv[0] === "Event date,Event,Package,Market,Profit status,Missing,Total,Gratuity,Deposit paid,Payments,Collected,Remaining balance,Overpaid,Balance due date,Payment status,Labor basis,Supplies method,Labor,Payroll burden,Mileage pay,Tips paid out,Supplies,Card processing,Reimbursed to staff,\"Paid by company, from receipts\",Other costs,Costs,Profit,Margin %", csv[0]);
+check("20. The CSV carries collected, remaining balance, status, labor basis and supplies method", csv[0] === "Event date,Event,Package,Market,Profit status,Missing,Total,Gratuity,Service fee,Deposit paid,Payments,Collected,Remaining balance,Overpaid,Balance due date,Payment status,Labor basis,Supplies method,Labor,Payroll burden,Mileage pay,Tips paid out,Supplies,Card processing,Reimbursed to staff,\"Paid by company, from receipts\",Other costs,Costs,Profit,Margin %", csv[0]);
 const cells = (line: string) => (line.match(/("([^"]|"")*"|[^,]*)(,|$)/g) ?? []).map((c) => c.replace(/,$/, "").replace(/^"|"$/g, "").replace(/""/g, '"'));
 const row = (line: string) => Object.fromEntries(cells(csv[0]).map((h, i) => [h, cells(line)[i]]));
 const pr = row(csv[3]);

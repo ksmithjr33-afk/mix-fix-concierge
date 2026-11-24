@@ -15,8 +15,10 @@ import { chicagoToday, eventSchedule, isWeddingEvent } from "@/lib/team/time";
 import { BREAKDOWN_MIN } from "@/lib/team/clock";
 import { eventPackageName, lineRate, scheduledMinutes } from "@/lib/team/pay";
 import { payoutSheet, type PayoutSheet } from "@/lib/team/payout-db";
-import { costSettings, packageRates, suppliesSettings } from "@/lib/team/business-settings-db";
-import { SUPPLY_PACKAGE_LABEL, type CostSettings, type SuppliesPerGuest, type SupplyPackage } from "@/lib/team/business-settings";
+import { costSettings, packageRates, sfSuppliesSettings, suppliesSettings } from "@/lib/team/business-settings-db";
+import { SF_SUPPLY_LABEL, SUPPLY_PACKAGE_LABEL, type CostSettings, type SfSuppliesPerGuest, type SuppliesPerGuest, type SupplyPackage } from "@/lib/team/business-settings";
+import { sessionPricingModel } from "@/lib/pricing-model";
+import { serviceFeePackage } from "@/lib/service-fee";
 import { setPendingPrice } from "@/lib/price-pending-db";
 import { DEFAULT_DEPOSIT, type BookedPrice } from "@/lib/price-change";
 import { packageKey, staffingFor } from "@/lib/pricing";
@@ -44,6 +46,7 @@ export interface EventBusinessView {
 export interface BusinessShared {
   settings: CostSettings;
   perGuest: SuppliesPerGuest;
+  sfPerGuest?: SfSuppliesPerGuest; // service fee events
   catalog: CatalogRow[];
 }
 
@@ -113,7 +116,7 @@ export function supplyPackage(name: unknown): SupplyPackage {
 /** The Business tab for one event. Null for anyone but an admin. Payroll hands in the payout sheet it already built. */
 export async function eventBusinessFor(viewer: StaffMember, session: SessionRow, now: Date = new Date(), shared?: BusinessShared | null, built?: PayoutSheet | null): Promise<EventBusinessView | null> {
   if (!isFullAdmin(viewer.role)) return null;
-  const [finance, other, payments, payout, settings, perGuest, supplies, rates, receipts] = await Promise.all([
+  const [finance, other, payments, payout, settings, perGuest, supplies, rates, receipts, sfPerGuest] = await Promise.all([
     financeRow(session.id),
     otherCosts(session.id),
     eventPayments(session.id),
@@ -123,7 +126,10 @@ export async function eventBusinessFor(viewer: StaffMember, session: SessionRow,
     supplyCostFor(viewer, session, undefined, shared?.catalog),
     packageRates(),
     approvedReceiptsFor(session.id),
+    shared?.sfPerGuest ?? sfSuppliesSettings(viewer),
   ]);
+  const serviceFee = sessionPricingModel(session) === "service_fee";
+  const sfKey = serviceFee ? serviceFeePackage(eventData(session).package ?? session.package_type) : null;
   const ed = eventData(session);
   const bp = (session.booked_price ?? null) as Partial<BookedPrice> | null;
   const total = toCents(bp?.total);
@@ -135,11 +141,12 @@ export async function eventBusinessFor(viewer: StaffMember, session: SessionRow,
     done: eventDone(session, now),
     totalCents: total !== null && total > 0 ? total : null,
     gratuityCents: toCents(bp?.gratuity),
+    serviceFee: serviceFee ? { feeCents: toCents(bp?.service_fee), rate: typeof bp?.service_fee_rate === "number" ? bp.service_fee_rate : null } : null,
     pricePending: !!session.price_pending,
     defaultDepositCents: DEFAULT_DEPOSIT_CENTS,
     finance,
     payments,
-    crew: rows.map((r) => ({ rateCents: r.rateCents, estPayCents: r.estPayCents, actualPayCents: r.actualPayCents, mileageCents: r.mileageCents })),
+    crew: rows.map((r) => ({ rateCents: r.rateCents, estPayCents: r.estPayCents, actualPayCents: r.actualPayCents, mileageCents: r.mileageCents, mileageRecorded: r.mileage.state === "paid" })),
     bookedBartenders: bp?.bartenders ?? session.bartender_count ?? null,
     guests: bookedGuestCount(ed.guest_count) ?? bookedGuestCount(session.guest_count),
     scheduledMinutes: scheduledMinutes(ed),
@@ -147,8 +154,8 @@ export async function eventBusinessFor(viewer: StaffMember, session: SessionRow,
     defaultRateCents: lineRate(null, eventPackageName(ed, session), rates, { model: session.pricing_model, role: "bartender" }).cents,
     staffingFor,
     supplyLines: supplies ? { catalogCents: supplies.cents, costed: supplies.matched, lines: supplies.lines } : null,
-    perGuestCents: perGuest![pkg],
-    packageLabel: SUPPLY_PACKAGE_LABEL[pkg],
+    perGuestCents: serviceFee ? (sfKey ? sfPerGuest![sfKey] : null) : perGuest![pkg],
+    packageLabel: serviceFee ? (sfKey ? `${SF_SUPPLY_LABEL[sfKey]} (service fee events)` : "this package (service fee events)") : SUPPLY_PACKAGE_LABEL[pkg],
     other,
     reimbursements: rows.flatMap((r) => r.reimbursements.map((x) => ({ kind: x.kind, cents: x.cents }))),
     receipts,
@@ -168,8 +175,8 @@ export async function eventBusinessFor(viewer: StaffMember, session: SessionRow,
 /** Settings and the catalog, loaded once for a list of events. Null for anyone but an admin. */
 export async function businessShared(admin: StaffMember): Promise<BusinessShared | null> {
   if (!isFullAdmin(admin.role)) return null;
-  const [settings, perGuest, catalog] = await Promise.all([costSettings(admin), suppliesSettings(admin), catalogRows(admin)]);
-  return { settings: settings!, perGuest: perGuest!, catalog };
+  const [settings, perGuest, catalog, sfPerGuest] = await Promise.all([costSettings(admin), suppliesSettings(admin), catalogRows(admin), sfSuppliesSettings(admin)]);
+  return { settings: settings!, perGuest: perGuest!, catalog, sfPerGuest: sfPerGuest! };
 }
 
 async function insertPayment(admin: StaffMember, sessionId: string, cents: number, date: string, note: string): Promise<Result> {

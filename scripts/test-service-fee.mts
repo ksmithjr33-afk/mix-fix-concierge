@@ -254,4 +254,35 @@ check("Gratuity model engine unchanged: Full 100/4 tip jar $1,749", old.priceEve
   check("A service fee event with no booked price gets a service fee baseline ($1,927)", baseline?.pricing_model === "service_fee" && baseline.total === 1927 && baseline.gratuity === null);
 }
 
+// ---------- Business tab on service fee events ----------
+
+{
+  const biz = await import("../lib/team/business.ts");
+  const bset = await import("../lib/team/business-settings.ts");
+  const { staffingFor } = await import("../lib/pricing.ts");
+  // Full Bar, 100 guests, 2 bartenders at $45 for 7 hours, $2,037 with a $314.45 fee, $150 add ons.
+  const base = {
+    today: "2026-11-24", eventDay: "2027-03-20", done: false, totalCents: 203700, gratuityCents: null,
+    serviceFee: { feeCents: 31445, rate: 0.2 }, pricePending: false, defaultDepositCents: 15000, finance: null, payments: [],
+    crew: [] as { rateCents: number; estPayCents: number | null; actualPayCents: number | null; mileageCents: number; mileageRecorded?: boolean }[],
+    bookedBartenders: 2, guests: 100, scheduledMinutes: 420, bookedMinutes: 420, defaultRateCents: 4500, staffingFor,
+    supplyLines: null, perGuestCents: bset.SF_SUPPLY_DEFAULTS.full, packageLabel: "Full Bar (service fee events)", other: [], settings: bset.COST_DEFAULTS,
+  };
+  const cost = (b: ReturnType<typeof biz.eventBusiness>, k: string) => b.costs.find((c) => c.key === k)!;
+  const b = biz.eventBusiness(base);
+  check("Revenue: service fee $314.45 (20%) inside the total, no gratuity", b.revenue.serviceFee && b.revenue.serviceFeeCents === 31445 && b.revenue.serviceFeeRate === 0.2 && b.revenue.gratuityCents === null && !b.revenue.noGratuity);
+  check("Tips paid out: $0 on a service fee event", cost(b, "tips").cents === 0);
+  check("Supplies: $3.50 a guest × 100 = $350", cost(b, "supplies").cents === 35000);
+  check("Per guest defaults: $0.25, $1.25, $2.50, $3.50, $6.00", JSON.stringify(bset.SF_SUPPLY_DEFAULTS) === JSON.stringify({ beerwine: 25, dive: 125, wedding: 250, full: 350, premium: 600 }));
+  check("Hand entered supplies still win over the per guest figure", cost(biz.eventBusiness({ ...base, finance: { session_id: "e", deposit_paid_cents: null, deposit_paid_on: null, balance_paid_cents: null, balance_paid_on: null, supplies_cents: 12345 } }), "supplies").cents === 12345);
+  check("No mileage recorded: the $30 gas estimate", cost(b, "mileage").cents === 3000);
+  const withMiles = biz.eventBusiness({ ...base, crew: [{ rateCents: 4500, estPayCents: 31500, actualPayCents: null, mileageCents: 2400, mileageRecorded: true }, { rateCents: 4500, estPayCents: 31500, actualPayCents: null, mileageCents: 0, mileageRecorded: true }] });
+  check("Recorded mileage replaces the gas estimate, never both ($24)", cost(withMiles, "mileage").cents === 2400);
+  check("Labor before anyone accepts: 2 × 7 h × $45 = $630; burden 15% kept", cost(b, "labor").cents === 63000 && cost(b, "burden").cents === 9450);
+  check("Card fees kept", cost(b, "card").cents === biz.cardFee(203700, bset.COST_DEFAULTS));
+  const grat = biz.eventBusiness({ ...base, serviceFee: null, gratuityCents: 16400 });
+  check("Gratuity events unchanged: tips = gratuity, mileage only after the event", cost(grat, "tips").cents === 16400 && cost(grat, "mileage").cents === null && !grat.revenue.serviceFee);
+  check("Service fee per guest settings validate", bset.readSfSupplies({ full: 400 }).full === 400 && bset.readSfSupplies(null).premium === 600 && !bset.validateSfSupplies({ full: "x" }).ok);
+}
+
 done("service fee");

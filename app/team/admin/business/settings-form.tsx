@@ -3,13 +3,25 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { PAY_PACKAGES, PAY_PACKAGE_LABEL, SERVICE_FEE_RATE_DEFAULTS, SERVICE_FEE_RATE_KEYS, SERVICE_FEE_RATE_LABEL, type MileageSettings, type PackageRates } from "@/lib/team/pay";
-import { SUPPLY_PACKAGES, SUPPLY_PACKAGE_LABEL, type CostSettings, type SuppliesPerGuest } from "@/lib/team/business-settings";
+import { SF_SUPPLY_LABEL, SF_SUPPLY_PACKAGES, SUPPLY_PACKAGES, SUPPLY_PACKAGE_LABEL, type CostSettings, type SfSuppliesPerGuest, type SuppliesPerGuest } from "@/lib/team/business-settings";
 
 // Business settings, admins only: hourly rate by package and mileage (staff pay), costs and supplies per guest (the Business area).
 const input = "w-full rounded-lg border border-[#DDD5CC] px-3 py-2 text-[16px]";
 const btn = "rounded-lg bg-[#B5845A] text-white px-3 py-2 text-sm font-medium disabled:opacity-50";
 
-export default function SettingsForm({ mileage, costs, perGuest, rates }: { mileage: MileageSettings; costs: CostSettings; perGuest: SuppliesPerGuest; rates: PackageRates }) {
+export default function SettingsForm({
+  mileage,
+  costs,
+  perGuest,
+  rates,
+  sfPerGuest,
+}: {
+  mileage: MileageSettings;
+  costs: CostSettings;
+  perGuest: SuppliesPerGuest;
+  rates: PackageRates;
+  sfPerGuest: SfSuppliesPerGuest;
+}) {
   const router = useRouter();
   const [m, setM] = useState({ thresholdMiles: String(mileage.thresholdMiles), deductionMiles: String(mileage.deductionMiles), rate: (mileage.rateCents / 100).toFixed(2), caRate: (mileage.caRateCents / 100).toFixed(2) });
   const [c, setC] = useState({ burdenPct: String(costs.burdenPct), cardPct: String(costs.cardPct), cardFixed: (costs.cardFixedCents / 100).toFixed(2) });
@@ -17,9 +29,10 @@ export default function SettingsForm({ mileage, costs, perGuest, rates }: { mile
   const [r, setR] = useState<Record<string, string>>(Object.fromEntries(PAY_PACKAGES.map((k) => [k, (rates[k] / 100).toFixed(2)])));
   const sfRates = rates.serviceFee ?? SERVICE_FEE_RATE_DEFAULTS;
   const [sf, setSf] = useState<Record<string, string>>(Object.fromEntries(SERVICE_FEE_RATE_KEYS.map((k) => [k, (sfRates[k] / 100).toFixed(2)])));
+  const [sg, setSg] = useState<Record<string, string>>(Object.fromEntries(SF_SUPPLY_PACKAGES.map((k) => [k, (sfPerGuest[k] / 100).toFixed(2)])));
   const [msg, setMsg] = useState<{ which: string; text: string; error: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
-  const save = async (which: "rates" | "sf_rates" | "mileage" | "costs" | "supplies", body: Record<string, string>) => {
+  const save = async (which: "rates" | "sf_rates" | "mileage" | "costs" | "supplies" | "sf_supplies", body: Record<string, string>) => {
     setBusy(true);
     setMsg(null);
     const res = await fetch("/api/team/admin/business/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ which, ...body }) }).catch(() => null);
@@ -100,7 +113,7 @@ export default function SettingsForm({ mileage, costs, perGuest, rates }: { mile
         {msg?.which === "costs" && <p className={`text-sm ${msg.error ? "text-[#A0412D]" : "text-[#55684A]"}`}>{msg.text}</p>}
       </div>
       <div className="space-y-2">
-        <h3 className="text-sm font-semibold text-[#2C2420]">Supplies per guest</h3>
+        <h3 className="text-sm font-semibold text-[#2C2420]">Supplies per guest, gratuity model events</h3>
         <p className="text-xs text-[#6B5D52]">Used when an event&apos;s Shopping list has no catalog costs, or for the share of items with no cost yet. Leave blank until you know the number.</p>
         <div className="grid grid-cols-2 gap-2">
           {SUPPLY_PACKAGES.map((k) => (
@@ -114,6 +127,22 @@ export default function SettingsForm({ mileage, costs, perGuest, rates }: { mile
           Save supplies per guest
         </button>
         {msg?.which === "supplies" && <p className={`text-sm ${msg.error ? "text-[#A0412D]" : "text-[#55684A]"}`}>{msg.text}</p>}
+      </div>
+      <div className="space-y-2" id="sf-supplies">
+        <h3 className="text-sm font-semibold text-[#2C2420]">Supplies per guest, service fee model events</h3>
+        <p className="text-xs text-[#6B5D52]">Replaces only the per guest estimate on service fee events. Supply costs entered by hand, receipts and the Shopping list still win.</p>
+        <div className="grid grid-cols-2 gap-2">
+          {SF_SUPPLY_PACKAGES.map((k) => (
+            <label key={k} className="text-sm text-[#2C2420]">
+              {SF_SUPPLY_LABEL[k]}, $ a guest
+              <input className={input} inputMode="decimal" value={sg[k]} onChange={(e) => setSg({ ...sg, [k]: e.target.value })} />
+            </label>
+          ))}
+        </div>
+        <button type="button" className={btn} disabled={busy} onClick={() => save("sf_supplies", sg)}>
+          Save service fee supplies
+        </button>
+        {msg?.which === "sf_supplies" && <p className={`text-sm ${msg.error ? "text-[#A0412D]" : "text-[#55684A]"}`}>{msg.text}</p>}
       </div>
     </section>
   );

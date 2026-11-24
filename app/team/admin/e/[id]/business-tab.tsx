@@ -103,11 +103,21 @@ export default function BusinessTab({ view, billing = null }: { view: EventBusin
         <dl className="grid grid-cols-[1fr_auto] gap-x-3 gap-y-1 text-[15px] text-[#2C2420] tabular-nums">
           <dt>Booked total</dt>
           <dd className="text-right font-semibold">{r.totalCents === null ? "no booked total" : money(r.totalCents)}</dd>
-          <dt className="text-[#6B5D52]">Gratuity inside it</dt>
-          <dd className="text-right">{money(r.gratuityCents ?? 0)}</dd>
+          {r.serviceFee ? (
+            <>
+              <dt className="text-[#6B5D52]">Service fee inside it{r.serviceFeeRate !== null ? ` (${Math.round(r.serviceFeeRate * 100)}%)` : ""}</dt>
+              <dd className="text-right">{r.serviceFeeCents === null ? "not split yet" : money(r.serviceFeeCents)}</dd>
+            </>
+          ) : (
+            <>
+              <dt className="text-[#6B5D52]">Gratuity inside it</dt>
+              <dd className="text-right">{money(r.gratuityCents ?? 0)}</dd>
+            </>
+          )}
         </dl>
+        {r.serviceFee && <p className="text-xs text-[#6B5D52] mt-0.5">Service fee model event: no gratuity, so no tips paid out.</p>}
         {r.noGratuity && <p className="text-xs text-[#9A7049] mt-0.5">No gratuity on file. Tips paid out will show $0 until it is entered.</p>}
-        {r.totalCents === null && <TotalForm sessionId={view.sessionId} pending={view.pricePending} askGratuity={r.gratuityCents === null} />}
+        {r.totalCents === null && <TotalForm sessionId={view.sessionId} pending={view.pricePending} askGratuity={!r.serviceFee && r.gratuityCents === null} />}
 
         <h3 className="text-sm font-semibold text-[#2C2420] mt-3">Payments</h3>
         <Deposit sessionId={view.sessionId} cents={r.depositPaidCents} on={r.depositPaidOn} edited={r.depositEdited} />

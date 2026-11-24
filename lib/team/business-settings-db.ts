@@ -10,18 +10,22 @@ import {
   MILEAGE_KEY,
   RATES_KEY,
   SF_RATES_KEY,
+  SF_SUPPLIES_KEY,
   SUPPLIES_KEY,
   readCosts,
   readMileage,
   readPackageRates,
   readServiceFeeRates,
+  readSfSupplies,
   readSupplies,
   validateCosts,
   validateMileage,
   validatePackageRates,
   validateServiceFeeRates,
+  validateSfSupplies,
   validateSupplies,
   type CostSettings,
+  type SfSuppliesPerGuest,
   type SuppliesPerGuest,
 } from "@/lib/team/business-settings";
 
@@ -53,13 +57,19 @@ export async function suppliesSettings(admin: StaffMember): Promise<SuppliesPerG
   return readSupplies(await raw(SUPPLIES_KEY));
 }
 
+/** Supplies per guest on service fee events. Admins only: anyone else gets nothing. */
+export async function sfSuppliesSettings(admin: StaffMember): Promise<SfSuppliesPerGuest | null> {
+  if (!isFullAdmin(admin.role)) return null;
+  return readSfSupplies(await raw(SF_SUPPLIES_KEY));
+}
+
 type Result<T> = { ok: true; value: T } | { ok: false; error: string; status: number };
 
-const SETTING_KEY: Record<string, string> = { mileage: MILEAGE_KEY, costs: COSTS_KEY, supplies: SUPPLIES_KEY, rates: RATES_KEY, sf_rates: SF_RATES_KEY };
+const SETTING_KEY: Record<string, string> = { mileage: MILEAGE_KEY, costs: COSTS_KEY, supplies: SUPPLIES_KEY, rates: RATES_KEY, sf_rates: SF_RATES_KEY, sf_supplies: SF_SUPPLIES_KEY };
 
-export async function saveBusinessSettings(admin: StaffMember, which: unknown, body: Record<string, unknown>): Promise<Result<MileageSettings | CostSettings | SuppliesPerGuest | PackageRates | ServiceFeeRates>> {
+export async function saveBusinessSettings(admin: StaffMember, which: unknown, body: Record<string, unknown>): Promise<Result<MileageSettings | CostSettings | SuppliesPerGuest | PackageRates | ServiceFeeRates | SfSuppliesPerGuest>> {
   if (!isFullAdmin(admin.role)) return { ok: false, error: "Admins only.", status: 403 };
-  const v = which === "mileage" ? validateMileage(body) : which === "costs" ? validateCosts(body) : which === "supplies" ? validateSupplies(body) : which === "rates" ? validatePackageRates(body) : which === "sf_rates" ? validateServiceFeeRates(body) : null;
+  const v = which === "mileage" ? validateMileage(body) : which === "costs" ? validateCosts(body) : which === "supplies" ? validateSupplies(body) : which === "rates" ? validatePackageRates(body) : which === "sf_rates" ? validateServiceFeeRates(body) : which === "sf_supplies" ? validateSfSupplies(body) : null;
   if (!v) return { ok: false, error: "Unknown setting.", status: 400 };
   if (!v.ok) return { ok: false, error: v.error, status: 400 };
   const { error } = await supabase

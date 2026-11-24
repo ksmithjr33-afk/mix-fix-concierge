@@ -5,7 +5,7 @@ import { money } from "@/lib/team/pay";
 import { COST_KEYS, COST_LABEL, profitTitle } from "@/lib/team/business";
 import { RANGE_LABEL, breakdown, cashView, completeness, rangeFor, totalsOf, type RangePreset, type Totals } from "@/lib/team/business-overview";
 import { cashEvents, overviewEvents } from "@/lib/team/business-overview-db";
-import { costSettings, mileageSettings, packageRates, suppliesSettings } from "@/lib/team/business-settings-db";
+import { costSettings, mileageSettings, packageRates, sfSuppliesSettings, suppliesSettings } from "@/lib/team/business-settings-db";
 import { managerHref } from "@/lib/team/manager-tabs";
 import TeamHeader from "../../team-header";
 import SettingsForm from "./settings-form";
@@ -27,7 +27,7 @@ export default async function BusinessPage({ searchParams }: { searchParams: Pro
   const me = await requireFullAdmin("/team/admin/business");
   const today = chicagoToday();
   const range = rangeFor(p.range, today, p.from, p.to);
-  const [events, cash, mileage, costs, perGuest, rates] = await Promise.all([overviewEvents(me, range.from, range.to), cashEvents(me, today), mileageSettings(), costSettings(me), suppliesSettings(me), packageRates()]);
+  const [events, cash, mileage, costs, perGuest, rates, sfPerGuest] = await Promise.all([overviewEvents(me, range.from, range.to), cashEvents(me, today), mileageSettings(), costSettings(me), suppliesSettings(me), packageRates(), sfSuppliesSettings(me)]);
   const totals = totalsOf(events);
   const done = completeness(events);
   const byPackage = breakdown(events, (e) => e.package);
@@ -240,7 +240,7 @@ export default async function BusinessPage({ searchParams }: { searchParams: Pro
           </p>
         </section>
 
-        <SettingsForm mileage={mileage} costs={costs!} perGuest={perGuest!} rates={rates} />
+        <SettingsForm mileage={mileage} costs={costs!} perGuest={perGuest!} rates={rates} sfPerGuest={sfPerGuest!} />
       </main>
     </>
   );

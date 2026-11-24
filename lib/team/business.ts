@@ -24,6 +24,12 @@
 //   company   approved receipts other than Supplies paid by Company
 //   other     lines an admin adds, less any already counted as a reimbursement
 // Every approved receipt dollar counts exactly once.
+//
+// Service fee model events: revenue shows the service fee inside the total
+// (no gratuity), tips paid out are $0, the per guest supply estimate is the
+// service fee figure for the package (hand entry, receipts and the Shopping
+// list still win), and mileage is the recorded mileage when there is any,
+// otherwise the $30 gas estimate, never both. Burden and card fees stay.
 // Only two things hold profit back: no booked total, or a blank per guest
 // supply estimate when one is needed.
 //
@@ -69,7 +75,11 @@ export interface CrewPay {
   estPayCents: number | null;
   actualPayCents: number | null; // null until clocked in and out
   mileageCents: number;
+  mileageRecorded?: boolean; // their mileage line is worked out (stored or adjusted)
 }
+
+/** The gas estimate on a service fee event with no recorded mileage. */
+export const GAS_ESTIMATE_CENTS = 30_00;
 
 export interface SupplyLines {
   catalogCents: number; // the costed lines, added up
@@ -83,6 +93,7 @@ export interface BusinessInputs {
   done: boolean; // service has ended
   totalCents: number | null; // the booked total
   gratuityCents: number | null; // inside the total
+  serviceFee?: { feeCents: number | null; rate: number | null } | null; // service fee model events only
   pricePending: boolean;
   defaultDepositCents: number;
   finance: FinanceRow | null;
@@ -154,6 +165,9 @@ export interface EventBusiness {
     totalCents: number | null;
     gratuityCents: number | null;
     noGratuity: boolean; // $0 or none on file
+    serviceFee: boolean; // a service fee model event: no gratuity, the fee is inside the total
+    serviceFeeCents: number | null;
+    serviceFeeRate: number | null; // 0.2 or 0.1
     depositPaidCents: number;
     depositPaidOn: string | null;
     depositEdited: boolean;
@@ -276,7 +290,14 @@ export function eventBusiness(i: BusinessInputs): EventBusiness {
   const pay = paymentStatus(total, depositCents, paymentsCents, balanceDue, i.today);
 
   const labor = laborEstimate(i);
-  const tips = i.gratuityCents ?? 0;
+  const sf = !!i.serviceFee;
+  const tips = sf ? 0 : (i.gratuityCents ?? 0);
+  const recordedMileage = i.crew.some((c) => c.mileageRecorded);
+  const mileageLine: CostLine = sf
+    ? recordedMileage
+      ? { key: "mileage", label: COST_LABEL.mileage, cents: i.crew.reduce((n, c) => n + c.mileageCents, 0), note: "recorded mileage pay, no gas estimate" }
+      : { key: "mileage", label: COST_LABEL.mileage, cents: GAS_ESTIMATE_CENTS, note: `gas estimate ${usd(GAS_ESTIMATE_CENTS)}, no mileage recorded` }
+    : { key: "mileage", label: COST_LABEL.mileage, cents: i.done ? i.crew.reduce((n, c) => n + c.mileageCents, 0) : null, note: i.done ? "stored mileage pay" : "after the event" };
   // Supplies reimbursements only ever come from Supplies receipts, which are counted in supplies.
   const allReimbursed = i.reimbursements ?? [];
   const reimbursements = allReimbursed.filter((r) => r.kind !== "supplies");
@@ -290,8 +311,8 @@ export function eventBusiness(i: BusinessInputs): EventBusiness {
   const costs: CostLine[] = [
     { key: "labor", label: COST_LABEL.labor, cents: labor.cents, note: labor.note },
     { key: "burden", label: COST_LABEL.burden, cents: Math.round((labor.cents * i.settings.burdenPct) / 100), note: `${i.settings.burdenPct}% of labor` },
-    { key: "mileage", label: COST_LABEL.mileage, cents: i.done ? i.crew.reduce((n, c) => n + c.mileageCents, 0) : null, note: i.done ? "stored mileage pay" : "after the event" },
-    { key: "tips", label: COST_LABEL.tips, cents: tips, note: "the gratuity, all of it to the bartenders" },
+    mileageLine,
+    { key: "tips", label: COST_LABEL.tips, cents: tips, note: sf ? "none, a service fee event has no gratuity" : "the gratuity, all of it to the bartenders" },
     supplies.cents === null
       ? { key: "supplies", label: COST_LABEL.supplies, cents: null, note: `${supplies.note ? `${supplies.note}; ` : ""}set a per guest estimate in Business settings`, href: SETTINGS_HREF }
       : { key: "supplies", label: COST_LABEL.supplies, cents: supplies.cents, note: supplies.note },
@@ -308,8 +329,11 @@ export function eventBusiness(i: BusinessInputs): EventBusiness {
     mode: i.done && labor.source === "actual" ? "Actual" : "Estimated",
     revenue: {
       totalCents: total,
-      gratuityCents: i.gratuityCents,
-      noGratuity: !i.gratuityCents,
+      gratuityCents: sf ? null : i.gratuityCents,
+      noGratuity: !sf && !i.gratuityCents,
+      serviceFee: sf,
+      serviceFeeCents: sf ? (i.serviceFee?.feeCents ?? null) : null,
+      serviceFeeRate: sf ? (i.serviceFee?.rate ?? null) : null,
       depositPaidCents: depositCents,
       depositPaidOn: f?.deposit_paid_on ?? null,
       depositEdited: f?.deposit_paid_cents != null,

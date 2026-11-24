@@ -155,3 +155,29 @@ export function validateServiceFeeRates(raw: Record<string, unknown>): Checked<S
   }
   return { ok: true, value: out };
 }
+
+// ----- Supplies per guest on service fee events -----
+// Replaces only the per guest default, only on service fee events. Hand
+// entered costs, receipts and the Shopping list still win.
+
+export type SfSupplyPackage = "beerwine" | "dive" | "wedding" | "full" | "premium";
+export const SF_SUPPLY_PACKAGES: SfSupplyPackage[] = ["beerwine", "dive", "wedding", "full", "premium"];
+export const SF_SUPPLY_LABEL: Record<SfSupplyPackage, string> = { beerwine: "Bartender Only", dive: "Dive Bar", wedding: "The Big Day Bar", full: "Full Bar", premium: "Premium Bar" };
+export const SF_SUPPLIES_KEY = "business_supplies_service_fee";
+export type SfSuppliesPerGuest = Record<SfSupplyPackage, number>; // cents a guest
+export const SF_SUPPLY_DEFAULTS: SfSuppliesPerGuest = { beerwine: 25, dive: 125, wedding: 250, full: 350, premium: 600 };
+
+export function readSfSupplies(v: unknown): SfSuppliesPerGuest {
+  const o = (v && typeof v === "object" ? v : {}) as Record<string, unknown>;
+  return Object.fromEntries(SF_SUPPLY_PACKAGES.map((k) => [k, typeof o[k] === "number" && (o[k] as number) >= 0 ? (o[k] as number) : SF_SUPPLY_DEFAULTS[k]])) as SfSuppliesPerGuest;
+}
+
+export function validateSfSupplies(raw: Record<string, unknown>): Checked<SfSuppliesPerGuest> {
+  const out = {} as SfSuppliesPerGuest;
+  for (const k of SF_SUPPLY_PACKAGES) {
+    const n = num(raw[k]);
+    if (n === null || n > 500) return { ok: false, error: `Enter ${SF_SUPPLY_LABEL[k]} in dollars a guest, like 3.50.` };
+    out[k] = Math.round(n * 100);
+  }
+  return { ok: true, value: out };
+}
