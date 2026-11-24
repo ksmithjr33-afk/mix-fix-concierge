@@ -1,7 +1,8 @@
 // Database side of availability and time off. Server only.
 //
-// Unavailable days keep a bartender out of new shift texts and Open shifts
-// for events on those days. They keep events they already accepted. Admins
+// Unavailable days keep a bartender out of new shift texts, Open shifts and
+// shift offers for events on those days: dates and date ranges they marked
+// off, and weekdays they never work (staff.off_weekdays). They keep events they already accepted. Admins
 // still see everyone and can assign someone who is unavailable after a
 // confirm step.
 
@@ -13,6 +14,7 @@ import { eventData, marketTz, sessionMarket, staffMarketsOf, type Market } from 
 import { eventSchedule, todayIn } from "@/lib/team/time";
 import { staffMarkets } from "@/lib/team/markets-db";
 import { acceptedWarning, covers, removalPlan, validateUnavailable, type UnavailRow } from "@/lib/team/availability";
+import { cleanWeekdays, offOnWeekday } from "@/lib/team/offers";
 
 type Result<T = object> = ({ ok: true } & T) | { ok: false; error: string; status: number };
 
@@ -36,16 +38,59 @@ export async function unavailableBetween(from: string, to: string, staffIds?: st
   return data as UnavailRow[];
 }
 
-/** Everyone unavailable on the day. */
-export async function unavailableOn(day: string | null): Promise<Set<string>> {
+/** Everyone who marked the date (or a range covering it) off. Weekdays not included. */
+export async function datesOffOn(day: string | null): Promise<Set<string>> {
   if (!day) return new Set();
   return new Set((await unavailableBetween(day, day)).map((r) => r.staff_id));
 }
 
-/** True when this person marked the day unavailable. */
+/** Everyone who never works the day's weekday. Empty before the column exists. */
+export async function weekdayOffOn(day: string | null, staffIds?: string[]): Promise<Set<string>> {
+  if (!day) return new Set();
+  try {
+    let q = supabase.from("staff").select("id, off_weekdays");
+    if (staffIds) q = q.in("id", staffIds);
+    const { data, error } = await q;
+    if (error || !data) return new Set();
+    return new Set((data as { id: string; off_weekdays?: unknown }[]).filter((r) => offOnWeekday(r.off_weekdays, day)).map((r) => r.id));
+  } catch {
+    return new Set();
+  }
+}
+
+/** Everyone unavailable on the day: a date marked off, or a weekday they never work. */
+export async function unavailableOn(day: string | null): Promise<Set<string>> {
+  if (!day) return new Set();
+  const [dates, weekdays] = await Promise.all([datesOffOn(day), weekdayOffOn(day)]);
+  return new Set([...dates, ...weekdays]);
+}
+
+/** True when this person marked the day unavailable, or never works that weekday. */
 export async function isUnavailable(staffId: string, day: string | null): Promise<boolean> {
   if (!day) return false;
-  return (await unavailableBetween(day, day, [staffId])).length > 0;
+  if ((await unavailableBetween(day, day, [staffId])).length > 0) return true;
+  return (await weekdayOffOn(day, [staffId])).has(staffId);
+}
+
+/** The weekdays this person never works, 0 Sunday .. 6 Saturday. Empty before the column exists. */
+export async function offWeekdaysOf(staffId: string): Promise<number[]> {
+  try {
+    const { data, error } = await supabase.from("staff").select("id, off_weekdays").eq("id", staffId).maybeSingle();
+    if (error || !data) return [];
+    return cleanWeekdays((data as { off_weekdays?: unknown }).off_weekdays) ?? [];
+  } catch {
+    return [];
+  }
+}
+
+/** Save the weekdays a staff member never works (their own). */
+export async function setOffWeekdays(staff: StaffMember, raw: unknown): Promise<Result<{ weekdays: number[] }>> {
+  const weekdays = cleanWeekdays(raw);
+  if (!weekdays) return { ok: false, error: "Pick weekdays from Sunday to Saturday.", status: 400 };
+  if (weekdays.length === 7) return { ok: false, error: "Leave at least one weekday you can work. For time off, add dates instead.", status: 400 };
+  const { error } = await supabase.from("staff").update({ off_weekdays: weekdays }).eq("id", staff.id);
+  if (error) return { ok: false, error: /off_weekdays/.test(error.message) ? "Weekdays are not set up yet. Ask an admin." : "Could not save. Try again.", status: 500 };
+  return { ok: true, weekdays };
 }
 
 /** The event's day in its market time zone. */
@@ -117,17 +162,17 @@ export async function removeUnavailable(staff: StaffMember, id: string, now: Dat
 
 /**
  * Available bartenders per event: active bartenders in the event's market who
- * did not mark the event's day unavailable. Null for events with no market or
+ * did not mark the event's day unavailable and do not have its weekday off. Null for events with no market or
  * no date.
  */
 export async function availableCounts(sessions: SessionRow[]): Promise<Map<string, number | null>> {
   const out = new Map<string, number | null>();
   const days = sessions.map((s) => eventDayOf(s)).filter((d): d is string => !!d).sort();
   const [{ data }, rows] = await Promise.all([
-    supabase.from("staff").select("id, role, active, markets").eq("active", true).eq("role", "bartender"),
+    supabase.from("staff").select("*").eq("active", true).eq("role", "bartender"),
     days.length ? unavailableBetween(days[0], days[days.length - 1]) : [],
   ]);
-  const bartenders = (data as { id: string; markets?: unknown }[]) ?? [];
+  const bartenders = (data as { id: string; markets?: unknown; off_weekdays?: unknown }[]) ?? [];
   for (const s of sessions) {
     const day = eventDayOf(s);
     const market = sessionMarket(s) as Market | null;
@@ -136,7 +181,7 @@ export async function availableCounts(sessions: SessionRow[]): Promise<Map<strin
       continue;
     }
     const away = new Set(rows.filter((r) => covers(r, day)).map((r) => r.staff_id));
-    out.set(s.id, bartenders.filter((b) => staffMarketsOf(b).includes(market) && !away.has(b.id)).length);
+    out.set(s.id, bartenders.filter((b) => staffMarketsOf(b).includes(market) && !away.has(b.id) && !offOnWeekday(b.off_weekdays, day)).length);
   }
   return out;
 }

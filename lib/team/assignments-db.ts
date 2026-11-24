@@ -5,6 +5,7 @@
 
 import { supabase } from "@/lib/supabase";
 import { lockMileage } from "@/lib/team/pay-db";
+import { handAssigned } from "@/lib/team/offers-db";
 import { isFullAdmin } from "@/lib/team/roles";
 import { NEEDS_CONFIRM } from "@/lib/team/availability";
 import type { SessionRow } from "@/lib/event-updates";
@@ -186,6 +187,8 @@ export async function assignStaff(
   } catch (err) {
     console.error("[team] closing the filled shift failed:", err instanceof Error ? err.message : String(err));
   }
+  // Assigning by hand always works and ends shift offers for that spot. Never throws.
+  await handAssigned(session.id, staffId);
   return { ok: true };
 }
 

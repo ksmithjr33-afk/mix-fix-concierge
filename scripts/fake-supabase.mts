@@ -23,6 +23,9 @@ const UNIQUE: Record<string, string[][]> = {
   order_sheet_stores: [["color"]],
   order_sheet_answers: [["session_id", "line_ref", "staff_id"]],
   order_sheet_ready_texts: [["session_id", "staff_id"]],
+  offer_claims: [["run_id", "spot"]],
+  offer_steps: [["run_id", "staff_id"]],
+  staff_rank: [["staff_id"]],
 };
 
 /** Tables a test treats as not created yet (a migration not run): every query on them returns an error. */

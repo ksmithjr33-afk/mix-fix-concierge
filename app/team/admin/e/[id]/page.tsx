@@ -46,7 +46,7 @@ import EditableDetails from "./editable-details";
 import { editCards } from "@/lib/team/edit-cards";
 import PackageCard from "../../../package-card";
 import { barbackStatus, bookingShortOf } from "@/lib/package-extras";
-import { AssignPanel, BarReadyCard, ClientListPanel, Closeouts, ManagerChat, OrderSheet, ShiftPanel } from "./lazy-panels";
+import { AssignPanel, BarReadyCard, ClientListPanel, Closeouts, ManagerChat, OffersPanel, OrderSheet, ShiftPanel } from "./lazy-panels";
 import ManagerTabs from "./manager-tabs";
 import { BartenderLists, ClockStatus, MissingReports, TimePunches } from "./day-of";
 import ClientLinksCard from "./client-links-card";
@@ -72,6 +72,7 @@ import { payoutSheet } from "@/lib/team/payout-db";
 import PayoutCard from "../../payout-card";
 import { timePageHref } from "@/lib/team/clock-card";
 import { rateTeamCard, tierBadges } from "@/lib/team/scorecard-db";
+import { offersPanel } from "@/lib/team/scorecard-offers-db";
 import RateTeamCard from "./rate-team-card";
 import BookingCard from "./booking-card";
 import { bookingCardData } from "@/lib/partners/client-view";
@@ -129,6 +130,13 @@ async function AdminEventPage({
   const listsP = Promise.all([peopleP, suppliesP]).then(([people, s]) => teamLists(session, people.filter((p) => p.status !== "declined").map((p) => p.staffId), s.list));
   const staffP = on("team") || on("pickups") ? listStaff() : none<Awaited<ReturnType<typeof listStaff>>>([]);
   const panelP = on("team") ? postPanel(session) : null;
+  // Shift offers card: the planned order or the live offers. Never breaks the tab.
+  const offersP = on("team")
+    ? offersPanel(me, session).catch((err) => {
+        console.error("[offers] panel failed:", err);
+        return null;
+      })
+    : null;
   const handoffsP = handoffPanel(session);
   const sheetP = getSheetView(session);
   // Ice: the Shopping list's ice prefills the total bags. Used before locations only with Pickups open.
@@ -183,6 +191,7 @@ async function AdminEventPage({
           new Set<string>() as Awaited<ReturnType<typeof unavailableOn>>,
           {} as Record<string, string>,
         ];
+  const offers = offersP ? await offersP : null;
   // Details, Client list and Chat only.
   const [links, autoSend, listEntries, messages, muted, history, eventNumber, agreements, clockRows, payout, business, supplyCosts, lowStock, rateCard, venue, receipts, booking] = await Promise.all([
     on("details") ? clientLinks(session, me) : null, // admins only: null for anyone else
@@ -425,6 +434,7 @@ async function AdminEventPage({
             showProgress={false}
             tiers={tiers}
           />
+          {offers && <OffersPanel sessionId={id} data={offers} />}
           <ShiftPanel sessionId={id} panel={panel} handoffs={handoffs} marketSource={marketSource} timeZone={v.timeZone} records={records} certs={certs} tiers={tiers} />
         </>
       );

@@ -56,6 +56,9 @@ import {
   type ShiftSummary,
 } from "@/lib/team/shifts";
 import { isAdminRole } from "@/lib/team/roles";
+import { liveRun } from "@/lib/team/offers-db";
+
+export const OFFERS_RUNNING = "Shift offers are running for this event. Stop them on the Team tab first, then post the shift.";
 
 export type Result<T = object> = ({ ok: true } & T) | { ok: false; error: string; status: number };
 
@@ -361,6 +364,8 @@ export async function postShift(
   const market = hidden ? sessionMarket(session) : await ensureMarket(session);
   const err = postError({ hidden, market, spotsOpen: await spotsOpen(session), alreadyPosted: !!(await activeOpenPost(session.id)), past: isPast(session, now) });
   if (err) return fail(err);
+  // An event uses a posted shift or shift offers, never both at once.
+  if (await liveRun(session.id)) return fail(OFFERS_RUNNING);
   const { data, error } = await supabase
     .from("shift_posts")
     .insert({ session_id: session.id, market, kind: "open", status: "posted", posted_by: admin.id, posted_at: now.toISOString() })

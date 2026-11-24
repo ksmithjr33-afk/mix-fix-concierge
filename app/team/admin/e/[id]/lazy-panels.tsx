@@ -8,6 +8,7 @@ import dynamic from "next/dynamic";
 
 export const AssignPanel = dynamic(() => import("./assign-panel"));
 export const ShiftPanel = dynamic(() => import("./shift-panel"));
+export const OffersPanel = dynamic(() => import("./offers-panel"));
 export const OrderSheet = dynamic(() => import("./order/order-sheet"));
 export const ClientListPanel = dynamic(() => import("./client-list-panel"));
 export const Closeouts = dynamic(() => import("./closeouts"));

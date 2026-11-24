@@ -2,7 +2,8 @@
 // 3 or lower, blanks left out, every tier rule, rank within market, the To rate
 // list and its 48 hour flag, check in calls and Locked by Tuesday, the reliability
 // facts, pages loading before the migration, and no scorecard data on any staff
-// facing page, text or export. Real code against the in-memory database.
+// facing page, text or export, including the offer order (tiers, ranks, who
+// was offered) behind ranked shift offers. Real code against the in-memory database.
 // Run: node --no-warnings scripts/test-scorecard.mts
 
 import { readdirSync, statSync } from "node:fs";
@@ -382,6 +383,22 @@ const leaks = staffFacing.filter((p) => /scorecard|TierBadge|staff_ratings|staff
 check("No staff facing page or route imports or reads scorecard data", leaks.length === 0, leaks.join(", "));
 const libLeaks = walk("lib").filter((p) => !p.includes("scorecard") && p !== "lib/team/header-nav.ts" && /scorecard|staff_ratings|staff_reviews|staff_checkin_calls/.test(src(p)));
 check("No other server code (texts, staff exports) reads scorecard tables", libLeaks.length === 0, libLeaks.join(", "));
+// Ranked shift offers: tiers, ranks and the offer order are Scorecard data too.
+const offerLeaks = staffFacing.filter((p) => /staff_rank|offer_steps|offer_runs|offer_claims|scorecard-ranks|scorecard-offers|\bgrp\b|offerOrder|rankBoard|runView|offersPanel/.test(src(p)));
+check("No staff facing page or route reads tiers, ranks, the offer order, or who else was offered", offerLeaks.length === 0, offerLeaks.join(", "));
+const rankLibLeaks = walk("lib").filter((p) => !p.includes("scorecard") && /staff_rank/.test(src(p)));
+check("No other server code reads the tier and rank tables", rankLibLeaks.length === 0, rankLibLeaks.join(", "));
+const orderReaders = [...walk("lib"), ...walk("app")].filter((p) => p !== "lib/team/scorecard-ranks-db.ts" && /\bofferOrder\b/.test(src(p)));
+check("Only the offer planner reads the offer order", orderReaders.join(",") === "lib/team/scorecard-offers-db.ts", orderReaders.join(", "));
+const plannerUsers = [...walk("lib"), ...walk("app")].filter((p) => p !== "lib/team/scorecard-offers-db.ts" && /scorecard-offers-db/.test(src(p)));
+check("The planner is used only by the admin Team tab, the admin offers route and the cron", plannerUsers.every((p) => p.startsWith("lib/team/scorecard") || p.startsWith("app/team/admin/") || p.startsWith("app/api/team/admin/") || p === "app/api/cron/team/route.ts"), plannerUsers.join(", "));
+const odbSrc = src("lib/team/offers-db.ts");
+const staffSide = odbSrc.slice(odbSrc.indexOf("export async function offerForStaff"), odbSrc.indexOf("export async function respondToOffer"));
+check("The offer page reads only the offer's id, run, person and status (never its tier or rank)", staffSide.includes('select("id, run_id, staff_id, status")') && !/grp|rank/.test(staffSide.replace(/\/\/.*$/gm, "")));
+const ofx = await import("../lib/team/offers.ts");
+const offerTexts = [ofx.offerText({ shortDate: "Sat, Dec 12", city: "Dallas", arrive: "5:00 PM", service: "6:00 PM to 10:00 PM", link: "https://x" }), ofx.heldText({ date: "Sat, Dec 12" }), ofx.offerFilledText({ date: "Sat, Dec 12" }), ofx.offerClosedText({ date: "Sat, Dec 12" })];
+check("No offer text a staff member gets says anything about order, tiers or ranks", offerTexts.every((t) => !ofx.ORDER_WORDS.test(t)));
+check("A decline and no response never change a rank: the offer code never writes the rank tables", !/staff_rank/.test(odbSrc) && !/from\("staff_rank/.test(src("lib/team/scorecard-offers-db.ts")));
 check("No text went to anyone while scoring", texts.length === 0);
 const shown = [...walk("app/team/admin/scorecard").filter((p) => !p.endsWith("/save.ts")), "app/team/admin/e/[id]/rate-team-card.tsx", "app/forbidden.tsx"].flatMap((p) => [...(src(p).match(/>\s*[A-Z][^<>{}();=]*</g) ?? []), ...(src(p).match(/"[A-Z][a-z][^"]*"/g) ?? [])]);
 check("No hyphens in wording shown on screen", shown.every((t) => !t.includes("-")), shown.filter((t) => t.includes("-")).join(" | "));

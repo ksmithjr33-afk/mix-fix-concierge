@@ -2,6 +2,7 @@ import Link from "next/link";
 import { requireAdmin } from "@/lib/team/auth";
 import { supabase } from "@/lib/supabase";
 import { todayFor, upcomingUnavailable } from "@/lib/team/availability-db";
+import { cleanWeekdays, WEEKDAY_NAMES } from "@/lib/team/offers";
 import { rangeLabel } from "@/lib/team/availability";
 import { staffMarketsOf, marketLabel } from "@/lib/team/markets";
 import TeamHeader from "../../../team-header";
@@ -33,7 +34,7 @@ export default async function StaffDetailPage({ params }: { params: Promise<{ id
   const me = await requireAdmin(`/team/admin/staff/${encodeURIComponent(id)}`);
   const back = { href: "/team/admin/staff", label: "Staff" };
   const { data } = await supabase.from("staff").select("*").eq("id", id).maybeSingle();
-  const person = data as { id: string; name: string; phone: string; role: string; active: boolean; markets?: unknown } | null;
+  const person = data as { id: string; name: string; phone: string; role: string; active: boolean; markets?: unknown; off_weekdays?: unknown } | null;
   if (!person) {
     return (
       <>
@@ -160,6 +161,12 @@ export default async function StaffDetailPage({ params }: { params: Promise<{ id
 
         <section className={card} aria-label="Availability">
           <h2 className="font-heading text-base font-bold text-[#2C2420] mb-2">Availability</h2>
+          <p className="text-[15px] text-[#2C2420] mb-1">
+            {(() => {
+              const off = cleanWeekdays(person.off_weekdays) ?? [];
+              return off.length ? `Never works: ${off.map((d) => WEEKDAY_NAMES[d]).join(", ")}` : "No weekdays off.";
+            })()}
+          </p>
           {away.length === 0 ? (
             <p className="text-[15px] text-[#6B5D52]">No unavailable days coming up.</p>
           ) : (

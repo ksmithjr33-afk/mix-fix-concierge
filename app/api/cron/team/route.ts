@@ -14,6 +14,8 @@ import { sendRequestTexts } from "@/lib/change-requests";
 import { sendKitSummary } from "@/lib/team/low-stock-db";
 import { sendHeldPartnerTexts } from "@/lib/partners/texts";
 import { sendListReadyTexts } from "@/lib/team/staff-list-db";
+import { advanceOffers } from "@/lib/team/offers-db";
+import { autoStartOffers } from "@/lib/team/scorecard-offers-db";
 import { supabase } from "@/lib/supabase";
 import type { SessionRow } from "@/lib/event-updates";
 
@@ -36,6 +38,9 @@ export async function GET(request: Request) {
   // Each job runs on its own, so one failing never stops the others.
   // Markets first, so the time math below uses each event's time zone.
   const markets = await Promise.allSettled([fillMarkets()]);
+  // Shift offers: Automatic markets start offers first, then every live run sends what is due.
+  const offerStarts = await Promise.allSettled([autoStartOffers(now)]);
+  const offerTexts = await Promise.allSettled([advanceOffers(now)]);
   const [reminders, alerts, short, shiftTexts, announcementTexts, chatTexts, closeoutTexts, certTexts, supplyTexts, menuTexts, requestTexts, iceTexts, prepTexts, kitSummary, partnerTexts, listReadyTexts] = await Promise.allSettled([
     sendClockOutReminders(now),
     sendLateSetupAlerts(now),
@@ -57,6 +62,8 @@ export async function GET(request: Request) {
   const result = (r: PromiseSettledResult<number>) => (r.status === "fulfilled" ? r.value : `failed: ${String(r.reason)}`);
   const out = {
     marketsSet: result(markets[0]),
+    offersStarted: result(offerStarts[0]),
+    offerTexts: result(offerTexts[0]), // ranked shift offers: daytime only (9 AM to 8 PM in the market), plus the one "nobody took it" text
     clockOutReminders: result(reminders),
     lateSetupAlerts: result(alerts),
     shortShiftAlerts: result(short),

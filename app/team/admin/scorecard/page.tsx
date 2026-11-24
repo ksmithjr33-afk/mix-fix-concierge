@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { requireScorecard } from "@/lib/team/scorecard-page";
 import { dateWords, roster, tierSettings, toRate } from "@/lib/team/scorecard-db";
 import { NOT_READY, SCORECARD_PATH, TIER_LABEL } from "@/lib/team/scorecard";
+import { OFFERS_PATH } from "@/lib/team/scorecard-ranks";
 import { MARKETS, MARKET_INFO, marketLabel } from "@/lib/team/markets";
 import { isFullAdmin } from "@/lib/team/roles";
 import { chicagoStamp } from "@/lib/team/time";
@@ -56,6 +57,9 @@ export default async function ScorecardPage() {
         </div>
         {r && !r.ready && <p className="rounded-2xl bg-[#FFF8EC] border border-[#E3C9A0] px-4 py-3 text-[15px] text-[#2C2420]">{NOT_READY}</p>}
         <nav className="flex flex-wrap gap-2" aria-label="Scorecard">
+          <Link href={OFFERS_PATH} className={pill}>
+            Offer order
+          </Link>
           <Link href={`${SCORECARD_PATH}/calls`} className={pill}>
             Check in calls
           </Link>
