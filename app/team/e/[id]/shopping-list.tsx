@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { BUTTONS, LIST_INTRO, LIST_NOT_READY, LIST_TITLE, NOTE_MAX, type StaffGroup, type StaffLineView, type StaffListView } from "@/lib/team/staff-list";
+import { BUTTONS, LIST_FINALIZING, LIST_INTRO, LIST_TITLE, NOTE_MAX, type StaffGroup, type StaffLineView, type StaffListView } from "@/lib/team/staff-list";
 
 // "Shopping list for this event" on its own Shopping list tab: the admin Shopping list's
 // own lines, under plain headings by source, with a small swatch so it matches
@@ -141,20 +141,19 @@ export default function ShoppingList({ initial }: { initial: StaffListView }) {
       setBusy(false);
     }
   };
-  if (!view.ready) {
-    return (
-      <div className="space-y-3" aria-label={LIST_TITLE} data-staff-shopping-list data-not-ready>
-        <h2 className="font-heading text-xl font-bold text-[#2C2420] px-1">{LIST_TITLE}</h2>
-        <p className={`${card} text-[15px] text-[#2C2420]`}>{LIST_NOT_READY}</p>
-      </div>
-    );
-  }
+  // Staff always see the list. Until most lines have a source it says it may still change;
+  // lines with no source stay under Not decided yet.
   return (
     <div className="space-y-3" aria-label={LIST_TITLE} data-staff-shopping-list>
       <div className="px-1">
         <h2 className="font-heading text-xl font-bold text-[#2C2420]">{LIST_TITLE}</h2>
         <p className="text-[15px] text-[#6B5D52]">{view.readOnlyNote || LIST_INTRO}</p>
       </div>
+      {!view.ready && (
+        <p className="rounded-2xl border border-[#E3C9A0] bg-[#FFF8EC] px-4 py-3 text-[15px] text-[#2C2420]" role="status" data-list-finalizing>
+          {LIST_FINALIZING}
+        </p>
+      )}
       {error && <p className="text-sm text-[#A0412D] px-1">{error}</p>}
       {view.groups.length === 0 ? (
         <p className={`${card} text-sm text-[#6B5D52]`}>Nothing on the shopping list yet.</p>

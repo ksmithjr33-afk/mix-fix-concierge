@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import type { IcePersonView, IceView } from "@/lib/team/ice-pickup-db";
-import { ICE_BACKUP_LINE, ICE_MACHINE_ONSITE } from "@/lib/team/ice-pickup";
+import { ICE_BACKUP_LINE, ICE_CLIENT_STAFF_NOTE, ICE_MACHINE_ONSITE } from "@/lib/team/ice-pickup";
 
 /** What staff read when the venue has an ice machine. */
 export const ICE_MACHINE_STAFF_NOTE = "The venue has an ice machine. Nobody needs to buy ice for this event.";
@@ -23,7 +23,9 @@ export function IceStateBadge({ view }: { view: IceView }) {
   const n = view.people.length;
   const done = view.people.filter((p) => p.pickedUp).length;
   const [text, tone] =
-    view.machineOnsite
+    view.clientIce
+      ? ["Client provides ice", "bg-[#E4EBDF] text-[#55684A]"]
+      : view.machineOnsite
       ? [ICE_MACHINE_ONSITE, "bg-[#E4EBDF] text-[#55684A]"]
       : view.state === "complete"
       ? ["Ice picked up", "bg-[#E4EBDF] text-[#55684A]"]
@@ -124,6 +126,19 @@ export default function IcePickupCard({ initial, showEvent = false }: { initial:
   };
   const coveringName = notYet.find((p) => p.staffId === covering)?.name ?? "";
   const highlight = !view.machineOnsite && !!mine && !mine.pickedUp;
+
+  // The client provides the ice: nothing to pick up, and staff are told plainly.
+  if (view.clientIce) {
+    return (
+      <section className="rounded-2xl px-4 py-3 sm:px-5 sm:py-4 space-y-1 border border-[#DDD5CC] bg-[#F5F0EB]" aria-label="Ice pickup" data-ice-client>
+        <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+          <h2 className="font-heading text-lg font-bold text-[#2C2420]">Ice</h2>
+          {showEvent ? <span className="text-[15px] text-[#6B5D52]">{view.title}, {view.date}</span> : <IceStateBadge view={view} />}
+        </div>
+        <p className="text-[15px] text-[#2C2420]">{ICE_CLIENT_STAFF_NOTE}</p>
+      </section>
+    );
+  }
 
   // An ice machine onsite: nothing to pick up, so nobody buys ice.
   if (view.machineOnsite) {

@@ -108,6 +108,16 @@ function supplyListLines(html: string): { section: SectionId; fields: Fields }[]
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 
 /** Every calculated line, in sheet section order. */
+/**
+ * "No ice from us, the client provides it" (set on the Ice pickup card): the
+ * calculated ice bags move to what the client is buying, so nobody orders or
+ * picks them up. Cups and other bar supplies in the ice section stay ours.
+ */
+export function withClientIce(lines: CalcLine[], clientIce: boolean): CalcLine[] {
+  if (!clientIce) return lines;
+  return lines.map((l) => (l.section === "ice" && /^ice\b/i.test(l.name.trim()) ? { ...l, clientBuys: true } : l));
+}
+
 export function calculatedLines(eventData: EventData): CalcLine[] {
   const raw: { section: SectionId; fields: Fields; clientBuys: boolean }[] = [];
 

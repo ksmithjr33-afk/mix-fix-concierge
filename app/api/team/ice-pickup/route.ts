@@ -8,7 +8,7 @@ import { isAdminRole } from "@/lib/team/roles";
 //   "assign" (admins): staffId, bags (adds the person, or changes their bags)
 //   "remove" (admins): staffId
 //   "undo" (admins): staffId
-//   "machine" (admins): mode "no_pickup", "backup" or "off" (or the older on, true or false)
+//   "machine" (admins): mode "no_pickup", "backup", "client" (no ice from us, the client provides it) or "off" (or the older on, true or false)
 //   "picked_up": location, bags; the person themselves, or an admin with staffId
 //   "instead": location, bags, coveringFor (a staff id still not picked up, or
 //     blank for "Nobody, this is extra"); someone on the event who is not

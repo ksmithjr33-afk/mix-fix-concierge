@@ -84,7 +84,8 @@ export interface IceView {
   bagLine: string; // "6 of 12 bags assigned"
   bagWarning: string;
   outstanding: boolean; // the Pickups count: inside 24 hours, not complete (never with an ice machine onsite)
-  machineOnsite: boolean; // "Ice machine onsite, no pickup": nobody needs to pick up ice
+  machineOnsite: boolean; // "Ice machine onsite, no pickup" or the client provides the ice: nobody needs to pick up ice
+  clientIce: boolean; // "No ice from us, the client provides it"
   machineBackup: boolean; // "Ice machine onsite, bring backup bags": a normal pickup, with the backup line on top
   machineLine: string; // "Set by Kenny, Dec 4, 3:40 PM"
   canEdit: boolean; // admins
@@ -135,7 +136,8 @@ export async function iceMachines(sessionIds: string[], opts: { withBackup?: boo
   const rows = data as { session_id: string; action: string; by_name: string | null; created_at: string }[];
   for (const id of ids) {
     const m = iceMachineFrom(rows.filter((r) => r.session_id === id));
-    if (m && (m.mode === "no_pickup" || opts.withBackup)) out.set(id, m);
+    // The client providing ice is a "no ice pickup" too.
+    if (m && (m.mode === "no_pickup" || m.mode === "client" || opts.withBackup)) out.set(id, m);
   }
   return out;
 }
@@ -200,7 +202,7 @@ export async function iceView(
 ): Promise<IceView> {
   const now = opts.now ?? new Date();
   const [row, people, rule, anyMachine] = await Promise.all([getIce(session.id), icePeople(session.id), teamText(ICE_RULE_KEY), iceMachine(session.id, { withBackup: true })]);
-  const machine = anyMachine?.mode === "no_pickup" ? anyMachine : null;
+  const machine = anyMachine?.mode === "no_pickup" || anyMachine?.mode === "client" ? anyMachine : null;
   const listBags = opts.listBags !== undefined ? opts.listBags : row?.total_bags !== null && row?.total_bags !== undefined ? null : await listIceBags(session);
   const ed = eventData(session);
   const tz = eventSchedule(ed).tz;
@@ -236,6 +238,7 @@ export async function iceView(
     bagWarning: summary.warning,
     outstanding: !machine && iceOutstanding(people, ed, now),
     machineOnsite: !!machine,
+    clientIce: machine?.mode === "client",
     machineBackup: anyMachine?.mode === "backup",
     machineLine: iceMachineLine(anyMachine, tz),
     canEdit: isAdminRole(viewer.role),
@@ -335,18 +338,19 @@ export async function setIceMachine(sessionId: string, admin: StaffMember, on: u
   const a = await adminOnly(sessionId, admin);
   if (!a.ok) return a;
   // mode: "no_pickup", "backup", or "off". The older { on } still works (true is no pickup).
-  const mode = rawMode === "no_pickup" || rawMode === "backup" || rawMode === "off" ? rawMode : typeof on === "boolean" ? (on ? "no_pickup" : "off") : null;
+  const mode = rawMode === "no_pickup" || rawMode === "backup" || rawMode === "client" || rawMode === "off" ? rawMode : typeof on === "boolean" ? (on ? "no_pickup" : "off") : null;
   if (!mode) return { ok: false, error: "Bad request", status: 400 };
   const current = (await iceMachine(sessionId, { withBackup: true }))?.mode ?? "off";
   if (current !== mode) {
-    const action = mode === "no_pickup" ? "machine_on" : mode === "backup" ? "machine_backup" : "machine_off";
+    const action = mode === "no_pickup" ? "machine_on" : mode === "backup" ? "machine_backup" : mode === "client" ? "client_ice_on" : "machine_off";
     const { error } = await supabase
       .from("event_ice_pickup_log")
       .insert({ session_id: sessionId, action, detail: null, by_id: admin.id, by_name: firstName(admin.name) || admin.name, created_at: now.toISOString() });
     if (error) return { ok: false, error: "Could not save. Try again.", status: 500 };
     // No pickup: held ice texts are dropped. Back to a pickup (backup bags or off): the people on the card get their texts.
-    if (mode === "no_pickup") await supabase.from("event_ice_pickup_people").update({ notify_after: null }).eq("session_id", sessionId);
-    else if (current === "no_pickup") await notifyPeople(a.session, now);
+    const noPickup = (m: string) => m === "no_pickup" || m === "client";
+    if (noPickup(mode)) await supabase.from("event_ice_pickup_people").update({ notify_after: null }).eq("session_id", sessionId);
+    else if (noPickup(current)) await notifyPeople(a.session, now);
   }
   return { ok: true, view: await iceView(a.session, admin, { now }) };
 }
@@ -370,7 +374,8 @@ export async function saveIce(sessionId: string, admin: StaffMember, raw: Record
 export async function assignIce(sessionId: string, admin: StaffMember, staffId: unknown, rawBags: unknown, now: Date = new Date()): Promise<Result<{ view: IceView }>> {
   const a = await adminOnly(sessionId, admin);
   if (!a.ok) return a;
-  if (await iceMachine(sessionId)) return { ok: false, error: "Ice machine onsite is on. Switch it back to assign someone.", status: 409 };
+  const blocked = await iceMachine(sessionId);
+  if (blocked) return { ok: false, error: blocked.mode === "client" ? "The client is providing the ice. Switch it back to assign someone." : "Ice machine onsite is on. Switch it back to assign someone.", status: 409 };
   const bags = cleanBags(rawBags);
   if (!bags.ok) return { ok: false, error: "Bags must be a whole number.", status: 400 };
   const who = typeof staffId === "string" ? await person(staffId) : null;

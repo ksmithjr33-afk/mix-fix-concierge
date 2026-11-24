@@ -305,4 +305,27 @@ check("Either can be switched back, and each switch is logged", back.ok && !back
 check("The latest entry decides the mode", ice.iceMachineFrom([{ action: "machine_on", by_name: "A", created_at: "2026-12-01T00:00:00Z" }, { action: "machine_backup", by_name: "B", created_at: "2026-12-02T00:00:00Z" }])?.mode === "backup");
 check("Both choices are on the admin card", src("app/team/admin/e/[id]/ice-pickup-panel.tsx").includes('machineToggle("no_pickup")') && src("app/team/admin/e/[id]/ice-pickup-panel.tsx").includes('machineToggle("backup")') && ice.ICE_MACHINE_NO_PICKUP === "Ice machine onsite, no pickup" && ice.ICE_MACHINE_BACKUP === "Ice machine onsite, bring backup bags");
 
+// ----- No ice from us, the client provides it -----
+reset();
+await iceDb.saveIce("s1", admin, { location_name: "Ice House on Elm", total_bags: "8" }, noon);
+await iceDb.assignIce("s1", admin, "b1", "", at("2026-12-03", 23)); // quiet hours: held
+check("No ice: a bartender cannot set it", !(await iceDb.setIceMachine("s1", taylor, undefined, noon, "client")).ok);
+const cOn = await iceDb.setIceMachine("s1", admin, undefined, at("2026-12-04", 7), "client");
+check("No ice: an admin picks No ice from us, the client provides it, logged with who and when", cOn.ok && cOn.view.clientIce && cOn.view.machineOnsite && db.event_ice_pickup_log.some((l) => l.action === "client_ice_on" && l.by_name === "Kenneth") && ice.ICE_CLIENT_PROVIDES === "No ice from us, the client provides it");
+check("...no pickup is assigned: assigning is refused and it never counts as unfinished", !(await iceDb.assignIce("s1", admin, "b2", "", at("2026-12-04", 9))).ok && !(await iceDb.iceView(session(), admin, { now: at(DAY, 14) })).outstanding);
+check("...held ice texts are dropped and none go out", !personRow("b1")!.notify_after && (await iceDb.sendIcePickupNotices(at("2026-12-04", 9))) === 0 && textsTo(taylor).length === 0);
+check("...not on anyone's home screen as a pickup to do", (await iceDb.myIcePickups(taylor, at(DAY, 9))).length === 0);
+const staffClient = await iceDb.staffIceView(session(), sam, at("2026-12-04", 9));
+check("Staff on the event see: No ice from The Mix Fix on this event.", !!staffClient && staffClient.clientIce && ice.ICE_CLIENT_STAFF_NOTE === "No ice from The Mix Fix on this event." && src("app/team/ice-pickup-card.tsx").includes("{ICE_CLIENT_STAFF_NOTE}") && src("app/team/ice-pickup-card.tsx").indexOf("if (view.clientIce)") < src("app/team/ice-pickup-card.tsx").indexOf("if (view.machineOnsite)"));
+check("The admin card has the choice", src("app/team/admin/e/[id]/ice-pickup-panel.tsx").includes('machineToggle("client")'));
+const sheet = await import("../lib/order-sheet.ts");
+const lines = [
+  { key: "ice:ice", section: "ice", clientBuys: false, name: "Ice", quantity: "12 x 16 lb bags", size: "", detail: "" },
+  { key: "ice:cups", section: "ice", clientBuys: false, name: "Cups", quantity: "200", size: "", detail: "" },
+] as never[];
+const moved = sheet.withClientIce(lines, true) as { name: string; clientBuys: boolean }[];
+check("The Shopping list's ice bags move to what the client buys, cups stay ours", moved[0].clientBuys && !moved[1].clientBuys && (sheet.withClientIce(lines, false) as { clientBuys: boolean }[]).every((l) => !l.clientBuys));
+const cOff = await iceDb.setIceMachine("s1", admin, undefined, at("2026-12-04", 10), "off");
+check("It can be switched back to a pickup", cOff.ok && !cOff.view.clientIce && !cOff.view.machineOnsite);
+
 done("ice pickup");

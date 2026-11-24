@@ -10,6 +10,7 @@ import {
   buildSheet,
   byStore,
   calculatedLines,
+  withClientIce,
   FIELD_NAMES,
   DELIVERY_STORE,
   isSection,
@@ -36,6 +37,7 @@ import {
 import { addStore, listStores, rememberLegendName } from "@/lib/order-sheet-stores";
 import { seenItems, suppliesFromSheet, supplyChanges, inNoticeWindow, type SeenItem } from "@/lib/team/supplies";
 import { eventSchedule } from "@/lib/team/time";
+import { ICE_MACHINE_ACTIONS, iceMachineFrom } from "@/lib/team/ice-pickup";
 import { listSyrups } from "@/lib/syrups-db";
 import { cleanSyrupEdit, sameSyrup, syrupViews, type SyrupRecipe, type SyrupView } from "@/lib/syrups";
 import { adminAnswers, type AdminAnswers, type AnswerRow } from "@/lib/team/staff-list";
@@ -163,10 +165,17 @@ interface Built {
   meta: MetaRow;
 }
 
+/** "No ice from us, the client provides it" is on (the latest Ice pickup log entry). False before the table exists. */
+async function clientIceOn(sessionId: string): Promise<boolean> {
+  const { data, error } = await supabase.from("event_ice_pickup_log").select("action, by_name, created_at").eq("session_id", sessionId).in("action", [...ICE_MACHINE_ACTIONS]);
+  if (error || !data) return false;
+  return iceMachineFrom(data as { action: string; by_name: string | null; created_at: string }[])?.mode === "client";
+}
+
 async function build(session: SessionLike): Promise<Built> {
   const ed = eventDataOf(session);
-  const calc = calculatedLines(ed);
-  const [saved, suggestions, stores, m] = await Promise.all([savedRows(session.id), teamSetting(SUGGEST_STORES_KEY), listStores(), metaRow(session.id)]);
+  const [saved, suggestions, stores, m, clientIce] = await Promise.all([savedRows(session.id), teamSetting(SUGGEST_STORES_KEY), listStores(), metaRow(session.id), clientIceOn(session.id)]);
+  const calc = withClientIce(calculatedLines(ed), clientIce);
   const last = suggestions ? await lastStores(session.id) : new Map<string, Store>();
   const sheet = buildSheet(calc, saved, (name) => last.get(itemKey(name)) ?? null, stores, m.delivery_day_of === true ? [DELIVERY_STORE] : []);
   return { calc, saved, sheet, suggestions, stores, meta: m };
@@ -209,9 +218,9 @@ export async function getSheetView(session: SessionLike): Promise<SheetView> {
  */
 export async function staffSheet(session: SessionLike): Promise<{ sheet: Sheet; recipes: SheetRecipe[]; syrups: SyrupView[]; stores: StoreInfo[] }> {
   const ed = eventDataOf(session);
-  const [saved, m, library, stores] = await Promise.all([savedRows(session.id), metaRow(session.id), listSyrups(), listStores()]);
+  const [saved, m, library, stores, clientIce] = await Promise.all([savedRows(session.id), metaRow(session.id), listSyrups(), listStores(), clientIceOn(session.id)]);
   // The team's store list, so a line on a store an admin added keeps its store (the staff Shopping list groups by it).
-  const sheet = buildSheet(calculatedLines(ed), saved, () => null, stores);
+  const sheet = buildSheet(withClientIce(calculatedLines(ed), clientIce), saved, () => null, stores);
   const list = withRecipeEdits(recipes(ed), m.recipe_edits);
   return { sheet, recipes: list, syrups: sheetSyrups(sheet, list, library, stores, m), stores };
 }

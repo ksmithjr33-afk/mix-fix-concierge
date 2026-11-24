@@ -1,9 +1,10 @@
 // The staff "Shopping list for this event" on its own Shopping list tab (right
 // after Supplies), and what staff tell us about each line. Pure, no database.
 //
-// Ready: the list has lines, and more than half our lines have a source
-// (listReady) or a ready text already went out for the event. Before then, or
-// when the list cannot be built, the tab still shows and says it is not ready yet.
+// Staff always see the list. Ready: the list has lines, and more than half our
+// lines have a source (listReady) or a ready text already went out for the
+// event. Before then the list still shows, under a banner that it is still
+// being finalized; lines with no source stay under Not decided yet.
 //
 // One list, never a copy: the lines are the admin Shopping list's own lines
 // (lib/order-sheet.ts buildSheet, read through staffSheet), grouped by each
@@ -34,7 +35,9 @@ export const LIST_READ_ONLY = "This event is over, so the list is read only.";
 export const LIST_PREVIEW = "You are viewing this as a bartender. Only people who accepted the event can answer.";
 export const NOTE_MAX = 80;
 export const LIST_TAB = "Shopping list";
+/** @deprecated The tab no longer has a not ready screen; kept for older imports. */
 export const LIST_NOT_READY = "The shopping list is not ready yet. You will get a text when it is.";
+export const LIST_FINALIZING = "This list is still being finalized. Items may change.";
 export const LIST_MOVED = "Looking for the shopping list? It has its own tab now.";
 export const LIST_MOVED_BUTTON = "Open the Shopping list";
 

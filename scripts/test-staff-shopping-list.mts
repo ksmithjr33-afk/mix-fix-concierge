@@ -122,6 +122,9 @@ reset();
 // Not ready: no sources yet and no ready text sent. The tab still shows, with the plain line.
 const early = await viewFor(jayde);
 check("Before most lines have a source, the list is not ready (but the tab still shows)", !!early && early.ready === false);
+check("Staff still see every line before it is ready, unsourced lines under Not decided yet", early!.total > 0 && sl.staffListLines(early!).length === early!.total && early!.groups.some((g: { id: string }) => g.id === "undecided"));
+const tabSrc = src("app/team/e/[id]/shopping-list.tsx");
+check("No not ready screen: the list always shows, with the finalizing banner until ready", !tabSrc.includes("data-not-ready") && !tabSrc.includes("LIST_NOT_READY") && tabSrc.includes("{!view.ready && (") && sl.LIST_FINALIZING === "This list is still being finalized. Items may change.");
 check("Store kinds: names give pick up, delivery, or supply until an admin sets one", shared.storeKind({ name: "Spec's pickup" }) === "pickup" && shared.storeKind({ name: "Sam's Club delivery" }) === "delivery" && shared.storeKind({ name: "Amazon" }) === "delivery" && shared.storeKind({ name: "Walmart Delivery" }) === "delivery" && shared.storeKind({ name: "Bring from your supply" }) === "supply" && shared.storeKind({ name: "Amazon", kind: "pickup" }) === "pickup");
 const ours = await source();
 const jv = await viewFor(jayde);
@@ -374,7 +377,8 @@ check("The list lives on that tab, and no longer on Supplies", panel("list").inc
 check("Supplies keeps its own list, with the card pointing to the new tab, for the same people", panel("shopping").includes("<Supplies\n") && panel("shopping").includes('{shoppingList && <ListMovedCard onOpen={() => setTab("list")} />}') && panel("shopping").indexOf("<ListMovedCard") < panel("shopping").indexOf("<Supplies"));
 check("The card's wording", sl.LIST_MOVED === "Looking for the shopping list? It has its own tab now." && tabs.includes("{LIST_MOVED}") && tabs.includes("{LIST_MOVED_BUTTON}"));
 check("Someone who has not done Tools can open Supplies and Shopping list: neither panel waits on Tools", !/toolsAt|SuppliesLocked/.test(panel("shopping") + panel("list")) && !tabs.includes("SuppliesLocked"));
-check("Not ready: the tab shows the plain line instead of the lines", sl.LIST_NOT_READY === "The shopping list is not ready yet. You will get a text when it is." && src("app/team/e/[id]/shopping-list.tsx").includes("if (!view.ready) {") && src("app/team/e/[id]/shopping-list.tsx").includes("{LIST_NOT_READY}"));
+check("Not ready: the tab shows the lines with the finalizing banner, never a not ready screen", !src("app/team/e/[id]/shopping-list.tsx").includes("if (!view.ready) {") && src("app/team/e/[id]/shopping-list.tsx").includes("{LIST_FINALIZING}"));
+check("The one time list is ready text is unchanged", sl.readyText({ title: "T", date: "D", link: "L" }) === "The shopping list for T, D is ready. Open it and mark what you already have: L");
 check("The tab row is one row that swipes sideways", tabs.includes('className="flex flex-nowrap gap-1 overflow-x-auto') && tabs.includes("shrink-0 whitespace-nowrap") && !/grid-cols-\d/.test(tabs.slice(tabs.indexOf('role="tablist"') - 300, tabs.indexOf('role="tablist"'))));
 check("Opened from a link, the selected tab scrolls into view", tabs.includes("<nav ref={navRef}") && tabs.includes(`querySelector<HTMLElement>('[aria-selected="true"]')`) && tabs.includes("nav.scrollTo("));
 check("The admin event page tabs are unchanged", !/"list"/.test(src("lib/team/manager-tabs.ts")));

@@ -4,7 +4,7 @@ import { useState } from "react";
 import type { IceView, Place } from "@/lib/team/ice-pickup-db";
 import { field, IceStateBadge, PersonStatus, PickedUpForm, postIce } from "../../../ice-pickup-card";
 import { roleSuffix } from "@/lib/team/roles";
-import { ICE_BACKUP_LINE, ICE_MACHINE_BACKUP, ICE_MACHINE_NO_PICKUP, ICE_MACHINE_ONSITE } from "@/lib/team/ice-pickup";
+import { ICE_BACKUP_LINE, ICE_CLIENT_PROVIDES, ICE_CLIENT_STAFF_NOTE, ICE_MACHINE_BACKUP, ICE_MACHINE_NO_PICKUP, ICE_MACHINE_ONSITE } from "@/lib/team/ice-pickup";
 
 const card = "bg-[#F5F0EB] rounded-2xl border border-[#DDD5CC] px-4 py-3 sm:px-5 sm:py-4";
 const small = "w-20 rounded-lg border border-[#DDD5CC] bg-white px-2 py-1.5 text-[16px] text-[#2C2420] focus:outline-none focus:ring-2 focus:ring-[#B5845A]/30 focus:border-[#B5845A]";
@@ -56,9 +56,9 @@ export default function IcePickupPanel({ initial, people, places }: { initial: I
   const nameOf = (id: string) => people.find((p) => p.id === id)?.name ?? "";
   const reuse = places.filter((p) => p.name.toLowerCase() !== name.trim().toLowerCase());
 
-  const SAVED_TEXT = { no_pickup: "Saved. No ice pickup texts go out for this event.", backup: "Saved. Backup bags are picked up like a normal pickup.", off: "Switched back to ice pickup." } as const;
-  const LABEL = { no_pickup: ICE_MACHINE_NO_PICKUP, backup: ICE_MACHINE_BACKUP, off: "Switch back to ice pickup" } as const;
-  const machineToggle = (mode: "no_pickup" | "backup" | "off") => (
+  const SAVED_TEXT = { no_pickup: "Saved. No ice pickup texts go out for this event.", backup: "Saved. Backup bags are picked up like a normal pickup.", client: "Saved. No ice pickup, and staff see that the client provides it.", off: "Switched back to ice pickup." } as const;
+  const LABEL = { no_pickup: ICE_MACHINE_NO_PICKUP, backup: ICE_MACHINE_BACKUP, client: ICE_CLIENT_PROVIDES, off: "Switch back to ice pickup" } as const;
+  const machineToggle = (mode: "no_pickup" | "backup" | "client" | "off") => (
     <button
       type="button"
       onClick={() => run("machine", { action: "machine", mode }, SAVED_TEXT[mode])}
@@ -76,10 +76,13 @@ export default function IcePickupPanel({ initial, people, places }: { initial: I
           <h3 className="font-heading text-base font-bold text-[#2C2420]">Ice pickup</h3>
           <IceStateBadge view={view} />
         </div>
-        <p className="text-[15px] text-[#2C2420]">{ICE_MACHINE_ONSITE}. No one needs to pick up ice, and no ice texts go out.</p>
+        <p className="text-[15px] text-[#2C2420]">
+          {view.clientIce ? `${ICE_CLIENT_PROVIDES}. No one picks up ice, no ice texts go out, and staff see: "${ICE_CLIENT_STAFF_NOTE}"` : `${ICE_MACHINE_ONSITE}. No one needs to pick up ice, and no ice texts go out.`}
+        </p>
         {view.machineLine && <p className="text-sm text-[#6B5D52]">{view.machineLine}</p>}
         <div className="flex flex-wrap items-center gap-3">
           {machineToggle("off")}
+          {view.clientIce ? machineToggle("no_pickup") : machineToggle("client")}
           {machineToggle("backup")}
           {saved && <span className="text-sm text-[#55684A]">{saved}</span>}
         </div>
@@ -101,6 +104,7 @@ export default function IcePickupPanel({ initial, people, places }: { initial: I
         </div>
       )}
       <div className="flex flex-wrap items-center gap-2">
+        {machineToggle("client")}
         {machineToggle("no_pickup")}
         {view.machineBackup ? machineToggle("off") : machineToggle("backup")}
       </div>

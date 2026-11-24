@@ -152,4 +152,18 @@ check("For a Saturday event: the day before and the day of", ev.receive === "Sat
 check("With home, preference, and confirmed this week", ev.home === "Apartment" && ev.pref === "Prefers pickup" && ev.confirmed && ev.full.length === 7);
 check("Nothing set reads not set", da.eventAvailability("b2", null, "2026-11-28", tue).receive === "not set" && !da.eventAvailability("b2", null, "2026-11-28", tue).set);
 
+// ----- 9. Shown on the event: Team tab and the top of the Shopping list tab -----
+reset();
+await daDb.saveDelivery(taylor, "b1", W(), mon);
+const m = await daDb.availabilityFor(["b1", "b2"], "2026-11-28", tue);
+check("Each person on the event gets their windows and whether they confirmed", m.get("b1")!.confirmed && m.get("b1")!.receive === "Sat 10a–2p" && !m.get("b2")!.confirmed && !m.get("b2")!.set);
+const page = src("app/team/admin/e/[id]/page.tsx");
+const teamPanel = page.slice(page.indexOf("    team: () => {"), page.indexOf("    order: () => ("));
+const orderPanel = page.slice(page.indexOf("    order: () => ("), page.indexOf("    client: () => ("));
+check("On the Team tab, above the assign panel", teamPanel.includes("<DeliveryStrip people={delivery} />") && teamPanel.indexOf("<DeliveryStrip") < teamPanel.indexOf("<AssignPanel"));
+check("At the top of the Shopping list tab, above the order sheet", orderPanel.includes("<DeliveryStrip people={delivery} />") && orderPanel.indexOf("<DeliveryStrip") < orderPanel.indexOf("<OrderSheet"));
+check("Only people still on the event (not declined)", page.includes('const onEventPeople = people.filter((p) => p.status !== "declined");'));
+const strip = src("app/team/admin/e/[id]/delivery-strip.tsx");
+check("The strip says confirmed or not this week, and never shows a price", strip.includes("Confirmed this week") && strip.includes("Not confirmed this week") && !/price|cost|cents|\$\{?\d/i.test(strip));
+
 done("deliveries and pickups");
