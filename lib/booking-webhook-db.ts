@@ -10,6 +10,7 @@ import { supabase } from "@/lib/supabase";
 import { basisFromEvent, DEFAULT_DEPOSIT, type BookedPrice, type PriceBasis } from "@/lib/price-change";
 import { bookedGuestCount } from "@/lib/booked-facts";
 import { centsToDollars, hasPriceInfo, validTotal, type Booking } from "@/lib/booking-webhook";
+import { serviceFeeBooked } from "@/lib/service-fee-booking";
 
 export const DUPLICATE_WINDOW_MS = 10 * 60 * 1000;
 
@@ -55,7 +56,20 @@ export function bookingBasis(b: Booking): PriceBasis | null {
   );
 }
 
+/**
+ * booked_price, and why the price needs a check (null when it is fine). A
+ * service fee booking is split by lib/service-fee-booking.ts. A gratuity
+ * booking is stored exactly as before; its only check is a booking that said
+ * no model at all.
+ */
+export function bookedFrom(b: Booking, nowIso: string): { booked: BookedPrice | null; check: string | null } {
+  if (b.pricingModel === "service_fee") return serviceFeeBooked(b, nowIso);
+  return { booked: bookedPriceFrom(b, nowIso), check: b.modelCheck };
+}
+
+/** booked_price on the gratuity model. */
 export function bookedPriceFrom(b: Booking, nowIso: string): BookedPrice | null {
+  if (b.pricingModel === "service_fee") return serviceFeeBooked(b, nowIso).booked;
   if (!hasPriceInfo(b)) return null;
   const total = validTotal(b) ? centsToDollars(b.totalCents) : null;
   return {
@@ -93,8 +107,11 @@ function legacyRow(id: string, b: Booking, booked: BookedPrice | null) {
   };
 }
 
-function fullRow(id: string, b: Booking, booked: BookedPrice | null, hash: string) {
+function fullRow(id: string, b: Booking, booked: BookedPrice | null, hash: string, check: string | null, nowIso: string) {
   return {
+    pricing_model: b.pricingModel,
+    price_check: check ? { reason: check, at: nowIso } : null,
+    price_check_at: check ? nowIso : null,
     ...legacyRow(id, b, booked),
     event_name: b.eventName,
     ghl_contact_id: b.contactId,
@@ -119,20 +136,25 @@ const missingColumn = (e: { code?: string; message?: string }) =>
  * Insert the new session. If the new columns are not there yet (migration not
  * run), the booking is still saved with the columns that exist, and the log says so.
  */
-export async function insertBooking(b: Booking, hash: string, now: Date = new Date()): Promise<{ ok: true; id: string } | { ok: false }> {
+export async function insertBooking(
+  b: Booking,
+  hash: string,
+  now: Date = new Date()
+): Promise<{ ok: true; id: string; check: string | null } | { ok: false }> {
   const id = crypto.randomBytes(4).toString("hex"); // 8 hex chars
-  const booked = bookedPriceFrom(b, now.toISOString());
-  const { error } = await supabase.from("sessions").insert(fullRow(id, b, booked, hash));
-  if (!error) return { ok: true, id };
+  const nowIso = now.toISOString();
+  const { booked, check } = bookedFrom(b, nowIso);
+  const { error } = await supabase.from("sessions").insert(fullRow(id, b, booked, hash, check, nowIso));
+  if (!error) return { ok: true, id, check };
   if (!missingColumn(error)) {
     console.error("[create-session] insert error:", error);
     return { ok: false };
   }
-  console.error(`[create-session] new booking columns missing (run supabase/migrations/20261215_booking_webhook_fields.sql). Saved without them: ${error.message}`);
+  console.error(`[create-session] new booking columns missing (run supabase/migrations/20261215_booking_webhook_fields.sql and 20270103_service_fee_model.sql). Saved without them: ${error.message}`);
   const retry = await supabase.from("sessions").insert(legacyRow(id, b, booked));
   if (retry.error) {
     console.error("[create-session] insert error:", retry.error);
     return { ok: false };
   }
-  return { ok: true, id };
+  return { ok: true, id, check };
 }

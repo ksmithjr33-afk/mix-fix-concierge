@@ -1,12 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
-import { missingBookingFields, parseBookingBody, readBooking } from "@/lib/booking-webhook";
+import { missingBookingFields, parseBookingBody, priceCheckAlertText, readBooking } from "@/lib/booking-webhook";
 import { insertBooking, payloadHash, recentDuplicate } from "@/lib/booking-webhook-db";
+import { textAdmins } from "@/lib/intake-alerts-db";
+import { siteOrigin } from "@/lib/team/clock-db";
+import { managerHref } from "@/lib/team/manager-tabs";
 
 // The GHL booking webhook. Every booking creates a new session: it is never
 // matched to an earlier event by contact, email or date (a repeat client has
 // one contact and many events). The only lookup is the duplicate guard, which
 // returns the session an identical payload made in the last 10 minutes.
-// Field rules are in lib/booking-webhook.ts.
+// Field rules are in lib/booking-webhook.ts. A booking whose price needs a
+// check (the service fee split did not line up, or no pricing model at all) is
+// still saved, flagged on the admin event page, and texted to the admins.
 
 export async function POST(req: NextRequest) {
   let raw = "";
@@ -46,5 +51,9 @@ export async function POST(req: NextRequest) {
   // Every expected field that arrived missing (blank, "null", or a merge tag), so a gap on the booking side shows in the logs.
   const gaps = missingBookingFields(booking);
   if (gaps.length > 0) console.warn(`[create-session] session=${made.id}: booking arrived without ${gaps.join(", ")}`);
-  return NextResponse.json({ id: made.id, url: link(made.id) });
+  if (made.check) {
+    console.warn(`[create-session] session=${made.id}: price needs a check (${booking.pricingModel}): ${made.check}`);
+    await textAdmins(priceCheckAlertText(booking, made.id, made.check, `${siteOrigin()}${managerHref(made.id)}`), "create-session");
+  }
+  return NextResponse.json({ id: made.id, url: link(made.id), pricing_model: booking.pricingModel, price_check: made.check });
 }

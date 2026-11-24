@@ -7,7 +7,7 @@
 // Run: node --no-warnings scripts/test-booking-webhook.mts
 
 import { registerHooks } from "node:module";
-import { check, done, src, out } from "./team-harness.mts";
+import { check, done, src, out, texts } from "./team-harness.mts";
 
 registerHooks({
   resolve(specifier, context, nextResolve) {
@@ -28,6 +28,8 @@ const payout = await import("../lib/team/payout.ts");
 const clockDb = await import("../lib/team/clock-db.ts");
 const markets = await import("../lib/team/markets.ts");
 const card = await import("../lib/booking-summary.ts");
+const pm = await import("../lib/pricing-model.ts");
+const pcdb = await import("../lib/price-check-db.ts");
 
 const SAMPLE = `Full Bar, Social Gathering
 18 guests · 4 hours in Prsoper, TX · 1 bartender · bar opens 6:00 PM
@@ -242,6 +244,130 @@ check("Tip note: more than a dollar apart", payout.tipMismatchNote(164, 8200) ==
 check("Tip note: missing either side, no note", payout.tipMismatchNote(null, 8200) === null && payout.tipMismatchNote(164, null) === null);
 check("Tips are still the gratuity split evenly", (() => { const t = pay.tipsShare(164, 2, true); return t.state === "on_file" && t.cents === 8200; })());
 check("Both payout cards pass the note", src("app/team/admin/e/[id]/page.tsx").includes("tipNote={payout.tipNote}") && src("app/team/admin/timesheets/page.tsx").includes("tipNote={payout.tipNote}"));
+
+// ---------- service fee model bookings ----------
+
+// The owner's quote tool example, as HighLevel forwards it.
+const SF = {
+  contact_id: "c-900", name: "Rosa Diaz", email: "rosa.d@example.com", phone: "(469) 555-0199", event_date: "2027-03-20", start_time: "6:00 PM",
+  event_type: "Birthday Party", city: "Frisco", state: "TX",
+  package_key: "full", guest_count: "100", service_hours: "4", number_of_bartenders: "2", second_bar: "Yes",
+  pricing_model: "service fee model", promo_code: "RETURN5", discount_amount: "82.75", custom_price: "", standard_price: "1986",
+  owner_override: "false", addons_total: "150", build_a_bar_price: "2037", package_price: "2037", deposit_paid: "0", balance_due: "2037",
+  tip_jar: "Yes", tip_jar_allowed: "Yes",
+};
+const admin = { id: "a1", name: "Owner", phone: "+12145550000", role: "admin", active: true };
+const resetSf = () => { reset(); db.staff = [admin]; texts.length = 0; };
+const sess = () => db.sessions[0] as Record<string, unknown> & { booked_price: Record<string, unknown>; price_check: { reason: string } | null };
+
+resetSf();
+const sf1 = await post(JSON.stringify(SF));
+let s = sess();
+check("Service fee booking: saved on the service fee model, no check", sf1.status === 200 && s.pricing_model === "service_fee" && s.price_check === null && s.price_check_at === null && sf1.json.pricing_model === "service_fee" && sf1.json.price_check === null);
+check("Service fee booking: package $1,572.25, fee $314.45 (20%), add ons $150, total $2,037", s.booked_price.package_price === 1572.25 && s.booked_price.service_fee === 314.45 && s.booked_price.service_fee_rate === 0.2 && s.booked_price.addons_total === 150 && s.booked_price.total === 2037, JSON.stringify(s.booked_price));
+check("Service fee booking: standard price, discount, custom price, owner override stored", s.booked_price.standard_price === 1986 && s.booked_price.discount_amount === 82.75 && s.booked_price.custom_price === null && s.booked_price.owner_override === false);
+check("Service fee booking: no gratuity, deposit $0, balance $2,037, second bar yes, engine split", s.booked_price.gratuity === null && s.booked_price.deposit_paid === 0 && s.booked_price.balance_due === 2037 && s.booked_price.second_bar === true && s.booked_price.split_method === "engine" && s.booked_price.pricing_model === "service_fee");
+check("Service fee booking: basis is what the engine matched", (() => { const b = s.booked_price.basis as Record<string, unknown>; return b.package === "full" && b.guests === 100 && b.hours === 4 && b.bartenders === 2 && b.isWedding === false; })());
+check("Service fee booking: package name, service hours, bartenders, promo saved", s.package_type === "Full Bar" && s.hours_booked === "4" && s.bartender_count === 2 && s.promo_code === "RETURN5" && s.tip_jar === true);
+check("Service fee booking: no admin text when the price lines up", texts.length === 0);
+
+resetSf();
+const { build_a_bar_price: _drop, ...onlyPackagePrice } = SF;
+void _drop;
+await post(JSON.stringify(onlyPackagePrice));
+s = sess();
+check("package_price alone is read as the grand total, never the package", s.booked_price.total === 2037 && s.booked_price.package_price === 1572.25 && s.price_check === null);
+
+resetSf();
+await post(JSON.stringify({ ...SF, official_total_price: "2037", total_price: "2150" }));
+s = sess();
+check("Grand totals more than $1 apart: saved with build_a_bar_price and flagged", s.booked_price.total === 2037 && /grand total fields disagree/.test(s.price_check?.reason ?? "") && /total_price \$2,150/.test(s.price_check?.reason ?? ""));
+check("A flagged booking texts the admins once, with the reason", texts.length === 1 && texts[0].phone === admin.phone && texts[0].message.startsWith("Price needs a check on a new booking: Rosa Diaz") && texts[0].message.includes("grand total fields disagree"));
+
+resetSf();
+await post(JSON.stringify({ ...SF, package_key: "essentials" }));
+s = sess();
+check("Unknown package key: saved, fee carved from total less add ons, flagged", s.pricing_model === "service_fee" && s.booked_price.split_method === "carved" && /Unknown package key "essentials"/.test(s.price_check?.reason ?? "") && texts.length === 1);
+
+resetSf();
+await post(JSON.stringify({ ...SF, standard_price: "1999" }));
+s = sess();
+check("Engine does not match standard_price: flagged with both prices", /engine prices this at \$1,986\.00, the booking says \$1,999\.00/.test(s.price_check?.reason ?? ""), String(s.price_check?.reason));
+
+resetSf();
+await post(JSON.stringify({ ...SF, custom_price: "1800", discount_amount: "186", build_a_bar_price: "1950", package_price: "1950", balance_due: "1950" }));
+s = sess();
+check("Custom price: package $1,500, fee $300 carved out, no check", s.booked_price.package_price === 1500 && s.booked_price.service_fee === 300 && s.booked_price.custom_price === 1800 && s.booked_price.split_method === "custom" && s.price_check === null);
+
+resetSf();
+await post(JSON.stringify({ ...SF, package_key: "big_day", event_type: "Wedding", standard_price: "2094", discount_amount: "0", promo_code: "", addons_total: "0", second_bar: "No", build_a_bar_price: "2094", package_price: "2094" }));
+s = sess();
+check("The Big Day Bar (big_day) wedding: $2,094 matches, named The Big Day Bar", s.price_check === null && s.package_type === "The Big Day Bar" && s.booked_price.total === 2094 && (s.booked_price.basis as Record<string, unknown>).isWedding === true);
+
+resetSf();
+await post(JSON.stringify({ ...SF, package_summary: SAMPLE, gratuity: "$164", tip_per_bartender: "$164" }));
+s = sess();
+check("Service fee booking: gratuity, tip per bartender and the summary's Gratuity line are not read", s.booked_price.gratuity === null && s.booked_price.tip_per_bartender == null && s.package_summary === SAMPLE);
+
+resetSf();
+await post(JSON.stringify({ ...SF, menu_frame_price: "45", custom_cups_price: "105" }));
+s = sess();
+check("Each add on's own price is a display line; only addons_total is money", JSON.stringify(s.booked_price.addon_lines) === JSON.stringify([{ label: "Menu frame", amount: 45 }, { label: "Custom cups", amount: 105 }]) && s.booked_price.addons_total === 150);
+
+resetSf();
+const { pricing_model: _pm, ...noModel } = SF;
+void _pm;
+await post(JSON.stringify(noModel));
+check("No pricing_model but standard_price and addons_total: service fee model, no check", sess().pricing_model === "service_fee" && sess().price_check === null);
+
+resetSf();
+await post(JSON.stringify(base));
+s = sess();
+check("No model at all: gratuity model, flagged, admins texted", s.pricing_model === "gratuity" && s.price_check?.reason === pm.NO_MODEL_CHECK && texts.length === 1 && texts[0].message.includes("Saved on the gratuity model"));
+check("No model at all: booked price exactly as before (total, gratuity, discount)", s.booked_price.total === 1749 && s.booked_price.gratuity === 164 && s.booked_price.discount_amount === 41 && s.booked_price.service_fee === undefined && s.booked_price.pricing_model === undefined);
+
+resetSf();
+await post(JSON.stringify({ ...base, pricing_model: "Gratuity model" }));
+check("pricing_model gratuity model: no check, no text", sess().pricing_model === "gratuity" && sess().price_check === null && texts.length === 0);
+
+{
+  const miss = bw.missingBookingFields(bw.readBooking({ ...SF, package_key: "", service_hours: "", number_of_bartenders: "", build_a_bar_price: "", package_price: "", standard_price: "1986" }));
+  check("Missing field log uses the quote tool's names on a service fee booking", miss.includes("package_key") && miss.includes("service_hours") && miss.includes("number_of_bartenders") && miss.includes("build_a_bar_price") && !miss.includes("total_price"));
+  check("A complete service fee booking logs nothing missing", bw.missingBookingFields(bw.readBooking(SF)).length === 0, JSON.stringify(bw.missingBookingFields(bw.readBooking(SF))));
+}
+
+// Booking summary card on a service fee event.
+resetSf();
+await post(JSON.stringify(SF));
+const sfCard = card.bookingSummary(sess() as never)!;
+check("Card: Pricing reads Service fee model (20%)", sfCard.pricing === "Service fee model (20%)");
+check(
+  "Card: the split in order",
+  JSON.stringify(sfCard.money) ===
+    JSON.stringify([["Standard price", "$1,986"], ["Discount", "$82.75"], ["Package", "$1,572.25"], ["Service fee (20%)", "$314.45"], ["Add ons", "$150"], ["Second bar", "Yes"], ["Total", "$2,037"], ["Deposit paid", "$0"], ["Balance due as booked", "$2,037"]]),
+  JSON.stringify(sfCard.money)
+);
+check("Card: a gratuity event reads Gratuity model with no split", (() => { const c = card.bookingSummary({ pricing_model: "gratuity", booked_price: { total: 1749 } }); return c?.pricing === "Gratuity model" && c.money.length === 0; })());
+
+// Confirming the model clears the flag.
+resetSf();
+await post(JSON.stringify(base));
+const flaggedId = String(sess().id);
+const listed = await pcdb.priceCheckList();
+check("Flagged bookings are listed for the admins, not yet openable before the concierge", listed.length === 1 && listed[0].sessionId === flaggedId && listed[0].submitted === false && listed[0].reason === pm.NO_MODEL_CHECK);
+const kept = await pcdb.confirmPriceCheck(flaggedId, "gratuity", { id: "a1", name: "Owner" });
+s = sess();
+check("Confirm the gratuity model: flag cleared, money unchanged, who confirmed recorded", kept.ok && s.price_check === null && s.price_check_at === null && s.booked_price.total === 1749 && s.booked_price.gratuity === 164 && (s.booked_price.price_confirmed as Record<string, unknown>).by === "Owner");
+check("Nothing left to check after confirming", (await pcdb.priceCheckList()).length === 0);
+
+resetSf();
+await post(JSON.stringify(base));
+await pcdb.confirmPriceCheck(String(sess().id), "service_fee", { id: "a1", name: "Owner" });
+s = sess();
+check("Switch to the service fee model: fee carved from the total ($1,749 → $1,457.50 + $291.50)", s.pricing_model === "service_fee" && s.booked_price.package_price === 1457.5 && s.booked_price.service_fee === 291.5 && s.booked_price.gratuity === null && s.price_check === null);
+check("Confirm refuses a model it does not know", !(await pcdb.confirmPriceCheck(String(sess().id), "tips", { id: "a1", name: "Owner" })).ok);
+check("Switching with no total is refused", (() => { const r = pcdb.confirmedBooked({ package_type: "Full Bar", booked_price: null, pricing_model: "gratuity" }, "service_fee", { id: "a1", name: "O" }, "t"); return !r.ok; })());
+check("The card and the alert list are wired", page.includes("<PriceCheckCard") && page.includes("isAdminRole(me.role) && session.price_check") && src("app/team/admin/events/save-alerts.tsx").includes("Price needs a check:"));
 
 void out;
 done("booking webhook");

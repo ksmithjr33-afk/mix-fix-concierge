@@ -6,11 +6,25 @@
 // sends an empty field) count as missing (lib/blank.ts). Dedicated fields
 // always win over what package_summary says, and the total price is never
 // read from the summary.
+//
+// Two pricing models (lib/pricing-model.ts). A booking is on the service fee
+// model when pricing_model says so, or, with no pricing_model, when it sends
+// standard_price or addons_total. On a service fee booking:
+//   - the grand total is build_a_bar_price, official_total_price, total_price
+//     or package_price, in that order. package_price is the GRAND TOTAL here,
+//     never the package alone. Totals more than $1 apart flag the price.
+//   - the engine inputs also come as package_key, service_hours and
+//     number_of_bartenders.
+//   - gratuity, tip_per_bartender and the summary's "Gratuity:" line are not read.
+//   - a promo code is stored as sent and never decoded.
+// Gratuity model bookings read exactly what they always did.
 
 import { parseTipJar } from "@/lib/price-change";
 import { normalizePhone } from "@/lib/team/codes";
 import { formatClock, parseClock } from "@/lib/team/time";
 import { isBlank } from "@/lib/blank";
+import { bookingPricingModel, type PricingModel } from "@/lib/pricing-model";
+import { SERVICE_FEE_PACKAGES, serviceFeePackage } from "@/lib/service-fee";
 
 export { parseTipJar };
 
@@ -142,9 +156,22 @@ export const EXPECTED_BOOKING_FIELDS: readonly { key: string; label: string; of:
   { key: "state", label: "state", of: (b) => b.state },
 ];
 
+/** On a service fee booking the same facts arrive under the quote tool's key names. */
+const SERVICE_FEE_KEY: Record<string, string> = {
+  package_type: "package_key",
+  hours_booked: "service_hours",
+  bartender_count: "number_of_bartenders",
+  total_price: "build_a_bar_price",
+};
+
 /** The expected booking fields this booking is missing, by payload key. */
 export function missingBookingFields(b: Booking): string[] {
-  return EXPECTED_BOOKING_FIELDS.filter((f) => f.of(b) === null || f.of(b) === undefined).map((f) => f.key);
+  const missing = EXPECTED_BOOKING_FIELDS.filter((f) => f.of(b) === null || f.of(b) === undefined).map((f) => f.key);
+  if (b.pricingModel !== "service_fee") return missing;
+  const out = missing.map((k) => SERVICE_FEE_KEY[k] ?? k);
+  if (b.standardPriceCents === null && b.customPriceCents === null) out.push("standard_price");
+  if (b.addonsTotalCents === null) out.push("addons_total");
+  return out;
 }
 
 /** "$1,749.50" → 174950. Null when missing or not an amount. */
@@ -274,13 +301,127 @@ export interface Booking {
   city: string | null;
   state: string | null;
   // Older payload keys still honored.
-  packagePriceCents: number | null;
+  packagePriceCents: number | null; // gratuity model only: the package alone. Never set on a service fee booking.
   customPriceCents: number | null;
   depositPaidCents: number | null;
+  // Which pricing model, and why it needs a check when it was not said.
+  pricingModel: PricingModel;
+  modelCheck: string | null;
+  // Service fee model only (null or false on a gratuity booking).
+  packageKey: string | null; // package_key, else package_type, as sent
+  isWedding: boolean;
+  standardPriceCents: number | null;
+  addonsTotalCents: number | null;
+  ownerOverride: boolean;
+  woodenBar: boolean | null; // null: not sent
+  barback: boolean | null; // null: not sent
+  secondBar: boolean | null;
+  balanceDueCents: number | null;
+  addonLines: { key: string; label: string; cents: number }[]; // each add on's own *_price field, shown only
+  totalSource: string | null; // the key the grand total came from
+  totalCheck: string | null; // the grand total fields disagree by more than $1
+}
+
+/** Yes, No, true, false, Included, Removed. Null when missing or unclear. */
+export function parseYesNo(v: unknown): boolean | null {
+  if (typeof v === "boolean") return v;
+  const s = clean(v)?.toLowerCase().replace(/[^a-z0-9 ]+/g, " ").trim();
+  if (!s) return null;
+  if (/^(yes|y|true|t|1|on|included|include|with|added)\b/.test(s)) return true;
+  if (/^(no|n|false|f|0|off|removed|remove|none|without)\b/.test(s)) return false;
+  return null;
+}
+
+/** The grand total keys of a service fee booking, first wins. */
+export const GRAND_TOTAL_KEYS = ["build_a_bar_price", "official_total_price", "total_price", "package_price"] as const;
+
+/** Keys ending in _price that are money fields, not add on lines. */
+const NOT_ADDON_PRICE = new Set<string>([...GRAND_TOTAL_KEYS, "standard_price", "custom_price"]);
+
+const usd = (cents: number) => `$${(cents / 100).toLocaleString("en-US", { minimumFractionDigits: cents % 100 ? 2 : 0, maximumFractionDigits: 2 })}`;
+
+/** The grand total: the first of the keys sent, and a check when another one is more than $1 off. */
+export function grandTotal(body: Record<string, unknown>): { cents: number | null; source: string | null; check: string | null } {
+  const sent = GRAND_TOTAL_KEYS.map((k) => ({ k, c: parseMoneyCents(body[k]) })).filter((x): x is { k: (typeof GRAND_TOTAL_KEYS)[number]; c: number } => x.c !== null && x.c > 0);
+  if (sent.length === 0) return { cents: null, source: null, check: null };
+  const first = sent[0];
+  const off = sent.filter((x) => Math.abs(x.c - first.c) > 100);
+  const check = off.length
+    ? `The grand total fields disagree: ${sent.map((x) => `${x.k} ${usd(x.c)}`).join(", ")}. Saved with ${first.k}.`
+    : null;
+  return { cents: first.c, source: first.k, check };
+}
+
+/** "menu_frame_price" → "Menu frame". */
+const addonLabel = (key: string) => {
+  const t = key.replace(/_price$/, "").replace(/_/g, " ").trim();
+  return t.charAt(0).toUpperCase() + t.slice(1);
+};
+
+function addonLines(body: Record<string, unknown>): Booking["addonLines"] {
+  const out: Booking["addonLines"] = [];
+  for (const key of Object.keys(body)) {
+    if (!/_price$/.test(key) || NOT_ADDON_PRICE.has(key)) continue;
+    const cents = parseMoneyCents(body[key]);
+    if (cents !== null && cents > 0) out.push({ key, label: addonLabel(key), cents });
+  }
+  return out;
 }
 
 /** Every field cleaned, with package_summary filling only what the dedicated fields left missing. */
 export function readBooking(body: Record<string, unknown>): Booking {
+  const standardPriceCents = parseMoneyCents(body.standard_price);
+  const addonsTotalCents = parseMoneyCents(body.addons_total);
+  const { model, check: modelCheck } = bookingPricingModel({
+    pricingModel: clean(body.pricing_model),
+    hasStandardPrice: standardPriceCents !== null,
+    hasAddonsTotal: addonsTotalCents !== null,
+  });
+  const gratuityBooking = readGratuityBooking(body);
+  if (model === "gratuity") return { ...gratuityBooking, modelCheck };
+  return readServiceFeeBooking(body, gratuityBooking, standardPriceCents, addonsTotalCents);
+}
+
+/** A service fee booking: the gratuity reading, with the quote tool's keys and money on top. */
+function readServiceFeeBooking(body: Record<string, unknown>, g: Booking, standardPriceCents: number | null, addonsTotalCents: number | null): Booking {
+  const total = grandTotal(body);
+  const packageKey = clean(body.package_key) ?? clean(body.package_type);
+  const key = serviceFeePackage(packageKey);
+  const promo = clean(body.promo_code);
+  const tipJar = parseTipJar(clean(body.tip_jar)) ?? parseTipJar(clean(body.tip_jar_allowed));
+  const kind = g.eventType ?? g.eventName ?? "";
+  return {
+    ...g,
+    packageType: clean(body.package_type) ?? (key ? SERVICE_FEE_PACKAGES[key].label : packageKey),
+    hoursBooked: clean(body.service_hours) ?? g.hoursBooked,
+    bartenderCount: parseCount(body.number_of_bartenders) ?? g.bartenderCount,
+    tipJar,
+    // Stored as sent, never decoded, never read from the summary.
+    promoCode: promo ? promo.toUpperCase() : null,
+    totalCents: total.cents,
+    gratuityCents: null,
+    tipPerBartenderCents: null,
+    discountCents: parseMoneyCents(body.discount_amount),
+    packagePriceCents: null,
+    pricingModel: "service_fee",
+    modelCheck: null,
+    packageKey,
+    isWedding: /wedding/i.test(kind) || key === "wedding",
+    standardPriceCents,
+    addonsTotalCents,
+    ownerOverride: parseYesNo(body.owner_override) === true,
+    woodenBar: parseYesNo(body.wooden_bar),
+    barback: parseYesNo(body.barback),
+    secondBar: parseYesNo(body.second_bar),
+    balanceDueCents: parseMoneyCents(body.balance_due),
+    addonLines: addonLines(body),
+    totalSource: total.source,
+    totalCheck: total.check,
+  };
+}
+
+/** Every field as a gratuity model booking reads it (unchanged from before the service fee model). */
+function readGratuityBooking(body: Record<string, unknown>): Booking {
   const rawSummary = typeof body.package_summary === "string" && clean(body.package_summary) !== null ? body.package_summary : null;
   const sum = parsePackageSummary(rawSummary);
   const eventType = clean(body.event_type);
@@ -313,11 +454,26 @@ export function readBooking(body: Record<string, unknown>): Booking {
     packagePriceCents: parseMoneyCents(body.package_price),
     customPriceCents: parseMoneyCents(body.custom_price),
     depositPaidCents: parseMoneyCents(body.deposit_paid),
+    pricingModel: "gratuity",
+    modelCheck: null,
+    packageKey: null,
+    isWedding: false,
+    standardPriceCents: null,
+    addonsTotalCents: null,
+    ownerOverride: false,
+    woodenBar: null,
+    barback: null,
+    secondBar: null,
+    balanceDueCents: null,
+    addonLines: [],
+    totalSource: null,
+    totalCheck: null,
   };
 }
 
 /** True when the booking carries any price information worth a booked_price. */
 export function hasPriceInfo(b: Booking): boolean {
+  if (b.pricingModel === "service_fee") return true; // always gets a booked_price, flagged when the money is missing
   return [b.totalCents, b.gratuityCents, b.packagePriceCents, b.customPriceCents, b.discountCents, b.depositPaidCents, b.tipPerBartenderCents, b.bartenderCount, b.promoCode, b.tipJar].some(
     (v) => v !== null
   );
@@ -357,4 +513,13 @@ export function cityFallback(session: Record<string, unknown>): string {
   if (!city) return "";
   const state = clean(session.event_state);
   return state ? `${city}, ${state}` : city;
+}
+
+// ---------- the price check text ----------
+
+/** The text every alert admin gets when a new booking is saved with "Price needs a check". */
+export function priceCheckAlertText(b: Booking, sessionId: string, reason: string, link: string): string {
+  const who = [b.name ?? b.email, b.eventDate, b.packageType].filter(Boolean).join(", ");
+  const model = b.pricingModel === "service_fee" ? "service fee model" : "gratuity model";
+  return `Price needs a check on a new booking: ${who || `session ${sessionId}`}. Saved on the ${model}. ${reason} The event page opens once the client finishes the concierge: ${link}`;
 }

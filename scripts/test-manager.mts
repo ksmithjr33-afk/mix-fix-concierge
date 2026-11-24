@@ -172,7 +172,7 @@ check("Routes, tables and the payload field keep their names", src("lib/client-l
   check("The Menu pickup and Ice pickup cards are on Pickups, not Details", pickups.includes("<MenuPickupPanel") && pickups.includes("<IcePickupPanel") && !details.includes("MenuPickupPanel") && !details.includes("IcePickupPanel"));
   check("The Agreement card is on Agreement, not Details, and its data loads only there", page.includes("agreement: () => (agreements ? <AgreementCard") && !details.includes("AgreementCard") && page.includes('on("agreement") ? agreementsFor(id, me'));
   check("The pickups badge counts the menu pickup, the approved menu and the ice", page.includes("pickups: (pickup.outstanding ? 1 : 0) + (menuFile.missing ? 1 : 0) + (ice.outstanding ? 1 : 0),"));
-  check("...and Details no longer counts them", page.includes("details: (session.price_pending ? 1 : 0) + (guestFlag ? 1 : 0),") && !/details: [^\n]*(pickup|menuFile|ice)\./.test(page));
+  check("...and Details no longer counts them", page.includes("details: (session.price_pending ? 1 : 0) + (guestFlag ? 1 : 0) + (session.price_check && isAdminRole(me.role) ? 1 : 0),") && !/details: [^\n]*(pickup|menuFile|ice)\./.test(page));
   check("Pickup links go to the Pickups tab, agreement links to the Agreement tab", src("lib/team/menu-pickup-db.ts").includes("?tab=pickups") && src("lib/team/ice-pickup-db.ts").includes("?tab=pickups") && src("lib/team/agreements-db.ts").includes("?tab=agreement"));
   const bar = src("app/team/admin/e/[id]/manager-tabs.tsx");
   check("The tab bar is one row that scrolls sideways at every width", bar.includes("overflow-x-auto") && bar.includes('className="flex w-max gap-1.5') && !/grid-cols/.test(bar));

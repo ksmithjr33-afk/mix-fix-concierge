@@ -1,5 +1,6 @@
 // What GHL sent when the client booked: the raw package summary (line breaks
-// kept) and the booked values beside it. Admins and managers only: it has the
+// kept), the booked values beside it, the pricing model, and the service fee
+// split as booked. Admins and managers only: it has the
 // discount and gratuity amounts, so the page renders it only for them.
 
 import type { BookingSummary } from "@/lib/booking-summary";
@@ -8,6 +9,7 @@ const dollars = (n: number) => `$${n.toLocaleString("en-US", { minimumFractionDi
 
 export default function BookingSummaryCard({ summary }: { summary: BookingSummary }) {
   const rows: [string, string][] = [];
+  if (summary.pricing) rows.push(["Pricing", summary.pricing]);
   if (summary.bookedStart) rows.push(["Booked start", summary.bookedStart]);
   if (summary.bartenders) rows.push(["Bartenders booked", String(summary.bartenders)]);
   if (summary.tipPerBartender !== null) rows.push(["Tip per bartender", dollars(summary.tipPerBartender)]);
@@ -21,6 +23,16 @@ export default function BookingSummaryCard({ summary }: { summary: BookingSummar
             <div key={k} className="contents">
               <dt className="text-[#6B5D52]">{k}</dt>
               <dd>{v}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+      {summary.money.length > 0 && (
+        <dl className="grid grid-cols-[auto_1fr] gap-x-3 text-sm text-[#2C2420] mb-2 border-t border-[#DDD5CC] pt-2" aria-label="Price as booked">
+          {summary.money.map(([k, v]) => (
+            <div key={k} className="contents">
+              <dt className={k.startsWith("  ") ? "pl-3 text-[#6B5D52]" : k === "Total" ? "font-medium text-[#2C2420]" : "text-[#6B5D52]"}>{k.trim()}</dt>
+              <dd className={k === "Total" ? "font-medium" : undefined}>{v}</dd>
             </div>
           ))}
         </dl>

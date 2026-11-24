@@ -64,6 +64,21 @@ export interface BookedPrice {
   // Shown only; the payout card always splits the gratuity evenly.
   tip_per_bartender?: number | null;
   updated_at?: string;
+  // Service fee model only (lib/service-fee-booking.ts). On these, package_price
+  // is the package alone after any discount, total is the grand total, and
+  // gratuity is null. The model itself is sessions.pricing_model.
+  pricing_model?: "gratuity" | "service_fee";
+  service_fee?: number | null;
+  service_fee_rate?: number | null; // 0.2, or 0.1 on Premium
+  addons_total?: number | null;
+  standard_price?: number | null;
+  owner_override?: boolean;
+  balance_due?: number | null; // as the booking sent it; the app keeps figuring the balance from payments
+  second_bar?: boolean | null;
+  addon_lines?: { label: string; amount: number }[]; // each add on's own price, shown only
+  split_method?: "engine" | "custom" | "carved" | null;
+  price_check?: string | null; // why the booking was flagged, as it was booked
+  price_confirmed?: { model: "gratuity" | "service_fee"; by: string; at: string }; // the admin who cleared the flag
 }
 
 /**

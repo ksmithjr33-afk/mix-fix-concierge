@@ -82,6 +82,10 @@ export interface SessionRow {
   package_summary?: string | null;
   event_city?: string | null;
   event_state?: string | null;
+  // Which pricing model, and "Price needs a check" (supabase/migrations/20270103_service_fee_model.sql).
+  pricing_model?: "gratuity" | "service_fee" | null;
+  price_check?: { reason: string; at: string } | null;
+  price_check_at?: string | null;
 }
 
 export interface EventUpdateRow {

@@ -69,6 +69,8 @@ import { listReports } from "@/lib/team/low-stock-db";
 import LowStockList from "../../running-low/report-list";
 import { isAdminRole } from "@/lib/team/roles";
 import PriceNeededCard from "./price-needed-card";
+import PriceCheckCard from "./price-check-card";
+import { sessionPricingModel } from "@/lib/pricing-model";
 import { guestCountFlag } from "@/lib/intake-guests";
 import { pendingBlocks, pendingSummary } from "@/lib/price-pending";
 import { eventTimesheetRows } from "@/lib/team/timesheet-db";
@@ -358,6 +360,15 @@ async function AdminEventPage({
       const packages = PACKAGE_CHOICES.includes(editValues.package) || !editValues.package ? PACKAGE_CHOICES : [editValues.package, ...PACKAGE_CHOICES];
       return (
         <>
+          {/* "Price needs a check" from the booking: admins and managers only, like the price it names. */}
+          {isAdminRole(me.role) && session.price_check && (
+            <PriceCheckCard
+              sessionId={id}
+              reason={session.price_check.reason}
+              model={sessionPricingModel(session)}
+              since={session.price_check_at ? chicagoStamp(session.price_check_at) : null}
+            />
+          )}
           {session.price_pending && (
             <PriceNeededCard sessionId={id} summary={pendingSummary(session.price_pending_info)} blocks={pendingBlocks(session.price_pending_info)} />
           )}
@@ -531,7 +542,7 @@ async function AdminEventPage({
         header={header}
         panel={panels[tab]()}
         counts={{
-          details: (session.price_pending ? 1 : 0) + (guestFlag ? 1 : 0),
+          details: (session.price_pending ? 1 : 0) + (guestFlag ? 1 : 0) + (session.price_check && isAdminRole(me.role) ? 1 : 0),
           // The menu is not picked up (or nobody is assigned) inside 48 hours, no approved menu inside 72 hours, and the ice not done inside 24 hours.
           pickups: (pickup.outstanding ? 1 : 0) + (menuFile.missing ? 1 : 0) + (ice.outstanding ? 1 : 0),
           team: hidden ? 0 : counts.stillNeeded + handoffs.length + (barbackNeeded ? 1 : 0),

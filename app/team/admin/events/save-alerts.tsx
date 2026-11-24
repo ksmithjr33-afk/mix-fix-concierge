@@ -11,7 +11,7 @@ function when(iso: string | null): string {
 // not save, and saved events whose date was already past when they booked.
 // Renders nothing when there is nothing to check.
 export default function SaveAlerts({ alerts }: { alerts: Alerts | null }) {
-  if (!alerts || (alerts.unsaved.length === 0 && alerts.pastDate.length === 0 && alerts.stale.length === 0 && alerts.pricePending.length === 0 && (alerts.guestCount ?? []).length === 0)) return null;
+  if (!alerts || (alerts.unsaved.length === 0 && alerts.pastDate.length === 0 && alerts.stale.length === 0 && alerts.pricePending.length === 0 && (alerts.priceCheck ?? []).length === 0 && (alerts.guestCount ?? []).length === 0)) return null;
   return (
     <div className="space-y-3" role="alert">
       {alerts.unsaved.length > 0 && (
@@ -42,6 +42,29 @@ export default function SaveAlerts({ alerts }: { alerts: Alerts | null }) {
                   {p.name}
                 </Link>{" "}
                 · {p.summary}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+      {(alerts.priceCheck ?? []).length > 0 && (
+        <section className="rounded-xl border-2 border-[#B3261E] bg-[#FDECEA] p-4 space-y-2">
+          <h2 className="font-semibold text-[#8C1D18]">
+            Price needs a check: {alerts.priceCheck.length} {alerts.priceCheck.length === 1 ? "booking" : "bookings"}
+          </h2>
+          <p className="text-sm text-[#6B5D52]">Saved from the booking, but the pricing model or the price did not line up. Confirm the model on the event.</p>
+          <ul className="text-sm space-y-1">
+            {alerts.priceCheck.map((p) => (
+              <li key={p.sessionId}>
+                {p.submitted ? (
+                  <Link href={`/team/admin/e/${p.sessionId}`} className="text-[#B5845A] underline">
+                    {p.name}
+                  </Link>
+                ) : (
+                  <span className="font-medium text-[#2C2420]">{p.name}</span>
+                )}{" "}
+                · {p.reason}
+                {!p.submitted && <span className="text-[#6B5D52]"> · the event opens once the client finishes the concierge (session {p.sessionId})</span>}
               </li>
             ))}
           </ul>
