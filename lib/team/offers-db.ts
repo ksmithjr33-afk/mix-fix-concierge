@@ -11,6 +11,7 @@
 // "no offers" and never breaks posting, assigning, or the cron.
 
 import { supabase } from "@/lib/supabase";
+import { upsertAssignment } from "@/lib/team/event-roles-db";
 import type { SessionRow } from "@/lib/event-updates";
 import { bartendersNeeded, firstName, type StaffMember } from "@/lib/team/event-view";
 import { adminEventTitle } from "@/lib/team/event-list";
@@ -344,10 +345,8 @@ async function claimSpot(run: RunRow, staffId: string, kind: ClaimRow["kind"]): 
 
 /** Put someone on the event as accepted (an offer they took). */
 async function assignAccepted(run: RunRow, session: SessionRow, staff: StaffFull, now: Date): Promise<void> {
-  const { error } = await supabase.from("event_assignments").upsert(
-    { session_id: session.id, staff_id: staff.id, status: "accepted", assigned_at: now.toISOString(), responded_at: now.toISOString(), assigned_by: run.started_by },
-    { onConflict: "session_id,staff_id" }
-  );
+  // Ranked offers fill Bartender spots only.
+  const { error } = await upsertAssignment({ session_id: session.id, staff_id: staff.id, status: "accepted", assigned_at: now.toISOString(), responded_at: now.toISOString(), assigned_by: run.started_by, role: "bartender" });
   if (error) throw new Error(`assign failed: ${error.message}`);
   await lockMileage(session.id, staff.id).catch((err) => console.error("[offers] mileage lock failed:", err));
   await sendStaffText(staff.phone, staff.name, gotShiftText({ date: dateOf(session), link: eventLink(session.id) }));

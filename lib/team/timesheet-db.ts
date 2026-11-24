@@ -7,6 +7,7 @@
 // reopen first), and staff_id always comes from the assignment.
 
 import { supabase } from "@/lib/supabase";
+import { eventRoleOf } from "@/lib/team/event-roles";
 import type { StaffMember } from "@/lib/team/event-view";
 import { eventTitle } from "@/lib/team/event-list";
 import { eventDay, eventSchedule, formatClock } from "@/lib/team/time";
@@ -76,13 +77,14 @@ function edOf(s: SessionLite): Record<string, unknown> {
 
 /** Rows for the given assignments, or for every event dated from..to (YYYY-MM-DD, inclusive). */
 async function buildRows(filter: { from: string; to: string } | { assignmentIds: string[] } | { sessionId: string }): Promise<TimesheetRow[]> {
-  let assignments: { id: string; session_id: string; staff_id: string; status: string }[] = [];
+  // "*": the role on the event is read once 20270106_assignment_roles.sql has added it.
+  let assignments: { id: string; session_id: string; staff_id: string; status: string; role?: string | null }[] = [];
   let sessions: SessionLite[] = [];
 
   if ("sessionId" in filter) {
     const [{ data: s, error }, { data, error: aErr }] = await Promise.all([
       supabase.from("sessions").select("*").eq("id", filter.sessionId),
-      supabase.from("event_assignments").select("id, session_id, staff_id, status").eq("session_id", filter.sessionId),
+      supabase.from("event_assignments").select("*").eq("session_id", filter.sessionId),
     ]);
     if (error) throw new Error(`sessions lookup failed: ${error.message}`);
     if (aErr) throw new Error(`event_assignments lookup failed: ${aErr.message}`);
@@ -90,7 +92,7 @@ async function buildRows(filter: { from: string; to: string } | { assignmentIds:
     assignments = (data as typeof assignments) ?? [];
   } else if ("assignmentIds" in filter) {
     if (filter.assignmentIds.length === 0) return [];
-    const { data, error } = await supabase.from("event_assignments").select("id, session_id, staff_id, status").in("id", filter.assignmentIds);
+    const { data, error } = await supabase.from("event_assignments").select("*").in("id", filter.assignmentIds);
     if (error) throw new Error(`event_assignments lookup failed: ${error.message}`);
     assignments = (data as typeof assignments) ?? [];
     const ids = [...new Set(assignments.map((a) => a.session_id))];
@@ -105,7 +107,7 @@ async function buildRows(filter: { from: string; to: string } | { assignmentIds:
     });
     const ids = sessions.map((x) => x.id);
     if (ids.length === 0) return [];
-    const { data, error: aErr } = await supabase.from("event_assignments").select("id, session_id, staff_id, status").in("session_id", ids);
+    const { data, error: aErr } = await supabase.from("event_assignments").select("*").in("session_id", ids);
     if (aErr) throw new Error(`event_assignments lookup failed: ${aErr.message}`);
     assignments = (data as typeof assignments) ?? [];
   }
@@ -128,8 +130,8 @@ async function buildRows(filter: { from: string; to: string } | { assignmentIds:
   const kept = assignments.filter((a) => a.status === "accepted" || withPunches.has(a.id));
 
   const staffIds = [...new Set([...kept.map((a) => a.staff_id), ...approvals.map((a) => a.approved_by), ...edits.map((e) => e.edited_by), ...reopens.flatMap((r) => [r.reopened_by, r.approved_by])])];
-  const { data: staffRows } = staffIds.length ? await supabase.from("staff").select("id, name, phone").in("id", staffIds) : { data: [] };
-  const staff = new Map(((staffRows as { id: string; name: string; phone: string }[]) ?? []).map((s) => [s.id, s]));
+  const { data: staffRows } = staffIds.length ? await supabase.from("staff").select("id, name, phone, role").in("id", staffIds) : { data: [] };
+  const staff = new Map(((staffRows as { id: string; name: string; phone: string; role?: string }[]) ?? []).map((s) => [s.id, s]));
   const bySession = new Map(sessions.map((s) => [s.id, s]));
 
   const rows = kept.flatMap((a): TimesheetRow[] => {
@@ -171,6 +173,7 @@ async function buildRows(filter: { from: string; to: string } | { assignmentIds:
         staffId: a.staff_id,
         staffName: person?.name || "Unknown staff member",
         staffPhone: person?.phone ?? "",
+        eventRole: eventRoleOf(a, person?.role),
         sessionId: a.session_id,
         timeZone: sched.tz,
         eventTitle: eventTitle(ed), // first name only: these rows go out in the payroll CSV

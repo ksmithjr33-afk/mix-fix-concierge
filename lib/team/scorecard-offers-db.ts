@@ -14,6 +14,8 @@ import { ensureMarket } from "@/lib/team/markets-db";
 import { eventData, marketLabel, marketTz, sessionMarket, staffMarketsOf, type Market } from "@/lib/team/markets";
 import { eventSchedule, todayIn } from "@/lib/team/time";
 import { isAdminRole } from "@/lib/team/roles";
+import { bartenderRows } from "@/lib/team/event-roles";
+import { assignmentsWithRoles } from "@/lib/team/event-roles-db";
 import { anyoneBeyondDeveloping, offerOrder } from "@/lib/team/scorecard-ranks-db";
 import {
   GROUP_LABEL,
@@ -28,11 +30,10 @@ import { advanceRun, busyFor, countOnFile, createRun, eventFit, liveRun, offerSe
 
 const fail = (error: string, status = 409) => ({ ok: false as const, error, status });
 
+/** The people working the event as Bartender: offers fill Bartender spots only. */
 async function assignmentsOf(sessionId: string): Promise<{ staff_id: string; status: AssignmentStatus }[]> {
   try {
-    const { data, error } = await supabase.from("event_assignments").select("staff_id, status").eq("session_id", sessionId);
-    if (error) return [];
-    return (data as { staff_id: string; status: AssignmentStatus }[]) ?? [];
+    return bartenderRows(await assignmentsWithRoles(sessionId));
   } catch {
     return [];
   }

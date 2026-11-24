@@ -5,6 +5,7 @@ import TeamHeader from "../../team-header";
 import ShiftCard from "../../shifts/shift-card";
 import OfferButtons from "./offer-buttons";
 import { isAdminRole } from "@/lib/team/roles";
+import { workingAsText } from "@/lib/team/event-roles";
 
 export const dynamic = "force-dynamic";
 
@@ -37,6 +38,8 @@ export default async function OfferPage({ params }: { params: Promise<{ id: stri
                 {page.shift.eventType} in {page.shift.city}
               </h1>
               <p className="text-[15px] text-[#6B5D52]">{page.shift.date}</p>
+              {/* Ranked offers fill Bartender spots only. */}
+              <p className="mt-1 text-[15px] font-medium text-[#2C2420]" data-working-as>{workingAsText("bartender")}</p>
             </div>
             <ShiftCard shift={page.shift} sameDay={[]} />
             <OfferButtons stepId={page.stepId} />

@@ -34,7 +34,7 @@ export async function payoutFrom(viewer: StaffMember, session: SessionRow, sheet
     for (const s of (data as { id: string; name: string }[]) ?? []) names.set(s.id, s.name);
   }
   const rows = crew
-    .map((c) => payoutRow({ staffId: c.staffId, assignmentId: c.assignmentId, name: names.get(c.staffId) || "Unknown staff member", role: c.role, estimate: c.estimate, sheet: bySheet.get(c.staffId) ?? null, reimbursements: reimb.byAssignment.get(c.assignmentId) ?? [] }))
+    .map((c) => payoutRow({ staffId: c.staffId, assignmentId: c.assignmentId, name: names.get(c.staffId) || "Unknown staff member", role: c.role, eventRole: c.eventRole, estimate: c.estimate, sheet: bySheet.get(c.staffId) ?? null, reimbursements: reimb.byAssignment.get(c.assignmentId) ?? [] }))
     .sort((a, b) => a.name.localeCompare(b.name));
   const serviceFee = sessionPricingModel(session) === "service_fee";
   const split = crew.map((c) => c.estimate.tips).find((t) => t.state === "on_file");

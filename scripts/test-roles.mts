@@ -101,9 +101,9 @@ for (const s of [sam, pat, jo]) {
 const opened = await events.openEvent("s1", taylor as never);
 const mates = opened.ok ? await events.eventPageData(opened.session, taylor as never) : null;
 const tm = mates?.view.teammates ?? [];
-check("The event team list shows each role after the name", tm.includes("Sam (bar back)") && tm.includes("Pat (server)") && tm.includes("Jo (event helper)"), tm.join(", "));
+check("The event team list shows each role on the event after the name", tm.includes("Sam (Barback)") && tm.includes("Pat (Server)") && tm.includes("Jo (Event helper)"), tm.join(", "));
 const ap = src("app/team/admin/e/[id]/assign-panel.tsx");
-check("The assign panel shows the role after each name and filters by role", ap.includes("{roleSuffix(s.role)}") && ap.includes("{roleSuffix(p.role) &&") && ap.includes('aria-label="Filter by role"') && ap.includes("pickable.map((s) => ("));
+check("The assign panel shows the role after each name and filters by role", ap.includes("{roleSuffix(s.role)}") && ap.includes("data-event-role") && ap.includes('aria-label="Filter by role"') && ap.includes("pickable.map((s) => ("));
 
 // ----- The migration -----
 const sql = src("supabase/migrations/20261206_staff_roles.sql");

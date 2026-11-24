@@ -78,6 +78,7 @@ export interface TimesheetRow {
   staffId: string;
   staffName: string;
   staffPhone: string;
+  eventRole?: string; // the role worked on this event: "bar_back"
   sessionId: string;
   timeZone: string; // the event's market time zone: punches show and edit in it
   eventTitle: string;

@@ -72,7 +72,7 @@ export default function SettingsForm({
       <div className="space-y-2" id="sf-rates">
         <h3 className="text-sm font-semibold text-[#2C2420]">Hourly rate, service fee model events</h3>
         <p className="text-xs text-[#6B5D52]">
-          Bartenders get the rate for their tier on the day of the event, and someone not placed in a tier gets the Core rate. A bartender with fewer approved events than the new hire count gets the new hire rate, whatever their tier (0 turns it off). Never less than the rate when they accepted the event, and approved hours keep the rate they were approved at. Bar backs, servers and event helpers get the support rate. A person&apos;s own rate counts only when it is higher. No gratuity share on these events.
+          Bartenders get the rate for their tier on the day of the event, and someone not placed in a tier gets the Core rate. A bartender with fewer approved events worked as Bartender than the new hire count gets the new hire rate, whatever their tier (0 turns it off). Never less than the rate when they accepted the event (after a role change, the new role&apos;s rate at the time of the change), and approved hours keep the rate they were approved at. Pay follows the role on the event: anyone working it as a barback, server or event helper gets the support rate. A person&apos;s own rate counts only when it is higher. No gratuity share on these events.
         </p>
         <div className="grid grid-cols-2 gap-2">
           {SERVICE_FEE_RATE_KEYS.map((k) => (

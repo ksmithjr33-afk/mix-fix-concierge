@@ -44,6 +44,7 @@ import type { TimesheetRow } from "@/lib/team/timesheet";
 import { sessionPricingModel } from "@/lib/pricing-model";
 import { tiersForPay, type TierChange, type TierNow } from "@/lib/team/scorecard-pay-db";
 import { eventSchedule } from "@/lib/team/time";
+import { eventRoleOf, type EventRole } from "@/lib/team/event-roles";
 
 type Result<T = object> = ({ ok: true } & T) | { ok: false; error: string; status: number };
 
@@ -59,7 +60,8 @@ interface SessionLite {
 
 /**
  * The rate for one person on one event, from their own rate (or none), the
- * package rates, the event's pricing model, the person's role and, on a
+ * package rates, the event's pricing model, the role they work on the event
+ * (the assignment's, lib/team/event-roles.ts) and, on a
  * service fee event, their standing (payStandings). The one rule: lineRate.
  */
 export function rateForEvent(ownCents: number | null | undefined, session: SessionLite, rates: PackageRates, role?: string | null, standing?: PayStanding | null): LineRate {
@@ -89,7 +91,11 @@ export function tierOnDay(day: string | null, now: RankNow | undefined, changes:
   return valid(t) ? t : null;
 }
 
-/** Each person's approved events (session ids with their days), on either model. */
+/**
+ * Each person's approved events worked as Bartender (session ids with their
+ * days), on either model. Events worked in another role (Barback, Event
+ * helper, Server) never count toward the new hire count.
+ */
 async function approvedEventDays(staffIds: string[]): Promise<Map<string, { sessionId: string; day: string | null }[]>> {
   const out = new Map<string, { sessionId: string; day: string | null }[]>();
   const ids = [...new Set(staffIds)];
@@ -97,8 +103,10 @@ async function approvedEventDays(staffIds: string[]): Promise<Map<string, { sess
   const { data: ap } = await supabase.from("time_approvals").select("assignment_id, staff_id").in("staff_id", ids);
   const approvals = (ap as { assignment_id: string; staff_id: string }[]) ?? [];
   if (approvals.length === 0) return out;
-  const { data: asg } = await supabase.from("event_assignments").select("id, session_id").in("id", approvals.map((a) => a.assignment_id));
-  const sessionOf = new Map(((asg as { id: string; session_id: string }[]) ?? []).map((a) => [a.id, a.session_id]));
+  // "*": the role is read once 20270106_assignment_roles.sql has added it; before that the profile role stands in.
+  const [{ data: asg }, profiles] = await Promise.all([supabase.from("event_assignments").select("*").in("id", approvals.map((a) => a.assignment_id)), rolesOf(ids)]);
+  const rows = (asg as { id: string; session_id: string; staff_id: string; role?: string | null }[]) ?? [];
+  const sessionOf = new Map(rows.filter((a) => eventRoleOf(a, profiles.get(a.staff_id)) === "bartender").map((a) => [a.id, a.session_id]));
   const sessions = await sessionsById([...sessionOf.values()]);
   for (const a of approvals) {
     const sid = sessionOf.get(a.assignment_id);
@@ -110,7 +118,7 @@ async function approvedEventDays(staffIds: string[]): Promise<Map<string, { sess
   return out;
 }
 
-/** How many events each person has approved hours on, on either model. For the Scorecard warning. */
+/** How many events each person has approved hours on as Bartender, on either model. For the Scorecard warning. */
 export async function approvedEventCounts(staffIds: string[]): Promise<Map<string, number>> {
   const days = await approvedEventDays(staffIds);
   return new Map(staffIds.map((id) => [id, days.get(id)?.length ?? 0]));
@@ -166,9 +174,9 @@ async function rateNow(sessionId: string, staffId: string, opts: { accepted?: bo
   const { data: s } = await supabase.from("sessions").select("*").eq("id", sessionId).maybeSingle();
   if (!s) return null;
   const session = s as SessionLite;
-  const [own, rates, role] = await Promise.all([rateOnFile(staffId), packageRates(), roleOf(staffId)]);
+  const [own, rates, roles] = await Promise.all([rateOnFile(staffId), packageRates(), eventRoles([{ sessionId, staffId }])]);
   const standing = (await payStandings(new Map([[session.id, session]]), [{ sessionId, staffId }], opts)).get(standingKey(sessionId, staffId));
-  return { session, rate: rateForEvent(own, session, rates, role, standing) };
+  return { session, rate: rateForEvent(own, session, rates, roles.get(standingKey(sessionId, staffId)), standing) };
 }
 
 /**
@@ -177,13 +185,15 @@ async function rateNow(sessionId: string, staffId: string, opts: { accepted?: bo
  * pay on it. Keeps the first number. Gratuity events store nothing. Never
  * throws, never blocks the accept. Runs from lockMileage, after every accept path.
  */
-export async function lockAcceptedRate(sessionId: string, staffId: string): Promise<void> {
+export async function lockAcceptedRate(sessionId: string, staffId: string, opts: { replace?: boolean } = {}): Promise<void> {
   try {
     const asg = await acceptedAssignment(sessionId, staffId);
     if (!asg) return;
     const now = await rateNow(sessionId, staffId, { accepted: false, stored: false });
     if (!now || sessionPricingModel(now.session) !== "service_fee") return;
-    const { error } = await supabase.from("event_assignments").update({ accepted_rate_cents: now.rate.cents }).eq("id", asg.id).is("accepted_rate_cents", null);
+    // replace: the role changed, so the floor becomes the new role's rate at the time of the change.
+    const q = supabase.from("event_assignments").update({ accepted_rate_cents: now.rate.cents }).eq("id", asg.id);
+    const { error } = opts.replace ? await q : await q.is("accepted_rate_cents", null);
     if (error) console.error("[team] storing the accepted rate failed (run 20270105_tier_pay.sql):", error.message);
   } catch (err) {
     console.error("[team] storing the accepted rate failed:", err instanceof Error ? err.message : String(err));
@@ -203,7 +213,23 @@ export async function rateToStore(assignmentId: string): Promise<{ rate_cents: n
   return { rate_cents: now.rate.cents, rate_reason: now.rate.reason ?? null };
 }
 
-/** The roles of these people, for the service fee rates. Missing reads as bartender. */
+/**
+ * The role each person works on each event (by standingKey): the assignment's
+ * role, else the default from their profile. Someone not on the event yet (an
+ * open shift, an offer) gets the profile default. Server only.
+ */
+export async function eventRoles(keys: { sessionId: string; staffId: string }[]): Promise<Map<string, EventRole>> {
+  const out = new Map<string, EventRole>();
+  if (keys.length === 0) return out;
+  const staffIds = [...new Set(keys.map((k) => k.staffId))];
+  const sessionIds = [...new Set(keys.map((k) => k.sessionId))];
+  const [profiles, { data }] = await Promise.all([rolesOf(staffIds), supabase.from("event_assignments").select("*").in("session_id", sessionIds).in("staff_id", staffIds)]);
+  const rows = new Map(((data as { session_id: string; staff_id: string; role?: string | null }[]) ?? []).map((a) => [standingKey(a.session_id, a.staff_id), a]));
+  for (const k of keys) out.set(standingKey(k.sessionId, k.staffId), eventRoleOf(rows.get(standingKey(k.sessionId, k.staffId)), profiles.get(k.staffId)));
+  return out;
+}
+
+/** The profile roles of these people. Missing reads as bartender. */
 async function rolesOf(staffIds: string[]): Promise<Map<string, string>> {
   const ids = [...new Set(staffIds)];
   if (ids.length === 0) return new Map();
@@ -234,12 +260,13 @@ export async function ratesFor(admin: StaffMember, staffIds: string[]): Promise<
  */
 export async function rowRates(admin: StaffMember, rows: Pick<TimesheetRow, "assignmentId" | "staffId" | "sessionId">[]): Promise<Map<string, number>> {
   if (!isAdminRole(admin.role) || rows.length === 0) return new Map();
-  const [own, rates, sessions, roles] = await Promise.all([ratesFor(admin, rows.map((r) => r.staffId)), packageRates(), sessionsById(rows.map((r) => r.sessionId)), rolesOf(rows.map((r) => r.staffId))]);
+  const [own, rates, sessions, roles] = await Promise.all([ratesFor(admin, rows.map((r) => r.staffId)), packageRates(), sessionsById(rows.map((r) => r.sessionId)), eventRoles(rows)]);
   const standings = await payStandings(sessions, rows);
   const out = new Map<string, number>();
   for (const r of rows) {
     const s = sessions.get(r.sessionId);
-    out.set(r.assignmentId, s ? rateForEvent(own.get(r.staffId), s, rates, roles.get(r.staffId), standings.get(standingKey(r.sessionId, r.staffId))).cents : lineRate(own.get(r.staffId), "", rates).cents);
+    const key = standingKey(r.sessionId, r.staffId);
+    out.set(r.assignmentId, s ? rateForEvent(own.get(r.staffId), s, rates, roles.get(key), standings.get(key)).cents : lineRate(own.get(r.staffId), "", rates).cents);
   }
   return out;
 }
@@ -268,19 +295,21 @@ export async function setRate(admin: StaffMember, staffId: string, raw: unknown,
 
 /** "$187.50" for this person on one event, or null without times. */
 export async function myEstimate(staffId: string, session: SessionLite): Promise<string | null> {
-  const [own, rates, role, standings] = await Promise.all([rateOnFile(staffId), packageRates(), roleOf(staffId), payStandings(new Map([[session.id, session]]), [{ sessionId: session.id, staffId }])]);
-  const c = estimatedPayCents(rateForEvent(own, session, rates, role, standings.get(standingKey(session.id, staffId))).cents, eventData(session));
+  const key = { sessionId: session.id, staffId };
+  const [own, rates, roles, standings] = await Promise.all([rateOnFile(staffId), packageRates(), eventRoles([key]), payStandings(new Map([[session.id, session]]), [key])]);
+  const c = estimatedPayCents(rateForEvent(own, session, rates, roles.get(standingKey(session.id, staffId)), standings.get(standingKey(session.id, staffId))).cents, eventData(session));
   return c === null ? null : money(c);
 }
 
 /** The same for many events at once, by session id. */
 export async function myEstimates(staffId: string, sessionIds: string[]): Promise<Record<string, string>> {
   if (sessionIds.length === 0) return {};
-  const [own, rates, sessions, role] = await Promise.all([rateOnFile(staffId), packageRates(), sessionsById(sessionIds), roleOf(staffId)]);
-  const standings = await payStandings(sessions, [...sessions.keys()].map((sessionId) => ({ sessionId, staffId })));
+  const [own, rates, sessions] = await Promise.all([rateOnFile(staffId), packageRates(), sessionsById(sessionIds)]);
+  const keys = [...sessions.keys()].map((sessionId) => ({ sessionId, staffId }));
+  const [standings, roles] = await Promise.all([payStandings(sessions, keys), eventRoles(keys)]);
   const out: Record<string, string> = {};
   for (const s of sessions.values()) {
-    const c = estimatedPayCents(rateForEvent(own, s, rates, role, standings.get(standingKey(s.id, staffId))).cents, eventData(s));
+    const c = estimatedPayCents(rateForEvent(own, s, rates, roles.get(standingKey(s.id, staffId)), standings.get(standingKey(s.id, staffId))).cents, eventData(s));
     if (c !== null) out[s.id] = money(c);
   }
   return out;
@@ -310,11 +339,13 @@ export async function myPayRows(staffId: string, from: string, to: string): Prom
   if (sheet.length === 0) return { rows: [] };
   const ids = [...new Set(sheet.map((r) => r.sessionId))];
   const [own, rates, sessions, crews, reimb, role] = await Promise.all([rateOnFile(staffId), packageRates(), sessionsById(ids), bartenderCounts(ids), myReimbursements(staffId, ids), roleOf(staffId)]);
-  const standings = await payStandings(sessions, ids.map((sessionId) => ({ sessionId, staffId })));
+  const keys = ids.map((sessionId) => ({ sessionId, staffId }));
+  const [standings, eventRoleBy] = await Promise.all([payStandings(sessions, keys), eventRoles(keys)]);
   const rows = sheet.map((r): PayRow => {
     const s = sessions.get(r.sessionId);
+    const eventRole = eventRoleBy.get(standingKey(r.sessionId, staffId)) ?? "bartender";
     // Only the rate leaves here, never why: no tier, rank or new hire rate on a staff page.
-    const rate = s ? rateForEvent(own, s, rates, role, standings.get(standingKey(s.id, staffId))) : lineRate(own, "", rates);
+    const rate = s ? rateForEvent(own, s, rates, eventRole, standings.get(standingKey(s.id, staffId))) : lineRate(own, "", rates);
     const sched = s ? scheduledMinutes(eventData(s)) : null;
     const approvedMinutes = r.approved && r.minutes !== null ? r.minutes : null;
     const tips = s ? tipsShare(gratuityOf(s), crews.get(s.id) ?? 1, role === "bartender", s.pricing_model) : null;
@@ -322,6 +353,7 @@ export async function myPayRows(staffId: string, from: string, to: string): Prom
       sessionId: r.sessionId,
       day: r.eventDay,
       title: r.eventTitle,
+      eventRole,
       rateCents: rate.cents,
       rateSource: rate.source,
       ratePkg: rate.pkg,
@@ -537,11 +569,12 @@ export async function upgradeToDriving(opts: { fromDay: string; apply: boolean; 
 }
 
 /** Bartenders accepted on the event, for splitting the gratuity. */
-async function acceptedCrew(sessionId: string): Promise<{ staffId: string; role: string; assignmentId: string }[]> {
-  const { data } = await supabase.from("event_assignments").select("id, staff_id, status, staff:staff_id (role)").eq("session_id", sessionId).eq("status", "accepted");
-  return ((data as { id: string; staff_id: string; staff: { role: string } | { role: string }[] | null }[]) ?? []).map((r) => {
+async function acceptedCrew(sessionId: string): Promise<{ staffId: string; role: string; eventRole: EventRole; assignmentId: string }[]> {
+  const { data } = await supabase.from("event_assignments").select("*, staff:staff_id (role)").eq("session_id", sessionId).eq("status", "accepted");
+  return ((data as { id: string; staff_id: string; role?: string | null; staff: { role: string } | { role: string }[] | null }[]) ?? []).map((r) => {
     const st = Array.isArray(r.staff) ? r.staff[0] : r.staff;
-    return { staffId: r.staff_id, role: st?.role ?? "bartender", assignmentId: r.id };
+    const role = st?.role ?? "bartender";
+    return { staffId: r.staff_id, role, eventRole: eventRoleOf(r, role), assignmentId: r.id };
   });
 }
 
@@ -561,7 +594,7 @@ function gratuityOf(session: SessionLite): number | null {
  * are on the event (an open shift), they are counted in the tips split.
  */
 export async function myPayEstimate(staffId: string, session: SessionRow): Promise<StaffEstimate> {
-  const [own, rates, settings, crew, miles, role, standings] = await Promise.all([
+  const [own, rates, settings, crew, miles, role, standings, eventRoleBy] = await Promise.all([
     rateOnFile(staffId),
     packageRates(),
     mileageSettings(),
@@ -569,12 +602,14 @@ export async function myPayEstimate(staffId: string, session: SessionRow): Promi
     mileageInputs(session, [staffId]),
     roleOf(staffId),
     payStandings(new Map([[session.id, session as SessionLite]]), [{ sessionId: session.id, staffId }]),
+    eventRoles([{ sessionId: session.id, staffId }]),
   ]);
+  // The gratuity split (gratuity events only) still follows the profile role, exactly as before.
   const isBartender = role === "bartender";
   const bartenders = crew.filter((c) => c.role === "bartender" && c.staffId !== staffId).length + (isBartender ? 1 : 0);
   // The person's own estimate: the rate, never why (forStaff).
   return forStaff(staffEstimate({
-    rate: rateForEvent(own, session, rates, role, standings.get(standingKey(session.id, staffId))),
+    rate: rateForEvent(own, session, rates, eventRoleBy.get(standingKey(session.id, staffId)), standings.get(standingKey(session.id, staffId))),
     minutes: scheduledMinutes(eventData(session)),
     mileage: mileageLine(miles.get(staffId)!, settings, sessionMarket(session) === "los_angeles"),
     tips: tipsShare(gratuityOf(session), bartenders, isBartender, session.pricing_model),
@@ -593,7 +628,8 @@ export async function myPayEstimateForPost(staffId: string, postId: string): Pro
 export interface CrewEstimate {
   staffId: string;
   assignmentId: string;
-  role: string;
+  role: string; // the profile role: the gratuity split on gratuity events follows it, as before
+  eventRole: EventRole; // the role worked on this event: service fee pay follows it, and it is what the Payout card and Payroll show
   estimate: StaffEstimate;
 }
 
@@ -617,8 +653,9 @@ export async function crewEstimates(viewer: StaffMember, session: SessionRow): P
     staffId: c.staffId,
     assignmentId: c.assignmentId,
     role: c.role,
+    eventRole: c.eventRole,
     estimate: staffEstimate({
-      rate: rateForEvent(own.get(c.staffId), session, rates, c.role, standings.get(standingKey(session.id, c.staffId))),
+      rate: rateForEvent(own.get(c.staffId), session, rates, c.eventRole, standings.get(standingKey(session.id, c.staffId))),
       minutes,
       mileage: mileageLine(miles.get(c.staffId)!, settings, ca),
       tips: tipsShare(gratuityOf(session), bartenders, c.role === "bartender", session.pricing_model),

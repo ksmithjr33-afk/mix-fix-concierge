@@ -6,20 +6,21 @@ import { supabase } from "@/lib/supabase";
 import { bartendersNeeded, type SessionLike } from "@/lib/team/event-view";
 import { barbackStatus } from "@/lib/package-extras";
 import { teamLine, type TeamNeeds, type TeamPerson } from "@/lib/team/team-line";
+import { eventRoleOf } from "@/lib/team/event-roles";
 import type { EventListItem } from "@/lib/team/event-list";
 
-/** Everyone ever offered each event (declined included, for the staffing counts), in one query. */
+/** Everyone ever offered each event (declined included, for the staffing counts), in one query. The role is the one worked on the event. */
 export async function teamsByEvent(ids: string[]): Promise<Map<string, TeamPerson[]>> {
   const teams = new Map<string, TeamPerson[]>();
   if (ids.length === 0) return teams;
   const { data, error } = await supabase
     .from("event_assignments")
-    .select("session_id, staff_id, status, assigned_at, staff:staff_id (name, role)")
+    .select("*, staff:staff_id (name, role)")
     .in("session_id", ids);
   if (error) throw new Error(`event_assignments lookup failed: ${error.message}`);
-  for (const r of (data as { session_id: string; staff_id: string; status: string; assigned_at?: string | null; staff: unknown }[]) ?? []) {
+  for (const r of (data as { session_id: string; staff_id: string; status: string; assigned_at?: string | null; role?: string | null; staff: unknown }[]) ?? []) {
     const s = (Array.isArray(r.staff) ? r.staff[0] : r.staff) as { name?: string; role?: string } | null;
-    const person: TeamPerson = { staffId: r.staff_id, name: s?.name ?? "", role: s?.role ?? "bartender", status: r.status, assignedAt: r.assigned_at ?? "" };
+    const person: TeamPerson = { staffId: r.staff_id, name: s?.name ?? "", role: eventRoleOf(r, s?.role), status: r.status, assignedAt: r.assigned_at ?? "" };
     teams.set(r.session_id, [...(teams.get(r.session_id) ?? []), person]);
   }
   return teams;

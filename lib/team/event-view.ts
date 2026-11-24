@@ -92,7 +92,8 @@ export interface StaffEventView {
   package: string;
   bartenders: number | null;
   tipJar: string; // service fee events only: the tip jar line from the booking, or empty. Never a price.
-  teammates: string[];
+  teammates: string[]; // first names with the role on this event: "Sam (Barback)"
+  workingAs?: string; // "You are working this event as: Barback." Only the viewer's own role, only on the staff event page
   theme: string;
   colors: string;
   allergies: string[];

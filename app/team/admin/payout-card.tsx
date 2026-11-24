@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import CopyButton from "./copy-button";
+import { eventRoleLabel } from "@/lib/team/event-roles";
 import { hoursText, mileageText, money, payReasonText, rateSourceText, rateText, NOT_PLACED_WARNING } from "@/lib/team/pay";
 import { reimbursementText } from "@/lib/team/reimbursements";
 import { PAYOUT_FLAG_LABEL, diffHours, diffMoney, payoutText, type PayoutRow, type PayoutTotals } from "@/lib/team/payout";
@@ -87,7 +88,10 @@ function PayoutLine({ sessionId, r }: { sessionId: string; r: PayoutRow }) {
   return (
     <li className="py-2 space-y-1">
       <div className="flex flex-wrap items-baseline justify-between gap-x-3">
-        <span className="font-medium text-[15px] text-[#2C2420]">{r.name}</span>
+        <span className="font-medium text-[15px] text-[#2C2420]">
+          {r.name}
+          <span className="font-normal text-sm text-[#6B5D52]" data-event-role>, {eventRoleLabel(r.eventRole)}</span>
+        </span>
         <span className="font-heading font-bold tabular-nums text-[#2C2420]">
           {money(r.totalCents)}
           {r.fromEstimate && <span className="text-xs font-normal text-[#9A7049]"> estimate</span>}

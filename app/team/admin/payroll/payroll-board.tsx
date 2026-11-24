@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { hoursText, money, rateText } from "@/lib/team/pay";
 import { timeLabel } from "@/lib/team/clock-label";
+import { eventRoleLabel } from "@/lib/team/event-roles";
 import { weekStart } from "@/lib/team/timesheet";
 import {
   changedText,
@@ -369,7 +370,7 @@ function PersonName({ l }: { l: PayrollLine }) {
   return (
     <p className="font-medium text-[#2C2420] break-words">
       {l.name}
-      {l.role !== "bartender" && <span className="text-xs font-normal text-[#6B5D52]"> ({l.role.replace(/_/g, " ")})</span>}
+      <span className="text-xs font-normal text-[#6B5D52]" data-event-role> ({eventRoleLabel(l.eventRole)})</span>
     </p>
   );
 }

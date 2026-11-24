@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 
 /** Shown on the event page while an event is offered to this staff member and not yet answered. */
-export default function RespondBanner({ sessionId }: { sessionId: string }) {
+export default function RespondBanner({ sessionId, workingAs = "" }: { sessionId: string; workingAs?: string }) {
   const router = useRouter();
   const [state, setState] = useState<"open" | "confirm-decline" | "accepted">("open");
   const [busy, setBusy] = useState(false);
@@ -38,6 +38,7 @@ export default function RespondBanner({ sessionId }: { sessionId: string }) {
   return (
     <section className="rounded-2xl bg-[#FFF8EC] border border-[#E3C9A0] px-4 py-3 space-y-2">
       <p className="text-[15px] font-medium text-[#2C2420]">You have been offered this event. Can you work it?</p>
+      {workingAs && <p className="text-[15px] text-[#2C2420]" data-working-as>{workingAs}</p>}
       {state === "confirm-decline" ? (
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-sm text-[#2C2420]">Decline this event?</span>

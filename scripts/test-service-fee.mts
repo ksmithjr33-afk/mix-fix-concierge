@@ -193,7 +193,7 @@ check("Gratuity model engine unchanged: Full 100/4 tip jar $1,749", old.priceEve
   const sfCtx = (role: string) => ({ model: "service_fee", role });
   const r = (own: number | null, pkg: string, role: string) => pay.lineRate(own, pkg, rates, sfCtx(role));
   check("Service fee bartender with no standing (the Business estimate): the Top rate, $45, on every package", ["Bartender Only", "Dive Bar", "The Big Day Bar", "Full Bar", "Premium Bar"].every((p) => r(null, p, "bartender").cents === 4500 && r(null, p, "bartender").source === "service_fee"));
-  check("Service fee bar back, server, event helper: $30", ["bar_back", "server", "event_helper"].every((role) => r(null, "Full Bar", role).cents === 3000 && r(null, "Full Bar", role).source === "support"));
+  check("Service fee bar back, server, event helper: $25", ["bar_back", "server", "event_helper"].every((role) => r(null, "Full Bar", role).cents === 2500 && r(null, "Full Bar", role).source === "support"));
   check("Personal rate only when higher: $50 wins, $35 does not", r(5000, "Full Bar", "bartender").cents === 5000 && r(5000, "Full Bar", "bartender").source === "own" && r(3500, "Full Bar", "bartender").cents === 4500);
   check("Support role with a $35 personal rate gets $35 (higher than $30)", r(3500, "Full Bar", "bar_back").cents === 3500);
   check("Top rate from settings", pay.lineRate(null, "Premium Bar", { ...rates, serviceFee: { ...pay.SERVICE_FEE_RATE_DEFAULTS, top: 5200 } }, sfCtx("bartender")).cents === 5200);

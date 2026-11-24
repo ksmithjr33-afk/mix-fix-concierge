@@ -6,7 +6,9 @@ import { useRouter } from "next/navigation";
 // "Bartenders needed" on the Team tab, admins and managers. Staffing only: it
 // never changes the price, the booked total, or the booking, and nothing is
 // sent to the client or GHL. The event cards, staffing colors, Team badge and
-// open shift posts follow it. Also shows the barback line and the staffing log.
+// open shift posts follow it. Also Barbacks, Event helpers and Servers needed
+// (staffing only too: ranked offers and open shifts fill Bartender spots only,
+// these are assigned by hand), the barback line and the staffing log.
 
 export interface BartendersNeededData {
   value: number | null; // what staffing uses now
@@ -15,11 +17,13 @@ export interface BartendersNeededData {
   setAt: string; // already formatted, "" when nobody did
   estimateNote: string; // "Estimated from 90 guests. Set the right number."
   barbackLine: string; // "" when the package has no barback
-  barbackMissing: boolean; // on, and no bar back assigned yet
+  barbackMissing: boolean; // on, and nobody holds the Barback role on this event yet
+  roles: { role: string; label: string; value: number; assigned: number; stillNeeded: number }[]; // Barbacks, Event helpers, Servers needed
   log: { at: string; by: string; text: string }[]; // at already formatted, newest first
 }
 
 const CHOICES = [1, 2, 3, 4];
+const ROLE_CHOICES = [0, 1, 2, 3, 4];
 
 export default function BartendersNeeded({ sessionId, data }: { sessionId: string; data: BartendersNeededData }) {
   const router = useRouter();
@@ -28,11 +32,12 @@ export default function BartendersNeeded({ sessionId, data }: { sessionId: strin
   const [error, setError] = useState("");
   const [showLog, setShowLog] = useState(false);
 
-  const save = async (v: number | null) => {
+  const save = async (v: number | null, role?: string) => {
     setBusy(true);
     setError("");
     try {
-      const res = await fetch("/api/team/admin/staffing", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId, action: "bartenders", value: v }) });
+      const body = role ? { sessionId, action: "role_needed", role, value: v } : { sessionId, action: "bartenders", value: v };
+      const res = await fetch("/api/team/admin/staffing", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const d = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(d.error ?? "Could not save.");
       router.refresh();
@@ -81,7 +86,28 @@ export default function BartendersNeeded({ sessionId, data }: { sessionId: strin
           </button>
         </p>
       )}
-      <p className="text-xs text-[#A39585]">Staffing only. The price and the booking stay the same.</p>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2" data-role-needed>
+        {data.roles.map((r) => (
+          <label key={r.role} className="flex items-center gap-2 text-[15px] text-[#2C2420]">
+            {r.label}
+            <select
+              value={r.value}
+              onChange={(e) => save(Number(e.target.value), r.role)}
+              disabled={busy}
+              aria-label={r.label}
+              className="rounded-lg border border-[#DDD5CC] bg-white px-2 py-1 text-[15px] text-[#2C2420]"
+            >
+              {ROLE_CHOICES.map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+            </select>
+            {r.stillNeeded > 0 && <span className="text-sm text-[#A0412D]">{r.stillNeeded} still needed</span>}
+          </label>
+        ))}
+      </div>
+      <p className="text-xs text-[#A39585]">Staffing only. The price and the booking stay the same. Ranked offers fill Bartender spots only; assign other roles by hand.</p>
       {data.barbackLine && (
         <p className="text-[15px] text-[#2C2420]" data-barback-line>
           {data.barbackLine}

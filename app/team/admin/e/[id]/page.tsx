@@ -19,7 +19,8 @@ import EditEvent, { type EditValues } from "./edit-event";
 import { formValue, packageChoices } from "@/lib/team/admin-edit";
 import { chicagoStamp, eventSchedule, todayIn, TZ } from "@/lib/team/time";
 import BartendersNeeded from "./bartenders-needed";
-import { bartendersFix, bookedBartenders, estimateNote, staffingLog } from "@/lib/team/staffing-fix";
+import { bartendersFix, bookedBartenders, estimateNote, roleNeeded, staffingLog } from "@/lib/team/staffing-fix";
+import { bartenderRows, EVENT_ROLE_PLURAL, OTHER_EVENT_ROLES, roleCounts } from "@/lib/team/event-roles";
 import { isHidden } from "@/lib/team/hidden";
 import { ensureMarket } from "@/lib/team/markets-db";
 import { handoffPanel, postPanel } from "@/lib/team/shifts-db";
@@ -296,10 +297,16 @@ async function AdminEventPage({
   const onList = new Set(onEventIds);
   const chatUnread = on("chat") ? 0 : (unread.get(id) ?? 0);
   const marketSource = (session as { team_market_source?: string | null }).team_market_source ?? null;
-  const counts = staffingCounts(bartendersNeeded(session), people.map((p) => p.status));
+  // Bartenders needed counts only people working the event as Bartender; every other role has its own count.
+  const counts = staffingCounts(bartendersNeeded(session), bartenderRows(people.map((p) => ({ status: p.status, role: p.eventRole }))).map((p) => p.status));
   // The barback: needed whenever it is on (Big Day Bar, Premium, a Full Bar wedding unless removed).
   const barback = barbackStatus(session);
-  const barbackNeeded = barback.on && !hidden && !people.some((p) => p.role === "bar_back" && p.status !== "declined");
+  // The line clears once someone holds the Barback role on this event.
+  const barbackNeeded = barback.on && !hidden && !people.some((p) => p.eventRole === "bar_back" && p.status !== "declined");
+  const otherNeeds = roleNeeded(session, barback.on);
+  const byRole = roleCounts({ bartender: bartendersNeeded(session), ...otherNeeds }, people.map((p) => ({ status: p.status, role: p.eventRole })));
+  const otherOpen = byRole.filter((c) => c.role !== "bartender").reduce((n, c) => n + c.stillNeeded, 0);
+  const barbackOpen = byRole.find((c) => c.role === "bar_back")?.stillNeeded ?? 0;
   const ed = session.event_data ?? {};
   // The title follows the planner title rule (host's name, "via" the planner) once the partners migration runs.
   const titled = eventData(session);
@@ -451,14 +458,19 @@ async function AdminEventPage({
               estimateNote: estimateNote(session),
               barbackLine: barback.applies ? barback.line : "",
               barbackMissing: barbackNeeded,
+              roles: OTHER_EVENT_ROLES.map((r) => {
+                const c = byRole.find((x) => x.role === r)!;
+                return { role: r, label: `${EVENT_ROLE_PLURAL[r]} needed`, value: otherNeeds[r as keyof typeof otherNeeds], assigned: c.assigned, stillNeeded: c.stillNeeded };
+              }),
               log: staffingLog(session).slice(0, 10).map((e) => ({ at: chicagoStamp(e.at, v.timeZone), by: e.by, text: e.text })),
             }}
           />
           <DeliveryStrip people={delivery} />
           <AssignPanel
             sessionId={id}
-            summary={`${staffingLabel(counts)}${counts.accepted ? `, ${counts.accepted} accepted` : ""}${counts.stillNeeded ? ` · ${counts.stillNeeded} still needed` : ""}`}
-            covered={counts.needed !== null && counts.stillNeeded === 0}
+            summary={`Bartenders ${staffingLabel(counts)}${counts.accepted ? `, ${counts.accepted} accepted` : ""}${counts.stillNeeded ? ` · ${counts.stillNeeded} still needed` : ""}`}
+            covered={counts.needed !== null && counts.stillNeeded === 0 && otherOpen === 0}
+            roleSummary={byRole.filter((c) => c.role !== "bartender" && (c.needed || c.assigned)).map((c) => `${EVENT_ROLE_PLURAL[c.role]} ${c.assigned} of ${c.needed}${c.stillNeeded ? ` · ${c.stillNeeded} still needed` : ""}`)}
             people={people}
             available={available}
             timeZone={v.timeZone}
@@ -550,7 +562,7 @@ async function AdminEventPage({
           details: (session.price_pending ? 1 : 0) + (guestFlag ? 1 : 0) + (session.price_check && isAdminRole(me.role) ? 1 : 0),
           // The menu is not picked up (or nobody is assigned) inside 48 hours, no approved menu inside 72 hours, and the ice not done inside 24 hours.
           pickups: (pickup.outstanding ? 1 : 0) + (menuFile.missing ? 1 : 0) + (ice.outstanding ? 1 : 0),
-          team: hidden ? 0 : counts.stillNeeded + handoffs.length + (barbackNeeded ? 1 : 0),
+          team: hidden ? 0 : counts.stillNeeded + otherOpen + handoffs.length + (barbackNeeded && barbackOpen === 0 ? 1 : 0),
           // Changed lines, plus each "I'm out" from staff on a supply line until an admin changes its source or dismisses it.
           order: sheetFlags + (sheet.answers?.badge ?? 0),
           client: pendingHolds.length,

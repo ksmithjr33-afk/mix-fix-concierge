@@ -22,7 +22,7 @@ const sf = (role: string, standing?: Parameters<typeof pay.serviceFeeBase>[2], o
 const st = (tier: "top" | "core" | "developing" | null, approvedEvents = 5, extra: Record<string, unknown> = {}) => ({ tier, approvedEvents, ...extra });
 
 // ----- The rule -----
-check("Defaults: Top $45, Core $40, Developing $35, new hire $30 for 1 event, support $30", D.top === 4500 && D.core === 4000 && D.developing === 3500 && D.newHire === 3000 && D.newHireEvents === 1 && D.support === 3000);
+check("Defaults: Top $45, Core $40, Developing $35, new hire $30 for 1 event, support $25", D.top === 4500 && D.core === 4000 && D.developing === 3500 && D.newHire === 3000 && D.newHireEvents === 1 && D.support === 2500);
 check("Top tier: $45", sf("bartender", st("top")).cents === 4500 && sf("bartender", st("top")).reason === "top");
 check("Core tier: $40", sf("bartender", st("core")).cents === 4000 && sf("bartender", st("core")).reason === "core");
 check("Developing tier: $35", sf("bartender", st("developing")).cents === 3500 && sf("bartender", st("developing")).reason === "developing");
@@ -33,7 +33,7 @@ const n3 = { ...rates, serviceFee: { ...D, newHireEvents: 3 } };
 check("New hire count 3: still a new hire with 2 approved events", pay.lineRate(null, "Full Bar", n3, { model: "service_fee", role: "bartender", standing: st("top", 2) }).cents === 3000);
 const off = { ...rates, serviceFee: { ...D, newHireEvents: 0 } };
 check("New hire count 0 turns it off", pay.lineRate(null, "Full Bar", off, { model: "service_fee", role: "bartender", standing: st("top", 0) }).cents === 4500);
-check("Bar backs, servers and event helpers: the $30 support rate, never a tier or new hire rate", ["bar_back", "server", "event_helper"].every((r) => sf(r, st("top", 0)).cents === 3000 && sf(r, st("top", 0)).reason === "support"));
+check("Bar backs, servers and event helpers: the $25 support rate, never a tier or new hire rate", ["bar_back", "server", "event_helper"].every((r) => sf(r, st("top", 0)).cents === 2500 && sf(r, st("top", 0)).reason === "support"));
 check("A personal rate only when higher: $50 wins over Top", sf("bartender", st("top"), 5000).cents === 5000 && sf("bartender", st("top"), 5000).reason === "own");
 check("A personal rate lower than the tier rate is not used", sf("bartender", st("core"), 3800).cents === 4000);
 check("A new hire with a higher personal rate gets the personal rate", sf("bartender", st("core", 0), 3600).cents === 3600 && sf("bartender", st("core", 0), 3600).reason === "own");
@@ -53,7 +53,7 @@ check("The change day is read in Chicago time (late evening counts as that day)"
 
 // ----- Settings -----
 const read = bs.readServiceFeeRates(null);
-check("Settings: defaults 45, 40, 35, 30, 1, 30", read.top === 4500 && read.core === 4000 && read.developing === 3500 && read.newHire === 3000 && read.newHireEvents === 1 && read.support === 3000);
+check("Settings: defaults 45, 40, 35, 30, 1, 25", read.top === 4500 && read.core === 4000 && read.developing === 3500 && read.newHire === 3000 && read.newHireEvents === 1 && read.support === 2500);
 check("Settings: old per package rates are ignored", JSON.stringify(bs.readServiceFeeRates({ beerwine: 5000, full: 5200, support: 3200 })) === JSON.stringify({ ...D, support: 3200 }));
 check("Settings: a saved count of 0 is kept (it turns the new hire rate off)", bs.readServiceFeeRates({ newHireEvents: 0 }).newHireEvents === 0);
 const good = bs.validateServiceFeeRates({ top: "46", core: "41.50", developing: "35", newHire: "30", newHireEvents: "2", support: "30" });
@@ -123,7 +123,7 @@ const s = (id: string) => db.sessions.find((x) => x.id === id) as never;
 const byId = (list: { staffId: string; estimate: { rateCents: number; reason?: string } }[]) => Object.fromEntries(list.map((c) => [c.staffId, c.estimate]));
 
 const crew = byId(await payDb.crewEstimates(admin as never, s("sf")));
-check("Payout: Top $45, new hire $30, not placed $40, Developing $35, bar back $30", crew.t1.rateCents === 4500 && crew.n1.rateCents === 3000 && crew.u1.rateCents === 4000 && crew.d1.rateCents === 3500 && crew.bk.rateCents === 3000, JSON.stringify(Object.fromEntries(Object.entries(crew).map(([k, v]) => [k, [v.rateCents, v.reason]]))));
+check("Payout: Top $45, new hire $30, not placed $40, Developing $35, bar back $25", crew.t1.rateCents === 4500 && crew.n1.rateCents === 3000 && crew.u1.rateCents === 4000 && crew.d1.rateCents === 3500 && crew.bk.rateCents === 2500, JSON.stringify(Object.fromEntries(Object.entries(crew).map(([k, v]) => [k, [v.rateCents, v.reason]]))));
 check("Payout: the reason for admins (Top, New hire, not placed, Developing, support)", crew.t1.reason === "top" && crew.n1.reason === "new_hire" && crew.u1.reason === "not_placed" && crew.d1.reason === "developing" && crew.bk.reason === "support");
 const gr = byId(await payDb.crewEstimates(admin as never, s("gr")));
 check("Gratuity event: everyone on the $30 package rate, no reason (unchanged)", Object.values(gr).every((e) => e.rateCents === 3000 && e.reason === undefined));

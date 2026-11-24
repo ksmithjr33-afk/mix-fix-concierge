@@ -26,6 +26,7 @@ export interface PayoutPerson {
   assignmentId: string;
   name: string;
   role: string;
+  eventRole?: string; // the role worked on this event: "bar_back"
   estimate: StaffEstimate;
   sheet: TimesheetRow | null; // their timesheet row for this event
   reimbursements?: Reimbursement[];
@@ -35,7 +36,8 @@ export interface PayoutRow {
   staffId: string;
   assignmentId: string;
   name: string;
-  role: string;
+  role: string; // the profile role
+  eventRole: string; // the role worked on this event, shown on the Payout card and in Payroll
   rateCents: number;
   rateSource: RateSource;
   ratePkg: PayPackage | null;
@@ -80,6 +82,7 @@ export function payoutRow(p: PayoutPerson): PayoutRow {
     assignmentId: p.assignmentId,
     name: p.name,
     role: p.role,
+    eventRole: p.eventRole ?? (p.role === "bar_back" || p.role === "server" || p.role === "event_helper" ? p.role : "bartender"),
     rateCents: e.rateCents,
     rateSource: e.rateSource,
     ratePkg: e.ratePkg,

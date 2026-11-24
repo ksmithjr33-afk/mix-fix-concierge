@@ -35,6 +35,11 @@ export function Details({ v, locationExtra }: { v: StaffEventView; locationExtra
     <div className="space-y-3">
       <WhatChanged v={v} />
 
+      {v.workingAs && (
+        <p className="rounded-2xl border border-[#DDD5CC] bg-[#F5F0EB] px-4 py-3 text-[15px] font-medium text-[#2C2420]" data-working-as>
+          {v.workingAs}
+        </p>
+      )}
       <Section title="Event">
         <Row label="Event" value={[v.eventName, v.eventType].filter(Boolean).join(", ")} />
         <Row label="Client" value={v.clientFirstName} />

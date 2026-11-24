@@ -21,6 +21,7 @@ import { hoursText, money, payReasonText, rateSourceText, type PayPackage, type 
 import { overWeekLimit, payoutTotals, WEEK_FLAG_MIN, type PayoutRow } from "@/lib/team/payout";
 import { csvCell, csvHours, csvTime, isYmd, staffTotals, weekRange, weekStart, type TimesheetRow } from "@/lib/team/timesheet";
 import { roleLabel } from "@/lib/team/roles";
+import { eventRoleLabel } from "@/lib/team/event-roles";
 import { KIND_LABEL, pickupPrompts, type PickupKind, type Reimbursement } from "@/lib/team/reimbursements";
 
 export const PAYROLL_PATH = "/team/admin/payroll";
@@ -121,7 +122,8 @@ export interface PayrollLine {
   assignmentId: string;
   staffId: string;
   name: string;
-  role: string; // "bartender"
+  role: string; // the profile role: "bartender"
+  eventRole: string; // the role worked on this event: "bar_back"
   sessionId: string;
   eventDay: string | null;
   eventTitle: string; // the admin title: "Justin Reyes · Wedding"
@@ -178,6 +180,7 @@ export function lineFrom(
     staffId: p.staffId,
     name: p.name,
     role: p.role,
+    eventRole: p.eventRole,
     sessionId: ev.sessionId,
     eventDay: ev.day,
     eventTitle: ev.title,
@@ -544,7 +547,7 @@ export function linesCsv(view: Pick<PayrollView, "people">): string {
       out.push(
         csvLine([
           p.name,
-          p.role,
+          eventRoleLabel(l.eventRole),
           dollars(l.rateCents),
           lineRateText(l),
           l.eventDay ?? "",

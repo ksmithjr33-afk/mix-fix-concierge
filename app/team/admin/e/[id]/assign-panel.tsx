@@ -6,6 +6,7 @@ import type { AssigneeProgress } from "@/lib/team/assignments-db";
 import { timeLabel } from "@/lib/team/clock-label";
 import { FLAG_LABELS, formatWorked, type PunchFlag } from "@/lib/team/clock";
 import { roleSuffix, ROLES, ROLE_LABEL } from "@/lib/team/roles";
+import { defaultEventRole, EVENT_ROLES, EVENT_ROLE_LABEL, type EventRole } from "@/lib/team/event-roles";
 import { TOOLS_TAB } from "@/lib/team/prep";
 import { PrepStatusLine } from "./day-of";
 import TierBadge from "../../scorecard/tier-badge";
@@ -37,6 +38,7 @@ function Bar({ label, checked, total }: { label: string; checked: number; total:
 export default function AssignPanel({
   sessionId,
   summary,
+  roleSummary = [],
   covered,
   people,
   available,
@@ -52,6 +54,7 @@ export default function AssignPanel({
   market: string | null;
   sessionId: string;
   summary: string;
+  roleSummary?: string[]; // "Barbacks 0 of 1 · 1 still needed"
   covered: boolean;
   people: AssigneeProgress[];
   available: {
@@ -68,6 +71,9 @@ export default function AssignPanel({
 }) {
   const router = useRouter();
   const [pick, setPick] = useState("");
+  // The role on this event: defaults from the picked person's profile role, and can be changed before assigning.
+  const [assignRole, setAssignRole] = useState<EventRole>("bartender");
+  const [roleNote, setRoleNote] = useState("");
   const [roleFilter, setRoleFilter] = useState("");
   const pickable = roleFilter ? available.filter((s) => s.role === roleFilter) : available;
   const [busy, setBusy] = useState("");
@@ -79,11 +85,12 @@ export default function AssignPanel({
   const call = async (method: "POST" | "DELETE", staffId: string, confirmUnavailable = false) => {
     setBusy(staffId);
     setError("");
+    setRoleNote("");
     try {
       const res = await fetch("/api/team/admin/assign", {
         method,
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId, staffId, confirmUnavailable }),
+        body: JSON.stringify(method === "POST" ? { sessionId, staffId, confirmUnavailable, role: assignRole } : { sessionId, staffId }),
       });
       const data = await res.json().catch(() => ({}));
       if (res.status === 428) {
@@ -102,13 +109,32 @@ export default function AssignPanel({
     }
   };
 
+  /** Change the role someone works on this event. Someone who accepted gets a text. */
+  const changeRole = async (p: AssigneeProgress, role: EventRole) => {
+    setBusy(p.staffId);
+    setError("");
+    setRoleNote("");
+    try {
+      const res = await fetch("/api/team/admin/assign", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId, staffId: p.staffId, role }) });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error ?? "Could not save.");
+      if (p.status === "accepted") setRoleNote(`${p.name.split(" ")[0]} now works this event as ${EVENT_ROLE_LABEL[role]}. They got a text.`);
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save.");
+    } finally {
+      setBusy("");
+    }
+  };
+
   return (
     <div className="space-y-3">
       <section className={card}>
         <div className="flex items-center justify-between gap-2 mb-2">
-          <h2 className="font-heading text-base font-bold text-[#2C2420]">Bartenders</h2>
+          <h2 className="font-heading text-base font-bold text-[#2C2420]">Team</h2>
           <span className={`text-xs font-bold px-2 py-0.5 rounded ${covered ? "bg-[#E4EBDF] text-[#55684A]" : "bg-[#F6E3DC] text-[#A0412D]"}`}>{summary}</span>
         </div>
+        {roleSummary.length > 0 && <p className="-mt-1 mb-2 text-xs text-[#6B5D52]" data-role-summary>{roleSummary.join(" · ")}</p>}
         {people.length === 0 ? (
           <p className="text-[15px] text-[#6B5D52] py-1">Nobody assigned yet.</p>
         ) : (
@@ -119,9 +145,29 @@ export default function AssignPanel({
                   <div className="min-w-0">
                     <p className="font-medium text-[#2C2420]">
                       {p.name}
-                      {roleSuffix(p.role) && <span className="font-normal text-[#6B5D52]">{roleSuffix(p.role)}</span>}
                       {tiers[p.staffId] && <TierBadge tier={tiers[p.staffId]} />}
                     </p>
+                    {p.status === "declined" ? (
+                      <p className="text-xs text-[#6B5D52]">{EVENT_ROLE_LABEL[p.eventRole]}</p>
+                    ) : (
+                      <label className="flex items-center gap-1.5 text-xs text-[#6B5D52]">
+                        Role on this event
+                        <select
+                          value={p.eventRole}
+                          onChange={(e) => changeRole(p, e.target.value as EventRole)}
+                          disabled={!!busy}
+                          aria-label={`Role for ${p.name} on this event`}
+                          data-event-role
+                          className="rounded-lg border border-[#DDD5CC] bg-white px-2 py-0.5 text-[13px] text-[#2C2420]"
+                        >
+                          {EVENT_ROLES.map((r) => (
+                            <option key={r} value={r}>
+                              {EVENT_ROLE_LABEL[r]}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    )}
                     <p className="text-xs text-[#6B5D52]">
                       Assigned {timeLabel(p.assignedAt, undefined, timeZone)}
                       {p.respondedAt ? `, replied ${timeLabel(p.respondedAt, undefined, timeZone)}` : ""}
@@ -166,6 +212,8 @@ export default function AssignPanel({
             ))}
           </ul>
         )}
+        {roleNote && <p className="mt-2 text-sm text-[#55684A]" role="status">{roleNote}</p>}
+        {error && !pick && <p className="mt-2 text-sm text-[#A0412D]">{error}</p>}
       </section>
 
       <section className={card}>
@@ -192,7 +240,10 @@ export default function AssignPanel({
             </select>
             <select
               value={pick}
-              onChange={(e) => setPick(e.target.value)}
+              onChange={(e) => {
+                setPick(e.target.value);
+                setAssignRole(defaultEventRole(available.find((s) => s.id === e.target.value)?.role));
+              }}
               aria-label="Staff member"
               className="flex-1 min-w-0 rounded-xl border border-[#DDD5CC] bg-white px-3 py-2.5 text-[16px] text-[#2C2420]"
             >
@@ -208,6 +259,19 @@ export default function AssignPanel({
                   {s.cert ? ` (${s.cert})` : ""}
                   {s.distance ? ` · ${s.distance.over ? "⚠ " : ""}${s.distance.miles} mi${s.distance.over ? ` (max ${s.distance.maxMiles})` : ""}` : ""}
                   {s.record ? ` · ${s.record}` : ""}
+                </option>
+              ))}
+            </select>
+            <select
+              value={assignRole}
+              onChange={(e) => setAssignRole(e.target.value as EventRole)}
+              aria-label="Role on this event"
+              data-assign-role
+              className="rounded-xl border border-[#DDD5CC] bg-white px-3 py-2.5 text-[16px] text-[#2C2420]"
+            >
+              {EVENT_ROLES.map((r) => (
+                <option key={r} value={r}>
+                  as {EVENT_ROLE_LABEL[r]}
                 </option>
               ))}
             </select>
@@ -242,8 +306,8 @@ export default function AssignPanel({
             </button>
           </div>
         )}
-        <p className="text-xs text-[#A39585] mt-2">They get a text with a link to accept or decline. Miles here are a straight line from their home address, a rough estimate. Driving miles are worked out when they accept.</p>
-        {error && <p className="text-sm text-[#A0412D] mt-2">{error}</p>}
+        <p className="text-xs text-[#A39585] mt-2">The role starts from their profile and can be changed. They get a text with a link to accept or decline. Miles here are a straight line from their home address, a rough estimate. Driving miles are worked out when they accept.</p>
+        {error && pick && <p className="text-sm text-[#A0412D] mt-2">{error}</p>}
       </section>
     </div>
   );

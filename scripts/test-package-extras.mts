@@ -149,7 +149,7 @@ check("Admin: removing it saves through the price change flow", saved.ok && row(
 check("...the Team tab says removed by the admin's name", extras.barbackStatus(row("fw")).line === "Barback: removed by Kenneth");
 const again = await editDb.saveAdminEdit({ sessionId: "fw", admin, changes: { barback: "Included" }, price: { mode: "engine" }, expectedVersion: row("fw").version, origin: "https://plan.test" });
 check("Admin: adding it back works the same way", again.ok && extras.barbackStatus(row("fw")).on && extras.barbackStatus(row("fw")).line === "Barback: included");
-check("Booking card and Team tab use it", src("app/team/admin/e/[id]/booking-card.tsx").includes("<BarbackControl sessionId={sessionId} data={barback} />") && src("app/team/admin/e/[id]/page.tsx").includes("barbackLine: barback.applies ? barback.line : \"\"") && src("app/team/admin/e/[id]/page.tsx").includes("(barbackNeeded ? 1 : 0)"));
+check("Booking card and Team tab use it", src("app/team/admin/e/[id]/booking-card.tsx").includes("<BarbackControl sessionId={sessionId} data={barback} />") && src("app/team/admin/e/[id]/page.tsx").includes("barbackLine: barback.applies ? barback.line : \"\"") && src("app/team/admin/e/[id]/page.tsx").includes("(barbackNeeded && barbackOpen === 0 ? 1 : 0)"));
 
 // Intake: the price for removing it is in the prompt, and it is applied after the final save.
 reset();

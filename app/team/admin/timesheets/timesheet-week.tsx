@@ -7,6 +7,7 @@ import { OWN_APPROVE_MESSAGE, rowHistory, staffTotals, toLocal, weekApproval } f
 import { FLAG_LABELS, formatWorked, type PunchFlag } from "@/lib/team/clock";
 import { timeLabel } from "@/lib/team/clock-label";
 import { zoneName, zoneShort } from "@/lib/team/time";
+import { eventRoleLabel } from "@/lib/team/event-roles";
 
 const card = "bg-[#F5F0EB] rounded-2xl border border-[#DDD5CC] px-4 py-3 sm:px-5 sm:py-4";
 const input =
@@ -105,6 +106,7 @@ function Row({ row, meId, onRows, rate }: { row: TimesheetRow; meId: string; onR
         <div className="min-w-0">
           <p className="font-medium text-[#2C2420]">
             {row.staffName}
+            {row.eventRole && <span className="text-sm font-normal text-[#6B5D52]" data-event-role>, {eventRoleLabel(row.eventRole)}</span>}
             {own && <span className="text-xs text-[#A39585]"> (you)</span>}
           </p>
           <p className="text-sm text-[#6B5D52] break-words">

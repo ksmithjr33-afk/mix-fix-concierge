@@ -50,7 +50,8 @@ function order(a: TeamPerson, b: TeamPerson): number {
 export function neededText(onIt: TeamPerson[], needs: TeamNeeds): string {
   if (onIt.length === 0) return "No one assigned yet";
   const parts: string[] = [];
-  const bartenders = onIt.filter((p) => p.role !== BAR_BACK).length;
+  // Only people working the event as Bartender fill bartender spots (the role on the assignment).
+  const bartenders = onIt.filter((p) => p.role === "bartender" || !p.role).length;
   const open = needs.bartenders === null ? 0 : Math.max(0, needs.bartenders - bartenders);
   if (open > 0) parts.push(`${open} bartender${open === 1 ? "" : "s"} still needed`);
   if (needs.barback && !onIt.some((p) => p.role === BAR_BACK)) parts.push("bar back needed");

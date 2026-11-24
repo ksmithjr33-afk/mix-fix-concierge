@@ -19,7 +19,8 @@ import { allSupplies, bartenderLists, supplyState, type ListDetail, type Supplie
 import { staffSupplies, supplyUpdates } from "@/lib/team/supplies-db";
 import type { SheetRecipe } from "@/lib/order-sheet";
 import { withDrinkEdits } from "@/lib/team/event-view";
-import { isAdminRole, roleSuffix } from "@/lib/team/roles";
+import { isAdminRole } from "@/lib/team/roles";
+import { eventRoleOf, nameWithRole, workingAsText } from "@/lib/team/event-roles";
 
 /** The staff member's assignment to an event. Null when there is none, or before the assignments table exists. */
 export async function getAssignment(sessionId: string, staffId: string): Promise<AssignmentLike | null> {
@@ -33,19 +34,28 @@ export async function getAssignment(sessionId: string, staffId: string): Promise
   return (data as AssignmentLike | null) ?? null;
 }
 
-/** First names of everyone else assigned and not declined. Empty before the assignments table exists. */
-async function teammates(sessionId: string, staffId: string): Promise<string[]> {
+/**
+ * Everyone assigned and not declined, with the role each works on this event
+ * (the assignment's, else the profile default). Empty before the assignments table exists.
+ */
+async function onEventRoles(sessionId: string): Promise<{ id: string; name: string; role: string }[]> {
   const { data, error } = await supabase
     .from("event_assignments")
-    .select("status, staff:staff_id (id, name, role)")
+    .select("*, staff:staff_id (id, name, role)")
     .eq("session_id", sessionId)
     .neq("status", "declined");
   if (error || !data) return [];
-  return data
-    .map((r) => (Array.isArray(r.staff) ? r.staff[0] : r.staff) as { id: string; name: string; role?: string } | null)
-    .filter((s): s is { id: string; name: string; role?: string } => !!s && s.id !== staffId && !!firstName(s.name))
-    // "Sam (bar back)": the role after everyone but bartenders.
-    .map((s) => `${firstName(s.name)}${roleSuffix(s.role)}`);
+  return (data as { role?: string | null; staff: unknown }[])
+    .map((r) => {
+      const s = (Array.isArray(r.staff) ? r.staff[0] : r.staff) as { id: string; name: string; role?: string } | null;
+      return s ? { id: s.id, name: s.name, role: eventRoleOf(r, s.role) as string } : null;
+    })
+    .filter((s): s is { id: string; name: string; role: string } => !!s);
+}
+
+/** "Sam (Barback)": first names of everyone else on the event, with the role each works on it. Never a tier or pay. */
+async function teammates(sessionId: string, staffId: string, people?: { id: string; name: string; role: string }[]): Promise<string[]> {
+  return (people ?? (await onEventRoles(sessionId))).filter((s) => s.id !== staffId && !!firstName(s.name)).map((s) => nameWithRole(firstName(s.name), s.role));
 }
 
 export async function getSubmittedSession(sessionId: string): Promise<SessionRow | null> {
@@ -132,8 +142,10 @@ export async function suppliesConfirmation(staffId: string, sessionId: string): 
  */
 export async function eventPageData(session: SessionRow, staff: StaffMember): Promise<EventPageData> {
   const suppliesP = staffSupplies(session);
-  const [mates, update, supplies, checklistRows, shopRows, confirmedAt, updates, suppliesConfirmedAt] = await Promise.all([
-    teammates(session.id, staff.id),
+  const peopleP = onEventRoles(session.id);
+  const [mates, mine, update, supplies, checklistRows, shopRows, confirmedAt, updates, suppliesConfirmedAt] = await Promise.all([
+    peopleP.then((p) => teammates(session.id, staff.id, p)),
+    peopleP.then((p) => p.find((x) => x.id === staff.id) ?? null),
     latestUpdate(session.id),
     suppliesP,
     checkRows(staff.id, session.id, "checklist"),
@@ -143,7 +155,8 @@ export async function eventPageData(session: SessionRow, staff: StaffMember): Pr
     suppliesConfirmation(staff.id, session.id),
   ]);
   const base = buildStaffEventView(session, { teammates: mates, latestUpdate: update });
-  const view = { ...base, drinks: withDrinkEdits(base.drinks, supplies.recipes) };
+  // Their own role on this event, only when they are on it (offered or accepted).
+  const view = { ...base, drinks: withDrinkEdits(base.drinks, supplies.recipes), ...(mine ? { workingAs: workingAsText(mine.role) } : {}) };
 
   const checklist = checklistFor(view.package);
 

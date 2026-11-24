@@ -54,11 +54,15 @@ export type PackageRates = Record<PayPackage, number> & { serviceFee?: ServiceFe
 // than the new hire count, on either model) gets the new hire rate ($30)
 // whatever their tier; a count of 0 turns that off. Someone past it who is not
 // placed in a tier gets the Core rate. Never less than the rate stored when they
-// accepted the event, and once hours are approved the rate stored on the
-// approval is the rate, so later changes never rewrite past pay. Bar backs,
-// servers and event helpers: one support rate, $30. A person's own rate counts
-// only when it is higher. No gratuity share. Gratuity model events keep every
-// rule above exactly as it was.
+// accepted the event (or, after an admin changed their role, the new role's
+// rate at the time of the change), and once hours are approved the rate stored
+// on the approval is the rate, so later changes never rewrite past pay.
+// Barbacks, servers and event helpers: one support rate, $25. The role is the
+// one on the assignment (lib/team/event-roles.ts), so a bartender working an
+// event as a barback gets the support rate on it, and only events worked as
+// Bartender count toward the new hire count. A person's own rate counts only
+// when it is higher. No gratuity share. Gratuity model events keep every rule
+// above exactly as it was.
 //
 // The tier and why a rate applies are for admins only: staff are only ever
 // told "your rate" (forStaff strips the reason).
@@ -73,7 +77,7 @@ export interface ServiceFeeRates {
   support: number;
 }
 export const SERVICE_FEE_BARTENDER_CENTS = 45_00; // the Top rate
-export const SUPPORT_RATE_CENTS = 30_00;
+export const SUPPORT_RATE_CENTS = 25_00;
 export const SERVICE_FEE_RATE_DEFAULTS: ServiceFeeRates = {
   top: SERVICE_FEE_BARTENDER_CENTS,
   core: 40_00,
@@ -89,7 +93,7 @@ export const SERVICE_FEE_RATE_LABEL: Record<keyof ServiceFeeRates, string> = {
   developing: "Developing tier bartenders",
   newHire: "New hire rate",
   newHireEvents: "New hire event count",
-  support: "Bar backs, servers and event helpers",
+  support: "Barbacks, servers and event helpers",
 };
 export const MAX_NEW_HIRE_EVENTS = 50;
 
@@ -134,7 +138,7 @@ export function serviceFeeBase(sf: ServiceFeeRates, role: string | null | undefi
   const floor = standing?.acceptedCents ?? null;
   return floor && floor > base.cents ? { cents: floor, reason: "accepted" } : base;
 }
-/** The roles paid the support rate on a service fee event. Everyone else on the event is paid as a bartender. */
+/** The roles paid the support rate on a service fee event (the role on the assignment). Everyone else on the event is paid as a bartender. */
 export const SUPPORT_ROLES = ["bar_back", "server", "event_helper"] as const;
 export const isSupportRole = (role: unknown): boolean => (SUPPORT_ROLES as readonly unknown[]).includes(role);
 
@@ -264,6 +268,7 @@ export interface PayRow {
   sessionId: string;
   day: string | null;
   title: string;
+  eventRole?: string; // the role worked on the event: "bar_back"
   rateCents: number;
   rateSource: RateSource;
   ratePkg: PayPackage | null;

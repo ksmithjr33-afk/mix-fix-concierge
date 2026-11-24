@@ -16,7 +16,8 @@ import { getSubmittedSession } from "@/lib/team/events";
 import { firstName, type StaffMember } from "@/lib/team/event-view";
 import { barbackStatus, BARBACK_INCLUDED, BARBACK_REMOVED } from "@/lib/package-extras";
 import { computeBaseline, withHoursBooked, type BookedPrice } from "@/lib/price-change";
-import { bartendersExtras, canFixStaffing, cleanBartenders, withLog } from "@/lib/team/staffing-fix";
+import { bartendersExtras, canFixStaffing, cleanBartenders, cleanRoleNeeded, isOtherRole, roleNeededExtras, withLog } from "@/lib/team/staffing-fix";
+import { EVENT_ROLE_PLURAL } from "@/lib/team/event-roles";
 import type { SessionRow } from "@/lib/event-updates";
 import { closeIfFilled } from "@/lib/team/shifts-db";
 
@@ -42,6 +43,20 @@ export async function setBartendersNeeded(sessionId: string, staff: StaffMember,
   if (error) throw new Error(`bartenders needed save failed: ${error.message}`);
   // An open shift post now covered by the new number closes, as when its last spot is filled.
   await closeIfFilled({ ...session, package_extras: extras } as SessionRow).catch((err) => console.error(`[staffing] ${sessionId}: open post check failed:`, err));
+  return { ok: true };
+}
+
+/** Set barbacks, event helpers or servers needed (0 to 4). Staffing only, like bartenders needed. */
+export async function setRoleNeeded(sessionId: string, staff: StaffMember, role: unknown, raw: unknown): Promise<FixResult> {
+  if (!canFixStaffing(staff.role)) return ADMINS_ONLY;
+  if (!isOtherRole(role)) return { ok: false, error: "Pick a role.", status: 400 };
+  const value = cleanRoleNeeded(raw);
+  if (value === null) return { ok: false, error: `Pick 0 to 4 ${EVENT_ROLE_PLURAL[role].toLowerCase()}.`, status: 400 };
+  const session = await getSubmittedSession(sessionId);
+  if (!session) return NOT_FOUND;
+  const extras = roleNeededExtras(session, role, value, firstName(staff.name) || "an admin", new Date().toISOString());
+  const { error } = await supabase.from("sessions").update({ package_extras: extras }).eq("id", sessionId);
+  if (error) throw new Error(`role needed save failed: ${error.message}`);
   return { ok: true };
 }
 

@@ -138,3 +138,53 @@ export function staffingLog(session: SessionLike): StaffingLogEntry[] {
 export function withLog(session: SessionLike, entry: StaffingLogEntry): StaffingLogEntry[] {
   return [entry, ...staffingLog(session)].slice(0, STAFFING_LOG_MAX);
 }
+
+// ----- Barbacks, event helpers and servers needed (Team tab) -----
+//
+// Beside Bartenders needed, staffing only like it: kept on
+// sessions.package_extras.role_needed ({ bar_back, event_helper, server }, 0 to
+// 4 each), never the price or the booking. Barbacks default to 1 when the
+// package has a barback on (lib/package-extras.ts), else 0; event helpers and
+// servers default to 0. Ranked offers and open shifts fill Bartender spots
+// only; these roles are assigned by hand.
+
+export const MAX_ROLE_NEEDED = 4;
+type OtherRole = "bar_back" | "event_helper" | "server";
+const OTHER: OtherRole[] = ["bar_back", "event_helper", "server"];
+const ROLE_LOG_LABEL: Record<OtherRole, string> = { bar_back: "Barbacks", event_helper: "Event helpers", server: "Servers" };
+
+export const isOtherRole = (v: unknown): v is OtherRole => typeof v === "string" && (OTHER as string[]).includes(v);
+
+/** A needed count from the form: a whole number 0 to 4, or null when it is not one. */
+export function cleanRoleNeeded(v: unknown): number | null {
+  const n = typeof v === "number" ? v : typeof v === "string" && /^\s*\d+\s*$/.test(v) ? Number(v) : NaN;
+  return Number.isInteger(n) && n >= 0 && n <= MAX_ROLE_NEEDED ? n : null;
+}
+
+/** What an admin set for each role, or nothing when they never did. */
+export function roleNeededSet(session: SessionLike): Partial<Record<OtherRole, number>> {
+  const r = extras(session).role_needed;
+  if (!r || typeof r !== "object" || Array.isArray(r)) return {};
+  const out: Partial<Record<OtherRole, number>> = {};
+  for (const k of OTHER) {
+    const n = cleanRoleNeeded((r as Record<string, unknown>)[k]);
+    if (n !== null) out[k] = n;
+  }
+  return out;
+}
+
+/** Barbacks, event helpers and servers needed: the admin's number, else the default (a barback when the package has one on). */
+export function roleNeeded(session: SessionLike, barbackOn: boolean): Record<OtherRole, number> {
+  const set = roleNeededSet(session);
+  return { bar_back: set.bar_back ?? (barbackOn ? 1 : 0), event_helper: set.event_helper ?? 0, server: set.server ?? 0 };
+}
+
+/** The package_extras with one role's needed count set, and a log line. */
+export function roleNeededExtras(session: SessionLike, role: OtherRole, value: number, by: string, at: string): Record<string, unknown> {
+  const base = extras(session);
+  return {
+    ...base,
+    role_needed: { ...roleNeededSet(session), [role]: value },
+    staffing_log: withLog(session, { at, by, text: `${ROLE_LOG_LABEL[role]} needed set to ${value}` }),
+  };
+}

@@ -65,7 +65,8 @@ export async function eventsForViewer(staff: StaffMember): Promise<EventListItem
     const [teams, unread, menus, noIce] = await Promise.all([teamsByEvent(ids), unreadByEvent(staff.id, ids), pickupBadges(ids), iceUnassignedIds(rows)]);
     const needs = new Map(rows.map((r) => [r.id, needsOf(r)]));
     const items = rows.map((r) => {
-      const c = staffingCounts(bartendersNeeded(r), (teams.get(r.id) ?? []).map((p) => p.status as AssignmentStatus));
+      // Bartenders needed counts only people working the event as Bartender.
+      const c = staffingCounts(bartendersNeeded(r), (teams.get(r.id) ?? []).filter((p) => p.role === "bartender").map((p) => p.status as AssignmentStatus));
       const menu = menus.get(r.id);
       return {
         ...eventListItem(r, own.get(r.id), { admin: true }),

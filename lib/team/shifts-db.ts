@@ -5,6 +5,8 @@
 // shift in one of their markets, built by shiftSummary() from an allowlist.
 
 import { supabase } from "@/lib/supabase";
+import { bartenderRows, type EventRole } from "@/lib/team/event-roles";
+import { assignmentsWithRoles, upsertAssignment } from "@/lib/team/event-roles-db";
 import { lockMileage } from "@/lib/team/pay-db";
 import type { SessionRow } from "@/lib/event-updates";
 import { bartendersNeeded, firstName, type StaffMember } from "@/lib/team/event-view";
@@ -84,18 +86,17 @@ interface AssignmentLite {
   session_id: string;
   staff_id: string;
   status: AssignmentStatus;
+  role: EventRole; // the role worked on the event
 }
 
 async function assignmentsOf(sessionId: string): Promise<AssignmentLite[]> {
-  const { data, error } = await supabase.from("event_assignments").select("id, session_id, staff_id, status").eq("session_id", sessionId);
-  if (error) throw new Error(`event_assignments lookup failed: ${error.message}`);
-  return (data as AssignmentLite[]) ?? [];
+  return assignmentsWithRoles(sessionId);
 }
 
-/** Spots still open on an event: bartenders needed minus everyone offered or accepted. */
+/** Bartender spots still open on an event: bartenders needed minus everyone offered or accepted as Bartender. Open shifts fill Bartender spots only. */
 async function spotsOpen(session: SessionRow): Promise<number> {
   const rows = await assignmentsOf(session.id);
-  return staffingCounts(bartendersNeeded(session), rows.map((r) => r.status)).stillNeeded;
+  return staffingCounts(bartendersNeeded(session), bartenderRows(rows).map((r) => r.status)).stillNeeded;
 }
 
 function isPast(session: SessionRow, now: Date = new Date()): boolean {
@@ -259,7 +260,7 @@ export async function deliverShiftNotices(now: Date = new Date(), only: { market
       posts.set(id, {
         post,
         session,
-        spots: session && post?.kind === "open" ? staffingCounts(bartendersNeeded(session), rows.map((r) => r.status)).stillNeeded : 1,
+        spots: session && post?.kind === "open" ? staffingCounts(bartendersNeeded(session), bartenderRows(rows).map((r) => r.status)).stillNeeded : 1,
         onEvent: new Set(rows.filter((a) => a.status !== "declined").map((a) => a.staff_id)),
         handoff: post?.handoff_id ? await handoffById(post.handoff_id) : null,
       });
@@ -457,7 +458,7 @@ export async function postSelected(admin: StaffMember, raw: unknown, now: Date =
       day: eventSchedule(eventData(s)).day,
       market,
       needed,
-      spotsOpen: staffingCounts(needed, rows.map((r) => r.status)).stillNeeded,
+      spotsOpen: staffingCounts(needed, bartenderRows(rows).map((r) => r.status)).stillNeeded,
       alreadyPosted: !!(await activeOpenPost(id)),
     });
     if (reason) {
@@ -755,9 +756,8 @@ export async function approveRequest(admin: StaffMember, postId: string, staffId
   if (existing && existing.status !== "declined") return fail(`${firstName(person.name) || "They"} is already on this event.`);
 
   const now = new Date().toISOString();
-  const { error } = await supabase
-    .from("event_assignments")
-    .upsert({ session_id: session.id, staff_id: staffId, status: "accepted", assigned_at: now, responded_at: now, assigned_by: admin.id }, { onConflict: "session_id,staff_id" });
+  // An open shift is a Bartender spot.
+  const { error } = await upsertAssignment({ session_id: session.id, staff_id: staffId, status: "accepted", assigned_at: now, responded_at: now, assigned_by: admin.id, role: "bartender" });
   if (error) throw new Error(`assign failed: ${error.message}`);
   await supabase.from("shift_requests").update({ status: "approved", updated_at: now }).eq("post_id", postId).eq("staff_id", staffId);
   await lockMileage(session.id, staffId);
@@ -976,9 +976,8 @@ async function completeHandoff(h: HandoffRow, replacementId: string, admin: Staf
 
   const now = new Date().toISOString();
   // The replacement first, so the event is never left with nobody if a step fails.
-  const { error: upErr } = await supabase
-    .from("event_assignments")
-    .upsert({ session_id: session.id, staff_id: replacementId, status: "accepted", assigned_at: now, responded_at: now, assigned_by: admin.id }, { onConflict: "session_id,staff_id" });
+  // The replacement works the event in the role the original person had.
+  const { error: upErr } = await upsertAssignment({ session_id: session.id, staff_id: replacementId, status: "accepted", assigned_at: now, responded_at: now, assigned_by: admin.id, role: original.role });
   if (upErr) throw new Error(`handoff assign failed: ${upErr.message}`);
   const { error: delErr } = await supabase.from("event_assignments").delete().eq("session_id", session.id).eq("staff_id", h.from_staff_id);
   if (delErr) {

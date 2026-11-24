@@ -139,7 +139,7 @@ export function validatePackageRates(raw: Record<string, unknown>): Checked<Pack
 // ----- Hourly rate on service fee events -----
 // Bartenders by tier (Top $45, Core $40, Developing $35), the new hire rate
 // ($30) and how many approved events someone is a new hire for (1; 0 turns it
-// off), and one support rate for bar backs, servers and event helpers ($30).
+// off), and one support rate for barbacks, servers and event helpers ($25).
 // lineRate uses them. The old per package rates saved under the same key are ignored.
 
 const validCount = (n: unknown) => typeof n === "number" && Number.isInteger(n) && n >= 0 && n <= MAX_NEW_HIRE_EVENTS;

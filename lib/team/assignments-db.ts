@@ -4,7 +4,9 @@
 // undoes or blocks the change that triggered it.
 
 import { supabase } from "@/lib/supabase";
-import { lockMileage } from "@/lib/team/pay-db";
+import { lockAcceptedRate, lockMileage } from "@/lib/team/pay-db";
+import { bartenderRows, defaultEventRole, eventRoleOf, isEventRole, roleChangeText, type EventRole } from "@/lib/team/event-roles";
+import { missingRoleColumn, ROLE_NOT_READY, upsertAssignment } from "@/lib/team/event-roles-db";
 import { handAssigned } from "@/lib/team/offers-db";
 import { isFullAdmin } from "@/lib/team/roles";
 import { NEEDS_CONFIRM } from "@/lib/team/availability";
@@ -114,6 +116,7 @@ export interface AssignmentRow {
   session_id: string;
   staff_id: string;
   status: AssignmentStatus;
+  role?: string | null; // the role worked on this event; null on rows from before 20270106_assignment_roles.sql
   assigned_at: string;
   responded_at: string | null;
   assigned_by: string | null;
@@ -142,14 +145,19 @@ export async function assignmentsFor(sessionId: string): Promise<AssignmentRow[]
 
 export type ActionResult = { ok: true } | { ok: false; error: string; status: number };
 
-/** Offer an event to a staff member and text them. Someone who declined can be offered it again. */
+/**
+ * Offer an event to a staff member and text them. Someone who declined can be
+ * offered it again. The role on the event is the one picked, else the default
+ * from their profile.
+ */
 export async function assignStaff(
   session: SessionRow,
   staffId: string,
   admin: StaffMember,
   origin: string,
-  opts: { confirmUnavailable?: boolean } = {}
+  opts: { confirmUnavailable?: boolean; role?: unknown } = {}
 ): Promise<ActionResult> {
+  if (opts.role !== undefined && opts.role !== null && opts.role !== "" && !isEventRole(opts.role)) return { ok: false, error: "Pick a role: Bartender, Barback, Event helper or Server.", status: 400 };
   if (await isHidden(session.id)) return { ok: false, error: "This event is hidden. Unhide it before assigning staff.", status: 409 };
   const staff = await staffById(staffId);
   if (!staff || !staff.active) return { ok: false, error: "That person is not on the active team.", status: 404 };
@@ -166,17 +174,16 @@ export async function assignStaff(
     if (problem) return { ok: false, error: problem, status: NEEDS_CONFIRM };
   }
 
-  const { error } = await supabase.from("event_assignments").upsert(
-    {
-      session_id: session.id,
-      staff_id: staffId,
-      status: "offered",
-      assigned_at: new Date().toISOString(),
-      responded_at: null,
-      assigned_by: admin.id,
-    },
-    { onConflict: "session_id,staff_id" }
-  );
+  const role: EventRole = isEventRole(opts.role) ? opts.role : defaultEventRole(staff.role);
+  const { error } = await upsertAssignment({
+    session_id: session.id,
+    staff_id: staffId,
+    status: "offered",
+    assigned_at: new Date().toISOString(),
+    responded_at: null,
+    assigned_by: admin.id,
+    role,
+  });
   if (error) throw new Error(`assign failed: ${error.message}`);
 
   const f = eventFacts(session);
@@ -188,7 +195,36 @@ export async function assignStaff(
     console.error("[team] closing the filled shift failed:", err instanceof Error ? err.message : String(err));
   }
   // Assigning by hand always works and ends shift offers for that spot. Never throws.
-  await handAssigned(session.id, staffId);
+  // Offers fill Bartender spots only: someone assigned in another role takes no offer spot.
+  if (role === "bartender") await handAssigned(session.id, staffId);
+  return { ok: true };
+}
+
+/**
+ * Change the role someone works on an event (admins and managers, Team tab).
+ * Someone who accepted gets a text, and on a service fee event the rate floor
+ * from accepting becomes the new role's rate at the time of the change.
+ * Gratuity model events store no rate: the role is recorded and shown only.
+ */
+export async function setAssignmentRole(session: SessionRow, staffId: string, rawRole: unknown): Promise<ActionResult> {
+  if (!isEventRole(rawRole)) return { ok: false, error: "Pick a role: Bartender, Barback, Event helper or Server.", status: 400 };
+  const { data } = await supabase.from("event_assignments").select("*").eq("session_id", session.id).eq("staff_id", staffId).maybeSingle();
+  const row = data as (AssignmentRow & { id: string }) | null;
+  if (!row || row.status === "declined") return { ok: false, error: "That person is not on this event.", status: 404 };
+  const staff = await staffById(staffId);
+  if (row.role === rawRole) return { ok: true };
+  const { error } = await supabase.from("event_assignments").update({ role: rawRole }).eq("session_id", session.id).eq("staff_id", staffId);
+  if (error) {
+    if (missingRoleColumn(error.message)) return { ok: false, error: ROLE_NOT_READY, status: 503 };
+    throw new Error(`role change failed: ${error.message}`);
+  }
+  if (row.status === "accepted") {
+    await lockAcceptedRate(session.id, staffId, { replace: true });
+    if (staff) {
+      const f = eventFacts(session);
+      await sendStaffText(staff.phone, staff.name, roleChangeText({ event: f.title ? `${f.title} on ${f.date}` : `your event on ${f.date}`, role: rawRole }));
+    }
+  }
   return { ok: true };
 }
 
@@ -303,9 +339,14 @@ export async function staffingByEvent(sessions: SessionRow[]): Promise<Map<strin
   const ids = sessions.map((s) => s.id);
   const statuses = new Map<string, AssignmentStatus[]>();
   if (ids.length > 0) {
-    const { data, error } = await supabase.from("event_assignments").select("session_id, status").in("session_id", ids);
+    // Bartenders needed counts only the people working the event as Bartender.
+    const { data, error } = await supabase.from("event_assignments").select("*, staff:staff_id (role)").in("session_id", ids);
     if (error) throw new Error(`event_assignments lookup failed: ${error.message}`);
-    for (const r of (data as { session_id: string; status: AssignmentStatus }[]) ?? []) {
+    const rows = ((data as { session_id: string; status: AssignmentStatus; role?: string | null; staff: unknown }[]) ?? []).map((r) => {
+      const st = (Array.isArray(r.staff) ? r.staff[0] : r.staff) as { role?: string } | null;
+      return { ...r, role: eventRoleOf(r, st?.role) };
+    });
+    for (const r of bartenderRows(rows)) {
       statuses.set(r.session_id, [...(statuses.get(r.session_id) ?? []), r.status]);
     }
   }
@@ -315,7 +356,8 @@ export async function staffingByEvent(sessions: SessionRow[]): Promise<Map<strin
 export interface AssigneeProgress {
   staffId: string;
   name: string;
-  role: string; // "bar_back"; shown next to the name for everyone but bartenders
+  role: string; // the profile role: "bar_back"
+  eventRole: EventRole; // the role worked on this event, set on the Team tab
   phone: string;
   status: AssignmentStatus;
   assignedAt: string;
@@ -357,6 +399,7 @@ export async function assigneeProgress(session: SessionRow, supplies?: Supplies)
         staffId: r.staff_id,
         name: s?.name || "Removed staff member",
         role: s?.role ?? "bartender",
+        eventRole: eventRoleOf(r, s?.role),
         phone: s?.phone ?? "",
         status: r.status,
         assignedAt: r.assigned_at,

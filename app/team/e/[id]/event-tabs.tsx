@@ -614,7 +614,7 @@ export default function EventTabs({
         )}
       </div>
 
-      {offered && <RespondBanner sessionId={view.sessionId} />}
+      {offered && <RespondBanner sessionId={view.sessionId} workingAs={view.workingAs} />}
 
       {menuPickup && <MyPickupCard pickup={menuPickup} showEvent={false} />}
 

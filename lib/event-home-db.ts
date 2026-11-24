@@ -17,6 +17,7 @@ import { recordedFrom } from "@/lib/balance";
 import { isServiceFeeEvent } from "@/lib/price-change";
 import { autoSendOn, holdsFor, listState } from "@/lib/client-list-db";
 import { firstName } from "@/lib/team/event-view";
+import { eventRoleLabel, eventRoleOf } from "@/lib/team/event-roles";
 import { typeLabel } from "@/lib/team/approved-menu";
 import { AGREEMENT_BUCKET, AGREEMENT_LINK_SECONDS, type AgreementRow } from "@/lib/team/agreements";
 import { shortLink } from "@/lib/team/direct-upload";
@@ -40,17 +41,24 @@ const DAY_MS = 86_400_000;
 const dollars = (cents: number) => `$${(cents / 100).toLocaleString("en-US", { minimumFractionDigits: cents % 100 ? 2 : 0, maximumFractionDigits: 2 })}`;
 
 /**
- * The bar team: accepted and not dropped, first names only. The event
- * assignment carries no role, so no role is shown: never "Bartender" for
- * everyone. If assignments ever get a role, it goes in TeamMember.role.
+ * The bar team: accepted and not dropped, first names with the role each
+ * works on this event (the assignment's, else the profile default): "Sam,
+ * Barback". Never a last name, contact details, a tier or pay.
  */
 export async function homeTeam(sessionId: string): Promise<TeamMember[]> {
-  const { data, error } = await supabase.from("event_assignments").select("staff_id, status, dropped_at").eq("session_id", sessionId).eq("status", "accepted");
+  // "*": the role is read once 20270106_assignment_roles.sql has added it.
+  const { data, error } = await supabase.from("event_assignments").select("*").eq("session_id", sessionId).eq("status", "accepted");
   if (error || !data || data.length === 0) return [];
-  const ids = (data as { staff_id: string; dropped_at: string | null }[]).filter((a) => !a.dropped_at).map((a) => a.staff_id);
-  if (ids.length === 0) return [];
-  const { data: staff } = await supabase.from("staff").select("id, name").in("id", ids);
-  return ((staff as { name: string }[] | null) ?? []).map((s) => ({ name: firstName(s.name), role: "" })).filter((m) => m.name);
+  const rows = (data as { staff_id: string; dropped_at?: string | null; role?: string | null }[]).filter((a) => !a.dropped_at);
+  if (rows.length === 0) return [];
+  const { data: staff } = await supabase.from("staff").select("id, name, role").in("id", rows.map((a) => a.staff_id));
+  const byId = new Map(((staff as { id: string; name: string; role?: string }[] | null) ?? []).map((s) => [s.id, s]));
+  return rows
+    .map((a) => {
+      const s = byId.get(a.staff_id);
+      return s ? { name: firstName(s.name), role: eventRoleLabel(eventRoleOf(a, s.role)) } : null;
+    })
+    .filter((m): m is TeamMember => !!m && !!m.name);
 }
 
 /** Current agreements only (never one still uploading, replaced, or removed). */
