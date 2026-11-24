@@ -16,6 +16,7 @@ import {
   REQUESTS_AND_NOTES_RULE,
   lateChargeRule,
   todayAndDates,
+  serviceFeeBartenderOnlyPrompt,
 } from "@/lib/system-prompt";
 import { packageDrinkCount, type Deadlines, type EventData } from "@/lib/event-diff";
 import { CHANGE_REQUEST_MESSAGE } from "@/lib/client-list";
@@ -112,7 +113,7 @@ export function buildUpdatePrompt(
   eventData: EventData,
   version: number,
   deadlines: Deadlines,
-  extra: { booked?: BookedPrice | null; recorded?: Recorded | null; recap?: ChatRecap | null; pricePending?: PricePendingInfo | null; planner?: string; packageSection?: string; serviceFee?: boolean } = {}
+  extra: { booked?: BookedPrice | null; recorded?: Recorded | null; recap?: ChatRecap | null; pricePending?: PricePendingInfo | null; planner?: string; packageSection?: string; serviceFee?: boolean; serviceFeeBartenderOnly?: boolean } = {}
 ): string {
   const paymentPreference = String(eventData.payment_preference ?? "").trim();
   // Older events' special requests were written for our team: the concierge never sees them, and what it sends is added to them.
@@ -144,7 +145,7 @@ export function buildUpdatePrompt(
       ? `The event is ${deadlines.daysUntil === 0 ? "today" : deadlines.daysUntil === 1 ? "tomorrow" : `${deadlines.daysUntil} days away`}, so we are WITHIN 6 DAYS. A drink menu change is a REQUEST FOR APPROVAL. Everything else can still be changed.`
       : `The last day a drink menu change saves right away is ${longDate(deadlines.lastDrinkChangeDay)}. Today the drink menu is OPEN, and everything can be changed.`;
 
-  return `You are the AI Bar Concierge for The Mix Fix, a premium private bartending service in Dallas, Texas. ${todayAndDates(new Date(), "update")}
+  const prompt = `You are the AI Bar Concierge for The Mix Fix, a premium private bartending service in Dallas, Texas. ${todayAndDates(new Date(), "update")}
 
 ${FORMATTING_RULES}
 
@@ -211,4 +212,6 @@ ${CHANGE_DEADLINES}
 
 ${drinkTodoSection(eventData, packageCount)}CURRENT EVENT DETAILS (version ${version}):
 ${JSON.stringify(clientEventData(eventData), null, 2)}`;
+  // The new Bartender Only: what is included is rewritten, nothing else.
+  return extra.serviceFeeBartenderOnly ? serviceFeeBartenderOnlyPrompt(prompt) : prompt;
 }

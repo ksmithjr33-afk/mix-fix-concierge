@@ -9,9 +9,19 @@
 
 import { PACKAGE_GUIDES, packageShortFor, BARBACK_AT_WEDDINGS, type BookingShort, type PackageShort } from "@/lib/packages-info";
 import { barbackStatus, bookingShortOf } from "@/lib/package-extras";
+import { isServiceFeeBartenderOnlyBooking } from "@/lib/bartender-only";
 
 /** The one sentence the concierge says, once, when a client asks to remove the Full Bar wedding barback. */
 export const BARBACK_KEEP_LINE = "We recommend keeping the barback so your bartenders never have to leave the bar.";
+
+/**
+ * The new Bartender Only (service fee model): the same conversation steps and
+ * drink rules as the legacy Bartender Only, only what is included differs.
+ * The prompt itself is rewritten too (serviceFeeBartenderOnlyPrompt in
+ * lib/system-prompt.ts), so no legacy cooler or supplies line is left in it.
+ */
+export const SF_BARTENDER_ONLY_RULE =
+  "BARTENDER ONLY ON OUR CURRENT PRICING: this booking is Bartender Only on our current pricing. Every Bartender Only rule in this prompt for the conversation steps and the drinks applies exactly as written (where a rule names the legacy Bartender Only or Tailored Bar, it applies to this booking too: the same phases, drink sourcing, signature drink count, mocktails and shopping list). Only what is included is different: the client buys everything on the shopping list, including alcohol, mixers, garnishes, ice, and cups, and we bring the bartenders and bar tools only. Never say we bring ice, a cooler, cups, mixers, or supplies on this booking, in any message, including the closing message. When ice comes up, say the ice is on their side and keep it on their shopping list. Never add an inclusion or a drink limit that is not stated here.";
 
 /** "Line. Bullet one, bullet two, and bullet three. Client provides line." */
 export function shortSentence(s: PackageShort): string {
@@ -53,10 +63,12 @@ export function bookingPackageSection(
   intakeQuote: { amount: number; newTotal: number } | null = null
 ): string {
   if (!pkg) return "";
-  const booking = bookingShortOf(session);
+  const sfBartenderOnly = isServiceFeeBartenderOnlyBooking(pkg, session as { pricing_model?: unknown; booked_price?: unknown } | null);
+  const booking = { ...bookingShortOf(session), serviceFee: sfBartenderOnly };
   const lines: string[] = [];
   const sentence = packageSentence(pkg, booking);
   if (sentence) lines.push(`THIS BOOKING'S PACKAGE (${pkg}): when you describe it, use exactly this: "${sentence}"`);
+  if (sfBartenderOnly) lines.push(SF_BARTENDER_ONLY_RULE);
   const b = barbackStatus(session);
   if (b.applies && !b.removable) {
     lines.push("BARBACK: a barback is part of this package and cannot be removed. If the client asks to remove it, say it is part of the package.");

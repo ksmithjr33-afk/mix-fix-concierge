@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { buildIntakePrompt } from "@/lib/system-prompt";
 import { bookingPackageSection } from "@/lib/package-prompt";
+import { isServiceFeeBartenderOnlyBooking } from "@/lib/bartender-only";
 import { applyIntakeBarback, intakeBarbackQuote, splitBarback } from "@/lib/intake-barback";
 import { supabase } from "@/lib/supabase";
 import { buildUpdatePrompt } from "@/lib/update-prompt";
@@ -412,6 +413,7 @@ async function updateModeResponse(session: SessionRow, messages: ChatMessage[], 
     pricePending: session.price_pending ? (session.price_pending_info ?? null) : null,
     packageSection: bookingPackageSection(session, String(eventData.package ?? ""), messages, approvalOnly ? "approval" : "update"),
     serviceFee: isServiceFeeEvent(session.booked_price, session),
+    serviceFeeBartenderOnly: isServiceFeeBartenderOnlyBooking(eventData.package, session),
   });
   // A price the client mentions while one is pending goes on the admins' summary.
   const lastUser = [...messages].reverse().find((m) => m.role === "user")?.content ?? "";
@@ -817,6 +819,7 @@ export async function POST(request: Request) {
         packageSection: session
           ? bookingPackageSection({ ...session, event_data: session.event_data ?? bookedEventFrom(session) }, String(session.package_type ?? ""), messages, approvalOnly ? "approval" : "intake", approvalOnly ? null : intakeBarbackQuote(session))
           : "",
+        serviceFeeBartenderOnly: isServiceFeeBartenderOnlyBooking(session?.package_type, session),
       }),
       cache_control: { type: "ephemeral" },
     },

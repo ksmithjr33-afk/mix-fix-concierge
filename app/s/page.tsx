@@ -15,6 +15,7 @@ import { clientAsks, clientEventData } from "@/lib/team-notes";
 import { packageDrinkCount } from "@/lib/event-diff";
 import { eventHome } from "@/lib/event-home-db";
 import { ALL_MONEY } from "@/lib/event-home";
+import { isServiceFeeEvent } from "@/lib/price-change";
 
 // The booking fields /chat takes as query params for intake.
 const INTAKE_PARAMS = [
@@ -140,6 +141,7 @@ export default async function ShortRedirectPage({
         menu={menu}
         cups={extrasOf(data).cups_included === true}
         noBarback={barbackStatus(data).notBooked}
+        serviceFee={isServiceFeeEvent(data.booked_price, data)}
         home={home}
         // The booking holder sees that it is a surprise.
         badge={surpriseOn(data as EventSession) ? <p className="inline-block text-[11px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-[#EDE3F5] text-[#5B3F7A]">{SURPRISE_LABEL}</p> : null}

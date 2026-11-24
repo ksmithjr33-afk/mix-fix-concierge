@@ -100,12 +100,14 @@ export default function EventSummary({
   data,
   cups = false,
   noBarback = false,
+  serviceFee = false,
   asks = null,
   onChange,
 }: {
   data: EventData;
   cups?: boolean;
   noBarback?: boolean;
+  serviceFee?: boolean; // service fee model: the new Bartender Only reads "We bring the bartenders and bar tools only."
   asks?: React.ReactNode; // the client's own questions (finish the drink menu, the extra drink), under Add ons and special requests
   onChange?: (topic: ChangeTopic) => void; // the Change button on each section; none on a read only view
 }) {
@@ -116,6 +118,8 @@ export default function EventSummary({
     // noBarback: a barback was never part of this booking, so the line is left out (not "removed").
     barback: String(data.barback ?? "").trim().toLowerCase() === "removed" ? (noBarback ? "none" : "removed") : "on",
     cups,
+    // The new Bartender Only (service fee model). Also when the event itself carries the model.
+    serviceFee: serviceFee || data.pricing_model === "service_fee",
   }, "client");
   const drinks = (Array.isArray(data.signature_drinks) ? data.signature_drinks : []) as Drink[];
   const start = text(data.bar_service_start);

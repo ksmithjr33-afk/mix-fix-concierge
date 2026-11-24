@@ -52,7 +52,20 @@ export interface BookingShort {
   wedding?: boolean; // the event is a wedding (the Full Bar barback line only shows at weddings)
   barback?: "on" | "removed" | "none"; // Full Bar weddings; none: a barback was never part of this booking, so no line at all
   cups?: boolean; // custom cups promised on an older Full Bar booking
+  serviceFee?: boolean; // the booking is on the service fee model: Bartender Only reads as the new package (SF_BARTENDER_ONLY_SHORT)
 }
+
+/**
+ * The new Bartender Only (service fee model): what is included, in the owner's
+ * words. The client buys everything on the shopping list and we bring the
+ * bartenders and bar tools only. Never ice, a cooler, cups, mixers or
+ * supplies. Legacy Bartender Only (gratuity model) keeps its own wording.
+ */
+export const SF_BARTENDER_ONLY_SHORT: PackageShort = {
+  line: "We bring the bartenders and bar tools only.",
+  bullets: [],
+  provides: "The client buys everything on the shopping list, including alcohol, mixers, garnishes, ice, and cups.",
+};
 
 /**
  * The short package wording for one booking: the package's line, bullets and
@@ -76,6 +89,7 @@ export type PackageVoice = "team" | "client";
 /** One line of the package wording, spoken to the client. */
 export function toClientVoice(line: string): string {
   return line
+    .replace(/\bThe client buys\b/g, "You buy")
     .replace(/\bThe client provides\b/g, "You provide")
     .replace(/\bthe client provides\b/g, "you provide")
     .replace(/\bThe client's\b/g, "Your")
@@ -98,6 +112,7 @@ function clientVoiceShort(s: PackageShort): PackageShort {
 function packageShortTeam(name: unknown, booking?: BookingShort): PackageShort | null {
   const g = packageGuide(name);
   if (!g) return null;
+  if (booking?.serviceFee && g.key === "bartender-only") return { ...SF_BARTENDER_ONLY_SHORT };
   if (!booking) return { ...g.short, bullets: g.short.bullets.slice(0, MAX_PACKAGE_BULLETS) };
   let bullets = [...g.short.bullets];
   if (g.key === "full") {

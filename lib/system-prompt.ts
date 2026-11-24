@@ -626,9 +626,42 @@ export interface IntakeOptions {
   noPayment?: boolean; // a planner who does not hold the booking: no payment step at all
   packageSection?: string; // this booking's package wording, barback and cups (lib/package-prompt.ts)
   opening?: string; // OPENING SUMMARY: what the booking told us, confirmed once (lib/intake-plan.ts)
+  serviceFeeBartenderOnly?: boolean; // the new Bartender Only: what is included is rewritten (serviceFeeBartenderOnlyPrompt)
 }
 
 const NO_PAYMENT_STEP = "PAYMENT STEP: skip it entirely for this chat. Do not ask about the remaining balance or payment, and leave payment_preference empty. Go from Phase 5 straight to Phase 6.";
+
+// ---------- The new Bartender Only (service fee model) ----------
+
+const SF_BO_INCLUDED = "the client buys everything on the shopping list, including alcohol, mixers, garnishes, ice, and cups, and we bring the bartenders and bar tools only";
+
+/**
+ * The legacy Bartender Only lines that say what we bring (a cooler, bar setup,
+ * the client supplies everything but ice), and what they say on the new
+ * Bartender Only instead. The conversation steps and drink rules stay word for
+ * word. Each pattern matches one whole line or sentence of the prompt above.
+ */
+const SF_BARTENDER_ONLY_REWRITES: [RegExp, string][] = [
+  [/^PACKAGE NAME NORMALIZATION: "Bartender Only" and "Tailored Bar".*$/m, `PACKAGE NAME NORMALIZATION: This booking is Bartender Only on our current pricing. It follows every Bartender Only and Tailored Bar rule in this prompt for the conversation steps and the drinks, but what is included is different: ${SF_BO_INCLUDED}. Never call this booking Tailored Bar.`],
+  [/We bring 1 cooler per bartender on EVERY package, including Bartender Only and Tailored Bar\./, "We bring 1 cooler per bartender on every package except Bartender Only on our current pricing, which is this booking: on it we bring no cooler and no ice."],
+  [/We bring 1 cooler per bartender\. State this once during logistics when confirming ice\./, "On this booking, never mention a cooler."],
+  [/^We do NOT bring any ice on the legacy Bartender Only or Tailored Bar packages\..*$/m, "We do NOT bring any ice or a cooler on this booking's Bartender Only. Tell the client early that the ice is on their side, keep ice on their shopping list, and if they ask for an estimate, plan about 1 to 1.5 pounds of ice per guest. Do not offer to bring ice, and never mention a cooler."],
+  [/^Bartender Only Package: .*$/m, `Bartender Only Package (this booking, on our current pricing): ${SF_BO_INCLUDED.charAt(0).toUpperCase()}${SF_BO_INCLUDED.slice(1)}. Full AI concierge conversation including cocktail menu strategy and shopping list generation.`],
+  [/^Tailored Bar Package: This was our June to August name.*$/m, "Tailored Bar Package: a legacy package. This booking is Bartender Only on our current pricing: never describe it with the Tailored Bar inclusions."],
+  [/^Bartender Only \(legacy\): .*$/m, `Bartender Only: ${packageSentence("Bartender Only", { serviceFee: true })}`],
+  [/^Tailored Bar Package \(LEGACY, or "Bartender Only" if that's what the prefilled package says\):/m, "Bartender Only Package (this booking, on our current pricing):"],
+  [/Client supplies everything including ice, so tell them early that we bring 1 cooler per bartender but the ice is on their side, and keep ice on their shopping list\./, "The client buys everything on the shopping list, including the ice, so tell them early that the ice is on their side, and keep ice on their shopping list. Never mention a cooler."],
+];
+
+/**
+ * A prompt (intake or update) for a booking on the new Bartender Only: the
+ * legacy lines about what we bring are rewritten, everything else is left
+ * alone. A line the prompt does not have (the update prompt has fewer
+ * sections) is skipped.
+ */
+export function serviceFeeBartenderOnlyPrompt(prompt: string): string {
+  return SF_BARTENDER_ONLY_REWRITES.reduce((out, [from, to]) => out.replace(from, () => to), prompt);
+}
 
 /** Intake prompt with the payment step for this session's booked total and deposit. */
 export function buildIntakePrompt(booking: IntakeBalance | null, now: Date = new Date(), opts: IntakeOptions = {}): string {
@@ -651,6 +684,7 @@ export function buildIntakePrompt(booking: IntakeBalance | null, now: Date = new
     prompt = replaceOnce(prompt, ASK_EVENT_TYPE_ITEM, "");
     prompt = replaceOnce(prompt, GREETING_ASKS_TYPE, GREETING_TYPE_BOOKED);
   }
+  if (opts.serviceFeeBartenderOnly) prompt = serviceFeeBartenderOnlyPrompt(prompt);
   return prompt;
 }
 

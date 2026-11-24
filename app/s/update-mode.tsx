@@ -46,6 +46,7 @@ export default function UpdateMode({
   extra = null,
   cups = false,
   noBarback = false,
+  serviceFee = false,
   initialAsks = null,
   home = null,
   badge = null,
@@ -55,6 +56,7 @@ export default function UpdateMode({
   initialAsks?: Asks | null; // the client's own questions: finish the drink menu, the extra drink
   cups?: boolean; // custom cups promised on an older Full Bar booking (sessions.package_extras)
   noBarback?: boolean; // a barback was never part of this booking (sessions.package_extras.barback_not_booked)
+  serviceFee?: boolean; // the booking is on the service fee model: Bartender Only shows the new package wording
   extra?: React.ReactNode; // the planners card, on client held events
   menu?: { type: string; typeLabel: string; viewHref: string; downloadHref: string } | null; // "Your menu": the approved menu, once uploaded
   sessionId: string;
@@ -387,6 +389,7 @@ export default function UpdateMode({
             data={eventData}
             cups={cups}
             noBarback={noBarback}
+            serviceFee={serviceFee}
             onChange={(t) => openChat(CHANGE_MESSAGES[t])}
           />
         </div>

@@ -385,4 +385,54 @@ check("Gratuity model engine unchanged: Full 100/4 tip jar $1,749", old.priceEve
   check("Details shows the line as one row", details.includes('<Row label="Tip jar" value={v.tipJar} />'));
 }
 
+// ----- The new Bartender Only in the concierge and on the client page -----
+{
+  const info = await import("../lib/packages-info.ts");
+  const pp = await import("../lib/package-prompt.ts");
+  const sp = await import("../lib/system-prompt.ts");
+  const up = await import("../lib/update-prompt.ts");
+  const bo = await import("../lib/bartender-only.ts");
+  const NEW = "We bring the bartenders and bar tools only. The client buys everything on the shopping list, including alcohol, mixers, garnishes, ice, and cups.";
+  const LEGACY = "Just the bartender. The client provides everything else.";
+  check("New Bartender Only: the package sentence", pp.packageSentence("Bartender Only", { serviceFee: true }) === NEW);
+  check("Legacy Bartender Only: the package sentence is unchanged", pp.packageSentence("Bartender Only") === LEGACY && pp.packageSentence("Bartender Only", { serviceFee: false }) === LEGACY);
+  const client = info.packageShortFor("Bartender Only", { serviceFee: true }, "client")!;
+  check("Client page: the new wording in the client's voice", client.line === "We bring the bartenders and bar tools only." && client.provides === "You buy everything on the shopping list, including alcohol, mixers, garnishes, ice, and cups.");
+  check("Client page: legacy Bartender Only is unchanged", info.packageShortFor("Bartender Only", {}, "client")!.provides === "You provide everything else.");
+  check("Other packages are untouched by the flag", ["Full Bar", "Dive Bar", "Premium Bar", "The Big Day Bar", "Tailored Bar"].every((n) => JSON.stringify(info.packageShortFor(n, { serviceFee: true })) === JSON.stringify(info.packageShortFor(n, {}))));
+
+  const sfSession = { pricing_model: "service_fee", package_type: "Bartender Only", event_data: { package: "Bartender Only" } };
+  const oldSession = { pricing_model: "gratuity", package_type: "Bartender Only", event_data: { package: "Bartender Only" } };
+  check("Booking check: service fee session or booked price, Bartender Only only", bo.isServiceFeeBartenderOnlyBooking("Bartender Only", sfSession) && bo.isServiceFeeBartenderOnlyBooking("Bartender Only", { booked_price: { pricing_model: "service_fee" } }) && !bo.isServiceFeeBartenderOnlyBooking("Bartender Only", oldSession) && !bo.isServiceFeeBartenderOnlyBooking("Full Bar", sfSession) && !bo.isServiceFeeBartenderOnlyBooking("Tailored Bar", sfSession));
+  for (const mode of ["intake", "update"] as const) {
+    const sec = pp.bookingPackageSection(sfSession as never, "Bartender Only", [], mode);
+    check(`${mode}: this booking's package uses the new wording and the rule`, sec.includes(`"${NEW}"`) && sec.includes(pp.SF_BARTENDER_ONLY_RULE));
+    const legacySec = pp.bookingPackageSection(oldSession as never, "Bartender Only", [], mode);
+    check(`${mode}: legacy booking's package section is unchanged`, legacySec === `THIS BOOKING'S PACKAGE (Bartender Only): when you describe it, use exactly this: "${LEGACY}"`);
+  }
+
+  const bannedNear = (p: string) => p.split("\n").filter((l) => /bartender only/i.test(l) && /cooler/i.test(l) && !/no cooler|never mention a cooler|or a cooler on this|ice, a cooler, cups/i.test(l));
+  const intakeOld = sp.buildIntakePrompt(null);
+  const intakeNew = sp.buildIntakePrompt(null, new Date(), { serviceFeeBartenderOnly: true });
+  check("Intake prompt: no line says Bartender Only comes with a cooler", bannedNear(intakeNew).length === 0 && bannedNear(intakeOld).length > 0);
+  check("Intake prompt: every legacy line about what we bring is rewritten", !intakeNew.includes("1 cooler per bartender on EVERY package, including Bartender Only") && !intakeNew.includes("we bring 1 cooler per bartender but the ice is on their side") && !/^Bartender Only \(legacy\):/m.test(intakeNew) && !intakeNew.includes("We provide the bartender, bar setup and tools, 1 cooler per bartender") && !intakeNew.includes("Neither is a current package"));
+  check("Intake prompt: the new package line and the same flow steps", intakeNew.includes(`Bartender Only: ${NEW}`) && intakeNew.includes("Bartender Only Package (this booking, on our current pricing): Full conversation. Phase 1 then Phase 2 then Phase 3 (guided selection from official cocktail menu) then Phase 3B (menu design statement, no questions) then Phase 4 then Phase 5 then the PAYMENT STEP then Phase 6."));
+  check("Intake prompt: drink rules for Bartender Only kept word for word", [sp.DRINK_SOURCING_RULES, sp.DRINK_MENU_RULES, sp.MOCKTAIL_RULES].every((r) => intakeNew.includes(r)) && intakeNew.includes("1 to 1.5 pounds of ice per guest"));
+  check("Intake prompt: only the Bartender Only lines change", intakeOld.split("\n").length === intakeNew.split("\n").length && intakeOld.split("\n").filter((l, i) => l !== intakeNew.split("\n")[i]).every((l) => /Bartender Only|Tailored|cooler/i.test(l)));
+  check("Intake prompt: unchanged without the flag", sp.buildIntakePrompt(null, new Date(), { serviceFeeBartenderOnly: false }) === intakeOld);
+
+  const dl = { eventDay: null, withinSixDays: false, daysUntil: null, lastDrinkChangeDay: null } as never;
+  const ed = { package: "Bartender Only", client_name: "Dana" };
+  const updOld = up.buildUpdatePrompt(ed, 1, dl, {});
+  const updNew = up.buildUpdatePrompt(ed, 1, dl, { serviceFeeBartenderOnly: true });
+  check("Update prompt: no line says Bartender Only comes with a cooler", bannedNear(updNew).length === 0 && bannedNear(updOld).length > 0);
+  check("Update prompt: the new package line, legacy one gone", updNew.includes(`Bartender Only: ${NEW}`) && !/^Bartender Only \(legacy\):/m.test(updNew) && !updNew.includes("We provide the bartender, bar setup and tools, 1 cooler per bartender"));
+  check("Update prompt: unchanged without the flag", up.buildUpdatePrompt(ed, 1, dl, { serviceFeeBartenderOnly: false }) === updOld);
+
+  const route = src("app/api/chat/route.ts");
+  check("Chat route passes the flag to both prompts", route.includes("serviceFeeBartenderOnly: isServiceFeeBartenderOnlyBooking(eventData.package, session)") && route.includes("serviceFeeBartenderOnly: isServiceFeeBartenderOnlyBooking(session?.package_type, session)"));
+  check("Client page passes the model to the package summary", src("app/s/page.tsx").includes("serviceFee={isServiceFeeEvent(data.booked_price, data)}") && src("app/s/event-summary.tsx").includes('serviceFee: serviceFee || data.pricing_model === "service_fee"'));
+  console.log("\nBEFORE (legacy, unchanged):", LEGACY, "\nAFTER (service fee):", NEW, "\nCLIENT PAGE AFTER:", client.line, client.provides);
+}
+
 done("service fee");

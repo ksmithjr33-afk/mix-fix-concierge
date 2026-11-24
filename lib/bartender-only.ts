@@ -27,3 +27,16 @@ export function isServiceFeeBartenderOnly(eventData: { package?: unknown; pricin
   if (!eventData || eventData.pricing_model !== "service_fee") return false;
   return serviceFeePackage(eventData.package) === "beerwine" && /bartender\s*only/i.test(String(eventData.package ?? ""));
 }
+
+/**
+ * A booking on the new Bartender Only, from the session row: the booking is on
+ * the service fee model (the session or its booked price says so, like
+ * isServiceFeeEvent) and the package is Bartender Only. For the concierge,
+ * which reads the session rather than event_data.
+ */
+export function isServiceFeeBartenderOnlyBooking(pkg: unknown, session: { pricing_model?: unknown; booked_price?: unknown } | null | undefined): boolean {
+  if (!session) return false;
+  const booked = session.booked_price as { pricing_model?: unknown } | null | undefined;
+  const sf = session.pricing_model === "service_fee" || booked?.pricing_model === "service_fee";
+  return sf && isServiceFeeBartenderOnly({ package: pkg, pricing_model: "service_fee" });
+}
