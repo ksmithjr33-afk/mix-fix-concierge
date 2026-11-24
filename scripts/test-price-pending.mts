@@ -142,7 +142,7 @@ check("The saved chat has no filler either", !/let me get a price/i.test(saved))
 // No change order, no charge.
 const payloads = hooks.filter((h) => h.url === "https://hooks.test/update").map((h) => h.body);
 check("GHL got the update with price_pending and the summary", payloads.length === 1 && payloads[0].price_pending === "Yes" && String(payloads[0].price_pending_summary).includes("Essentials Bar to Full Bar"));
-check("No change order or charge: every money field is blank", payloads.every((p) => p.pending_change_amount === null && p.pending_change_new_total === null && p.booked_total === null && p.pending_change_gratuity === null));
+check("No change order or charge: every money field is blank", payloads.every((p) => p.pending_change_amount === null && p.pending_change_new_total === null && p.booked_total === null && p.pending_change_gratuity === null && p.pending_change_service_fee === null));
 check("No new total in the payload text", payloads.every((p) => !/\$\d/.test(String(p.pending_change_price_text))));
 const prompts = ai.calls.map((c) => JSON.stringify(c.system));
 check("Once pending, the concierge's prompt says so and has no balance amount", prompts.slice(-2).every((p) => p.includes("PRICE PENDING:") && !p.includes("Your remaining balance is now $")));

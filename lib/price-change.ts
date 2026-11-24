@@ -585,6 +585,8 @@ export function pendingChangeFields(
     pending_change_new_total: p?.new_total ?? null,
     pending_change_package_price: p?.package_price ?? null,
     pending_change_gratuity: p?.gratuity ?? null,
+    // Service fee model events: the fee inside the new total (null on gratuity events and when unpriced).
+    pending_change_service_fee: p?.service_fee ?? null,
     pending_change_booked_total: p?.booked_total ?? null,
     pending_change_requested_at: p?.requested_at ?? null,
   };

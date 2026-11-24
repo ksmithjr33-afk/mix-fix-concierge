@@ -309,4 +309,17 @@ check("Gratuity model engine unchanged: Full 100/4 tip jar $1,749", old.priceEve
   check("Gratuity events: hand set text unchanged", gratManual.price_text === "Kim set the new total to $2,400, a difference of $363." && !gratManual.price_text.includes("Service fee"));
 }
 
+// ---------- GHL change notice ----------
+
+{
+  const pc = await import("../lib/price-change.ts");
+  const sfChange = { changes: [], requested_at: "t", amount: 256, new_total: 2293, package_price: 1786, gratuity: null, service_fee: 357.2, service_fee_rate: 0.2, addons_total: 150, price_text: "x", summary: "", basis: null, class49_applied: false, booked_total: 2037, deposit_paid: 0 };
+  const f = pc.pendingChangeFields(sfChange as never, [{ field: "guest_count", old: 100, new: 150 }] as never, { event_data: { guest_count: 150 } } as never);
+  check("pending_change_service_fee carries the new fee ($357.20), package price is the package alone", f.pending_change_service_fee === 357.2 && f.pending_change_package_price === 1786 && f.pending_change_gratuity === null);
+  const g = pc.pendingChangeFields({ ...sfChange, service_fee: undefined, gratuity: 180 } as never, [], { event_data: {} } as never);
+  check("Gratuity events: pending_change_service_fee is empty, gratuity as before", g.pending_change_service_fee === null && g.pending_change_gratuity === 180);
+  check("No price change: pending_change_service_fee is empty", pc.pendingChangeFields(null, [], { event_data: {} } as never).pending_change_service_fee === null);
+  check("Price pending blanks pending_change_service_fee too", src("lib/update-notes.ts").includes('"pending_change_service_fee"'));
+}
+
 done("service fee");

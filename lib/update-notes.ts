@@ -134,7 +134,7 @@ export function buildUpdatePayload(session: SessionRow, row: EventUpdateRow, ext
   if (!payload.email && session.email) payload.email = session.email;
   // While the price is pending no total goes out, not the old one and not a guess.
   if (session.price_pending) {
-    for (const k of ["pending_change_amount", "pending_change_new_total", "pending_change_package_price", "pending_change_gratuity", "pending_change_booked_total", "booked_total"]) payload[k] = null;
+    for (const k of ["pending_change_amount", "pending_change_new_total", "pending_change_package_price", "pending_change_gratuity", "pending_change_service_fee", "pending_change_booked_total", "booked_total"]) payload[k] = null;
     payload.pending_change_price_text = "Price needed. Our team will confirm the new total.";
   }
   return payload;
