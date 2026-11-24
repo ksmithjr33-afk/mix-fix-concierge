@@ -116,7 +116,12 @@ export function PaymentCard({ payment, lines = [] }: { payment: PaymentView | nu
   return (
     <HomeCard title="Payment" id="payment">
       <dl className="space-y-1.5" data-payment>
-        {row("Package total", payment.total)}
+        {row(payment.feeNote ? "Total" : "Package total", payment.total)}
+        {payment.feeNote && payment.total && (
+          <div data-fee-note>
+            <dd className="text-sm text-[#6B5D52]">{payment.feeNote}</dd>
+          </div>
+        )}
         {row("Balance due by", payment.due)}
         {row("Paid so far", payment.paid)}
         {row("Balance", payment.balance)}

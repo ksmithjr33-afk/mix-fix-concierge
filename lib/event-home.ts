@@ -12,6 +12,7 @@ import { formatClock, longDate, eventSchedule } from "@/lib/team/time";
 import { isBlank } from "@/lib/blank";
 import type { ClientAsks } from "@/lib/team-notes";
 import { knownBalance, totalOnFile, type Recorded } from "@/lib/balance";
+import { SERVICE_FEE_TEXT } from "@/lib/service-fee";
 import { DRINKS_UNFINISHED_LINE, FINISH_DRINKS_BUTTON, FINISH_DRINKS_MESSAGE, extraDrinkQuestion } from "@/lib/team-notes";
 
 type EventData = Record<string, unknown>;
@@ -164,6 +165,7 @@ export interface PaymentView {
   paid: string; // only when payments have been recorded
   balance: string; // only when payments have been recorded and the total is known
   preference: string; // how they chose to pay
+  feeNote: string; // service fee model events: the fee sentence, shown under the total
 }
 
 /** The balance is due two weeks before the event. */
@@ -187,6 +189,7 @@ export function paymentView(o: {
   eventDay: string | null;
   recorded: Recorded | null; // what has been recorded as paid (lib/balance.ts), never the assumed deposit
   preference: unknown;
+  serviceFee?: boolean; // the event is on the service fee model
 }): PaymentView | null {
   if (!o.money.total && !o.money.balance) return null;
   const total = o.money.total ? totalOnFile({ total: o.total }, o.pricePending) : null;
@@ -198,6 +201,7 @@ export function paymentView(o: {
     paid: rec ? money(rec.cents / 100) : "",
     balance: balance !== null ? money(balance) : "",
     preference: o.money.balance ? str(o.preference) : "",
+    feeNote: o.serviceFee && total !== null ? SERVICE_FEE_TEXT : "",
   };
   return Object.values(view).some(Boolean) ? view : null;
 }

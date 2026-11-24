@@ -2,8 +2,8 @@
 // values are cleaned into the shapes event_data already uses, and the three
 // price choices. Pure, no database.
 
-import { splitFromCustom } from "@/lib/service-fee";
-import type { PriceChange } from "@/lib/price-change";
+import { SERVICE_FEE_TEXT, splitFromCustom } from "@/lib/service-fee";
+import { serviceFeeBreakdown, type PriceChange } from "@/lib/price-change";
 import { eventDay, parseClock } from "@/lib/team/time";
 
 /**
@@ -322,10 +322,15 @@ export function adminPrice(engine: PriceChange, mode: PriceMode, manualTotal: nu
     package_price: sf ? sf.package_price : null,
     gratuity: null,
     ...(sf ? { service_fee: sf.service_fee } : {}),
-    price_text:
+    price_text: [
       amount === null
         ? `${who} set the new total to ${money(total)}.`
         : `${who} set the new total to ${money(total)}, a difference of ${amount < 0 ? "-" : ""}${money(Math.abs(amount))}.`,
+      // Service fee events: the fee on its own line and the fee sentence, as on every change order.
+      ...(sf ? [serviceFeeBreakdown({ package_price: sf.package_price, service_fee: sf.service_fee, service_fee_rate: engine.service_fee_rate, addons_total: engine.addons_total }), SERVICE_FEE_TEXT] : []),
+    ]
+      .filter(Boolean)
+      .join("\n"),
   };
 }
 

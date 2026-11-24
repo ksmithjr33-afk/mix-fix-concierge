@@ -14,6 +14,7 @@ import { eventSchedule, longDate } from "@/lib/team/time";
 import { computeDeadlines, recapLines } from "@/lib/event-diff";
 import { eventPayments, financeRow } from "@/lib/team/business-db";
 import { recordedFrom } from "@/lib/balance";
+import { isServiceFeeEvent } from "@/lib/price-change";
 import { autoSendOn, holdsFor, listState } from "@/lib/client-list-db";
 import { firstName } from "@/lib/team/event-view";
 import { typeLabel } from "@/lib/team/approved-menu";
@@ -112,7 +113,7 @@ export async function eventHome(s: SessionRow, money: HomeMoney, now: Date = new
   const total = raw === null || raw === undefined || !Number.isFinite(Number(raw)) ? null : Number(raw);
   // Recorded only: an entered deposit, a legacy balance, and the payments list. Never the assumed deposit.
   const recorded = recordedFrom(finance, pays);
-  const payment = paymentView({ money, total, pricePending: !!s.price_pending, eventDay: day ?? deadlines.eventDay, recorded, preference: ed.payment_preference });
+  const payment = paymentView({ money, total, pricePending: !!s.price_pending, eventDay: day ?? deadlines.eventDay, recorded, preference: ed.payment_preference, serviceFee: isServiceFeeEvent(s.booked_price, s) });
   const depositLine = finance?.deposit_paid_cents ? [{ amount: `${dollars(finance.deposit_paid_cents)} deposit`, on: longDate(finance.deposit_paid_on ?? null) }] : [];
   return {
     date: longDate(day ?? deadlines.eventDay),

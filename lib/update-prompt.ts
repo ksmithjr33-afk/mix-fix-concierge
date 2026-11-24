@@ -2,6 +2,7 @@
 // is changing details. Reuses the intake prompt's package, drink sourcing,
 // menu, add ons, and deadline sections so both modes apply the same rules.
 
+import { SERVICE_FEE_TEXT } from "@/lib/service-fee";
 import { PAYMENT_QUESTION_WITH_BALANCE, balanceFollowUpNote, balanceGap, balanceRule, knownBalance, paymentQuestion as paymentQuestionText, totalOnFile, type Recorded } from "@/lib/balance";
 import {
   FORMATTING_RULES,
@@ -102,11 +103,16 @@ function drinkTodoSection(eventData: EventData, packageCount: number): string {
   return out.length ? `${out.join("\n\n")}\n\n` : "";
 }
 
+/** Service fee model events: how a price change is said. The fee sentence is the owner's exact wording. */
+export function serviceFeeQuoteRule(): string {
+  return `SERVICE FEE EVENT: This event is on the service fee model. In the yes or no question for a price change, after the difference and the new total, give the service fee line from the TOOL RESULT price (package, service fee, add ons) and then say exactly: "${SERVICE_FEE_TEXT}" Never call any part of the price a gratuity, never say a gratuity or tip is included, and never mention a tip jar amount.`;
+}
+
 export function buildUpdatePrompt(
   eventData: EventData,
   version: number,
   deadlines: Deadlines,
-  extra: { booked?: BookedPrice | null; recorded?: Recorded | null; recap?: ChatRecap | null; pricePending?: PricePendingInfo | null; planner?: string; packageSection?: string } = {}
+  extra: { booked?: BookedPrice | null; recorded?: Recorded | null; recap?: ChatRecap | null; pricePending?: PricePendingInfo | null; planner?: string; packageSection?: string; serviceFee?: boolean } = {}
 ): string {
   const paymentPreference = String(eventData.payment_preference ?? "").trim();
   // Older events' special requests were written for our team: the concierge never sees them, and what it sends is added to them.
@@ -162,7 +168,7 @@ ${extra.planner ? `${extra.planner}\n\n` : ""}${extra.packageSection ? `${extra.
 
 ALLOWED: the event date, the service times or hours, the guest count, the number of bartenders, the package, the address, venue or private residence, parking, bar location and bar floor access, bar on site, day of contact name and phone, beer and wine, and allergies can all be changed up to the event. Drinks save right away until the cutoff below, and after it a drink change is sent to our team as a request, see REQUESTS INSIDE 6 DAYS. Add ons follow the CONDUCT RULE path.
 
-PRICE CHANGES: A change to the guest count (guest_count), the service times or hours (bar_service_start, bar_service_end, hours_booked), the number of bartenders (bartenders), or the package (package) can change the price. Never work out or guess a price yourself. Before you confirm one of these changes, call the quote_price_change tool with the new values and write NO text in that reply. The TOOL RESULT gives you the difference and the new total from our pricing engine. Then ask ONE yes or no question that states the change, the difference, and the new total, for example: "Just to confirm, you want to change your guest count from 60 to 90. The difference is $240, which brings your new total to $1,989. Should I make that change?" For a credit say "That is a $X credit, which brings your new total to $Y." If the TOOL RESULT says no change in price (for example a time shift that keeps the same number of hours), say "There is no change in price." in the question. If it lists implied changes (more bartenders for the guest count, new hours from new times), name them in the question too. If the TOOL RESULT says SAVED, PRICE PENDING, the change is already saved: say the message it gives you exactly once, ask if they want to change anything else, and never ask them to confirm that change. Only when the client clearly says yes, call update_event_data with the same values and set quoted_new_total to the new total you quoted. If the client changes their mind or the values change, quote again before saving. If they say no, save nothing.
+PRICE CHANGES: A change to the guest count (guest_count), the service times or hours (bar_service_start, bar_service_end, hours_booked), the number of bartenders (bartenders), or the package (package) can change the price. Never work out or guess a price yourself. Before you confirm one of these changes, call the quote_price_change tool with the new values and write NO text in that reply. The TOOL RESULT gives you the difference and the new total from our pricing engine. Then ask ONE yes or no question that states the change, the difference, and the new total, for example: "Just to confirm, you want to change your guest count from 60 to 90. The difference is $240, which brings your new total to $1,989. Should I make that change?" For a credit say "That is a $X credit, which brings your new total to $Y." If the TOOL RESULT says no change in price (for example a time shift that keeps the same number of hours), say "There is no change in price." in the question. If it lists implied changes (more bartenders for the guest count, new hours from new times), name them in the question too. If the TOOL RESULT says SAVED, PRICE PENDING, the change is already saved: say the message it gives you exactly once, ask if they want to change anything else, and never ask them to confirm that change. Only when the client clearly says yes, call update_event_data with the same values and set quoted_new_total to the new total you quoted. If the client changes their mind or the values change, quote again before saving. If they say no, save nothing.${extra.serviceFee ? `\n\n${serviceFeeQuoteRule()}` : ""}
 NO PRICE PROMISES: never write "let me get a price", "let me get that quoted", "let me price that", "one moment while I check the price", or anything else that promises a price, unless the price itself is in that same reply. When you need a price, call quote_price_change and write NO text.
 NEVER CONFIRM TWICE: never ask the client to confirm the same change twice. Once they said yes to a change, call update_event_data. A change listed under PRICE PENDING or already in CURRENT EVENT DETAILS is saved: acknowledge it in a few words and move on, with no new quote_price_change or update_event_data call for it.
 ${pricePendingBlock(extra.pricePending ?? null)}

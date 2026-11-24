@@ -27,7 +27,7 @@ import { UPDATE_OPENER } from "@/lib/update-mode-shared";
 import { deliverEventUpdates } from "@/lib/update-delivery";
 import { allowedMenus, createMenuFilter, type MenuKey } from "@/lib/menu-markers";
 import { applyDiveSetMenu, DIVE_CARD_MAX, DIVE_MENU_SET_MESSAGE } from "@/lib/dive-menu";
-import { impliedLine, money, paymentPhrase, toCount, type PriceChange } from "@/lib/price-change";
+import { impliedLine, isServiceFeeEvent, money, paymentPhrase, toCount, type PriceChange } from "@/lib/price-change";
 import { balanceGap, knownBalance, paymentFollowUp, remainingBalanceLine, totalOnFile, withBalanceFollowUp, type Recorded } from "@/lib/balance";
 import { recordedPayments } from "@/lib/team/business-db";
 import { CHANGE_REQUEST_MESSAGE } from "@/lib/client-list";
@@ -411,6 +411,7 @@ async function updateModeResponse(session: SessionRow, messages: ChatMessage[], 
     recap: since ? { lines: recapLines(since.changes), totalBefore: since.totalBefore, totalAfter: since.totalAfter } : null,
     pricePending: session.price_pending ? (session.price_pending_info ?? null) : null,
     packageSection: bookingPackageSection(session, String(eventData.package ?? ""), messages, approvalOnly ? "approval" : "update"),
+    serviceFee: isServiceFeeEvent(session.booked_price, session),
   });
   // A price the client mentions while one is pending goes on the admins' summary.
   const lastUser = [...messages].reverse().find((m) => m.role === "user")?.content ?? "";

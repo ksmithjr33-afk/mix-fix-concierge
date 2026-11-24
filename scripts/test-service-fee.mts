@@ -4,7 +4,7 @@
 // settings not sent, unknown keys, mismatches), and which model a booking is on.
 // Run: npm run test:service-fee
 
-import { check, done } from "./team-harness.mts";
+import { check, done, src } from "./team-harness.mts";
 
 const sf = await import("../lib/service-fee.ts");
 const pm = await import("../lib/pricing-model.ts");
@@ -283,6 +283,30 @@ check("Gratuity model engine unchanged: Full 100/4 tip jar $1,749", old.priceEve
   const grat = biz.eventBusiness({ ...base, serviceFee: null, gratuityCents: 16400 });
   check("Gratuity events unchanged: tips = gratuity, mileage only after the event", cost(grat, "tips").cents === 16400 && cost(grat, "mileage").cents === null && !grat.revenue.serviceFee);
   check("Service fee per guest settings validate", bset.readSfSupplies({ full: 400 }).full === 400 && bset.readSfSupplies(null).premium === 600 && !bset.validateSfSupplies({ full: "x" }).ok);
+}
+
+// ---------- wording on service fee events ----------
+
+{
+  const home = await import("../lib/event-home.ts");
+  const up = await import("../lib/update-prompt.ts");
+  const ae = await import("../lib/team/admin-edit.ts");
+  const ed = await import("../lib/event-diff.ts");
+  const pv = (serviceFee: boolean) => home.paymentView({ money: home.ALL_MONEY, total: 2037, pricePending: false, eventDay: "2027-03-20", recorded: null, preference: "", serviceFee });
+  check("Client page: the fee sentence under the total on a service fee event", pv(true)?.feeNote === sf.SERVICE_FEE_TEXT && pv(true)?.total === "$2,037");
+  check("Client page: no fee sentence on a gratuity event", pv(false)?.feeNote === "");
+  check("Client page: no sentence while a new price is being confirmed", home.paymentView({ money: home.ALL_MONEY, total: 2037, pricePending: true, eventDay: "2027-03-20", recorded: null, preference: "", serviceFee: true })?.feeNote === "");
+  check("Client card labels it Total and renders the note", src("app/_event-home/sections.tsx").includes('payment.feeNote ? "Total" : "Package total"') && src("app/_event-home/sections.tsx").includes("data-fee-note"));
+  const deadlines = ed.computeDeadlines("2027-03-20", new Date("2026-11-24T12:00:00Z"));
+  const withRule = up.buildUpdatePrompt({ package: "Full Bar" } as never, 3, deadlines, { serviceFee: true });
+  const without = up.buildUpdatePrompt({ package: "Full Bar" } as never, 3, deadlines, {});
+  check("Concierge quotes: the service fee rule and exact sentence on service fee events only", withRule.includes("SERVICE FEE EVENT") && withRule.includes(sf.SERVICE_FEE_TEXT) && !without.includes("SERVICE FEE EVENT"));
+  check("The chat route turns the rule on from the event's model", src("app/api/chat/route.ts").includes("serviceFee: isServiceFeeEvent(session.booked_price, session)"));
+  const engine = { changes: [], requested_at: "t", amount: 256, new_total: 2293, package_price: 1786, gratuity: null, service_fee: 357.2, service_fee_rate: 0.2, addons_total: 150, price_text: "x", summary: "", basis: null, class49_applied: false, booked_total: 2037, deposit_paid: 0 };
+  const manual = ae.adminPrice(engine as never, "manual", 2400, "Kim");
+  check("Change order text set by hand: the fee line and the exact sentence, no gratuity", manual.price_text.includes("Service fee (20%) $375") && manual.price_text.includes(sf.SERVICE_FEE_TEXT) && !/gratuity is|gratuity of|\bgratuity:/i.test(manual.price_text));
+  const gratManual = ae.adminPrice({ ...engine, service_fee: undefined, service_fee_rate: undefined, addons_total: undefined } as never, "manual", 2400, "Kim");
+  check("Gratuity events: hand set text unchanged", gratManual.price_text === "Kim set the new total to $2,400, a difference of $363." && !gratManual.price_text.includes("Service fee"));
 }
 
 done("service fee");
