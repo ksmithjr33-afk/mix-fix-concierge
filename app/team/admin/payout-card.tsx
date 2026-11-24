@@ -10,13 +10,35 @@ import { PAYOUT_FLAG_LABEL, diffHours, diffMoney, payoutText, type PayoutRow, ty
 // The payout sheet for one event: admins and managers, on the manager Day of
 // tab and on the Time page for that event. Estimate against actual, mileage,
 // tips, and what to pay each person.
-export default function PayoutCard({ sessionId, title, rows, totals, tipNote = null }: { sessionId: string; title: string; rows: PayoutRow[]; totals: PayoutTotals; tipNote?: string | null }) {
+export default function PayoutCard({
+  sessionId,
+  title,
+  rows,
+  totals,
+  tipNote = null,
+  serviceFee = false,
+  priceCheck = null,
+}: {
+  sessionId: string;
+  title: string;
+  rows: PayoutRow[];
+  totals: PayoutTotals;
+  tipNote?: string | null;
+  serviceFee?: boolean;
+  priceCheck?: string | null;
+}) {
   return (
     <section className="rounded-2xl border border-[#DDD5CC] bg-white px-4 py-3" aria-label="Payout">
       <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
         <h2 className="font-heading text-base font-bold text-[#2C2420]">Payout</h2>
         {rows.length > 0 && <CopyButton text={payoutText(title, rows, totals)} label="Copy payout" />}
       </div>
+      {priceCheck && (
+        <p role="alert" className="mb-2 rounded-xl border-2 border-[#B3261E] bg-[#FDECEA] px-3 py-2 text-sm text-[#8C1D18]">
+          {priceCheck}
+        </p>
+      )}
+      {serviceFee && <p className="mb-1 text-xs text-[#6B5D52]">Service fee event: bartenders at the service fee rate, support roles at the support rate, no gratuity share.</p>}
       {rows.length === 0 ? (
         <p className="text-[15px] text-[#6B5D52]">Nobody has accepted this event yet.</p>
       ) : (
@@ -40,7 +62,7 @@ export default function PayoutCard({ sessionId, title, rows, totals, tipNote = n
               {totals.mileageMiles} mi · {money(totals.mileageCents)}
             </dd>
             <dt>Tips</dt>
-            <dd className="text-right">{money(totals.tipsCents)}</dd>
+            <dd className="text-right">{serviceFee ? "No gratuity share" : money(totals.tipsCents)}</dd>
             <dt>Reimbursements</dt>
             <dd className="text-right">{money(totals.reimbursementsCents)}</dd>
             <dt className="font-semibold">Total to pay</dt>
@@ -83,7 +105,7 @@ function PayoutLine({ sessionId, r }: { sessionId: string; r: PayoutRow }) {
       <dl className="grid grid-cols-[auto_1fr] gap-x-3 text-sm text-[#2C2420] tabular-nums">
         <dt className="text-[#6B5D52]">Rate</dt>
         <dd>
-          {rateText(r.rateCents)} · {rateSourceText({ source: r.rateSource, pkg: r.ratePkg })}
+          {rateText(r.rateCents)} · {rateSourceText({ source: r.rateSource, pkg: r.ratePkg, serviceFee: r.serviceFee })}
         </dd>
         <dt className="text-[#6B5D52]">Estimated</dt>
         <dd>
@@ -108,7 +130,7 @@ function PayoutLine({ sessionId, r }: { sessionId: string; r: PayoutRow }) {
           {r.mileage.state === "paid" && r.mileage.note && <span className="block text-xs text-[#6B5D52]">Note: {r.mileage.note}</span>}
         </dd>
         <dt className="text-[#6B5D52]">Tips</dt>
-        <dd>{r.tipsCents === null ? "not on file yet" : money(r.tipsCents)}</dd>
+        <dd>{r.serviceFee ? "No gratuity share (service fee event)" : r.tipsCents === null ? "not on file yet" : money(r.tipsCents)}</dd>
         {r.reimbursements.length > 0 && (
           <>
             <dt className="text-[#6B5D52]">Reimbursed</dt>

@@ -39,6 +39,7 @@ export interface PayoutRow {
   rateCents: number;
   rateSource: RateSource;
   ratePkg: PayPackage | null;
+  serviceFee: boolean; // a service fee event: no gratuity share, tips are 0
   estMinutes: number | null;
   estPayCents: number | null;
   actualMinutes: number | null; // null until clocked in and out
@@ -64,7 +65,7 @@ export function payoutRow(p: PayoutPerson): PayoutRow {
   const diffMinutes = actualMinutes !== null && e.minutes !== null ? actualMinutes - e.minutes : null;
   const diffCents = actualPayCents !== null && e.hourlyCents !== null ? actualPayCents - e.hourlyCents : null;
   const mileageCents = e.mileage.state === "paid" ? e.mileage.cents : 0;
-  const tipsCents = e.tips.state === "on_file" ? e.tips.cents : e.tips.state === "not_bartender" ? 0 : null;
+  const tipsCents = e.tips.state === "on_file" ? e.tips.cents : e.tips.state === "not_bartender" || e.tips.state === "service_fee" ? 0 : null;
   const flags: PayoutFlag[] = [];
   if (!p.sheet?.clockIn) flags.push("not_clocked_in");
   else if (!p.sheet.clockOut) flags.push("not_clocked_out");
@@ -80,6 +81,7 @@ export function payoutRow(p: PayoutPerson): PayoutRow {
     rateCents: e.rateCents,
     rateSource: e.rateSource,
     ratePkg: e.ratePkg,
+    serviceFee: e.serviceFee,
     estMinutes: e.minutes,
     estPayCents: e.hourlyCents,
     actualMinutes,
@@ -148,7 +150,7 @@ export function payoutText(title: string, rows: PayoutRow[], totals: PayoutTotal
     diffMoney(r.diffCents),
     String(r.mileageMiles),
     money(r.mileageCents),
-    r.tipsCents === null ? "not on file" : money(r.tipsCents),
+    r.serviceFee ? "no gratuity share" : r.tipsCents === null ? "not on file" : money(r.tipsCents),
     money(r.reimbursementsCents),
     `${money(r.totalCents)}${r.fromEstimate ? " (estimate)" : ""}`,
     r.flags.map((f) => PAYOUT_FLAG_LABEL[f]).join("; "),

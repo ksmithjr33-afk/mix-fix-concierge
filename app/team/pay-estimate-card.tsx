@@ -16,7 +16,7 @@ export default function PayEstimateCard({ estimate: e }: { estimate: StaffEstima
         <div className={row}>
           <span className={label}>
             Hourly (estimate)
-            <span className={sub}>{e.minutes !== null ? `${hoursText(e.minutes)} hours at ${rateText(e.rateCents)}, ${rateSourceText({ source: e.rateSource, pkg: e.ratePkg })}` : "Times not set yet"}</span>
+            <span className={sub}>{e.minutes !== null ? `${hoursText(e.minutes)} hours at ${rateText(e.rateCents)}, ${rateSourceText({ source: e.rateSource, pkg: e.ratePkg, serviceFee: e.serviceFee })}` : "Times not set yet"}</span>
           </span>
           <span className={amount}>{e.hourlyCents !== null ? money(e.hourlyCents) : "—"}</span>
         </div>

@@ -521,7 +521,7 @@ async function AdminEventPage({
         <MissingReports reports={missing.filter((r) => !onList.has(r.staffId))} timeZone={v.timeZone} />
         <Closeouts sessionId={id} closeouts={closeouts} waiting={started ? waiting : []} timeZone={v.timeZone} />
         <TimePunches people={people} timeZone={v.timeZone} />
-        {payout && <PayoutCard sessionId={id} title={[adminEventTitle(ed), v.date].filter(Boolean).join(", ")} rows={payout.rows} totals={payout.totals} tipNote={payout.tipNote} />}
+        {payout && <PayoutCard sessionId={id} title={[adminEventTitle(ed), v.date].filter(Boolean).join(", ")} rows={payout.rows} totals={payout.totals} tipNote={payout.tipNote} serviceFee={payout.serviceFee} priceCheck={payout.priceCheck} />}
       </>
     ),
     receipts: () =>

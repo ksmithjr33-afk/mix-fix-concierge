@@ -106,7 +106,7 @@ export default async function MyPayPage({ searchParams }: { searchParams: Promis
                         <span className="shrink-0 font-heading font-bold text-[#2C2420] tabular-nums">{r.payCents === null ? "--" : money(r.payCents)}</span>
                       </div>
                       <p className="text-xs text-[#6B5D52]">
-                        {rateText(r.rateCents)}, {rateSourceText({ source: r.rateSource, pkg: r.ratePkg })} · Scheduled {r.scheduledMinutes === null ? "--" : `${hoursText(r.scheduledMinutes)} h`} · Approved {r.approvedMinutes === null ? "not yet" : `${hoursText(r.approvedMinutes)} h`}
+                        {rateText(r.rateCents)}, {rateSourceText({ source: r.rateSource, pkg: r.ratePkg, serviceFee: r.serviceFee })} · Scheduled {r.scheduledMinutes === null ? "--" : `${hoursText(r.scheduledMinutes)} h`} · Approved {r.approvedMinutes === null ? "not yet" : `${hoursText(r.approvedMinutes)} h`}
                         {r.fromApproved ? " · from approved hours" : " · from scheduled hours"}
                       </p>
                       {(r.tipsCents !== null || r.reimbursements.length > 0) && (

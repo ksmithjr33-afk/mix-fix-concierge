@@ -55,7 +55,7 @@ export default async function TimesheetsPage({
             </Link>
           </p>
         )}
-        {payout && session && <PayoutCard sessionId={session.id} title={[rows[0]?.eventTitle, rows[0]?.eventDay].filter(Boolean).join(", ") || "Payout"} rows={payout.rows} totals={payout.totals} tipNote={payout.tipNote} />}
+        {payout && session && <PayoutCard sessionId={session.id} title={[rows[0]?.eventTitle, rows[0]?.eventDay].filter(Boolean).join(", ") || "Payout"} rows={payout.rows} totals={payout.totals} tipNote={payout.tipNote} serviceFee={payout.serviceFee} priceCheck={payout.priceCheck} />}
         <TimesheetWeek key={`${week.from}:${eventId ?? ""}`} initial={rows} meId={me.id} from={week.from} to={week.to} rates={rates} scope={eventId ? "event" : "week"} over40={[...overWeekLimit(staffTotals(all))]} />
       </main>
     </>

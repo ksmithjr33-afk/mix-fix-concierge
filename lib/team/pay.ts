@@ -4,13 +4,15 @@
 // service + 1 hour of breakdown, from scheduledMinutes below: the one place
 // hours are figured. Estimated pay = hours × the line's rate (lineRate below:
 // the person's own rate when one is on file, else the package rate) + mileage
-// + their share of the gratuity. Visible only to
+// + their share of the gratuity (none on a service fee event). Visible only to
 // admins, managers on the payout sheet, and the staff member it belongs to.
 // Payroll is the final record; everything here is labeled as an estimate.
 
 import { BREAKDOWN_MIN } from "@/lib/team/clock";
 import { eventSchedule } from "@/lib/team/time";
 import { packageKey } from "@/lib/pricing";
+import { sessionPricingModel } from "@/lib/pricing-model";
+import { serviceFeePackage, type ServiceFeePackage } from "@/lib/service-fee";
 
 export const PAY_LABEL = "Estimated pay, before taxes and tips";
 export const PAY_NOTE = "These are estimates, before taxes and tips. Payroll is the final record.";
@@ -42,7 +44,46 @@ export const PAY_PACKAGE_LABEL: Record<PayPackage, string> = {
   premium: "Premium Bar",
   wedding: "The Big Day Bar",
 };
-export type PackageRates = Record<PayPackage, number>; // cents an hour
+// Gratuity model rates by package (cents an hour), plus the service fee
+// model rates when Business settings has been read (packageRates() fills it).
+export type PackageRates = Record<PayPackage, number> & { serviceFee?: ServiceFeeRates };
+
+// ----- Service fee events -----
+//
+// Bartenders: a rate per service fee package, $45 by default. Bar backs,
+// servers and event helpers: one support rate, $30. A person's own rate counts
+// only when it is higher. No gratuity share. Gratuity model events keep every
+// rule above exactly as it was.
+
+export type ServiceFeeRates = Record<ServiceFeePackage, number> & { support: number };
+export const SERVICE_FEE_BARTENDER_CENTS = 45_00;
+export const SUPPORT_RATE_CENTS = 30_00;
+export const SERVICE_FEE_RATE_DEFAULTS: ServiceFeeRates = {
+  beerwine: SERVICE_FEE_BARTENDER_CENTS,
+  dive: SERVICE_FEE_BARTENDER_CENTS,
+  wedding: SERVICE_FEE_BARTENDER_CENTS,
+  full: SERVICE_FEE_BARTENDER_CENTS,
+  premium: SERVICE_FEE_BARTENDER_CENTS,
+  support: SUPPORT_RATE_CENTS,
+};
+export const SERVICE_FEE_RATE_KEYS: (keyof ServiceFeeRates)[] = ["beerwine", "dive", "wedding", "full", "premium", "support"];
+export const SERVICE_FEE_RATE_LABEL: Record<keyof ServiceFeeRates, string> = {
+  beerwine: "Bartender Only",
+  dive: "Dive Bar",
+  wedding: "The Big Day Bar",
+  full: "Full Bar",
+  premium: "Premium Bar",
+  support: "Bar backs, servers and event helpers",
+};
+/** The roles paid the support rate on a service fee event. Everyone else on the event is paid as a bartender. */
+export const SUPPORT_ROLES = ["bar_back", "server", "event_helper"] as const;
+export const isSupportRole = (role: unknown): boolean => (SUPPORT_ROLES as readonly unknown[]).includes(role);
+
+/** Which event the line is on and who works it. Without it (or on a gratuity event) the gratuity rules apply. */
+export interface RateContext {
+  model?: unknown; // sessions.pricing_model
+  role?: string | null;
+}
 export const PACKAGE_RATE_DEFAULTS: PackageRates = {
   beerwine: 25_00,
   bartender_only: 25_00,
@@ -69,25 +110,42 @@ export function eventPackageName(ed: Record<string, unknown>, session?: { packag
   return String(ed.package || session?.package_type || "").trim();
 }
 
-export type RateSource = "own" | "package" | "default";
+export type RateSource = "own" | "package" | "default" | "service_fee" | "support";
 
 export interface LineRate {
   cents: number;
-  source: RateSource; // own: set on the profile; package: the package rate; default: a package not listed
+  // own: set on the profile; package: the package rate; default: a package not listed;
+  // service_fee: a bartender on a service fee event; support: a bar back, server or helper on one.
+  source: RateSource;
   pkg: PayPackage | null;
+  serviceFee?: boolean; // the line is on a service fee event
 }
 
-/** The rate for one person on one event: their own rate if one is set, otherwise the package rate. */
-export function lineRate(ownCents: number | null | undefined, packageName: unknown, rates: PackageRates = PACKAGE_RATE_DEFAULTS): LineRate {
+/**
+ * The rate for one person on one event. Gratuity events: their own rate if one
+ * is set, otherwise the package rate. Service fee events: the bartender rate
+ * for the package or the support rate, and their own rate only when higher.
+ */
+export function lineRate(ownCents: number | null | undefined, packageName: unknown, rates: PackageRates = PACKAGE_RATE_DEFAULTS, ctx?: RateContext): LineRate {
   const pkg = payPackage(packageName);
+  if (ctx && sessionPricingModel({ pricing_model: ctx.model }) === "service_fee") {
+    const sf = rates.serviceFee ?? SERVICE_FEE_RATE_DEFAULTS;
+    const support = isSupportRole(ctx.role);
+    const key = serviceFeePackage(packageName);
+    const base = support ? sf.support : key ? sf[key] : SERVICE_FEE_BARTENDER_CENTS;
+    if (ownCents && ownCents > base) return { cents: ownCents, source: "own", pkg, serviceFee: true };
+    return { cents: base, source: support ? "support" : "service_fee", pkg, serviceFee: true };
+  }
   if (ownCents && ownCents > 0) return { cents: ownCents, source: "own", pkg };
   if (pkg) return { cents: rates[pkg] ?? DEFAULT_RATE_CENTS, source: "package", pkg };
   return { cents: DEFAULT_RATE_CENTS, source: "default", pkg: null };
 }
 
-/** Which rule applied: "own rate", "Tailored rate", "standard rate". */
-export function rateSourceText(r: Pick<LineRate, "source" | "pkg">): string {
-  if (r.source === "own") return "own rate";
+/** Which rule applied: "own rate", "Tailored rate", "standard rate", "service fee event". */
+export function rateSourceText(r: Pick<LineRate, "source" | "pkg"> & { serviceFee?: boolean }): string {
+  if (r.source === "service_fee") return "service fee event, no gratuity share";
+  if (r.source === "support") return "support rate, service fee event";
+  if (r.source === "own") return r.serviceFee ? "own rate, service fee event, no gratuity share" : "own rate";
   if (r.source === "package" && r.pkg) return `${PAY_PACKAGE_LABEL[r.pkg]} rate`;
   return "standard rate";
 }
@@ -141,6 +199,7 @@ export interface PayRow {
   rateCents: number;
   rateSource: RateSource;
   ratePkg: PayPackage | null;
+  serviceFee?: boolean;
   tipsCents: number | null; // their share of the gratuity once it is on file
   reimbursements: { label: string; cents: number; note: string }[]; // their own, once an admin enters them
   scheduledMinutes: number | null;
@@ -264,10 +323,14 @@ export function mileageText(l: MileageLine): string {
 
 // ----- Tips -----
 
-export type TipsLine = { state: "on_file"; cents: number; bartenders: number } | { state: "not_on_file" } | { state: "not_bartender" };
+export type TipsLine = { state: "on_file"; cents: number; bartenders: number } | { state: "not_on_file" } | { state: "not_bartender" } | { state: "service_fee" };
 
-/** The booking's gratuity (dollars) split evenly among the bartenders. Null gratuity: not on file. */
-export function tipsShare(gratuityDollars: number | null | undefined, bartenders: number, isBartender: boolean): TipsLine {
+/**
+ * The booking's gratuity (dollars) split evenly among the bartenders. Null
+ * gratuity: not on file. A service fee event has no gratuity to split.
+ */
+export function tipsShare(gratuityDollars: number | null | undefined, bartenders: number, isBartender: boolean, model?: unknown): TipsLine {
+  if (sessionPricingModel({ pricing_model: model }) === "service_fee") return { state: "service_fee" };
   if (gratuityDollars === null || gratuityDollars === undefined || !Number.isFinite(Number(gratuityDollars))) return { state: "not_on_file" };
   if (!isBartender) return { state: "not_bartender" };
   const n = Math.max(1, Math.floor(bartenders));
@@ -275,6 +338,7 @@ export function tipsShare(gratuityDollars: number | null | undefined, bartenders
 }
 
 export function tipsText(t: TipsLine): string {
+  if (t.state === "service_fee") return "No gratuity share on a service fee event. Tips from the guests are yours.";
   if (t.state === "not_on_file") return "Tips: not on file yet";
   if (t.state === "not_bartender") return "Tips are split among the bartenders";
   return `${money(t.cents)}, split ${t.bartenders} ${t.bartenders === 1 ? "way" : "ways"}`;
@@ -286,6 +350,7 @@ export interface StaffEstimate {
   rateCents: number;
   rateSource: RateSource;
   ratePkg: PayPackage | null;
+  serviceFee: boolean;
   minutes: number | null;
   hourlyCents: number | null;
   mileage: MileageLine;
@@ -302,6 +367,7 @@ export function staffEstimate(o: { rate: LineRate; minutes: number | null; milea
     rateCents,
     rateSource: o.rate.source,
     ratePkg: o.rate.pkg,
+    serviceFee: !!o.rate.serviceFee,
     minutes: o.minutes,
     hourlyCents,
     mileage: o.mileage,

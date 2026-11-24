@@ -4,19 +4,22 @@
 import { supabase } from "@/lib/supabase";
 import type { StaffMember } from "@/lib/team/event-view";
 import { isFullAdmin } from "@/lib/team/roles";
-import type { MileageSettings, PackageRates } from "@/lib/team/pay";
+import type { MileageSettings, PackageRates, ServiceFeeRates } from "@/lib/team/pay";
 import {
   COSTS_KEY,
   MILEAGE_KEY,
   RATES_KEY,
+  SF_RATES_KEY,
   SUPPLIES_KEY,
   readCosts,
   readMileage,
   readPackageRates,
+  readServiceFeeRates,
   readSupplies,
   validateCosts,
   validateMileage,
   validatePackageRates,
+  validateServiceFeeRates,
   validateSupplies,
   type CostSettings,
   type SuppliesPerGuest,
@@ -32,9 +35,10 @@ export async function mileageSettings(): Promise<MileageSettings> {
   return readMileage(await raw(MILEAGE_KEY));
 }
 
-/** The hourly rate by package. Read by any server code that figures pay, like mileage. */
+/** The hourly rate by package, with the service fee event rates. Read by any server code that figures pay, like mileage. */
 export async function packageRates(): Promise<PackageRates> {
-  return readPackageRates(await raw(RATES_KEY));
+  const [g, sf] = await Promise.all([raw(RATES_KEY), raw(SF_RATES_KEY)]);
+  return { ...readPackageRates(g), serviceFee: readServiceFeeRates(sf) };
 }
 
 /** Costs feed the Business area only. Admins only: anyone else gets nothing. */
@@ -51,11 +55,11 @@ export async function suppliesSettings(admin: StaffMember): Promise<SuppliesPerG
 
 type Result<T> = { ok: true; value: T } | { ok: false; error: string; status: number };
 
-const SETTING_KEY: Record<string, string> = { mileage: MILEAGE_KEY, costs: COSTS_KEY, supplies: SUPPLIES_KEY, rates: RATES_KEY };
+const SETTING_KEY: Record<string, string> = { mileage: MILEAGE_KEY, costs: COSTS_KEY, supplies: SUPPLIES_KEY, rates: RATES_KEY, sf_rates: SF_RATES_KEY };
 
-export async function saveBusinessSettings(admin: StaffMember, which: unknown, body: Record<string, unknown>): Promise<Result<MileageSettings | CostSettings | SuppliesPerGuest | PackageRates>> {
+export async function saveBusinessSettings(admin: StaffMember, which: unknown, body: Record<string, unknown>): Promise<Result<MileageSettings | CostSettings | SuppliesPerGuest | PackageRates | ServiceFeeRates>> {
   if (!isFullAdmin(admin.role)) return { ok: false, error: "Admins only.", status: 403 };
-  const v = which === "mileage" ? validateMileage(body) : which === "costs" ? validateCosts(body) : which === "supplies" ? validateSupplies(body) : which === "rates" ? validatePackageRates(body) : null;
+  const v = which === "mileage" ? validateMileage(body) : which === "costs" ? validateCosts(body) : which === "supplies" ? validateSupplies(body) : which === "rates" ? validatePackageRates(body) : which === "sf_rates" ? validateServiceFeeRates(body) : null;
   if (!v) return { ok: false, error: "Unknown setting.", status: 400 };
   if (!v.ok) return { ok: false, error: v.error, status: 400 };
   const { error } = await supabase

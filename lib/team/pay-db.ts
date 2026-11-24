@@ -46,11 +46,23 @@ interface SessionLite {
   package_type?: string | null;
   team_market?: string | null;
   booked_price?: { gratuity?: number | null } | null;
+  pricing_model?: string | null;
 }
 
-/** The rate for one person on one event, from their own rate (or none) and the package rates. The one rule: lineRate. */
-export function rateForEvent(ownCents: number | null | undefined, session: SessionLite, rates: PackageRates): LineRate {
-  return lineRate(ownCents, eventPackageName(eventData(session), session), rates);
+/**
+ * The rate for one person on one event, from their own rate (or none), the
+ * package rates, the event's pricing model and the person's role. The one rule: lineRate.
+ */
+export function rateForEvent(ownCents: number | null | undefined, session: SessionLite, rates: PackageRates, role?: string | null): LineRate {
+  return lineRate(ownCents, eventPackageName(eventData(session), session), rates, { model: session.pricing_model, role: role ?? "bartender" });
+}
+
+/** The roles of these people, for the service fee rates. Missing reads as bartender. */
+async function rolesOf(staffIds: string[]): Promise<Map<string, string>> {
+  const ids = [...new Set(staffIds)];
+  if (ids.length === 0) return new Map();
+  const { data } = await supabase.from("staff").select("id, role").in("id", ids);
+  return new Map(((data as { id: string; role: string }[]) ?? []).map((r) => [r.id, r.role]));
 }
 
 /** The rate set for one person in cents, or null when none is on file. For the admin rate form. */
@@ -76,11 +88,11 @@ export async function ratesFor(admin: StaffMember, staffIds: string[]): Promise<
  */
 export async function rowRates(admin: StaffMember, rows: Pick<TimesheetRow, "assignmentId" | "staffId" | "sessionId">[]): Promise<Map<string, number>> {
   if (!isAdminRole(admin.role) || rows.length === 0) return new Map();
-  const [own, rates, sessions] = await Promise.all([ratesFor(admin, rows.map((r) => r.staffId)), packageRates(), sessionsById(rows.map((r) => r.sessionId))]);
+  const [own, rates, sessions, roles] = await Promise.all([ratesFor(admin, rows.map((r) => r.staffId)), packageRates(), sessionsById(rows.map((r) => r.sessionId)), rolesOf(rows.map((r) => r.staffId))]);
   const out = new Map<string, number>();
   for (const r of rows) {
     const s = sessions.get(r.sessionId);
-    out.set(r.assignmentId, s ? rateForEvent(own.get(r.staffId), s, rates).cents : lineRate(own.get(r.staffId), "", rates).cents);
+    out.set(r.assignmentId, s ? rateForEvent(own.get(r.staffId), s, rates, roles.get(r.staffId)).cents : lineRate(own.get(r.staffId), "", rates).cents);
   }
   return out;
 }
@@ -109,18 +121,18 @@ export async function setRate(admin: StaffMember, staffId: string, raw: unknown,
 
 /** "$187.50" for this person on one event, or null without times. */
 export async function myEstimate(staffId: string, session: SessionLite): Promise<string | null> {
-  const [own, rates] = await Promise.all([rateOnFile(staffId), packageRates()]);
-  const c = estimatedPayCents(rateForEvent(own, session, rates).cents, eventData(session));
+  const [own, rates, role] = await Promise.all([rateOnFile(staffId), packageRates(), roleOf(staffId)]);
+  const c = estimatedPayCents(rateForEvent(own, session, rates, role).cents, eventData(session));
   return c === null ? null : money(c);
 }
 
 /** The same for many events at once, by session id. */
 export async function myEstimates(staffId: string, sessionIds: string[]): Promise<Record<string, string>> {
   if (sessionIds.length === 0) return {};
-  const [own, rates, sessions] = await Promise.all([rateOnFile(staffId), packageRates(), sessionsById(sessionIds)]);
+  const [own, rates, sessions, role] = await Promise.all([rateOnFile(staffId), packageRates(), sessionsById(sessionIds), roleOf(staffId)]);
   const out: Record<string, string> = {};
   for (const s of sessions.values()) {
-    const c = estimatedPayCents(rateForEvent(own, s, rates).cents, eventData(s));
+    const c = estimatedPayCents(rateForEvent(own, s, rates, role).cents, eventData(s));
     if (c !== null) out[s.id] = money(c);
   }
   return out;
@@ -152,10 +164,10 @@ export async function myPayRows(staffId: string, from: string, to: string): Prom
   const [own, rates, sessions, crews, reimb, role] = await Promise.all([rateOnFile(staffId), packageRates(), sessionsById(ids), bartenderCounts(ids), myReimbursements(staffId, ids), roleOf(staffId)]);
   const rows = sheet.map((r): PayRow => {
     const s = sessions.get(r.sessionId);
-    const rate = s ? rateForEvent(own, s, rates) : lineRate(own, "", rates);
+    const rate = s ? rateForEvent(own, s, rates, role) : lineRate(own, "", rates);
     const sched = s ? scheduledMinutes(eventData(s)) : null;
     const approvedMinutes = r.approved && r.minutes !== null ? r.minutes : null;
-    const tips = s ? tipsShare(gratuityOf(s), crews.get(s.id) ?? 1, role === "bartender") : null;
+    const tips = s ? tipsShare(gratuityOf(s), crews.get(s.id) ?? 1, role === "bartender", s.pricing_model) : null;
     return {
       sessionId: r.sessionId,
       day: r.eventDay,
@@ -163,6 +175,7 @@ export async function myPayRows(staffId: string, from: string, to: string): Prom
       rateCents: rate.cents,
       rateSource: rate.source,
       ratePkg: rate.pkg,
+      serviceFee: !!rate.serviceFee,
       tipsCents: tips?.state === "on_file" ? tips.cents : null,
       reimbursements: (reimb.get(r.sessionId) ?? []).map((x) => ({ label: KIND_LABEL[x.kind], cents: x.cents, note: x.note })),
       scheduledMinutes: sched,
@@ -400,10 +413,10 @@ export async function myPayEstimate(staffId: string, session: SessionRow): Promi
   const isBartender = role === "bartender";
   const bartenders = crew.filter((c) => c.role === "bartender" && c.staffId !== staffId).length + (isBartender ? 1 : 0);
   return staffEstimate({
-    rate: rateForEvent(own, session, rates),
+    rate: rateForEvent(own, session, rates, role),
     minutes: scheduledMinutes(eventData(session)),
     mileage: mileageLine(miles.get(staffId)!, settings, sessionMarket(session) === "los_angeles"),
-    tips: tipsShare(gratuityOf(session), bartenders, isBartender),
+    tips: tipsShare(gratuityOf(session), bartenders, isBartender, session.pricing_model),
   });
 }
 
@@ -438,10 +451,10 @@ export async function crewEstimates(viewer: StaffMember, session: SessionRow): P
     assignmentId: c.assignmentId,
     role: c.role,
     estimate: staffEstimate({
-      rate: rateForEvent(own.get(c.staffId), session, rates),
+      rate: rateForEvent(own.get(c.staffId), session, rates, c.role),
       minutes,
       mileage: mileageLine(miles.get(c.staffId)!, settings, ca),
-      tips: tipsShare(gratuityOf(session), bartenders, c.role === "bartender"),
+      tips: tipsShare(gratuityOf(session), bartenders, c.role === "bartender", session.pricing_model),
     }),
   }));
 }

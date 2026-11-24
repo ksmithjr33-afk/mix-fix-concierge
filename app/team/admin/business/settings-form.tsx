@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { PAY_PACKAGES, PAY_PACKAGE_LABEL, type MileageSettings, type PackageRates } from "@/lib/team/pay";
+import { PAY_PACKAGES, PAY_PACKAGE_LABEL, SERVICE_FEE_RATE_DEFAULTS, SERVICE_FEE_RATE_KEYS, SERVICE_FEE_RATE_LABEL, type MileageSettings, type PackageRates } from "@/lib/team/pay";
 import { SUPPLY_PACKAGES, SUPPLY_PACKAGE_LABEL, type CostSettings, type SuppliesPerGuest } from "@/lib/team/business-settings";
 
 // Business settings, admins only: hourly rate by package and mileage (staff pay), costs and supplies per guest (the Business area).
@@ -15,9 +15,11 @@ export default function SettingsForm({ mileage, costs, perGuest, rates }: { mile
   const [c, setC] = useState({ burdenPct: String(costs.burdenPct), cardPct: String(costs.cardPct), cardFixed: (costs.cardFixedCents / 100).toFixed(2) });
   const [g, setG] = useState<Record<string, string>>(Object.fromEntries(SUPPLY_PACKAGES.map((k) => [k, perGuest[k] === null ? "" : (perGuest[k]! / 100).toFixed(2)])));
   const [r, setR] = useState<Record<string, string>>(Object.fromEntries(PAY_PACKAGES.map((k) => [k, (rates[k] / 100).toFixed(2)])));
+  const sfRates = rates.serviceFee ?? SERVICE_FEE_RATE_DEFAULTS;
+  const [sf, setSf] = useState<Record<string, string>>(Object.fromEntries(SERVICE_FEE_RATE_KEYS.map((k) => [k, (sfRates[k] / 100).toFixed(2)])));
   const [msg, setMsg] = useState<{ which: string; text: string; error: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
-  const save = async (which: "rates" | "mileage" | "costs" | "supplies", body: Record<string, string>) => {
+  const save = async (which: "rates" | "sf_rates" | "mileage" | "costs" | "supplies", body: Record<string, string>) => {
     setBusy(true);
     setMsg(null);
     const res = await fetch("/api/team/admin/business/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ which, ...body }) }).catch(() => null);
@@ -37,7 +39,7 @@ export default function SettingsForm({ mileage, costs, perGuest, rates }: { mile
     <section className="rounded-2xl border border-[#DDD5CC] bg-white px-4 py-3 space-y-4" aria-label="Business settings" id="settings">
       <h2 className="font-heading text-base font-bold text-[#2C2420]">Business settings</h2>
       <div className="space-y-2" id="rates">
-        <h3 className="text-sm font-semibold text-[#2C2420]">Hourly rate by package</h3>
+        <h3 className="text-sm font-semibold text-[#2C2420]">Hourly rate by package, gratuity model events</h3>
         <p className="text-xs text-[#6B5D52]">
           The rate for a person on an event is their own rate when one is set on their profile, otherwise this package rate. Any package not listed here pays $30.00 an hour. Used for the pay estimate, the Payout card, Payroll and Business labor.
         </p>
@@ -53,6 +55,24 @@ export default function SettingsForm({ mileage, costs, perGuest, rates }: { mile
           Save rates
         </button>
         {msg?.which === "rates" && <p className={`text-sm ${msg.error ? "text-[#A0412D]" : "text-[#55684A]"}`}>{msg.text}</p>}
+      </div>
+      <div className="space-y-2" id="sf-rates">
+        <h3 className="text-sm font-semibold text-[#2C2420]">Hourly rate, service fee model events</h3>
+        <p className="text-xs text-[#6B5D52]">
+          Bartenders get the rate for the event&apos;s package. Bar backs, servers and event helpers get the support rate. A person&apos;s own rate counts only when it is higher. No gratuity share on these events.
+        </p>
+        <div className="grid grid-cols-2 gap-2">
+          {SERVICE_FEE_RATE_KEYS.map((k) => (
+            <label key={k} className="text-sm text-[#2C2420]">
+              {k === "support" ? SERVICE_FEE_RATE_LABEL[k] : `${SERVICE_FEE_RATE_LABEL[k]} bartenders`}, $ an hour
+              <input className={input} inputMode="decimal" value={sf[k]} onChange={(e) => setSf({ ...sf, [k]: e.target.value })} />
+            </label>
+          ))}
+        </div>
+        <button type="button" className={btn} disabled={busy} onClick={() => save("sf_rates", sf)}>
+          Save service fee rates
+        </button>
+        {msg?.which === "sf_rates" && <p className={`text-sm ${msg.error ? "text-[#A0412D]" : "text-[#55684A]"}`}>{msg.text}</p>}
       </div>
       <div className="space-y-2">
         <h3 className="text-sm font-semibold text-[#2C2420]">Mileage pay</h3>

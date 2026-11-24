@@ -2,6 +2,7 @@
 // anyone else gets nothing back.
 
 import { supabase } from "@/lib/supabase";
+import { PRICING_MODEL_LABEL, sessionPricingModel } from "@/lib/pricing-model";
 import type { SessionRow } from "@/lib/event-updates";
 import type { StaffMember } from "@/lib/team/event-view";
 import { isAdminRole } from "@/lib/team/roles";
@@ -16,6 +17,8 @@ export interface PayoutSheet {
   rows: PayoutRow[];
   totals: PayoutTotals;
   tipNote: string | null; // booked tip per bartender against the split, when they differ by more than a dollar
+  serviceFee: boolean; // the event is on the service fee model: no gratuity share
+  priceCheck: string | null; // "Price needs a check" on the booking: pay here is on a model nobody has confirmed
   reimbursementsReady: boolean; // false until the reimbursements migration runs
 }
 
@@ -33,9 +36,11 @@ export async function payoutFrom(viewer: StaffMember, session: SessionRow, sheet
   const rows = crew
     .map((c) => payoutRow({ staffId: c.staffId, assignmentId: c.assignmentId, name: names.get(c.staffId) || "Unknown staff member", role: c.role, estimate: c.estimate, sheet: bySheet.get(c.staffId) ?? null, reimbursements: reimb.byAssignment.get(c.assignmentId) ?? [] }))
     .sort((a, b) => a.name.localeCompare(b.name));
+  const serviceFee = sessionPricingModel(session) === "service_fee";
   const split = crew.map((c) => c.estimate.tips).find((t) => t.state === "on_file");
-  const tipNote = tipMismatchNote(session.booked_price?.tip_per_bartender, split?.state === "on_file" ? split.cents : null);
-  return { sessionId: session.id, rows, totals: payoutTotals(rows), tipNote, reimbursementsReady: reimb.ready };
+  const tipNote = serviceFee ? null : tipMismatchNote(session.booked_price?.tip_per_bartender, split?.state === "on_file" ? split.cents : null);
+  const priceCheck = session.price_check ? `Price needs a check: pay here is figured on the ${PRICING_MODEL_LABEL[sessionPricingModel(session)].toLowerCase()}, which nobody has confirmed yet. ${session.price_check.reason}` : null;
+  return { sessionId: session.id, rows, totals: payoutTotals(rows), tipNote, serviceFee, priceCheck, reimbursementsReady: reimb.ready };
 }
 
 export async function payoutSheet(viewer: StaffMember, session: SessionRow): Promise<PayoutSheet | null> {
