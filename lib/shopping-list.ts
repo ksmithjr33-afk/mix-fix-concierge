@@ -371,16 +371,18 @@ function getSpiritBottles(
 
   // Accumulate oz per spirit. The Dive Bar well sets its own spirits below.
   for (const drink of diveWell ? [] : alcoholicDrinks) {
-    const baseSpirit = drink.base_spirit?.toLowerCase()?.trim() || "";
-    if (!baseSpirit || baseSpirit === "none" || baseSpirit === "n/a") continue;
+    const rawBase = drink.base_spirit?.toLowerCase()?.trim() || "";
+    // No base spirit on the recipe: its alcohol is still counted, each by its own name.
+    const baseSpirit = rawBase === "none" || rawBase === "n/a" ? "" : rawBase;
 
     const ingredients = normalizeIngredients(drink.ingredients);
 
     for (const ing of ingredients) {
-      const oz = parseOz(ing);
+      const ingName = ing.replace(/^[\d.]+\s*oz\s*/i, "").replace(/^(top with|topped with|float of|splash of)\s+/i, "").trim().toLowerCase();
+      let oz = parseOz(ing);
+      if (oz <= 0 && sparklingKey(ingName)) oz = SPARKLING_TOP_OZ;
       if (oz <= 0) continue;
 
-      const ingName = ing.replace(/^[\d.]+\s*oz\s*/i, "").trim().toLowerCase();
       if (!isLikelySpirit(ingName, baseSpirit)) continue;
 
       const spiritKey = normalizeSpiritName(ingName, baseSpirit);
@@ -497,6 +499,8 @@ function isLikelySpirit(ingName: string, baseSpirit: string): boolean {
     "raspberry liqueur", "chambord", "framboise",
     "elderflower", "st-germain", "st germain", "st. germain",
     "red wine",
+    // Sparkling wine is alcohol the client provides, never a mixer.
+    "prosecco", "champagne", "sparkling wine", "cava", "lambrusco", "sparkling rose", "sparkling rosé", "brut",
     "coconut liqueur", "kalani",
     "amaretto", "disaronno",
     "lillet", "lillet blanc",
@@ -532,6 +536,11 @@ function normalizeSpiritName(ingName: string, baseSpirit: string): string {
   const lower = ingName.toLowerCase();
 
   if (lower.includes("vanilla vodka")) return "vanilla vodka";
+  // Sparkling wine: its own bottle, on the client's alcohol list.
+  const sparkling = sparklingKey(lower);
+  if (sparkling) return sparkling;
+  // Crème de cacao, crème de menthe, crème de cassis: each its own bottle, never more of the base spirit.
+  if (/cr[eè]me de /.test(lower)) return lower.replace(/^.*?cr[eè]me de /, "creme de ").replace(/\s+/g, " ").trim();
   if (lower.includes("red wine")) return "red wine";
   if (lower.includes("maraschino")) return "maraschino liqueur";
   if (lower.includes("violette")) return "creme de violette";
@@ -581,9 +590,28 @@ function normalizeSpiritName(ingName: string, baseSpirit: string): string {
   if (lower.includes("bourbon")) return "bourbon";
   // Any other liqueur is its own bottle, not more of the drink's base spirit.
   if (lower.includes("liqueur")) return lower;
+  // Alcohol that is not the drink's base spirit (mezcal in a tequila drink, any
+  // spirit when the recipe has no base spirit) is its own bottle, never folded
+  // into the base spirit's count and lost.
+  const base = baseSpirit.toLowerCase().trim();
+  if (!base || !lower.includes(base)) return lower;
 
-  return baseSpirit.toLowerCase();
+  return base;
 }
+
+/** "prosecco", "champagne", "cava", "lambrusco", or "sparkling wine". Null when it is not sparkling wine. */
+export function sparklingKey(name: string): string | null {
+  const k = name.toLowerCase();
+  if (k.includes("prosecco")) return "prosecco";
+  if (k.includes("champagne")) return "champagne";
+  if (/\bcava\b/.test(k)) return "cava";
+  if (k.includes("lambrusco")) return "lambrusco";
+  if (/sparkling (wine|ros[eé])|\bbrut\b/.test(k)) return "sparkling wine";
+  return null;
+}
+
+/** A pour with no oz: "Top with Prosecco" is about 3 oz. Other alcohol needs its oz written. */
+const SPARKLING_TOP_OZ = 3;
 
 /**
  * One shopping line per ingredient: produce written with a count or prep
@@ -1789,6 +1817,10 @@ function calculateProduceFromGarnishes(drinks: SignatureDrink[], guestCount: num
     });
     if (muddlesMint) muddledMintDrinks++;
     if (usedInRecipe("celery") || g.includes("celery")) garnishCounts["celery"] = (garnishCounts["celery"] || 0) + 1;
+    // Muddled basil or rosemary in the recipe: the mixer list skips herbs, so they land here.
+    for (const herb of ["basil", "rosemary"]) {
+      if (usedInRecipe(herb) && !g.includes(herb)) garnishCounts[herb] = (garnishCounts[herb] || 0) + 1;
+    }
     if (!g) continue;
 
     if (g.includes("lime")) garnishCounts["lime"] = (garnishCounts["lime"] || 0) + 1;

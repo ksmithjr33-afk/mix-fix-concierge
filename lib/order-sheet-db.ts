@@ -41,6 +41,7 @@ import { ICE_MACHINE_ACTIONS, iceMachineFrom } from "@/lib/team/ice-pickup";
 import { listSyrups } from "@/lib/syrups-db";
 import { cleanSyrupEdit, sameSyrup, syrupViews, type SyrupRecipe, type SyrupView } from "@/lib/syrups";
 import { adminAnswers, type AdminAnswers, type AnswerRow } from "@/lib/team/staff-list";
+import { unmatchedIngredients, type Unmatched } from "@/lib/recipe-coverage";
 
 type EventData = Record<string, unknown>;
 
@@ -76,6 +77,17 @@ export interface SheetView {
   stores: StoreInfo[]; // every store, retired ones too, in list order
   suggestions: boolean; // the team setting
   answers: AdminAnswers; // what staff said about each line (lib/team/staff-list.ts)
+  unmatched: Unmatched[]; // saved recipe ingredients no line covers: "Not matched, check this". Admin sheet only.
+}
+
+/**
+ * Every saved recipe ingredient should be on the list. Checked against the
+ * saved recipes (not this event's display edits), every line on the sheet,
+ * lines an admin removed on purpose, and the house syrups.
+ */
+export function sheetUnmatched(ed: Record<string, unknown>, sheet: Sheet, syrups: SyrupView[]): Unmatched[] {
+  const names = [...sheet.sections.flatMap((s) => s.lines.map((l) => l.fields.name)), ...sheet.removed.map((l) => l.fields.name), ...syrups.map((s) => s.name)];
+  return unmatchedIngredients(recipes(ed), names);
 }
 
 /** Staff answers on this event, with names, for the admin sheet. None before the migration. */
@@ -197,12 +209,14 @@ export async function getSheetView(session: SessionLike): Promise<SheetView> {
   const [{ sheet, suggestions, stores, meta: m }, library] = await Promise.all([build(session), listSyrups()]);
   const list = withRecipeEdits(recipes(ed), m.recipe_edits);
   const answers = await sheetAnswers(session.id, sheet, stores);
+  const syrups = sheetSyrups(sheet, list, library, stores, m);
   return {
     answers,
+    unmatched: sheetUnmatched(ed, sheet, syrups),
     sessionId: session.id,
     header: sheetHeader(ed),
     recipes: list,
-    syrups: sheetSyrups(sheet, list, library, stores, m),
+    syrups,
     sheet,
     byStore: byStore(sheet, stores),
     meta: meta(m, stores),

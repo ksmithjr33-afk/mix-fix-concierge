@@ -1,5 +1,6 @@
 "use client";
 
+import { NOT_MATCHED_TITLE } from "@/lib/recipe-coverage";
 import { useEffect, useRef, useState } from "react";
 import { PALETTE, RECIPE_EDIT_NOTE, SECTIONS, lineText, paletteName, textOn, type SectionId, type Store, type StoreInfo } from "@/lib/order-sheet-shared";
 import type { FieldName, Fields, SheetLine, SheetRecipe } from "@/lib/order-sheet";
@@ -1112,6 +1113,19 @@ export default function OrderSheet({ initial, timeZone, costs = null }: { initia
             </section>
           );
         })}
+        {(view.unmatched ?? []).length > 0 && (
+          <section className="mt-3 rounded border-2 border-[#B42318] bg-[#FEF3F2] px-3 py-2 text-[#7A271A]" aria-label={NOT_MATCHED_TITLE}>
+            <h3 className="font-bold">{NOT_MATCHED_TITLE}</h3>
+            <p className="text-[13px]">These recipe ingredients are not on the list. Add a line, or check the recipe.</p>
+            <ul className="mt-1 list-disc pl-5">
+              {view.unmatched.map((u, i) => (
+                <li key={i}>
+                  {u.ingredient} <span className="text-[13px]">({u.drink})</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
         <Legend view={view} call={call} open={open} setOpen={setOpen} />
         {view.meta.note && <p className="mt-3 whitespace-pre-wrap">Note: {view.meta.note}</p>}
         <Recipes view={view} call={call} onSaved={() => flash(`Recipe saved. ${RECIPE_EDIT_NOTE}`, 6000)} />
@@ -1145,7 +1159,20 @@ export default function OrderSheet({ initial, timeZone, costs = null }: { initia
               </section>
             );
           })}
-          <Legend view={view} call={call} open={open} setOpen={setOpen} />
+          {(view.unmatched ?? []).length > 0 && (
+          <section className="mt-3 rounded border-2 border-[#B42318] bg-[#FEF3F2] px-3 py-2 text-[#7A271A]" aria-label={NOT_MATCHED_TITLE}>
+            <h3 className="font-bold">{NOT_MATCHED_TITLE}</h3>
+            <p className="text-[13px]">These recipe ingredients are not on the list. Add a line, or check the recipe.</p>
+            <ul className="mt-1 list-disc pl-5">
+              {view.unmatched.map((u, i) => (
+                <li key={i}>
+                  {u.ingredient} <span className="text-[13px]">({u.drink})</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+        <Legend view={view} call={call} open={open} setOpen={setOpen} />
         </article>
       )}
 
