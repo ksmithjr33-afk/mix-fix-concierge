@@ -61,6 +61,8 @@ export default function AddEventForm({
   const [v, setV] = useState<Record<string, string>>({ package: "", booked_on: today, ...(initialDate ? { event_date: initialDate } : {}) });
   // The pricing model defaults from Booked on; the admin can pick the other one.
   const [model, setModel] = useState<Model>(modelFor(today));
+  // Service fee model only: is a tip jar allowed at the event. Yes by default.
+  const [tipJar, setTipJar] = useState<"yes" | "no">("yes");
   const modelPackages = model === "service_fee" ? sfPackages : packages;
   const changeModel = (m: Model) => {
     setModel(m);
@@ -96,7 +98,7 @@ export default function AddEventForm({
         body: JSON.stringify({
           ...v,
           pricing_model: model,
-          ...(model === "service_fee" ? { package_price: "", gratuity: "" } : { addons_total: "" }),
+          ...(model === "service_fee" ? { package_price: "", gratuity: "", tip_jar: tipJar === "yes" } : { addons_total: "" }),
           ...flags,
           ...(calendarOnly ? { send_list: false, calendar_only: true } : {}),
           mode,
@@ -245,6 +247,14 @@ export default function AddEventForm({
               <option value="service_fee">Service fee model</option>
             </select>
           </Field>
+          {model === "service_fee" && (
+            <Field label="Tip jar" hint="Staff see this on the event Details.">
+              <select className={input} value={tipJar} onChange={(e) => setTipJar(e.target.value as "yes" | "no")}>
+                <option value="yes">Yes</option>
+                <option value="no">No</option>
+              </select>
+            </Field>
+          )}
         </div>
         <p className="text-xs text-[#A39585]">Booked on November 23, 2026 or earlier is the gratuity model, after that the service fee model. Pick the other one if this booking is different.</p>
         <Field label="Package">

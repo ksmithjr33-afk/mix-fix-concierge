@@ -45,6 +45,7 @@ export interface CleanManual {
   calendarOnly: boolean; // "Already confirmed, add to our calendar only": nothing to GHL or the client
   bookedOn: string; // YYYY-MM-DD, the day the client booked
   pricingModel: PricingModel; // from the admin's pick, defaulting by bookedOn
+  tipJar: boolean | null; // service fee model only (default yes), stored like the booking webhook's tip_jar; null on the gratuity model
 }
 
 export type ManualResult = { ok: true; value: CleanManual } | { ok: false; error: string };
@@ -154,6 +155,11 @@ export function cleanManualEvent(raw: unknown, today: string): ManualResult {
   if (modelRaw && modelRaw !== "gratuity" && modelRaw !== "service_fee") return { ok: false, error: "Pick a pricing model." };
   const pricingModel: PricingModel = (modelRaw as PricingModel) || defaultModelForBookedOn(bookedOn);
 
+  // Tip jar: service fee model only, Yes unless the admin picks No. The gratuity model never stores one here.
+  const tipRaw = str(f.tip_jar).toLowerCase();
+  if (pricingModel === "service_fee" && tipRaw && !["true", "false", "yes", "no"].includes(tipRaw)) return { ok: false, error: "Pick Yes or No for the tip jar." };
+  const tipJar = pricingModel === "service_fee" ? tipRaw !== "false" && tipRaw !== "no" : null;
+
   const pkg = str(f.package);
   if (!manualPackages(pricingModel).includes(pkg)) return { ok: false, error: pricingModel === "service_fee" ? "Pick a service fee model package." : "Pick a package." };
   if (pkg === "The Big Day Bar" && !/wedding|reception/i.test(eventType)) return { ok: false, error: "The Big Day Bar is for weddings and receptions only." };
@@ -259,11 +265,13 @@ export function cleanManualEvent(raw: unknown, today: string): ManualResult {
         discount_amount: f.discount_amount,
         addons_total: f.addons_total,
         bartenders: bartenders ?? undefined,
+        ...(tipJar !== null ? { tip_jar: tipJar } : {}),
       },
       sendList: !calendarOnly && f.send_list === true,
       calendarOnly,
       bookedOn,
       pricingModel,
+      tipJar,
     },
   };
 }

@@ -201,6 +201,8 @@ export async function addManualEvent(admin: StaffMember, raw: unknown, now: Date
     ...(price ? { booked_price: price } : {}),
     pricing_model: v.pricingModel,
     booked_on: v.bookedOn,
+    // Service fee model: the tip jar, in the same column the booking webhook writes (the staff Details line reads it).
+    ...(v.tipJar !== null ? { tip_jar: v.tipJar } : {}),
     created_by: "admin",
     created_by_name: byName,
     created_by_staff_id: admin.id,

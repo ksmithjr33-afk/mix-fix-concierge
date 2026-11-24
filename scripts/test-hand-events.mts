@@ -248,6 +248,8 @@ check("The craft menu is read from the concierge's menu text", catalog.craftDrin
   const oldRow = old.ok ? session(old.id) : undefined;
   check("Saved: an old booking is on the gratuity model", oldRow?.pricing_model === "gratuity" && oldRow?.booked_on === "2026-09-01");
 
+  check("Saved: the gratuity model stores no tip jar on the session", oldRow !== undefined && !("tip_jar" in oldRow) && (oldRow.booked_price as Record<string, unknown> | undefined)?.service_fee === undefined);
+
   // Edit event: Booked on and the model.
   const bm = await import("../lib/booking-model-db.ts");
   const who = { id: admin.id, name: "Kenneth" };
@@ -285,6 +287,34 @@ check("The craft menu is read from the concierge's menu text", catalog.craftDrin
   const edit = await import("../lib/team/admin-edit.ts");
   check("Edit event: a service fee event offers Bartender Only, not Beer and Wine", edit.packageChoices("service_fee").includes("Bartender Only") && !edit.packageChoices("service_fee").includes("Beer and Wine") && edit.packageChoices("gratuity").includes("Beer and Wine"));
   check("Edit event: Bartender Only is refused on a gratuity event", !edit.cleanAdminEdit({ package: "Bartender Only" }, "Full Bar", "gratuity").ok && edit.cleanAdminEdit({ package: "Bartender Only" }, "Full Bar", "service_fee").ok);
+}
+
+
+// ----- Tip jar on service fee events added by hand -----
+{
+  // Tip jar: service fee events only, Yes by default, stored where the booking webhook puts it.
+  const tip = (extra: Record<string, unknown>) => {
+    const c = manual.cleanManualEvent(form(extra), today2);
+    return c.ok ? c.value.tipJar : `error: ${c.error}`;
+  };
+  check("Tip jar: Yes by default on the service fee model", tip({ booked_on: "2026-11-24" }) === true);
+  check("Tip jar: No when the admin picks No", tip({ booked_on: "2026-11-24", tip_jar: false }) === false && tip({ booked_on: "2026-11-24", tip_jar: "no" }) === false);
+  check("Tip jar: none on the gratuity model", tip({ booked_on: "2026-11-01", tip_jar: false }) === null);
+  check("Tip jar: a made up answer is refused", String(tip({ booked_on: "2026-11-24", tip_jar: "maybe" })).includes("tip jar"));
+  const ev = await import("../lib/team/event-view.ts");
+  for (const [label, val, line] of [["Yes", true, ev.TIP_JAR_YES], ["No", false, ev.TIP_JAR_NO]] as const) {
+    reset();
+    const r = await manualDb.addManualEvent(admin, form({ booked_on: "2026-11-24", package: "Full Bar", tip_jar: val }));
+    const row = r.ok ? session(r.id) : undefined;
+    check(`Tip jar ${label}: saved on the session's tip_jar like the booking webhook`, row?.tip_jar === val, JSON.stringify(row?.tip_jar));
+    check(`Tip jar ${label}: the staff Details line reads it`, ev.tipJarLine(row as never) === line);
+    reset();
+    const priced = await manualDb.addManualEvent(admin, form({ booked_on: "2026-11-24", package: "Full Bar", tip_jar: val, total: "1500" }));
+    const prow = priced.ok ? session(priced.id) : undefined;
+    check(`Tip jar ${label}: the booked price carries it too`, (prow?.booked_price as Record<string, unknown>)?.tip_jar === val && prow?.tip_jar === val);
+  }
+  const formSrc = src("app/team/admin/events/new/add-event-form.tsx");
+  check("Add event form: Tip jar Yes or No on service fee events, Yes by default", formSrc.includes('useState<"yes" | "no">("yes")') && formSrc.includes('{model === "service_fee" && (\n            <Field label="Tip jar"') && formSrc.includes('tip_jar: tipJar === "yes"'));
 }
 
 done("hand added event");
