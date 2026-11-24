@@ -15,6 +15,7 @@ import { isBlank, present } from "@/lib/blank";
 import { packageDrinkCount } from "@/lib/event-diff";
 import { CLOSING_PATTERN } from "@/lib/unsaved-sessions";
 import { UNCONFIRMED_DRINKS, hasRecipe, notConfirmedNote, notFinalizedNote, withTeamNotes } from "@/lib/team-notes";
+import { boClassicsNote, guardClassicsOnly } from "@/lib/bartender-only-drinks";
 import { guardMocktails, isMocktailFollowup, mocktailNotes, mocktailsAllowed } from "@/lib/mocktail-menu";
 
 export { CLOSING_PATTERN };
@@ -309,13 +310,23 @@ const drinkName = (d: unknown) => present((d as { name?: unknown })?.name) ?? pr
  * unconfirmed_drinks, listed for the team, and asked on the client page. drinks_finalized and
  * extra_drinks_accepted are taken off the saved event.
  */
-export function checkDrinks(input: Record<string, unknown>, packageType: unknown): DrinkCheck {
+export function checkDrinks(input: Record<string, unknown>, packageType: unknown, opts: { classicsOnly?: boolean } = {}): DrinkCheck {
   const { drinks_finalized: finalizedFlag, extra_drinks_accepted: extrasFlag, ...data } = input;
   const kind = pkgKind(packageType ?? data.package);
   const cardOnly = kind === "dive" && data.dive_menu_card !== true;
   if (kind === "beer_wine" || cardOnly) return { data, notFinalized: false, unconfirmed: [], named: [] };
   const included = kind === "dive" ? 3 : packageDrinkCount(packageType ?? data.package);
   let drinks = Array.isArray(data.signature_drinks) ? (data.signature_drinks as unknown[]) : [];
+  // The new Bartender Only is the classics only: a craft drink, a mocktail or a
+  // custom drink is left off, with a team note, and each classic gets its CLASSICS recipe.
+  if (opts.classicsOnly) {
+    const g = guardClassicsOnly(drinks);
+    if (g.refused.length) {
+      console.warn(`[bartender-only] not classics, left off: ${g.refused.join(", ")}`);
+      Object.assign(data, withTeamNotes(data, [boClassicsNote(g.refused)]));
+    }
+    drinks = g.drinks;
+  }
   // The concierge never creates a drink: a mocktail not on a loaded mocktail menu
   // becomes a follow up that holds its drink spot (no recipe, no ingredients).
   const mock = guardMocktails(drinks, { allowsMocktails: mocktailsAllowed(packageType ?? data.package) });

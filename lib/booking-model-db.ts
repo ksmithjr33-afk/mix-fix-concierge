@@ -13,7 +13,9 @@ import { supabase } from "@/lib/supabase";
 import type { BookedPrice } from "@/lib/price-change";
 import type { SessionRow } from "@/lib/event-updates";
 import { confirmedBooked } from "@/lib/price-check-db";
-import { withPricingModel } from "@/lib/bartender-only";
+import { isServiceFeeBartenderOnly, withPricingModel } from "@/lib/bartender-only";
+import { boClassicsNote, guardClassicsOnly } from "@/lib/bartender-only-drinks";
+import { withTeamNotes } from "@/lib/team-notes";
 import { formDateToEvent } from "@/lib/team/admin-edit";
 import { PRICING_MODEL_LABEL, sessionPricingModel, type PricingModel } from "@/lib/pricing-model";
 
@@ -57,6 +59,9 @@ export async function setBookedOnAndModel(
   if (!data) return { ok: false, status: 404, error: "Event not found." };
   const session = data as SessionRow & { booked_on?: string | null };
   const changedModel = sessionPricingModel(session) !== model;
+  const ed = (session.event_data ?? {}) as Record<string, unknown>;
+  const pkg = ed.package ?? session.package_type;
+  const toNewBartenderOnly = changedModel && isServiceFeeBartenderOnly({ package: pkg, pricing_model: model });
   const update: Record<string, unknown> = { pricing_model: model };
   if (day) update.booked_on = day;
   if (changedModel || session.price_check) {
@@ -67,7 +72,16 @@ export async function setBookedOnAndModel(
     const booked = bookedForModel(session, model, who, now.toISOString());
     if (booked) update.booked_price = booked;
     // The shopping lists read the model from event_data (lib/bartender-only.ts). A record, not a client update.
-    if (session.event_data) update.event_data = withPricingModel(session.event_data, { pricing_model: model });
+    if (session.event_data) {
+      let next = withPricingModel(session.event_data, { pricing_model: model });
+      // Moving a legacy Bartender Only to the service fee model makes it the new
+      // Bartender Only, the classics only: drinks that are not classics come off, with a team note.
+      if (toNewBartenderOnly && Array.isArray(next.signature_drinks)) {
+        const g = guardClassicsOnly(next.signature_drinks as unknown[]);
+        if (g.refused.length) next = withTeamNotes({ ...next, signature_drinks: g.drinks }, [boClassicsNote(g.refused)]) as typeof next;
+      }
+      update.event_data = next;
+    }
   }
   const { error: upErr } = await supabase.from("sessions").update(update).eq("id", sessionId);
   if (upErr && /booked_on/.test(upErr.message ?? "")) {

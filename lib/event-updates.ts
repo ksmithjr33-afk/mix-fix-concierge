@@ -2,7 +2,7 @@
 // apply post submission changes as versioned event_updates rows.
 
 import { supabase } from "@/lib/supabase";
-import { withPricingModel } from "@/lib/bartender-only";
+import { isServiceFeeBartenderOnlyBooking, withPricingModel } from "@/lib/bartender-only";
 import {
   applyChanges,
   computeDeadlines,
@@ -241,6 +241,7 @@ export interface ApplyResult {
   diveMenuSet: boolean; // drink changes on Dive Bar, which has a set menu, dropped
   diveCardRefused: string[]; // Dive Bar menu card picks that are not a classic Dive Bar allows, dropped
   diveCardOverMax: string[]; // Dive Bar menu card classics past the sixth, dropped
+  classicsRefused: string[]; // the new Bartender Only: drinks sent that are not classics, left off
   withinSixDays: boolean;
   paymentPreference: string | null;
   // Inside six days a client drink change, and (auto send on) a client change
@@ -310,6 +311,7 @@ interface PreparedUpdate {
   diveMenuSet: boolean;
   diveCardRefused: string[];
   diveCardOverMax: string[];
+  classicsRefused: string[];
 }
 
 /** Plan and price an update without saving anything. */
@@ -324,7 +326,14 @@ function prepareUpdate(
   const deadlines = computeDeadlines(current.event_date ?? session.event_date, options.now, eventTimeZone(session));
   // Admins are not bound by the six day cutoff.
   const planDeadlines = options.ignoreCutoff ? { ...deadlines, withinSixDays: false } : deadlines;
-  const plan = planUpdate(current, partial, { managerRequest: options.managerRequest, deadlines: planDeadlines });
+  // The new Bartender Only (service fee model) is the classics only, before and after a package change.
+  const nextPkg = "package" in partial && partial.package !== undefined ? partial.package : current.package;
+  const plan = planUpdate(current, partial, {
+    managerRequest: options.managerRequest,
+    deadlines: planDeadlines,
+    classicsOnly: isServiceFeeBartenderOnlyBooking(nextPkg, session),
+    wasClassicsOnly: isServiceFeeBartenderOnlyBooking(current.package ?? session.package_type, session),
+  });
 
   let applied = plan.applied;
   let next = plan.next;
@@ -370,7 +379,7 @@ function prepareUpdate(
     price = extraDrinksPrice(plan.acceptedExtras, price, booked, { pending: !!session.price_pending, version: session.version, now: options.now });
   }
 
-  return { current, deadlines, applied, requests: plan.requests, next, price, booked, bookedComputed, cutoffChanges: plan.cutoffChanges, diveMenuSet: plan.diveMenuSet, diveCardRefused: plan.diveCardRefused, diveCardOverMax: plan.diveCardOverMax };
+  return { current, deadlines, applied, requests: plan.requests, next, price, booked, bookedComputed, cutoffChanges: plan.cutoffChanges, diveMenuSet: plan.diveMenuSet, diveCardRefused: plan.diveCardRefused, diveCardOverMax: plan.diveCardOverMax, classicsRefused: plan.classicsRefused };
 }
 
 /**
@@ -482,6 +491,7 @@ export interface QuoteResult {
   diveMenuSet: boolean;
   diveCardRefused: string[];
   diveCardOverMax: string[];
+  classicsRefused: string[];
   withinSixDays: boolean;
   changes: FieldChange[]; // what would apply, implied changes included
 }
@@ -504,6 +514,7 @@ export async function quoteEventUpdate(
     diveMenuSet: prep.diveMenuSet,
     diveCardRefused: prep.diveCardRefused,
     diveCardOverMax: prep.diveCardOverMax,
+    classicsRefused: prep.classicsRefused,
     withinSixDays: prep.deadlines.withinSixDays,
     changes: prep.applied?.changes ?? [],
   };
@@ -570,6 +581,7 @@ export async function applyEventUpdate(
       diveMenuSet: prep.diveMenuSet,
       diveCardRefused: prep.diveCardRefused,
       diveCardOverMax: prep.diveCardOverMax,
+      classicsRefused: prep.classicsRefused,
       withinSixDays: prep.deadlines.withinSixDays,
       paymentPreference: (current.payment_preference as string | undefined) || null,
       held: null as ApplyResult["held"],

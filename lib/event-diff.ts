@@ -4,7 +4,8 @@
 // lib/event-updates.ts for that.
 
 import { parseEventDate } from "@/lib/event-date";
-import { ACCEPT_EXTRA_DRINKS, settleDrinkFlags } from "@/lib/team-notes";
+import { ACCEPT_EXTRA_DRINKS, settleDrinkFlags, withTeamNotes } from "@/lib/team-notes";
+import { boClassicsNote, guardClassicsOnly } from "@/lib/bartender-only-drinks";
 import { guardMocktails, mocktailNotes, mocktailsAllowed } from "@/lib/mocktail-menu";
 import { cardPicks, DIVE_CARD_INCLUDED, diveSetMenuDrinks, hasDiveMenuCard, isDiveBarPackage } from "@/lib/dive-menu";
 
@@ -518,6 +519,8 @@ export interface UpdatePlan {
   // (a specialty cocktail, mocktail, custom or excluded drink), or past the sixth.
   diveCardRefused: string[];
   diveCardOverMax: string[];
+  // The new Bartender Only (classics only): drinks sent that are not classics, left off.
+  classicsRefused: string[];
 }
 
 interface DiveCardPlan {
@@ -586,7 +589,14 @@ function row(changes: FieldChange[], applied: boolean, within: boolean | null): 
 export function planUpdate(
   current: EventData,
   partial: EventData,
-  options: { managerRequest?: string | null; deadlines: Deadlines }
+  options: {
+    managerRequest?: string | null;
+    deadlines: Deadlines;
+    // The new Bartender Only (service fee model): after this update (classicsOnly)
+    // and before it (wasClassicsOnly). The caller works it out from the session.
+    classicsOnly?: boolean;
+    wasClassicsOnly?: boolean;
+  }
 ): UpdatePlan {
   const { deadlines } = options;
   const updates: EventData = {};
@@ -618,10 +628,30 @@ export function planUpdate(
     }
   }
 
+  // The new Bartender Only is the classics only (lib/bartender-only-drinks.ts):
+  // a craft drink, mocktail or custom drink sent is left off. Switching an event
+  // to it takes off the saved drinks that are not classics, with a team note.
+  // Drinks already saved on an event that was already on it stay as they are.
+  const classicsOnly = options.classicsOnly === true;
+  const enteringClassics = classicsOnly && options.wasClassicsOnly !== true;
+  let classicsRefused: string[] = [];
+  if (classicsOnly) {
+    const sent = Array.isArray(updates.signature_drinks) ? (updates.signature_drinks as unknown[]) : enteringClassics ? currentDrinks : null;
+    if (sent) {
+      const g = guardClassicsOnly(sent, enteringClassics ? [] : currentDrinks);
+      if (Array.isArray(updates.signature_drinks) || g.refused.length) updates.signature_drinks = g.drinks;
+      classicsRefused = g.refused;
+      if (enteringClassics && g.refused.length) {
+        const noted = withTeamNotes({ team_notes: updates.team_notes ?? current.team_notes }, [boClassicsNote(g.refused)]);
+        updates.team_notes = noted.team_notes;
+      }
+    }
+  }
+
   // The concierge never creates a drink: a new or changed mocktail not on a loaded
   // mocktail menu becomes a follow up holding its drink spot. Saved drinks stay as they are.
   if (Array.isArray(updates.signature_drinks)) {
-    const mock = guardMocktails(updates.signature_drinks as unknown[], { saved: currentDrinks, allowsMocktails: mocktailsAllowed(nextPkg) });
+    const mock = guardMocktails(updates.signature_drinks as unknown[], { saved: currentDrinks, allowsMocktails: mocktailsAllowed(nextPkg) && !classicsOnly });
     updates.signature_drinks = mock.drinks;
     const notes = mocktailNotes({ ...current, ...updates }, mock);
     if (notes.special_requests !== undefined) updates.special_requests = notes.special_requests;
@@ -680,6 +710,10 @@ export function planUpdate(
     kept.push({ field: "signature_drinks", old: current.signature_drinks ?? null, new: diveSetMenuDrinks() });
     if (current.dive_set_menu !== true) kept.push({ field: "dive_set_menu", old: current.dive_set_menu ?? null, new: true });
     keptRequests = keptRequests.filter((c) => !String(c.new).startsWith("Add drinks beyond"));
+  } else if (enteringClassics && classicsRefused.length > 0 && kept.some((c) => c.field === "package")) {
+    // Switching to the new Bartender Only takes the drinks that are not classics off with it, inside six days too.
+    kept = [...kept, ...cutoffChanges];
+    cutoffChanges = [];
   } else if (isDiveBarPackage(current.package) && !isDiveBarPackage(nextPkg) && current.dive_set_menu === true && kept.some((c) => c.field === "package")) {
     // Leaving Dive Bar: the five classics stay as the drinks, no longer a set menu.
     kept.push({ field: "dive_set_menu", old: true, new: false });
@@ -699,6 +733,7 @@ export function planUpdate(
     diveMenuSet,
     diveCardRefused: diveCard?.refused ?? [],
     diveCardOverMax: diveCard?.overMax ?? [],
+    classicsRefused,
   };
 }
 

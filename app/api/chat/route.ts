@@ -1,7 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { buildIntakePrompt } from "@/lib/system-prompt";
 import { bookingPackageSection } from "@/lib/package-prompt";
-import { isServiceFeeBartenderOnlyBooking } from "@/lib/bartender-only";
+import { BO_CLASSICS_LINE, isServiceFeeBartenderOnlyBooking } from "@/lib/bartender-only";
 import { applyIntakeBarback, intakeBarbackQuote, splitBarback } from "@/lib/intake-barback";
 import { supabase } from "@/lib/supabase";
 import { buildUpdatePrompt } from "@/lib/update-prompt";
@@ -322,9 +322,12 @@ function quoteToolResult(quote: QuoteResult | null, pending: PricePendingInfo | 
   return `TOOL RESULT:\n\n${parts.join("\n\n")}`;
 }
 
-/** Dive Bar menu card picks the server dropped, for the bot to say so. */
-function diveCardLines(r: { diveCardRefused: string[]; diveCardOverMax: string[] }): string[] {
+/** Dive Bar menu card picks, and drinks on the new Bartender Only that are not classics, the server dropped, for the bot to say so. */
+function diveCardLines(r: { diveCardRefused: string[]; diveCardOverMax: string[]; classicsRefused?: string[] }): string[] {
   const out: string[] = [];
+  if (r.classicsRefused?.length) {
+    out.push(`NOT SAVED, NOT A CLASSIC: ${r.classicsRefused.join(", ")}. This booking is Bartender Only on our current pricing, which covers the classics only: no craft menu drink, no mocktail, no custom drink. If you have not said it yet in this chat, say exactly, once: "${BO_CLASSICS_LINE}" and then write [MENU:classics] alone on its own line at the very end. Never say these drinks were saved or added.`);
+  }
   if (r.diveCardRefused.length > 0) {
     out.push(`NOT ON THE MENU CARD: ${r.diveCardRefused.join(", ")}. A Dive Bar menu card holds only the classics Dive Bar allows, never a specialty cocktail, a mocktail, a custom drink, or a drink Dive Bar leaves out. Tell the client that is a Full Bar feature, and offer to switch the package to Full Bar (a package change is a PRICE CHANGE: quote it with quote_price_change first). Never call it a signature or specialty cocktail.`);
   }
@@ -362,7 +365,7 @@ function updateToolResult(result: ApplyResult | null, recorded: Recorded | null 
   if (result.held) {
     parts.push(`NOT SAVED, SENT TO OUR TEAM FOR APPROVAL: within 6 days of the event this change is a request that our team approves or declines first. It is NOT confirmed. Never say it was saved, updated, changed, or done. Say exactly: "${CHANGE_REQUEST_MESSAGE}" Anything listed below as SAVED AND APPLIED NOW was saved separately and can be confirmed.`);
   }
-  const cardDropped = result.diveCardRefused.length > 0 || result.diveCardOverMax.length > 0;
+  const cardDropped = result.diveCardRefused.length > 0 || result.diveCardOverMax.length > 0 || result.classicsRefused.length > 0;
   if (result.rows.length === 0 && !result.requestFailed && !result.diveMenuSet && !result.held && !cardDropped) {
     if (result.pricePending) {
       return `TOOL RESULT: ALREADY SAVED, PRICE PENDING: this is already saved and waiting for our management team to set the new total. Acknowledge it in a few words, do not mention the price again, do not ask them to confirm it, and ask if there is anything else they would like to change.`;
@@ -447,7 +450,7 @@ async function updateModeResponse(session: SessionRow, messages: ChatMessage[], 
     async start(controller) {
       let fullText = "";
       const menuFilter = createMenuFilter(
-        allowedMenus(eventData.package ?? session.package_type, eventData.dive_menu_requested === true),
+        allowedMenus(eventData.package ?? session.package_type, eventData.dive_menu_requested === true, isServiceFeeBartenderOnlyBooking(eventData.package ?? session.package_type, session)),
         (text) => {
           fullText += text;
           send(controller, { text });
@@ -649,6 +652,9 @@ async function updateModeResponse(session: SessionRow, messages: ChatMessage[], 
               text = "Sorry, that change did not go through. Our team will follow up with you.";
             } else if (lastApply.held && lastApply.rows.length === 0) {
               text = `${CHANGE_REQUEST_MESSAGE} Anything else you would like to change?`;
+            } else if (lastApply.rows.length === 0 && lastApply.classicsRefused.length > 0) {
+              // No menu picture on this fallback, so the line without "Here it is again".
+              text = `${BO_CLASSICS_LINE.replace(" Here it is again.", "")} Anything else you would like to change?`;
             } else if (lastApply.rows.length === 0 && (lastApply.diveCardRefused.length > 0 || lastApply.diveCardOverMax.length > 0)) {
               text = lastApply.diveCardRefused.length > 0
                 ? "That is a Full Bar feature. Your menu card can have classics only. Anything else you would like to change?"
@@ -850,7 +856,7 @@ export async function POST(request: Request) {
     async start(controller) {
       let fullText = "";
       const menuFilter = createMenuFilter(
-        allowedMenus(session?.package_type ?? packageFromContext(messages)),
+        allowedMenus(session?.package_type ?? packageFromContext(messages), undefined, isServiceFeeBartenderOnlyBooking(session?.package_type, session)),
         (text) => {
           fullText += text;
           controller.enqueue(encoder.encode(`data: ${JSON.stringify({ text })}\n\n`));
@@ -1014,7 +1020,10 @@ export async function POST(request: Request) {
             // Who is planning (and a planner's guest count ask) never goes in the event itself.
             const { answers: bookingAnswers, rest: answered } = takeBookingAnswers(submitted);
             // Skipped drink details still submit, marked Drinks not finalized; an extra drink nobody said yes to is held back.
-            drinks = checkDrinks(answered, session?.package_type ?? answered.package);
+            // The new Bartender Only takes classics only: anything else is left off with a team note.
+            drinks = checkDrinks(answered, session?.package_type ?? answered.package, {
+              classicsOnly: isServiceFeeBartenderOnlyBooking(session?.package_type ?? answered.package, session),
+            });
             // Written to the client since 2026-11-21: these special requests may show on their page.
             let input = withClientVoice(drinks.data);
             // No balance was quoted in the payment step: a team note so someone confirms it with the client.

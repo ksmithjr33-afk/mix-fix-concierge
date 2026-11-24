@@ -8,6 +8,7 @@ import { MENU_COPY } from "@/lib/menu-markers";
 import { formatClock, parseClock } from "@/lib/team/time";
 import { packageShortFor } from "@/lib/packages-info";
 import { packageSentence, packageShortSection, shortSentence } from "@/lib/package-prompt";
+import { BO_CLASSICS_LINE } from "@/lib/bartender-only";
 import { hasMocktailMenu, MOCKTAIL_CLIENT_LINE, MOCKTAIL_FOLLOWUP_NAME, MOCKTAIL_MENU_TEXT, mocktailMenu } from "@/lib/mocktail-menu";
 
 // The "mention once" notes, built from the short package wording.
@@ -636,10 +637,19 @@ const NO_PAYMENT_STEP = "PAYMENT STEP: skip it entirely for this chat. Do not as
 const SF_BO_INCLUDED = "the client buys everything on the shopping list, including alcohol, mixers, garnishes, ice, and cups, and we bring the bartenders and bar tools only";
 
 /**
+ * The drink sourcing rule on the new Bartender Only: classics only. It takes
+ * the place of the legacy line "(Legacy Bartender Only and Tailored Bar follow
+ * the Full Bar sourcing.)" in DRINK SOURCING BY PACKAGE, on this booking only.
+ */
+export const SF_BO_SOURCING = `Bartender Only on our current pricing (this booking): CLASSICS ONLY. This overrides every other drink rule in this prompt for this booking. Suggest, show, and accept drinks only from the CLASSICS section, with their CLASSICS recipes. Never suggest, show, or accept anything from the craft menu (the VODKA through BUBBLIES sections), not even a POPULAR pick or a recommendation. Never a mocktail: mocktails are not on the classics list, so never ask cocktail or mocktail, and every signature drink is a classic cocktail. Never a custom, off menu, or invented drink, not even when the client gives an exact recipe. If the client asks for any drink that is not in the CLASSICS section, do not add it and do not ask for a recipe: say once, exactly, "${BO_CLASSICS_LINE}" and then write [MENU:classics] alone on its own line as the very last thing in the message. If they ask again, offer classics again without repeating that sentence. The signature drink count and the $50 additional drinks stay exactly as stated for this package. (The legacy Bartender Only and Tailored Bar on older bookings follow the Full Bar sourcing. That is not this booking.)`;
+
+/**
  * The legacy Bartender Only lines that say what we bring (a cooler, bar setup,
  * the client supplies everything but ice), and what they say on the new
- * Bartender Only instead. The conversation steps and drink rules stay word for
- * word. Each pattern matches one whole line or sentence of the prompt above.
+ * Bartender Only instead, and the drink lines that would let it use the craft
+ * menu, mocktails or custom drinks (it is the classics only, SF_BO_SOURCING).
+ * The conversation steps stay word for word. Each pattern matches one whole
+ * line or sentence of the prompt above.
  */
 const SF_BARTENDER_ONLY_REWRITES: [RegExp, string][] = [
   [/^PACKAGE NAME NORMALIZATION: "Bartender Only" and "Tailored Bar".*$/m, `PACKAGE NAME NORMALIZATION: This booking is Bartender Only on our current pricing. It follows every Bartender Only and Tailored Bar rule in this prompt for the conversation steps and the drinks, but what is included is different: ${SF_BO_INCLUDED}. Never call this booking Tailored Bar.`],
@@ -651,6 +661,15 @@ const SF_BARTENDER_ONLY_REWRITES: [RegExp, string][] = [
   [/^Bartender Only \(legacy\): .*$/m, `Bartender Only: ${packageSentence("Bartender Only", { serviceFee: true })}`],
   [/^Tailored Bar Package \(LEGACY, or "Bartender Only" if that's what the prefilled package says\):/m, "Bartender Only Package (this booking, on our current pricing):"],
   [/Client supplies everything including ice, so tell them early that we bring 1 cooler per bartender but the ice is on their side, and keep ice on their shopping list\./, "The client buys everything on the shopping list, including the ice, so tell them early that the ice is on their side, and keep ice on their shopping list. Never mention a cooler."],
+  // Drinks: the classics only (SF_BO_SOURCING). Legacy Bartender Only keeps the Full Bar sourcing.
+  [/\(Legacy Bartender Only and Tailored Bar follow the Full Bar sourcing\.\)/, SF_BO_SOURCING],
+  [/On every package, do NOT invent new drinks and do NOT improvise ingredients\. If a client wants a drink/, "On every package, do NOT invent new drinks and do NOT improvise ingredients. On this booking's Bartender Only, never take a custom recipe: follow its CLASSICS ONLY rule above. On every other package, if a client wants a drink"],
+  [/\(and the legacy Bartender Only and Tailored Bar\)/g, "(and the legacy Bartender Only and Tailored Bar on older bookings, never this booking's Bartender Only)"],
+  [/4\. AUTO FILL CLASSICS \(Full Bar and Premium Bar, and the legacy Bartender Only and Tailored Bar\):/, "4. AUTO FILL CLASSICS (Full Bar and Premium Bar, the legacy Bartender Only and Tailored Bar, and this booking's Bartender Only, where the CLASSICS section is the only pool):"],
+  [/If the client requests a cocktail that is on neither our craft menu nor the classics list \(and it is not one of the cases handled by AUTO FILL BY PACKAGE above\), ask/, "On this booking's Bartender Only, a cocktail that is not in the CLASSICS section is never added and you never ask for its recipe: follow its CLASSICS ONLY rule. On other packages, if the client requests a cocktail that is on neither our craft menu nor the classics list (and it is not one of the cases handled by AUTO FILL BY PACKAGE above), ask"],
+  [/Full Bar, Premium Bar, and The Big Day Bar, and the legacy Bartender Only and Tailored Bar: \[MENU:specialty\] and then \[MENU:classics\], each on its own line\./, "Full Bar, Premium Bar, and The Big Day Bar, and the legacy Bartender Only and Tailored Bar on older bookings: [MENU:specialty] and then [MENU:classics], each on its own line. This booking's Bartender Only: [MENU:classics] only, never [MENU:specialty]."],
+  [/Phase 3 \(guided selection from official cocktail menu\)/, "Phase 3 (guided selection from the CLASSICS section only, see DRINK SOURCING BY PACKAGE)"],
+  [/If a client asks for something their package does not allow, say it is not part of their package menu, offer the closest allowed option, and quote nothing\./, "If a client asks for something their package does not allow, say it is not part of their package menu, offer the closest allowed option, and quote nothing. On this booking's Bartender Only, follow its CLASSICS ONLY rule instead, word for word."],
 ];
 
 /**

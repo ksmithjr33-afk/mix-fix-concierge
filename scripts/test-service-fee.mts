@@ -365,7 +365,7 @@ check("Gratuity model engine unchanged: Full 100/4 tip jar $1,749", old.priceEve
   check("Other service fee packages are untouched by the marker", email({ ...base, package: "Full Bar", pricing_model: "service_fee" }) === email({ ...base, package: "Full Bar" }));
 
   check("withPricingModel copies the session's model onto event_data", bo.withPricingModel({ a: 1 }, { pricing_model: "service_fee" }).pricing_model === "service_fee" && !("pricing_model" in bo.withPricingModel({ a: 1 }, null)));
-  check("The model reaches event_data on submission, on a model change, and on Price needs a check", src("lib/event-updates.ts").includes("withPricingModel(withHoursBooked(") && src("lib/booking-model-db.ts").includes("update.event_data = withPricingModel(") && src("lib/price-check-db.ts").includes("event_data: withPricingModel(") && src("app/api/webhook/route.ts").includes("withPricingModel(teamEventData(body.eventData), sessionRow)"));
+  check("The model reaches event_data on submission, on a model change, and on Price needs a check", src("lib/event-updates.ts").includes("withPricingModel(withHoursBooked(") && src("lib/booking-model-db.ts").includes("withPricingModel(session.event_data, { pricing_model: model })") && src("lib/price-check-db.ts").includes("event_data: withPricingModel(") && src("app/api/webhook/route.ts").includes("withPricingModel(teamEventData(body.eventData), sessionRow)"));
 }
 
 // ----- Tip jar on the staff event page -----
@@ -416,9 +416,9 @@ check("Gratuity model engine unchanged: Full 100/4 tip jar $1,749", old.priceEve
   const intakeNew = sp.buildIntakePrompt(null, new Date(), { serviceFeeBartenderOnly: true });
   check("Intake prompt: no line says Bartender Only comes with a cooler", bannedNear(intakeNew).length === 0 && bannedNear(intakeOld).length > 0);
   check("Intake prompt: every legacy line about what we bring is rewritten", !intakeNew.includes("1 cooler per bartender on EVERY package, including Bartender Only") && !intakeNew.includes("we bring 1 cooler per bartender but the ice is on their side") && !/^Bartender Only \(legacy\):/m.test(intakeNew) && !intakeNew.includes("We provide the bartender, bar setup and tools, 1 cooler per bartender") && !intakeNew.includes("Neither is a current package"));
-  check("Intake prompt: the new package line and the same flow steps", intakeNew.includes(`Bartender Only: ${NEW}`) && intakeNew.includes("Bartender Only Package (this booking, on our current pricing): Full conversation. Phase 1 then Phase 2 then Phase 3 (guided selection from official cocktail menu) then Phase 3B (menu design statement, no questions) then Phase 4 then Phase 5 then the PAYMENT STEP then Phase 6."));
-  check("Intake prompt: drink rules for Bartender Only kept word for word", [sp.DRINK_SOURCING_RULES, sp.DRINK_MENU_RULES, sp.MOCKTAIL_RULES].every((r) => intakeNew.includes(r)) && intakeNew.includes("1 to 1.5 pounds of ice per guest"));
-  check("Intake prompt: only the Bartender Only lines change", intakeOld.split("\n").length === intakeNew.split("\n").length && intakeOld.split("\n").filter((l, i) => l !== intakeNew.split("\n")[i]).every((l) => /Bartender Only|Tailored|cooler/i.test(l)));
+  check("Intake prompt: the new package line and the same flow steps", intakeNew.includes(`Bartender Only: ${NEW}`) && intakeNew.includes("Bartender Only Package (this booking, on our current pricing): Full conversation. Phase 1 then Phase 2 then Phase 3 (guided selection from the CLASSICS section only, see DRINK SOURCING BY PACKAGE) then Phase 3B (menu design statement, no questions) then Phase 4 then Phase 5 then the PAYMENT STEP then Phase 6."));
+  check("Intake prompt: legacy drink rules are whole without the flag", [sp.DRINK_SOURCING_RULES, sp.DRINK_MENU_RULES, sp.MOCKTAIL_RULES].every((r) => intakeOld.includes(r)) && intakeNew.includes("1 to 1.5 pounds of ice per guest"));
+  check("Intake prompt: only the Bartender Only lines change", intakeOld.split("\n").length === intakeNew.split("\n").length && intakeOld.split("\n").map((l, i) => [l, intakeNew.split("\n")[i]]).filter(([a, b]) => a !== b).every(([a, b]) => /Bartender Only|Tailored|cooler/i.test(a) || /this booking's Bartender Only/.test(b)));
   check("Intake prompt: unchanged without the flag", sp.buildIntakePrompt(null, new Date(), { serviceFeeBartenderOnly: false }) === intakeOld);
 
   const dl = { eventDay: null, withinSixDays: false, daysUntil: null, lastDrinkChangeDay: null } as never;
@@ -433,6 +433,104 @@ check("Gratuity model engine unchanged: Full 100/4 tip jar $1,749", old.priceEve
   check("Chat route passes the flag to both prompts", route.includes("serviceFeeBartenderOnly: isServiceFeeBartenderOnlyBooking(eventData.package, session)") && route.includes("serviceFeeBartenderOnly: isServiceFeeBartenderOnlyBooking(session?.package_type, session)"));
   check("Client page passes the model to the package summary", src("app/s/page.tsx").includes("serviceFee={isServiceFeeEvent(data.booked_price, data)}") && src("app/s/event-summary.tsx").includes('serviceFee: serviceFee || data.pricing_model === "service_fee"'));
   console.log("\nBEFORE (legacy, unchanged):", LEGACY, "\nAFTER (service fee):", NEW, "\nCLIENT PAGE AFTER:", client.line, client.provides);
+}
+
+// ----- The new Bartender Only: classics only -----
+{
+  const cat = await import("../lib/menu-catalog.ts");
+  const me = await import("../lib/manual-event.ts");
+  const mm = await import("../lib/menu-markers.ts");
+  const bod = await import("../lib/bartender-only-drinks.ts");
+  const bo = await import("../lib/bartender-only.ts");
+  const plan = await import("../lib/intake-plan.ts");
+  const diff = await import("../lib/event-diff.ts");
+  const sp = await import("../lib/system-prompt.ts");
+  const up = await import("../lib/update-prompt.ts");
+  const pp = await import("../lib/package-prompt.ts");
+  const SF = { pricingModel: "service_fee" };
+
+  // The catalog the Add event picker and its server check read.
+  check("Catalog: new Bartender Only is the classics pool", cat.menuPool("Bartender Only", SF) === "classics");
+  check("Catalog: legacy Bartender Only keeps the craft menu and classics", cat.menuPool("Bartender Only") === "craft_classics" && cat.menuPool("Bartender Only", { pricingModel: "gratuity" }) === "craft_classics");
+  const picks = cat.drinksFor("Bartender Only", SF);
+  check("Catalog: new Bartender Only lists every classic and no craft drink", picks.length === cat.classicDrinks().length && picks.every((d) => d.key.startsWith("classic:")) && !picks.some((d) => d.name === "French Martini"));
+  check("Catalog: no mocktails or custom drinks on the new Bartender Only", !cat.allowsMocktails("Bartender Only", SF) && !cat.allowsCustom("Bartender Only", SF) && cat.allowsMocktails("Bartender Only") && cat.allowsCustom("Bartender Only"));
+  check("Catalog: the drink count is unchanged (3 included, up to 6)", JSON.stringify(cat.drinkLimits("Bartender Only", SF)) === JSON.stringify({ included: 3, max: 6 }) && JSON.stringify(cat.drinkLimits("Bartender Only")) === JSON.stringify({ included: 3, max: 6 }));
+  check("Catalog: other service fee packages are untouched", ["Dive Bar", "Full Bar", "Premium Bar", "The Big Day Bar"].every((p) => cat.menuPool(p, SF) === cat.menuPool(p) && cat.drinksFor(p, SF).length === cat.drinksFor(p).length));
+
+  // Add event: the server check.
+  const clean = (drinks: unknown[], model?: "gratuity" | "service_fee") => me.cleanDrinks(drinks, "Bartender Only", model);
+  check("Add event: a classic saves on the new Bartender Only", clean([{ key: "classic:Margarita" }], "service_fee").ok);
+  const craft = clean([{ key: "craft:French Martini" }], "service_fee");
+  check("Add event: a craft drink is refused on the new Bartender Only", !craft.ok && /not on the Bartender Only menu/.test((craft as { error: string }).error));
+  check("Add event: a custom drink or mocktail is refused on the new Bartender Only", !clean([{ name: "House Punch", ingredients: "2 oz rum" }], "service_fee").ok && !clean([{ name: "Virgin Mule", ingredients: "4 oz ginger beer", is_mocktail: true }], "service_fee").ok);
+  check("Add event: legacy Bartender Only still takes craft and custom drinks", clean([{ key: "craft:French Martini" }, { name: "House Punch", ingredients: "2 oz rum" }], "gratuity").ok);
+  check("Add event page: service fee menus are built with the model", src("app/team/admin/events/new/page.tsx").includes('menusFor(SF_MANUAL_PACKAGES, "service_fee")') && src("app/team/admin/events/new/add-event-form.tsx").includes('(model === "service_fee" ? sfMenus : menus)[v.package]'));
+
+  // Menu pictures in the chat.
+  check("Menu pictures: the new Bartender Only shows the classics only", JSON.stringify(mm.allowedMenus("Bartender Only", undefined, true)) === JSON.stringify(["classics"]) && JSON.stringify(mm.allowedMenus("Bartender Only")) === JSON.stringify(["specialty", "classics"]));
+  {
+    const shown: string[] = [];
+    const f = mm.createMenuFilter(mm.allowedMenus("Bartender Only", undefined, true), () => {}, (m) => shown.push(m));
+    f.push("Here is our actual menu so you can see what we make. Pick anything on it, or tell me a spirit and I will suggest from it.\n[MENU:specialty]\n[MENU:classics]");
+    f.finish();
+    check("Menu pictures: a specialty marker is dropped on the new Bartender Only", JSON.stringify(shown) === JSON.stringify(["classics"]));
+  }
+  check("Chat route: both menu filters and the submit check get the flag", src("app/api/chat/route.ts").includes("eventData.dive_menu_requested === true, isServiceFeeBartenderOnlyBooking(") && src("app/api/chat/route.ts").includes("packageFromContext(messages), undefined, isServiceFeeBartenderOnlyBooking(") && src("app/api/chat/route.ts").includes("classicsOnly: isServiceFeeBartenderOnlyBooking("));
+
+  // The guard every saved drink goes through.
+  const craftDrink = { name: "Berry Bliss", menu_name: "French Martini", base_spirit: "vodka", ingredients: ["2 oz vodka", "0.5 oz raspberry liqueur", "1.5 oz pineapple juice"], is_mocktail: false, is_custom: false };
+  const classic = { name: "Golden Hour", menu_name: "Margarita", base_spirit: "tequila", ingredients: ["2 oz tequila", "1 oz mango puree"], is_mocktail: false, is_custom: false };
+  const mock = { name: "Sunset Fizz", ingredients: ["4 oz orange juice"], is_mocktail: true };
+  const custom = { name: "Grandpa's Punch", ingredients: ["2 oz rum", "2 oz punch"], is_custom: true };
+  const g = bod.guardClassicsOnly([craftDrink, classic, mock, custom, { name: "gin & tonic" }]);
+  const kept = g.drinks as Record<string, unknown>[];
+  check("Guard: craft, mocktail and custom drinks are left off", JSON.stringify(g.refused) === JSON.stringify(["Berry Bliss", "Sunset Fizz", "Grandpa's Punch"]));
+  check("Guard: a classic keeps its approved name and gets the CLASSICS recipe", kept[0].name === "Golden Hour" && kept[0].menu_name === "Margarita" && JSON.stringify(kept[0].ingredients) === JSON.stringify(["2 oz tequila blanco", "1 oz lime juice", "0.75 oz triple sec", "0.5 oz simple syrup"]) && kept[0].is_custom === false);
+  check("Guard: a classic by name alone matches (Gin & Tonic)", kept[1].menu_name === "Gin and Tonic" && (kept[1].ingredients as string[])[0] === "2 oz gin");
+  check("Guard: a craft drink named like a classic is matched by its menu name, not its creative name", JSON.stringify(bod.guardClassicsOnly([{ name: "Margarita", menu_name: "French Martini" }]).refused) === JSON.stringify(["Margarita"]));
+
+  // Intake submit.
+  const payload = { package: "Bartender Only", signature_drinks: [classic, craftDrink, mock], drinks_finalized: true };
+  const on = plan.checkDrinks(payload, "Bartender Only", { classicsOnly: true });
+  const names = (on.data.signature_drinks as { name: string }[]).map((d) => d.name);
+  check("Intake submit: only the classic is saved on the new Bartender Only", JSON.stringify(names) === JSON.stringify(["Golden Hour"]));
+  check("Intake submit: a team note names what was left off, never special_requests", String(on.data.team_notes).includes(bod.boClassicsNote(["Berry Bliss", "Sunset Fizz"])) && !String(on.data.special_requests ?? "").includes("Berry Bliss"));
+  const off = plan.checkDrinks(payload, "Bartender Only");
+  check("Intake submit: legacy Bartender Only keeps craft drinks and mocktails as before", (off.data.signature_drinks as unknown[]).length === 3 && !String(off.data.team_notes ?? "").includes("classics only"));
+
+  // Update mode, admin edits and accepted extras (all go through planUpdate).
+  const deadlines = { withinSixDays: false } as never;
+  const saved = { package: "Bartender Only", signature_drinks: [kept[0]] };
+  const add = diff.planUpdate(saved, { signature_drinks: [kept[0], craftDrink] }, { deadlines, classicsOnly: true, wasClassicsOnly: true });
+  check("Update: a craft drink sent on the new Bartender Only is not saved", JSON.stringify(add.classicsRefused) === JSON.stringify(["Berry Bliss"]) && (add.next.signature_drinks as unknown[]).length === 1 && !add.applied);
+  const addLegacy = diff.planUpdate(saved, { signature_drinks: [kept[0], craftDrink] }, { deadlines });
+  check("Update: legacy Bartender Only still saves it", (addLegacy.next.signature_drinks as unknown[]).length === 2 && addLegacy.classicsRefused.length === 0);
+  const swapClassic = diff.planUpdate(saved, { signature_drinks: [kept[0], { name: "Old Fashioned", menu_name: "Old Fashioned" }] }, { deadlines, classicsOnly: true, wasClassicsOnly: true });
+  check("Update: a classic added on the new Bartender Only saves", (swapClassic.next.signature_drinks as unknown[]).length === 2 && swapClassic.classicsRefused.length === 0);
+  const fullEvent = { package: "Full Bar", signature_drinks: [craftDrink, kept[0]] };
+  const sw = diff.planUpdate(fullEvent, { package: "Bartender Only" }, { deadlines, classicsOnly: true, wasClassicsOnly: false });
+  check("Package switch to the new Bartender Only: drinks that are not classics come off, with a team note", sw.next.package === "Bartender Only" && JSON.stringify((sw.next.signature_drinks as { name: string }[]).map((d) => d.name)) === JSON.stringify(["Golden Hour"]) && String(sw.next.team_notes).includes(bod.boClassicsNote(["Berry Bliss"])));
+  const within = diff.planUpdate(fullEvent, { package: "Bartender Only" }, { deadlines: { withinSixDays: true } as never, classicsOnly: true, wasClassicsOnly: false });
+  check("Package switch inside six days: the craft drink still comes off with the package", (within.next.signature_drinks as unknown[]).length === 1 && within.cutoffChanges.length === 0);
+  check("Updates read the flag from the session, before and after a package change", src("lib/event-updates.ts").includes("classicsOnly: isServiceFeeBartenderOnlyBooking(nextPkg, session)") && src("lib/event-updates.ts").includes("wasClassicsOnly: isServiceFeeBartenderOnlyBooking("));
+  check("Update tool result tells the bot to say the line", src("app/api/chat/route.ts").includes("NOT SAVED, NOT A CLASSIC") && src("app/api/chat/route.ts").includes("lastApply.classicsRefused.length > 0"));
+  check("Model change to the service fee model on a legacy Bartender Only takes off the drinks that are not classics", src("lib/booking-model-db.ts").includes("guardClassicsOnly(next.signature_drinks"));
+
+  // The concierge prompts.
+  const LEGACY_LINE = "(Legacy Bartender Only and Tailored Bar follow the Full Bar sourcing.)";
+  const intakeOld = sp.buildIntakePrompt(null);
+  const intakeNew = sp.buildIntakePrompt(null, new Date(), { serviceFeeBartenderOnly: true });
+  check("Intake prompt: the classics only rule replaces the Full Bar sourcing line", intakeNew.includes(sp.SF_BO_SOURCING) && !intakeNew.includes(LEGACY_LINE) && intakeOld.includes(LEGACY_LINE) && !intakeOld.includes("CLASSICS ONLY"));
+  check("Intake prompt: the client is told the line once and shown the classics again", sp.SF_BO_SOURCING.includes(`say once, exactly, "${bo.BO_CLASSICS_LINE}"`) && sp.SF_BO_SOURCING.includes("[MENU:classics]"));
+  check("Intake prompt: no mocktails, no custom recipe, no specialty menu picture on this booking", intakeNew.includes("never this booking's Bartender Only)") && intakeNew.includes("On this booking's Bartender Only, never take a custom recipe") && intakeNew.includes("This booking's Bartender Only: [MENU:classics] only, never [MENU:specialty]."));
+  check("Intake prompt: the package rule no longer says the drink rules are the legacy ones", pp.SF_BARTENDER_ONLY_RULE.includes("CLASSICS ONLY") && !pp.SF_BARTENDER_ONLY_RULE.includes("drink sourcing, signature drink count, mocktails"));
+  const ued = { package: "Bartender Only", event_date: "March 20, 2027" } as never;
+  const dl = diff.computeDeadlines("2027-03-20", new Date("2026-11-24T12:00:00Z"));
+  const updNew = up.buildUpdatePrompt(ued, 1, dl, { serviceFeeBartenderOnly: true });
+  const updOld = up.buildUpdatePrompt(ued, 1, dl, {});
+  check("Update prompt: the classics only rule on this booking, legacy untouched", updNew.includes(sp.SF_BO_SOURCING) && !updNew.includes(LEGACY_LINE) && updOld.includes(LEGACY_LINE) && updNew.includes("follow its CLASSICS ONLY rule instead"));
+  console.log("\nDRINK SOURCING BEFORE (this package):", LEGACY_LINE, "\nDRINK SOURCING AFTER (this package):", sp.SF_BO_SOURCING);
 }
 
 done("service fee");

@@ -15,13 +15,14 @@ import { isServiceFeeBartenderOnlyBooking } from "@/lib/bartender-only";
 export const BARBACK_KEEP_LINE = "We recommend keeping the barback so your bartenders never have to leave the bar.";
 
 /**
- * The new Bartender Only (service fee model): the same conversation steps and
- * drink rules as the legacy Bartender Only, only what is included differs.
+ * The new Bartender Only (service fee model): the same conversation steps as
+ * the legacy Bartender Only, but the drinks are the classics only and what is
+ * included differs.
  * The prompt itself is rewritten too (serviceFeeBartenderOnlyPrompt in
  * lib/system-prompt.ts), so no legacy cooler or supplies line is left in it.
  */
 export const SF_BARTENDER_ONLY_RULE =
-  "BARTENDER ONLY ON OUR CURRENT PRICING: this booking is Bartender Only on our current pricing. Every Bartender Only rule in this prompt for the conversation steps and the drinks applies exactly as written (where a rule names the legacy Bartender Only or Tailored Bar, it applies to this booking too: the same phases, drink sourcing, signature drink count, mocktails and shopping list). Only what is included is different: the client buys everything on the shopping list, including alcohol, mixers, garnishes, ice, and cups, and we bring the bartenders and bar tools only. Never say we bring ice, a cooler, cups, mixers, or supplies on this booking, in any message, including the closing message. When ice comes up, say the ice is on their side and keep it on their shopping list. Never add an inclusion or a drink limit that is not stated here.";
+  "BARTENDER ONLY ON OUR CURRENT PRICING: this booking is Bartender Only on our current pricing. Every Bartender Only rule in this prompt for the conversation steps and the drinks applies exactly as written (where a rule names the legacy Bartender Only or Tailored Bar, it applies to this booking too: the same phases, signature drink count, and shopping list). The drinks are different: CLASSICS ONLY, from the CLASSICS section, never the craft menu, never a mocktail, never a custom or off menu drink (see DRINK SOURCING BY PACKAGE). What is included is different too: the client buys everything on the shopping list, including alcohol, mixers, garnishes, ice, and cups, and we bring the bartenders and bar tools only. Never say we bring ice, a cooler, cups, mixers, or supplies on this booking, in any message, including the closing message. When ice comes up, say the ice is on their side and keep it on their shopping list. Never add an inclusion or a drink limit that is not stated here.";
 
 /** "Line. Bullet one, bullet two, and bullet three. Client provides line." */
 export function shortSentence(s: PackageShort): string {

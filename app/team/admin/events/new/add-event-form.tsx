@@ -6,7 +6,7 @@ import CopyButton from "../../copy-button";
 import { CALENDAR_ONLY_SKIPPED } from "@/lib/calendar-only";
 
 export interface PackageMenu {
-  pool: "none" | "set" | "craft" | "craft_classics";
+  pool: "none" | "set" | "craft" | "craft_classics" | "classics";
   mocktails: boolean;
   included: number;
   max: number;
@@ -46,13 +46,15 @@ export default function AddEventForm({
   packages,
   sfPackages,
   menus,
+  sfMenus,
   diveSetMenu,
   initialDate = "",
   today = "",
 }: {
   packages: string[]; // gratuity model
   sfPackages: string[]; // service fee model
-  menus: Record<string, PackageMenu>;
+  menus: Record<string, PackageMenu>; // gratuity model
+  sfMenus: Record<string, PackageMenu>; // service fee model: Bartender Only is the classics only
   diveSetMenu: string[];
   initialDate?: string; // YYYY-MM-DD, from a tap on the calendar
   today?: string; // YYYY-MM-DD: past dates stay refused (the server checks too)
@@ -78,7 +80,7 @@ export default function AddEventForm({
   const [duplicate, setDuplicate] = useState<{ mode: "confirmed" | "link"; message: string; list: { id: string; title: string; status: string }[] } | null>(null);
   const [link, setLink] = useState("");
 
-  const menu = v.package ? menus[v.package] : null;
+  const menu = v.package ? (model === "service_fee" ? sfMenus : menus)[v.package] ?? null : null;
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => setV((o) => ({ ...o, [k]: e.target.value }));
   const setDrink = (i: number, patch: Partial<DrinkRow>) => setDrinks((list) => list.map((d, j) => (j === i ? { ...d, ...patch } : d)));
 
@@ -103,7 +105,7 @@ export default function AddEventForm({
           ...(calendarOnly ? { send_list: false, calendar_only: true } : {}),
           mode,
           confirm_duplicate: confirmDuplicate,
-          drinks: drinks.map((d) => (d.kind === "menu" ? { key: d.key } : { name: d.name, ingredients: d.ingredients, is_mocktail: d.is_mocktail })),
+          drinks: drinks.map((d) => (d.kind === "menu" || menu?.pool === "classics" ? { key: d.key } : { name: d.name, ingredients: d.ingredients, is_mocktail: d.is_mocktail })),
         }),
       });
       const d = await res.json().catch(() => ({}));
@@ -281,7 +283,9 @@ export default function AddEventForm({
           <div className="space-y-3">
             <p className="text-sm text-[#6B5D52]">
               {menu.included} signature drinks are included. Each one past that is $50, up to {menu.max}.{" "}
-              {menu.pool === "craft" ? "Specialty menu only, no mocktails." : "Specialty menu and classics, mocktails allowed."} A custom drink needs its exact recipe.
+              {menu.pool === "classics"
+                ? "Classics only: no specialty menu, no mocktails, no custom drinks."
+                : `${menu.pool === "craft" ? "Specialty menu only, no mocktails." : "Specialty menu and classics, mocktails allowed."} A custom drink needs its exact recipe.`}
             </p>
             {drinks.map((d, i) => (
               <div key={i} className="rounded-xl border border-[#DDD5CC] bg-white px-3 py-3 space-y-2">
@@ -291,6 +295,7 @@ export default function AddEventForm({
                     Remove
                   </button>
                 </div>
+                {menu.pool !== "classics" && (
                 <div className="flex gap-4 text-sm text-[#2C2420]">
                   <label className="flex items-center gap-1.5">
                     <input type="radio" className="accent-[#B5845A]" checked={d.kind === "menu"} onChange={() => setDrink(i, { kind: "menu" })} /> From our menu
@@ -299,7 +304,8 @@ export default function AddEventForm({
                     <input type="radio" className="accent-[#B5845A]" checked={d.kind === "custom"} onChange={() => setDrink(i, { kind: "custom" })} /> Custom drink
                   </label>
                 </div>
-                {d.kind === "menu" ? (
+                )}
+                {d.kind === "menu" || menu.pool === "classics" ? (
                   <>
                     <select className={input} value={d.key} onChange={(e) => setDrink(i, { key: e.target.value })}>
                       <option value="">Pick a drink</option>

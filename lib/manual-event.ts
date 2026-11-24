@@ -5,7 +5,7 @@
 import { formDateToEvent, formTimeToEvent } from "@/lib/team/admin-edit";
 import { applyDiveSetMenu } from "@/lib/dive-menu";
 import { toMoney } from "@/lib/price-change";
-import { allowsMocktails, drinkLimits, drinksFor, menuPool } from "@/lib/menu-catalog";
+import { allowsCustom, allowsMocktails, drinkLimits, drinksFor, menuPool } from "@/lib/menu-catalog";
 import { defaultModelForBookedOn, type PricingModel } from "@/lib/pricing-model";
 
 /** The packages new clients book, in the concierge's order. */
@@ -82,17 +82,18 @@ function ingredientList(v: unknown): string[] {
 }
 
 /** The drinks, checked against the package rules the concierge follows. */
-export function cleanDrinks(raw: unknown, pkg: string): { ok: true; drinks: Record<string, unknown>[] } | { ok: false; error: string } {
+export function cleanDrinks(raw: unknown, pkg: string, pricingModel?: PricingModel): { ok: true; drinks: Record<string, unknown>[] } | { ok: false; error: string } {
   const list = (Array.isArray(raw) ? raw : []) as ManualDrinkInput[];
   const picked = list.filter((d) => d && (str(d.key) || str(d.name) || str(d.ingredients)));
-  const pool = menuPool(pkg);
+  const opt = { pricingModel };
+  const pool = menuPool(pkg, opt);
   if (pool === "set") return { ok: true, drinks: [] }; // Dive Bar gets its set menu
   if (pool === "none") {
     return picked.length ? { ok: false, error: "Beer and Wine has no signature drinks." } : { ok: true, drinks: [] };
   }
-  const { max } = drinkLimits(pkg);
+  const { max } = drinkLimits(pkg, opt);
   if (picked.length > max) return { ok: false, error: `${pkg} can have at most ${max} signature drinks (the package count and up to 3 more).` };
-  const menu = new Map(drinksFor(pkg).map((d) => [d.key, d]));
+  const menu = new Map(drinksFor(pkg, opt).map((d) => [d.key, d]));
   const out: Record<string, unknown>[] = [];
   for (const d of picked) {
     const key = str(d.key);
@@ -102,11 +103,13 @@ export function cleanDrinks(raw: unknown, pkg: string): { ok: true; drinks: Reco
       out.push({ name: m.name, base_spirit: m.base_spirit, ingredients: m.ingredients, garnish: m.garnish, description: m.description, is_mocktail: false, is_custom: false });
       continue;
     }
+    // The new Bartender Only is the classics only: no custom drink and no mocktail.
+    if (!allowsCustom(pkg, opt)) return { ok: false, error: `Bartender Only covers the classics only. Pick ${str(d.name) || "each drink"} from the classics list, not as a custom drink or mocktail.` };
     const name = str(d.name);
     const ingredients = ingredientList(d.ingredients);
     if (!name) return { ok: false, error: "Give each custom drink a name." };
     if (ingredients.length === 0) return { ok: false, error: `Add the ingredients for ${name}.` };
-    if (d.is_mocktail && !allowsMocktails(pkg)) return { ok: false, error: `Mocktails are only on Full Bar, Premium Bar and The Big Day Bar, not ${pkg}.` };
+    if (d.is_mocktail && !allowsMocktails(pkg, opt)) return { ok: false, error: `Mocktails are only on Full Bar, Premium Bar and The Big Day Bar, not ${pkg}.` };
     const base = d.is_mocktail ? "" : (ingredients[0] ?? "").replace(/^[\d.]+\s*oz\s*/i, "").toLowerCase();
     out.push({ name, base_spirit: base, ingredients, garnish: "", is_mocktail: d.is_mocktail === true, is_custom: true });
   }
@@ -200,7 +203,7 @@ export function cleanManualEvent(raw: unknown, today: string): ManualResult {
   const contactPhone = contactPhoneRaw ? cleanPhone(contactPhoneRaw) : null;
   if (contactPhoneRaw && !contactPhone) return { ok: false, error: "Enter a valid 10 digit day of contact phone." };
 
-  const drinks = cleanDrinks(f.drinks, pkg);
+  const drinks = cleanDrinks(f.drinks, pkg, pricingModel);
   if (!drinks.ok) return { ok: false, error: drinks.error };
 
   for (const k of ["package_price", "gratuity", "total", "deposit_paid", "discount_amount", "addons_total"]) {

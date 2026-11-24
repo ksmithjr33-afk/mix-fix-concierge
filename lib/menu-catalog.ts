@@ -6,12 +6,15 @@
 //   Full Bar, Premium Bar and The Big Day Bar (and legacy Bartender Only,
 //   Tailored Bar): the craft menu plus the CLASSICS on request, and mocktails.
 //   Beer and Wine: no signature drinks.
-// On every package a custom drink is allowed with its exact recipe (is_custom).
+//   Bartender Only on the service fee model (the new Bartender Only): the
+//   CLASSICS only, no craft menu, no mocktails, no custom drinks.
+// On every other package a custom drink is allowed with its exact recipe (is_custom).
 // Pure, no database.
 
 import { DRINK_MENU_RULES } from "@/lib/system-prompt";
 import { classicRecipes, isDiveBarPackage, recipeAsDrink } from "@/lib/dive-menu";
 import { packageDrinkCount } from "@/lib/event-diff";
+import { isServiceFeeBartenderOnly } from "@/lib/bartender-only";
 
 export interface CatalogDrink {
   key: string; // "craft:French Martini" or "classic:Old Fashioned"
@@ -58,32 +61,43 @@ export function classicDrinks(): CatalogDrink[] {
   });
 }
 
-export type MenuPool = "none" | "set" | "craft" | "craft_classics";
+export type MenuPool = "none" | "set" | "craft" | "craft_classics" | "classics";
 
-/** Which drinks a package can pick from. */
-export function menuPool(pkg: unknown): MenuPool {
+/** The pricing model of the event, when known: only the new Bartender Only reads it. */
+export type ModelOpt = { pricingModel?: unknown };
+
+/** Which drinks a package can pick from. Bartender Only on the service fee model is the classics only. */
+export function menuPool(pkg: unknown, opt: ModelOpt = {}): MenuPool {
   const p = String(pkg ?? "").toLowerCase();
+  if (isServiceFeeBartenderOnly({ package: pkg, pricing_model: opt.pricingModel })) return "classics";
   if (isDiveBarPackage(p)) return "set";
   if (packageDrinkCount(p) === 0) return "none";
   if (p.includes("essentials")) return "craft";
   return "craft_classics";
 }
 
-/** Mocktails on Full Bar, Premium Bar, The Big Day Bar, and the legacy Bartender Only and Tailored Bar. Never Essentials or Dive Bar. */
-export function allowsMocktails(pkg: unknown): boolean {
-  return menuPool(pkg) === "craft_classics";
+/** Mocktails on Full Bar, Premium Bar, The Big Day Bar, and the legacy Bartender Only and Tailored Bar. Never Essentials, Dive Bar, or the new Bartender Only. */
+export function allowsMocktails(pkg: unknown, opt: ModelOpt = {}): boolean {
+  return menuPool(pkg, opt) === "craft_classics";
+}
+
+/** A custom drink with its own recipe: every package with picks except the new Bartender Only. */
+export function allowsCustom(pkg: unknown, opt: ModelOpt = {}): boolean {
+  const pool = menuPool(pkg, opt);
+  return pool === "craft" || pool === "craft_classics";
 }
 
 /** The drinks this package can pick from, craft menu first. */
-export function drinksFor(pkg: unknown): CatalogDrink[] {
-  const pool = menuPool(pkg);
+export function drinksFor(pkg: unknown, opt: ModelOpt = {}): CatalogDrink[] {
+  const pool = menuPool(pkg, opt);
+  if (pool === "classics") return classicDrinks();
   if (pool === "craft") return craftDrinks();
   if (pool === "craft_classics") return [...craftDrinks(), ...classicDrinks()];
   return [];
 }
 
 /** The package count, and up to 3 more at $50 each, as the concierge allows. */
-export function drinkLimits(pkg: unknown): { included: number; max: number } {
+export function drinkLimits(pkg: unknown, opt: ModelOpt = {}): { included: number; max: number } {
   const included = packageDrinkCount(pkg);
-  return { included, max: menuPool(pkg) === "set" || included === 0 ? 0 : included + 3 };
+  return { included, max: menuPool(pkg, opt) === "set" || included === 0 ? 0 : included + 3 };
 }

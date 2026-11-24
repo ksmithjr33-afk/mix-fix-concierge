@@ -16,17 +16,24 @@ export default async function AddEventPage({ searchParams }: { searchParams: Pro
   // A tap on a calendar day fills in the date. Past dates stay refused: no prefill here, and the server checks on save.
   const today = todayIn(TZ);
   const initialDate = typeof date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(date) && date >= today ? date : "";
-  const menus: Record<string, PackageMenu> = Object.fromEntries(
-    [...new Set<string>([...MANUAL_PACKAGES, ...SF_MANUAL_PACKAGES])].map((p) => [
-      p,
-      {
-        pool: menuPool(p),
-        mocktails: allowsMocktails(p),
-        ...drinkLimits(p),
-        drinks: drinksFor(p).map((d) => ({ key: d.key, name: d.name, group: d.group, ingredients: d.ingredients.join(", ") })),
-      },
-    ])
-  );
+  // Each model's packages with their drink rules: Bartender Only on the service fee model is the classics only.
+  const menusFor = (list: readonly string[], pricingModel: "gratuity" | "service_fee"): Record<string, PackageMenu> =>
+    Object.fromEntries(
+      list.map((p) => {
+        const opt = { pricingModel };
+        return [
+          p,
+          {
+            pool: menuPool(p, opt),
+            mocktails: allowsMocktails(p, opt),
+            ...drinkLimits(p, opt),
+            drinks: drinksFor(p, opt).map((d) => ({ key: d.key, name: d.name, group: d.group, ingredients: d.ingredients.join(", ") })),
+          },
+        ];
+      })
+    );
+  const menus = menusFor(MANUAL_PACKAGES, "gratuity");
+  const sfMenus = menusFor(SF_MANUAL_PACKAGES, "service_fee");
   return (
     <>
       <TeamHeader signedIn admin back={{ href: "/team/admin/events", label: "All events" }} />
@@ -35,7 +42,7 @@ export default async function AddEventPage({ searchParams }: { searchParams: Pro
           <h1 className="font-heading text-2xl font-bold text-[#2C2420]">Add event</h1>
           <p className="text-[15px] text-[#6B5D52]">For a client who booked before the concierge existed or never completed it, or an event already confirmed that only needs to be on our calendar.</p>
         </div>
-        <AddEventForm packages={[...MANUAL_PACKAGES]} sfPackages={[...SF_MANUAL_PACKAGES]} menus={menus} diveSetMenu={[...DIVE_SET_MENU]} initialDate={initialDate} today={today} />
+        <AddEventForm packages={[...MANUAL_PACKAGES]} sfPackages={[...SF_MANUAL_PACKAGES]} menus={menus} sfMenus={sfMenus} diveSetMenu={[...DIVE_SET_MENU]} initialDate={initialDate} today={today} />
       </main>
     </>
   );

@@ -19,12 +19,15 @@ export function knownMenus(menus: unknown): MenuKey[] {
 }
 
 /**
- * Which menus a package may show. diveMenuRequested is unknown (undefined) during
+ * Which menus a package may show. classicsOnly is the new Bartender Only,
+ * which the caller works out from the session. diveMenuRequested is unknown (undefined) during
  * intake, where the prompt holds that rule until the client has answered. An
  * unknown package keeps both, since the prompt still applies its package rules.
  */
-export function allowedMenus(pkg: unknown, diveMenuRequested?: unknown): MenuKey[] {
+export function allowedMenus(pkg: unknown, diveMenuRequested?: unknown, classicsOnly = false): MenuKey[] {
   const p = String(pkg ?? "").toLowerCase();
+  // The new Bartender Only (service fee model, see lib/bartender-only.ts) is the classics only.
+  if (classicsOnly) return ["classics"];
   // Dive Bar has its set menu, so no menu pictures. diveMenuRequested is kept for older callers.
   if (p.includes("dive")) return [];
   if (p.includes("essentials")) return ["specialty"]; // The Big Day Bar shows both: classics on request, like Full
