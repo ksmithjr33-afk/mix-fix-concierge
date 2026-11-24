@@ -15,6 +15,7 @@ import { isBlank, present } from "@/lib/blank";
 import { packageDrinkCount } from "@/lib/event-diff";
 import { CLOSING_PATTERN } from "@/lib/unsaved-sessions";
 import { UNCONFIRMED_DRINKS, hasRecipe, notConfirmedNote, notFinalizedNote, withTeamNotes } from "@/lib/team-notes";
+import { guardMocktails, isMocktailFollowup, mocktailNotes, mocktailsAllowed } from "@/lib/mocktail-menu";
 
 export { CLOSING_PATTERN };
 
@@ -315,6 +316,12 @@ export function checkDrinks(input: Record<string, unknown>, packageType: unknown
   if (kind === "beer_wine" || cardOnly) return { data, notFinalized: false, unconfirmed: [], named: [] };
   const included = kind === "dive" ? 3 : packageDrinkCount(packageType ?? data.package);
   let drinks = Array.isArray(data.signature_drinks) ? (data.signature_drinks as unknown[]) : [];
+  // The concierge never creates a drink: a mocktail not on a loaded mocktail menu
+  // becomes a follow up that holds its drink spot (no recipe, no ingredients).
+  const mock = guardMocktails(drinks, { allowsMocktails: mocktailsAllowed(packageType ?? data.package) });
+  if (mock.replaced.length) console.warn(`[mocktails] a mocktail with no menu was turned into a follow up: ${mock.replaced.join(", ")}`);
+  drinks = mock.drinks;
+  Object.assign(data, mocktailNotes(data, mock));
   const named = drinks.map(drinkName).filter(Boolean);
   let unconfirmed: string[] = [];
   let held: unknown[] = [];
@@ -324,7 +331,8 @@ export function checkDrinks(input: Record<string, unknown>, packageType: unknown
     unconfirmed = held.map(drinkName);
     drinks = drinks.slice(0, included);
   }
-  const notFinalized = finalizedFlag === false || drinks.length === 0 || drinks.some((d) => !hasRecipe(d));
+  // A mocktail follow up is our team's to finish, not the client's: it never marks the drinks not finalized.
+  const notFinalized = finalizedFlag === false || drinks.length === 0 || drinks.some((d) => !hasRecipe(d) && !isMocktailFollowup(d));
   const notes: string[] = [];
   if (notFinalized) notes.push(notFinalizedNote(named));
   if (unconfirmed.length) notes.push(notConfirmedNote(unconfirmed));

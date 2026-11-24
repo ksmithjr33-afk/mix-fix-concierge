@@ -77,6 +77,10 @@ export const submitEventDataTool: Anthropic.Tool = {
             method: { type: "string" },
             garnish: { type: "string" },
             is_mocktail: { type: "boolean" },
+            mocktail_followup: {
+              type: "boolean",
+              description: "true only for the mocktail placeholder when there is no mocktail menu (see MOCKTAIL RULES): name \"Mocktail (options coming)\", empty ingredients. Our team sends the client options.",
+            },
             is_custom: { type: "boolean" },
           },
         },

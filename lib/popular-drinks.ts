@@ -11,8 +11,9 @@
 //      recipe, a clear best match only. Older events only have creative names.
 // Dive Bar events are skipped: their set menu is not a pick.
 //
-// Mocktails: there is no mocktail menu. The concierge makes mocktails up under
-// MOCKTAIL RULES, so no mocktail is "on the current menu" and none is counted.
+// Mocktails: there is no mocktail menu yet (lib/mocktail-menu.ts). The concierge
+// never makes one up: it records the request and our team sends options, so
+// no mocktail is "on the current menu" and none is counted.
 // The mocktail list always comes from the fallback list until a menu exists.
 // Pure, no database.
 

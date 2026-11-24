@@ -101,8 +101,17 @@ async function AdminStaffPage() {
           settingKey={POPULAR_MOCKTAILS_KEY}
           initial={popularMocktails}
           title="Most popular mocktails (fallback)"
-          help={`There is no mocktail menu to count from, so the concierge always uses this list for mocktails. Names separated by commas, top five used. Empty means the concierge says it has no most popular mocktails yet. ${popularStatusLine(popular, "mocktails")}`}
+          help={`Used only once a mocktail menu is loaded, and only for names on it: until then the concierge names no mocktails. Names separated by commas, top five used. Empty means the concierge says it has no most popular mocktails yet. ${popularStatusLine(popular, "mocktails")}`}
         />
+        <section className="bg-[#F5F0EB] rounded-2xl border border-[#DDD5CC] px-4 py-3 flex flex-wrap items-center justify-between gap-2">
+          <div className="min-w-0">
+            <h2 className="font-heading text-base font-bold text-[#2C2420]">Upcoming events with a mocktail</h2>
+            <p className="text-sm text-[#6B5D52]">Read only, for review. There is no mocktail menu yet.</p>
+          </div>
+          <a href="/team/admin/mocktails" className="inline-flex min-h-[44px] items-center rounded-lg border border-[#2C2420] px-4 text-sm font-medium text-[#2C2420]">
+            Review
+          </a>
+        </section>
         <section className="bg-[#F5F0EB] rounded-2xl border border-[#DDD5CC] px-4 py-3 flex flex-wrap items-center justify-between gap-2">
           <div className="min-w-0">
             <h2 className="font-heading text-base font-bold text-[#2C2420]">Syrup recipes</h2>

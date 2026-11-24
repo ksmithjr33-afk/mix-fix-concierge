@@ -5,6 +5,7 @@
 
 import { parseEventDate } from "@/lib/event-date";
 import { ACCEPT_EXTRA_DRINKS, settleDrinkFlags } from "@/lib/team-notes";
+import { guardMocktails, mocktailNotes, mocktailsAllowed } from "@/lib/mocktail-menu";
 import { cardPicks, DIVE_CARD_INCLUDED, diveSetMenuDrinks, hasDiveMenuCard, isDiveBarPackage } from "@/lib/dive-menu";
 
 export type EventData = Record<string, unknown>;
@@ -615,6 +616,16 @@ export function planUpdate(
         new: `Add drinks beyond the package count: ${diveCard.extras.map(formatDrink).join("; ")} (Dive Bar menu card)`,
       });
     }
+  }
+
+  // The concierge never creates a drink: a new or changed mocktail not on a loaded
+  // mocktail menu becomes a follow up holding its drink spot. Saved drinks stay as they are.
+  if (Array.isArray(updates.signature_drinks)) {
+    const mock = guardMocktails(updates.signature_drinks as unknown[], { saved: currentDrinks, allowsMocktails: mocktailsAllowed(nextPkg) });
+    updates.signature_drinks = mock.drinks;
+    const notes = mocktailNotes({ ...current, ...updates }, mock);
+    if (notes.special_requests !== undefined) updates.special_requests = notes.special_requests;
+    if (notes.team_notes !== undefined) updates.team_notes = notes.team_notes;
   }
 
   // Drinks beyond the package count are a manager request.

@@ -8,6 +8,7 @@ import { MENU_COPY } from "@/lib/menu-markers";
 import { formatClock, parseClock } from "@/lib/team/time";
 import { packageShortFor } from "@/lib/packages-info";
 import { packageSentence, packageShortSection, shortSentence } from "@/lib/package-prompt";
+import { hasMocktailMenu, MOCKTAIL_CLIENT_LINE, MOCKTAIL_FOLLOWUP_NAME, MOCKTAIL_MENU_TEXT, mocktailMenu } from "@/lib/mocktail-menu";
 
 // The "mention once" notes, built from the short package wording.
 const bulletList = (name: string) => shortSentence({ line: "", bullets: packageShortFor(name)?.bullets ?? [], provides: "" }).replace(/\.$/, "");
@@ -204,7 +205,7 @@ STEP 2: Once the client picks a spirit, suggest exactly 3 cocktail options for t
 
 STEP 3: Once the client picks their first drink, confirm it in its own message. Do NOT ask about the next spirit in the same message. Example: "Love it! That is drink number one locked in." Then in the NEXT message ask, on Full Bar, Premium Bar, and The Big Day Bar: "Now, for your second drink, would you like a cocktail or a mocktail? If a cocktail, what spirit?" On Dive Bar and Essentials Bar ask only: "Now, for your second cocktail, what spirit are you thinking?"
 
-STEP 4: Repeat the same process for the second drink. Suggest 3 cocktail options for the chosen spirit from the pool their package allows. On Full Bar, Premium Bar, and The Big Day Bar only, if they chose a mocktail, suggest 3 mocktail options. Never suggest a spirit they already picked unless they specifically request it.
+STEP 4: Repeat the same process for the second drink. Suggest 3 cocktail options for the chosen spirit from the pool their package allows. On Full Bar, Premium Bar, and The Big Day Bar only, if they chose a mocktail, follow MOCKTAIL RULES. Never suggest a spirit they already picked unless they specifically request it.
 
 STEP 5: Repeat this process for each remaining drink in the package count, one at a time. Same process each time: ask for the spirit (and on Full Bar, Premium Bar, and The Big Day Bar only, cocktail or mocktail), suggest 3 options from the pool the package allows, client picks one, confirm it. Stop once you reach the package count. Essentials Bar, Full Bar, Premium Bar, and Dive Bar with a requested menu have 3 signature drinks, so you build a third drink. The Big Day Bar has only 2 signature drinks, so STOP after the second drink and do NOT build a third.
 
@@ -216,6 +217,22 @@ STEP 8: The ingredients array in the submit_event_data tool data must include th
 `;
 
 // Auto fill classics, mocktail rules, the craft cocktail menu, and the CLASSICS section.
+// Mocktails come only from a loaded mocktail menu (lib/mocktail-menu.ts). With no
+// menu the concierge records the request and our team follows up: it never
+// builds a mocktail. Loading a menu switches this by itself.
+const MOCKTAIL_PACKAGES = "Mocktails are only available on Full Bar, Premium Bar, and The Big Day Bar (and the legacy Bartender Only and Tailored Bar). On Dive Bar and Essentials Bar, never offer or create mocktails, follow the mocktail rule in SIGNATURE DRINKS instead.";
+export function mocktailRules(menuText: string = MOCKTAIL_MENU_TEXT): string {
+  if (hasMocktailMenu(menuText)) {
+    const lines = mocktailMenu(menuText).map((m) => `${m.name}: ${m.description}. Recipe: ${m.ingredients.join(", ")}.`).join("\n");
+    return `MOCKTAIL RULES: ${MOCKTAIL_PACKAGES} On Full Bar, Premium Bar, and The Big Day Bar, suggest mocktails ONLY from the MOCKTAIL MENU below, exactly as written, the same way as cocktails: 3 options with a name and flavor description, ingredient names only to the client. Save the recipe exactly as the menu gives it, with menu_name set to the menu name and is_mocktail true. Never invent a mocktail, change a menu mocktail's recipe, or build one from the client's description. If the client wants a mocktail that is not on the MOCKTAIL MENU, offer the closest one from the menu.
+
+MOCKTAIL MENU:
+${lines}`;
+  }
+  return `MOCKTAIL RULES: ${MOCKTAIL_PACKAGES} There is no mocktail menu yet, so you never suggest, name, describe, or build a mocktail, and you never write mocktail ingredients or a recipe, not even a simple one, not even when the client describes what they want or asks you to choose. This follows the CONDUCT RULE: never invent a drink. On Full Bar, Premium Bar, and The Big Day Bar, when the client asks for a mocktail or picks mocktail for a drink, tell them plainly, exactly: "${MOCKTAIL_CLIENT_LINE}" That mocktail still takes one of their included signature drink spots: record it in signature_drinks as one drink with name "${MOCKTAIL_FOLLOWUP_NAME}", is_mocktail true, mocktail_followup true, and an empty ingredients array, and count it toward the package count. Never offer an additional drink or quote $50 in its place, and never ask a follow up question about flavors for it. Put "${MOCKTAIL_CLIENT_LINE}" in special_requests and "Follow up with mocktail options." in team_notes (in update mode, team_note). Then move on to the next drink.`;
+}
+export const MOCKTAIL_RULES = mocktailRules();
+
 export const DRINK_MENU_RULES = `RULES FOR DRINK SELECTION:
 1. Always suggest exactly 3 options per spirit, one spirit at a time.
 2. On craft menu packages, ALWAYS suggest from the POPULAR picks first for whatever spirit the client chooses.
@@ -237,9 +254,7 @@ SPICY CUSTOM DRINKS: When a client requests a spicy variation of a cocktail (spi
 8. If the client has no preference at all, asks "what should we get?", or wants the system to choose for them, follow MOST POPULAR AND RECOMMENDATIONS when this prompt has it. Without it, suggest three POPULAR picks from the craft menu, each a different spirit. Present them one at a time for confirmation.
 9. After finalizing all drinks, auto generate creative names matching the event theme and ask the client to approve or change (never on Dive Bar, which has its set menu).
 
-MOCKTAIL RULES: Mocktails are only available on Full Bar, Premium Bar, and The Big Day Bar (and the legacy Bartender Only and Tailored Bar). On Dive Bar and Essentials Bar, never offer or create mocktails, follow the mocktail rule in SIGNATURE DRINKS instead. On Full Bar, Premium Bar, and The Big Day Bar, when a client requests mocktails, you can create original mocktail suggestions. However, all mocktail ingredients must be common and easily found at local grocery stores. Use ingredients like: fresh fruits (lemon, lime, orange, pineapple, watermelon, strawberry, mango, peach), juices (cranberry, pineapple, orange, pomegranate, apple, grapefruit, lemonade), sodas and sparkling water (club soda, ginger beer, tonic, Sprite, sparkling water), syrups (simple syrup, honey syrup, agave, grenadine, vanilla syrup, lavender syrup), fresh herbs (mint, basil, rosemary), and other common items (cream of coconut, coconut water, bitters, Tajin). Do NOT suggest ingredients that are hard to find or specialty items that would require ordering online. When suggesting mocktails, follow the same flow as cocktails: suggest 3 options one at a time with a name and flavor description. Present ingredients only (no measurements to the client). Store the full recipe with measurements in the submit_event_data tool data for the supply list.
-
-KEEP MOCKTAIL RECIPES SIMPLE: Aim for 3 to 4 ingredients per drink with clear structure (a base juice or puree, a sour element, a sweetener, and optionally a fizzy top). Avoid stacking 5 or more mixers in one drink. When you have a choice, prefer common ingredients like lemonade, cranberry juice, pineapple juice, lime juice, ginger beer, and simple syrup over specialty items like rose water, lavender syrup, or unusual purees, unless the client specifically asks for those.
+${MOCKTAIL_RULES}
 
 MENU IMAGES: You can show the client our printed menus as pictures. To show one, write its marker alone on its own line: [MENU:specialty] for the specialty cocktail menu, [MENU:classics] for the classics menu. The system turns the marker into the picture, and the client never sees the marker. Earlier messages in this conversation will not show any markers, because the system removes them, so never copy that and leave the marker out.
 Which menus by package. Dive Bar: never, it has its set menu. Essentials Bar: [MENU:specialty] only. Full Bar, Premium Bar, and The Big Day Bar, and the legacy Bartender Only and Tailored Bar: [MENU:specialty] and then [MENU:classics], each on its own line. Beer and Wine: never.
@@ -586,12 +601,14 @@ export interface PopularForPrompt {
 export function popularSection(popular: PopularForPrompt | null): string {
   const list = (names: string[]) => (names.length ? names.map((n, i) => `${i + 1}. ${n}`).join(", ") : "none on file yet");
   const cocktails = popular?.cocktails ?? [];
-  const mocktails = popular?.mocktails ?? [];
+  // With no mocktail menu, a popular mocktail would be a drink we never made: none is named.
+  const menuNames = mocktailMenu().map((m) => m.name.toLowerCase());
+  const mocktails = hasMocktailMenu() ? (popular?.mocktails ?? []).filter((n) => menuNames.includes(n.toLowerCase())) : [];
   return `MOST POPULAR AND RECOMMENDATIONS:
 MOST POPULAR COCKTAILS: ${list(cocktails)}
 MOST POPULAR MOCKTAILS: ${list(mocktails)}
 These lists come from our records. When a client asks what is popular, what most people order, or what our best sellers are, answer ONLY from these lists, in this order, naming only drinks their package allows (never mocktails on Essentials Bar or Dive Bar, never classics on Essentials Bar, and Dive Bar has its set menu so do not use the lists there). Never call any other drink popular, a favorite, or a best seller, and never make up numbers or percentages. The POPULAR labels inside the menu sections below are our suggested starting picks, not counts, so never present them as most popular. If a list says none on file yet, say you do not have a most popular list for that yet and offer a recommendation instead. Do NOT proactively mention these lists to every client.
-RECOMMENDATIONS: When a client asks for a recommendation, or asks you to choose for them, suggest two or three drinks (this overrides the exactly 3 rule for this answer only). Every recommended drink must come from the pool their package allows under DRINK SOURCING BY PACKAGE, never anything off the menu. Pick them to fit what you already know: the spirit they named if any, the event type, the theme or colors, and the season of the event date (the seasonal drinks, Pumpkin Spice Old Fashioned and Fig Bees Knees, only fit fall and winter events). Give one short reason for each, in the same sentence as the drink, for example "Peach Paloma, bright and fizzy for a summer party". Never recommend a drink that contains anything on the client's allergies or ingredients to avoid. Skip drinks they already picked and spirits already used under NO DUPLICATE SPIRITS unless they ask. For a mocktail recommendation on a package that allows mocktails, start from MOST POPULAR MOCKTAILS, and otherwise follow MOCKTAIL RULES. End with one question asking which one they want.
+RECOMMENDATIONS: When a client asks for a recommendation, or asks you to choose for them, suggest two or three drinks (this overrides the exactly 3 rule for this answer only). Every recommended drink must come from the pool their package allows under DRINK SOURCING BY PACKAGE, never anything off the menu. Pick them to fit what you already know: the spirit they named if any, the event type, the theme or colors, and the season of the event date (the seasonal drinks, Pumpkin Spice Old Fashioned and Fig Bees Knees, only fit fall and winter events). Give one short reason for each, in the same sentence as the drink, for example "Peach Paloma, bright and fizzy for a summer party". Never recommend a drink that contains anything on the client's allergies or ingredients to avoid. Skip drinks they already picked and spirits already used under NO DUPLICATE SPIRITS unless they ask. For a mocktail recommendation on a package that allows mocktails, follow MOCKTAIL RULES, and never recommend a mocktail that is not on the MOCKTAIL MENU. End with one question asking which one they want.
 MENU INVITE: The first time you show the menu in this chat, at the start of the signature drink step, put this line right after "${MENU_COPY}" and before the markers, exactly as written: "${MENU_INVITE}" Use it once in the whole chat. Do not repeat it for the second or third drink or when you show the menu again. It is the one line allowed to sit beside your question in that message.`;
 }
 
