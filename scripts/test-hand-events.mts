@@ -317,4 +317,19 @@ check("The craft menu is read from the concierge's menu text", catalog.craftDrin
   check("Add event form: Tip jar Yes or No on service fee events, Yes by default", formSrc.includes('useState<"yes" | "no">("yes")') && formSrc.includes('{model === "service_fee" && (\n            <Field label="Tip jar"') && formSrc.includes('tip_jar: tipJar === "yes"'));
 }
 
+// ----- Bartender Only on the service fee model is not for weddings -----
+{
+  const bo = await import("../lib/bartender-only.ts");
+  const sfBo = (extra: Record<string, unknown>) => manual.cleanManualEvent(form({ package: "Bartender Only", pricing_model: "service_fee", booked_on: today2, drinks: [], ...extra }), today2);
+  for (const t of ["Wedding", "Wedding reception", "Reception"]) {
+    const r = sfBo({ event_type: t });
+    check(`Add event: new Bartender Only refused for "${t}"`, !r.ok && (r as { error: string }).error === bo.BO_NO_WEDDINGS && bo.BO_NO_WEDDINGS === "Bartender Only is not available for weddings.");
+  }
+  check("Add event: new Bartender Only is fine for a birthday", sfBo({ event_type: "Birthday" }).ok);
+  check("Add event: other service fee packages are fine at a wedding", manual.cleanManualEvent(form({ package: "Full Bar", pricing_model: "service_fee", booked_on: today2, event_type: "Wedding", drinks: [] }), today2).ok);
+  check("Refusal: legacy Bartender Only on the gratuity model is never refused", bo.bartenderOnlyWeddingRefusal("Bartender Only", "gratuity", "Wedding") === null && bo.bartenderOnlyWeddingRefusal("Bartender Only", "service_fee", "Wedding") === bo.BO_NO_WEDDINGS);
+  check("Edit event refuses it on a package or event name change, preview and save", (src("lib/team/admin-edit-db.ts").match(/const noWedding = bartenderOnlyWedding\(clean\.partial, session\);/g) ?? []).length === 2);
+  check("Edit event refuses moving a Bartender Only wedding to the service fee model", src("lib/booking-model-db.ts").includes("return { ok: false, status: 400, error: BO_NO_WEDDINGS };"));
+}
+
 done("hand added event");

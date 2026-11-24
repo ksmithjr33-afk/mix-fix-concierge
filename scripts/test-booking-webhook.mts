@@ -370,4 +370,20 @@ check("Switching with no total is refused", (() => { const r = pcdb.confirmedBoo
 check("The card and the alert list are wired", page.includes("<PriceCheckCard") && page.includes("isAdminRole(me.role) && session.price_check") && src("app/team/admin/events/save-alerts.tsx").includes("Price needs a check:"));
 
 void out;
+// Bartender Only on the service fee model is not for weddings: saved, flagged with that reason.
+{
+  const BO = { ...SF, package_key: "bartender_only", package_type: "", guest_count: "100", service_hours: "4", promo_code: "", discount_amount: "0", standard_price: "1296", addons_total: "0", second_bar: "No", build_a_bar_price: "1296", package_price: "1296" };
+  resetSf();
+  await post(JSON.stringify({ ...BO, event_type: "Wedding" }));
+  s = sess();
+  check("Bartender Only wedding: saved on the service fee model as Bartender Only", db.sessions.length === 1 && s.pricing_model === "service_fee" && s.package_type === "Bartender Only");
+  check("Bartender Only wedding: flagged Price needs a check with the reason", (s.price_check?.reason ?? "").includes("Bartender Only is not available for weddings.") && s.booked_price.price_check === s.price_check?.reason && texts.some((t) => t.message.includes("Bartender Only is not available for weddings.")));
+  resetSf();
+  await post(JSON.stringify({ ...BO, event_type: "Reception" }));
+  check("Bartender Only reception: flagged too", (sess().price_check?.reason ?? "").includes("Bartender Only is not available for weddings."));
+  resetSf();
+  await post(JSON.stringify({ ...BO, event_type: "Birthday Party" }));
+  check("Bartender Only birthday: no wedding flag", !(sess().price_check?.reason ?? "").includes("weddings"), sess().price_check?.reason);
+}
+
 done("booking webhook");

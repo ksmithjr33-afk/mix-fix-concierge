@@ -23,6 +23,7 @@ import { firstName, type StaffMember } from "@/lib/team/event-view";
 import { adminPrice, cleanAdminEdit, cleanPriceChoice } from "@/lib/team/admin-edit";
 import { unpriced } from "@/lib/price-pending";
 import { barbackStatus } from "@/lib/package-extras";
+import { BO_NO_WEDDINGS, isServiceFeeBartenderOnlyBooking, isWeddingType } from "@/lib/bartender-only";
 import { textPricePending } from "@/lib/price-pending-db";
 import { holdForTeam } from "@/lib/team/held-changes-db";
 
@@ -44,6 +45,21 @@ export interface AdminPreview {
   balanceAfter?: number | null;
 }
 
+/**
+ * Bartender Only on the service fee model is not for weddings or receptions.
+ * Checked when the edit changes the package or the event name, so a booking
+ * the webhook saved and flagged can still have its other details edited.
+ */
+function bartenderOnlyWedding(partial: Record<string, unknown>, session: NonNullable<Awaited<ReturnType<typeof getSession>>>): string | null {
+  if (!("package" in partial) && !("event_name" in partial)) return null;
+  const ed = (session.event_data ?? {}) as Record<string, unknown>;
+  const row = session as typeof session & { event_type?: string | null; event_name?: string | null };
+  const pkg = "package" in partial ? partial.package : ed.package ?? session.package_type;
+  const name = "event_name" in partial ? partial.event_name : ed.event_name ?? row.event_name;
+  const kind = [ed.event_type ?? row.event_type, name].filter(Boolean).join(" ");
+  return isServiceFeeBartenderOnlyBooking(pkg, session) && isWeddingType(kind) ? BO_NO_WEDDINGS : null;
+}
+
 export type PreviewResult = { ok: true; preview: AdminPreview } | { ok: false; error: string; status: number };
 
 /** The engine's price for the edit, shown next to "apply the pricing engine's difference". Saves nothing. */
@@ -52,6 +68,8 @@ export async function previewAdminEdit(sessionId: string, rawChanges: unknown): 
   if (!session || session.status !== "submitted" || !session.event_data) return { ok: false, error: "We could not find that event.", status: 404 };
   const clean = cleanAdminEdit(rawChanges, session.event_data.package, session.pricing_model);
   if (!clean.ok) return { ok: false, error: clean.error, status: 400 };
+  const noWedding = bartenderOnlyWedding(clean.partial, session);
+  if (noWedding) return { ok: false, error: noWedding, status: 400 };
   const quote = await quoteEventUpdate(sessionId, clean.partial, undefined, { ignoreCutoff: true });
   const p = quote?.price ?? null;
   const current = withHoursBooked(session.event_data, session);
@@ -96,6 +114,8 @@ export async function saveAdminEdit(opts: {
   if (!session || session.status !== "submitted" || !session.event_data) return { ok: false, error: "We could not find that event.", status: 404 };
   const clean = cleanAdminEdit(opts.changes, session.event_data.package, session.pricing_model);
   if (!clean.ok) return { ok: false, error: clean.error, status: 400 };
+  const noWedding = bartenderOnlyWedding(clean.partial, session);
+  if (noWedding) return { ok: false, error: noWedding, status: 400 };
   // A surprise event: the guest of honor's number is never the day of contact.
   const sx = session as typeof session & SurpriseColumns;
   if (surpriseActive(sx, new Date(), eventTimeZone(session)) && isHonoree(sx, { phone: clean.partial.day_of_contact_phone })) {

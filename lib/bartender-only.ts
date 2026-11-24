@@ -44,3 +44,17 @@ export function isServiceFeeBartenderOnlyBooking(pkg: unknown, session: { pricin
 /** What the concierge says, once, when a client on the new Bartender Only asks for a drink that is not a classic. */
 export const BO_CLASSICS_LINE =
   "Bartender Only covers our classics, so I can only add drinks from our classics menu. Here it is again. If you would like to change packages, our team can help with that.";
+
+/** What Add event and Edit event say when Bartender Only on the service fee model is picked for a wedding. */
+export const BO_NO_WEDDINGS = "Bartender Only is not available for weddings.";
+
+/** A wedding or a reception, by the event type (or name) as typed or sent. */
+export const isWeddingType = (eventType: unknown): boolean => /wedding|reception/i.test(String(eventType ?? ""));
+
+/**
+ * BO_NO_WEDDINGS when this would be the new Bartender Only at a wedding or a
+ * reception, else null. Legacy Bartender Only on the gratuity model is never refused.
+ */
+export function bartenderOnlyWeddingRefusal(pkg: unknown, pricingModel: unknown, eventType: unknown): string | null {
+  return isServiceFeeBartenderOnly({ package: pkg, pricing_model: pricingModel }) && isWeddingType(eventType) ? BO_NO_WEDDINGS : null;
+}

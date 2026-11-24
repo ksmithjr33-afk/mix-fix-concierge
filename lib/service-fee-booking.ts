@@ -4,6 +4,7 @@
 // lib/service-fee.ts (splitWebhookMoney).
 
 import { bookedGuestCount } from "@/lib/booked-facts";
+import { BO_NO_WEDDINGS, isServiceFeeBartenderOnly, isWeddingType } from "@/lib/bartender-only";
 import type { Booking } from "@/lib/booking-webhook";
 import { DEFAULT_DEPOSIT, type BookedPrice, type PriceBasis } from "@/lib/price-change";
 import { SERVICE_FEE_PACKAGES, splitWebhookMoney, type ServiceFeeQuote, type WebhookMoney } from "@/lib/service-fee";
@@ -56,7 +57,9 @@ export interface ServiceFeeBooked {
 /** booked_price for a service fee booking, and the check reason. Never null: a booking is always saved. */
 export function serviceFeeBooked(b: Booking, nowIso: string): ServiceFeeBooked {
   const split = splitWebhookMoney(webhookMoney(b));
-  const reasons = [b.totalCheck, split ? split.check : NO_GRAND_TOTAL_CHECK].filter((r): r is string => !!r);
+  // Bartender Only is not for weddings or receptions: the booking is still saved, flagged with that reason.
+  const boWedding = isServiceFeeBartenderOnly({ package: b.packageType, pricing_model: "service_fee" }) && (b.isWedding || isWeddingType([b.eventType, b.eventName].filter(Boolean).join(" ")));
+  const reasons = [boWedding ? BO_NO_WEDDINGS : null, b.totalCheck, split ? split.check : NO_GRAND_TOTAL_CHECK].filter((r): r is string => !!r);
   const check = reasons.length ? reasons.join(" ") : null;
   const guests = bookedGuestCount(b.guestCount);
   const basis = split?.standard && guests ? basisOf(split.standard, b, guests) : null;

@@ -13,7 +13,7 @@ import { supabase } from "@/lib/supabase";
 import type { BookedPrice } from "@/lib/price-change";
 import type { SessionRow } from "@/lib/event-updates";
 import { confirmedBooked } from "@/lib/price-check-db";
-import { isServiceFeeBartenderOnly, withPricingModel } from "@/lib/bartender-only";
+import { BO_NO_WEDDINGS, isServiceFeeBartenderOnly, isWeddingType, withPricingModel } from "@/lib/bartender-only";
 import { boClassicsNote, guardClassicsOnly } from "@/lib/bartender-only-drinks";
 import { withTeamNotes } from "@/lib/team-notes";
 import { formDateToEvent } from "@/lib/team/admin-edit";
@@ -60,8 +60,13 @@ export async function setBookedOnAndModel(
   const session = data as SessionRow & { booked_on?: string | null };
   const changedModel = sessionPricingModel(session) !== model;
   const ed = (session.event_data ?? {}) as Record<string, unknown>;
+  const row = session as typeof session & { event_type?: string | null; event_name?: string | null };
   const pkg = ed.package ?? session.package_type;
   const toNewBartenderOnly = changedModel && isServiceFeeBartenderOnly({ package: pkg, pricing_model: model });
+  // Bartender Only on the service fee model is not for weddings or receptions.
+  if (toNewBartenderOnly && isWeddingType([ed.event_type ?? row.event_type, ed.event_name ?? row.event_name].filter(Boolean).join(" "))) {
+    return { ok: false, status: 400, error: BO_NO_WEDDINGS };
+  }
   const update: Record<string, unknown> = { pricing_model: model };
   if (day) update.booked_on = day;
   if (changedModel || session.price_check) {

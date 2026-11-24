@@ -6,6 +6,7 @@ import { formDateToEvent, formTimeToEvent } from "@/lib/team/admin-edit";
 import { applyDiveSetMenu } from "@/lib/dive-menu";
 import { toMoney } from "@/lib/price-change";
 import { allowsCustom, allowsMocktails, drinkLimits, drinksFor, menuPool } from "@/lib/menu-catalog";
+import { bartenderOnlyWeddingRefusal } from "@/lib/bartender-only";
 import { defaultModelForBookedOn, type PricingModel } from "@/lib/pricing-model";
 
 /** The packages new clients book, in the concierge's order. */
@@ -166,6 +167,8 @@ export function cleanManualEvent(raw: unknown, today: string): ManualResult {
   const pkg = str(f.package);
   if (!manualPackages(pricingModel).includes(pkg)) return { ok: false, error: pricingModel === "service_fee" ? "Pick a service fee model package." : "Pick a package." };
   if (pkg === "The Big Day Bar" && !/wedding|reception/i.test(eventType)) return { ok: false, error: "The Big Day Bar is for weddings and receptions only." };
+  const noWedding = bartenderOnlyWeddingRefusal(pkg, pricingModel, eventType);
+  if (noWedding) return { ok: false, error: noWedding };
 
   const guests = whole(f.guest_count, 1, 2000);
   if (guests === null) return { ok: false, error: "Enter a guest count between 1 and 2,000." };
