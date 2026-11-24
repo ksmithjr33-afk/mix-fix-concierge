@@ -8,7 +8,7 @@ import { MENU_COPY } from "@/lib/menu-markers";
 import { formatClock, parseClock } from "@/lib/team/time";
 import { packageShortFor } from "@/lib/packages-info";
 import { packageSentence, packageShortSection, shortSentence } from "@/lib/package-prompt";
-import { BO_CLASSICS_LINE } from "@/lib/bartender-only";
+import { BO_BEER_WINE_LINE, BO_CLASSICS_LINE } from "@/lib/bartender-only";
 import { hasMocktailMenu, MOCKTAIL_CLIENT_LINE, MOCKTAIL_FOLLOWUP_NAME, MOCKTAIL_MENU_TEXT, mocktailMenu } from "@/lib/mocktail-menu";
 
 // The "mention once" notes, built from the short package wording.
@@ -644,6 +644,13 @@ const SF_BO_INCLUDED = "the client buys everything on the shopping list, includi
 export const SF_BO_SOURCING = `Bartender Only on our current pricing (this booking): CLASSICS ONLY. This overrides every other drink rule in this prompt for this booking. Suggest, show, and accept drinks only from the CLASSICS section, with their CLASSICS recipes. Never suggest, show, or accept anything from the craft menu (the VODKA through BUBBLIES sections), not even a POPULAR pick or a recommendation. Never a mocktail: mocktails are not on the classics list, so never ask cocktail or mocktail, and every signature drink is a classic cocktail. Never a custom, off menu, or invented drink, not even when the client gives an exact recipe. If the client asks for any drink that is not in the CLASSICS section, do not add it and do not ask for a recipe: say once, exactly, "${BO_CLASSICS_LINE}" and then write [MENU:classics] alone on its own line as the very last thing in the message. If they ask again, offer classics again without repeating that sentence. The signature drink count and the $50 additional drinks stay exactly as stated for this package. (The legacy Bartender Only and Tailored Bar on older bookings follow the Full Bar sourcing. That is not this booking.)`;
 
 /**
+ * The new Bartender Only when the client is serving only beer and wine: no
+ * cocktail menu at all. Classics only when the client wants cocktails. It
+ * follows SF_BO_SOURCING in DRINK SOURCING BY PACKAGE, in intake and update mode.
+ */
+export const SF_BO_BEER_WINE_ONLY = `BEER AND WINE ONLY on this booking's Bartender Only: if the client says they are serving only beer and wine, skip the cocktail menu entirely: no signature drinks, no cocktail or classics suggestions, no menu pictures, no menu colors question, and no menu design statement (skip Phase 3 and Phase 3B). Confirm it in one message that starts exactly: "${BO_BEER_WINE_LINE}" and in that same message confirm the beer and wine: repeat what they said they are serving, if they said, then follow PHASE 4 EXTRAS and CLIENT BRINGING THEIR OWN for whether we work out the beer and wine quantities on their shopping list. Then move on to the next step. In submit_event_data send beer_wine_only true, signature_drinks empty, and beer, wine, and client_providing_beer_wine as the client said. Offer classics only if the client says they want cocktails, now or later: then build the drinks from the CLASSICS section as above and send beer_wine_only false. Never push cocktails on a client who said beer and wine only. In update mode, an event with beer_wine_only true has no drinks on purpose: do not call its drink menu unfinished, and add classics only when the client asks for cocktails.`;
+
+/**
  * The legacy Bartender Only lines that say what we bring (a cooler, bar setup,
  * the client supplies everything but ice), and what they say on the new
  * Bartender Only instead, and the drink lines that would let it use the craft
@@ -662,7 +669,7 @@ const SF_BARTENDER_ONLY_REWRITES: [RegExp, string][] = [
   [/^Tailored Bar Package \(LEGACY, or "Bartender Only" if that's what the prefilled package says\):/m, "Bartender Only Package (this booking, on our current pricing):"],
   [/Client supplies everything including ice, so tell them early that we bring 1 cooler per bartender but the ice is on their side, and keep ice on their shopping list\./, "The client buys everything on the shopping list, including the ice, so tell them early that the ice is on their side, and keep ice on their shopping list. Never mention a cooler."],
   // Drinks: the classics only (SF_BO_SOURCING). Legacy Bartender Only keeps the Full Bar sourcing.
-  [/\(Legacy Bartender Only and Tailored Bar follow the Full Bar sourcing\.\)/, SF_BO_SOURCING],
+  [/\(Legacy Bartender Only and Tailored Bar follow the Full Bar sourcing\.\)/, `${SF_BO_SOURCING} ${SF_BO_BEER_WINE_ONLY}`],
   [/On every package, do NOT invent new drinks and do NOT improvise ingredients\. If a client wants a drink/, "On every package, do NOT invent new drinks and do NOT improvise ingredients. On this booking's Bartender Only, never take a custom recipe: follow its CLASSICS ONLY rule above. On every other package, if a client wants a drink"],
   [/\(and the legacy Bartender Only and Tailored Bar\)/g, "(and the legacy Bartender Only and Tailored Bar on older bookings, never this booking's Bartender Only)"],
   [/4\. AUTO FILL CLASSICS \(Full Bar and Premium Bar, and the legacy Bartender Only and Tailored Bar\):/, "4. AUTO FILL CLASSICS (Full Bar and Premium Bar, the legacy Bartender Only and Tailored Bar, and this booking's Bartender Only, where the CLASSICS section is the only pool):"],

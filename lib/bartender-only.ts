@@ -45,6 +45,9 @@ export function isServiceFeeBartenderOnlyBooking(pkg: unknown, session: { pricin
 export const BO_CLASSICS_LINE =
   "Bartender Only covers our classics, so I can only add drinks from our classics menu. Here it is again. If you would like to change packages, our team can help with that.";
 
+/** What the concierge says, exactly, when a client on the new Bartender Only is serving only beer and wine. */
+export const BO_BEER_WINE_LINE = "Got it, just beer and wine, so we will skip the cocktail menu.";
+
 /** What Add event and Edit event say when Bartender Only on the service fee model is picked for a wedding. */
 export const BO_NO_WEDDINGS = "Bartender Only is not available for weddings.";
 

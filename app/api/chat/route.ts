@@ -845,6 +845,7 @@ export async function POST(request: Request) {
     planningRole: session ? planningRoleOf(session as EventSession) : null,
     plannerAsked: (session as EventSession | null)?.planner_asked === true || (session as EventSession | null)?.booking_holder === "planner",
     noPayment: approvalOnly,
+    classicsOnly: isServiceFeeBartenderOnlyBooking(session?.package_type, session),
   };
   // The chat already sent the closing line but nothing was submitted (the model skipped the tool):
   // this turn submits right away instead of chatting on, so the client is never told "submitted" falsely.

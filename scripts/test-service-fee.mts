@@ -530,6 +530,34 @@ check("Gratuity model engine unchanged: Full 100/4 tip jar $1,749", old.priceEve
   const updNew = up.buildUpdatePrompt(ued, 1, dl, { serviceFeeBartenderOnly: true });
   const updOld = up.buildUpdatePrompt(ued, 1, dl, {});
   check("Update prompt: the classics only rule on this booking, legacy untouched", updNew.includes(sp.SF_BO_SOURCING) && !updNew.includes(LEGACY_LINE) && updOld.includes(LEGACY_LINE) && updNew.includes("follow its CLASSICS ONLY rule instead"));
+
+  // Beer and wine only on the new Bartender Only.
+  check("Beer and wine only: the rule follows the classics rule in both prompts, legacy untouched", intakeNew.includes(`${sp.SF_BO_SOURCING} ${sp.SF_BO_BEER_WINE_ONLY}`) && updNew.includes(sp.SF_BO_BEER_WINE_ONLY) && !intakeOld.includes("BEER AND WINE ONLY") && !updOld.includes("BEER AND WINE ONLY"));
+  check("Beer and wine only: skip the menu, confirm with the exact line, classics only on request", sp.SF_BO_BEER_WINE_ONLY.includes("skip the cocktail menu entirely") && sp.SF_BO_BEER_WINE_ONLY.includes(`starts exactly: "${bo.BO_BEER_WINE_LINE}"`) && sp.SF_BO_BEER_WINE_ONLY.includes("Offer classics only if the client says they want cocktails"));
+  const bw = plan.checkDrinks({ package: "Bartender Only", signature_drinks: [], beer: true, wine: true, beer_wine_only: true }, "Bartender Only", { classicsOnly: true });
+  check("Beer and wine only submit: saved with no drinks, not marked unfinished", !bw.notFinalized && bw.data.beer_wine_only === true && (bw.data.signature_drinks as unknown[]).length === 0 && bw.data.drinks_not_finalized === undefined && !String(bw.data.team_notes ?? "").includes("not finalized"));
+  const bwWithClassic = plan.checkDrinks({ package: "Bartender Only", signature_drinks: [classic], beer_wine_only: true, drinks_finalized: true }, "Bartender Only", { classicsOnly: true });
+  check("Beer and wine only submit: a classic means cocktails after all, the flag is dropped", bwWithClassic.data.beer_wine_only === undefined && (bwWithClassic.data.signature_drinks as unknown[]).length === 1 && !bwWithClassic.notFinalized);
+  const noFlagEmpty = plan.checkDrinks({ package: "Bartender Only", signature_drinks: [] }, "Bartender Only", { classicsOnly: true });
+  check("No drinks without beer and wine only: still marked unfinished as before", noFlagEmpty.notFinalized);
+  const legacyBw = plan.checkDrinks({ package: "Bartender Only", signature_drinks: [], beer_wine_only: true }, "Bartender Only");
+  check("Legacy Bartender Only ignores the flag: unfinished as before, flag not saved", legacyBw.notFinalized && legacyBw.data.beer_wine_only === undefined);
+  const ctx = (classicsOnly: boolean) => ({ packageType: "Bartender Only", booking: {} as never, classicsOnly });
+  const chat = (line: string) => [{ role: "user", content: "hi" }, { role: "assistant", content: line }, { role: "user", content: "ok" }] as never;
+  const steps = (c: ReturnType<typeof ctx>, m: never) => { const seen: string[] = []; let msgs = m as { role: string; content: string }[]; for (let i = 0; i < 40; i++) { const n = plan.nextPlanStep(c as never, msgs as never); if (!n) break; seen.push(n.id); msgs = [...msgs, { role: "assistant", content: n.question }, { role: "user", content: "yes" }]; } return seen; };
+  const bwSteps = steps(ctx(true), chat(`${bo.BO_BEER_WINE_LINE} Would you like us to work out the quantities?`));
+  const normalSteps = steps(ctx(true), chat("Great!"));
+  check("Step planner: after the beer and wine only line it never asks for drinks or menu colors", !bwSteps.includes("drinks") && !bwSteps.includes("colors") && bwSteps.includes("allergies"), bwSteps.join(","));
+  check("Step planner: without it the drinks are still asked, with the classics question", normalSteps.includes("drinks") && plan.nextPlanStep(ctx(true) as never, [{ role: "user", content: "hi" }] as never) !== null);
+  check("Step planner: the drinks question on the new Bartender Only offers no mocktail", !plan.CLASSICS_FIRST_DRINK.includes("mocktail") && steps(ctx(false), chat(`${bo.BO_BEER_WINE_LINE}`)).includes("drinks"));
+  const bwEvent = { package: "Bartender Only", signature_drinks: [], beer_wine_only: true };
+  const wantsCocktails = diff.planUpdate(bwEvent, { signature_drinks: [{ name: "Old Fashioned", menu_name: "Old Fashioned" }] }, { deadlines, classicsOnly: true, wasClassicsOnly: true });
+  check("Update: adding a classic to a beer and wine only event saves it and clears the flag", wantsCocktails.next.beer_wine_only === false && (wantsCocktails.next.signature_drinks as unknown[]).length === 1);
+  const wantsCraft = diff.planUpdate(bwEvent, { signature_drinks: [craftDrink] }, { deadlines, classicsOnly: true, wasClassicsOnly: true });
+  check("Update: a craft drink on a beer and wine only event is still refused, flag kept", wantsCraft.next.beer_wine_only === true && wantsCraft.classicsRefused.length === 1);
+  const leaves = diff.planUpdate(bwEvent, { package: "Full Bar" }, { deadlines, classicsOnly: false, wasClassicsOnly: true });
+  check("Update: switching off the new Bartender Only clears the flag", leaves.next.beer_wine_only === false);
+  check("Chat route gives the step planner the flag, and the submit tool has the field", src("app/api/chat/route.ts").includes("classicsOnly: isServiceFeeBartenderOnlyBooking(session?.package_type, session),") && src("lib/intake-tools.ts").includes("beer_wine_only: {"));
   console.log("\nDRINK SOURCING BEFORE (this package):", LEGACY_LINE, "\nDRINK SOURCING AFTER (this package):", sp.SF_BO_SOURCING);
 }
 

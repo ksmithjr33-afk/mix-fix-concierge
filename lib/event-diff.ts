@@ -641,12 +641,17 @@ export function planUpdate(
       const g = guardClassicsOnly(sent, enteringClassics ? [] : currentDrinks);
       if (Array.isArray(updates.signature_drinks) || g.refused.length) updates.signature_drinks = g.drinks;
       classicsRefused = g.refused;
+      // Drinks on an event saved as beer and wine only: the client wants cocktails after all.
+      if (current.beer_wine_only === true && g.drinks.length > 0) updates.beer_wine_only = false;
       if (enteringClassics && g.refused.length) {
         const noted = withTeamNotes({ team_notes: updates.team_notes ?? current.team_notes }, [boClassicsNote(g.refused)]);
         updates.team_notes = noted.team_notes;
       }
     }
   }
+
+  // Beer and wine only belongs to the new Bartender Only: leaving it clears the flag.
+  if (!classicsOnly && current.beer_wine_only === true && "package" in updates) updates.beer_wine_only = false;
 
   // The concierge never creates a drink: a new or changed mocktail not on a loaded
   // mocktail menu becomes a follow up holding its drink spot. Saved drinks stay as they are.

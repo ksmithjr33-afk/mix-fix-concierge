@@ -90,6 +90,10 @@ export const submitEventDataTool: Anthropic.Tool = {
       beer: { type: "boolean" },
       wine: { type: "boolean" },
       client_providing_beer_wine: { type: "boolean" },
+      beer_wine_only: {
+        type: "boolean",
+        description: "Bartender Only on our current pricing only: true when the client is serving only beer and wine, so there are no signature drinks. Otherwise false or left out.",
+      },
       special_requests: { type: "string", description: "Only what the client asked for or told us, written to them in plain words (\"You will provide your own cups.\"). They see it on their event page. Never \"the client\", never a follow up or a staff instruction." },
       team_notes: { type: "string", description: "Anything for our team only: follow ups, what the client says they were promised, instructions to staff. One short line each. The client never sees it." },
       menu_colors: { type: ["string", "null"] },

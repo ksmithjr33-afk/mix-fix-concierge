@@ -16,6 +16,7 @@ import { packageDrinkCount } from "@/lib/event-diff";
 import { CLOSING_PATTERN } from "@/lib/unsaved-sessions";
 import { UNCONFIRMED_DRINKS, hasRecipe, notConfirmedNote, notFinalizedNote, withTeamNotes } from "@/lib/team-notes";
 import { boClassicsNote, guardClassicsOnly } from "@/lib/bartender-only-drinks";
+import { BO_BEER_WINE_LINE } from "@/lib/bartender-only";
 import { guardMocktails, isMocktailFollowup, mocktailNotes, mocktailsAllowed } from "@/lib/mocktail-menu";
 
 export { CLOSING_PATTERN };
@@ -125,6 +126,7 @@ export interface PlanContext {
   planningRole?: string | null; // saved on the session
   plannerAsked?: boolean; // saved on the session, or a planner holds the booking
   noPayment?: boolean; // a planner who cannot see money
+  classicsOnly?: boolean; // the new Bartender Only (service fee model): classics only, and beer and wine only skips the drinks
 }
 
 export interface PlanStep {
@@ -147,6 +149,10 @@ const pkgKind = (p: unknown) => {
   return "full";
 };
 const noDrinks = (c: PlanContext) => ["dive", "beer_wine"].includes(pkgKind(c.packageType));
+/** The new Bartender Only, and the concierge confirmed the client is serving only beer and wine. */
+const beerWineOnly = (c: PlanContext, m: Msg[]) => !!c.classicsOnly && m.some((x) => x.role === "assistant" && textOf(x).includes(BO_BEER_WINE_LINE));
+/** The first drink question on the new Bartender Only: classics only, no mocktail. */
+export const CLASSICS_FIRST_DRINK = "For your first signature drink, which spirit are you thinking? Our classics cover whiskey, vodka, tequila, gin, rum, and more.";
 
 const STEPS: StepRule[] = [
   // Only the opening: once the chat has moved past the first reply, it is never asked late.
@@ -173,10 +179,10 @@ const STEPS: StepRule[] = [
   { id: "pace", label: "the drinking pace", question: "What drinking pace are you expecting for your crowd: Light, Moderate, Heavy, or Mixed?", asked: /drinking pace/i, skip: noDrinks },
   { id: "planner", label: "whether they are working with a planner", question: "Are you working with an event planner? If so, I can give them access to help with your bar planning.", asked: /event planner/i, known: (c) => !!c.plannerAsked || c.planningRole === "planner" },
   { id: "theme", label: "the theme", question: "Do you have a theme for your event?", asked: /\btheme\b/i, skip: noDrinks },
-  { id: "colors", label: "the colors", question: "What colors are you going with for your event? We will use these for your cocktail menu design.", asked: /colou?rs?\b|palette/i, skip: noDrinks },
+  { id: "colors", label: "the colors", question: "What colors are you going with for your event? We will use these for your cocktail menu design.", asked: /colou?rs?\b|palette/i, skip: (c, _t, m) => noDrinks(c) || beerWineOnly(c, m) },
   { id: "allergies", label: "allergies", question: "Do you have any allergies or ingredients to avoid that we should know about?", asked: /allerg/i },
   { id: "day_of_contact", label: "the day of contact", question: "Who will be the day of contact on event day, and what is the best phone number to reach them?", asked: /day of contact/i },
-  { id: "drinks", label: "the signature drinks", question: "For your first signature drink, would you like a cocktail or a mocktail?", asked: /first (signature )?(drink|cocktail)|signature (cocktail|drink) menu|which drinks/i, skip: noDrinks },
+  { id: "drinks", label: "the signature drinks", question: "For your first signature drink, would you like a cocktail or a mocktail?", asked: /first (signature )?(drink|cocktail)|signature (cocktail|drink) menu|which drinks/i, skip: (c, _t, m) => noDrinks(c) || beerWineOnly(c, m) },
   { id: "beer_wine", label: "beer and wine", question: "Would you like beer and wine available for your guests as well?", asked: /beer and wine/i, skip: (c) => noDrinks(c) },
   { id: "add_ons", label: "add ons", question: "We also have add ons like custom cups, a coffee station, and more. Want me to send the full list?", asked: /add ons?\b/i },
   { id: "payment", label: "the remaining balance", question: "How would you like to handle your remaining balance, which is due two weeks before your event?", asked: /remaining balance/i, skip: (c) => !!c.noPayment },
@@ -216,7 +222,7 @@ export function nextPlanStep(c: PlanContext, messages: Msg[]): PlanStep | null {
     if (s.skip?.(c, type, messages)) continue;
     if (s.known?.(c)) continue;
     if (covered(s, messages)) continue;
-    return { id: s.id, label: s.label, question: s.question };
+    return { id: s.id, label: s.label, question: s.id === "drinks" && c.classicsOnly ? CLASSICS_FIRST_DRINK : s.question };
   }
   return null;
 }
@@ -311,7 +317,7 @@ const drinkName = (d: unknown) => present((d as { name?: unknown })?.name) ?? pr
  * extra_drinks_accepted are taken off the saved event.
  */
 export function checkDrinks(input: Record<string, unknown>, packageType: unknown, opts: { classicsOnly?: boolean } = {}): DrinkCheck {
-  const { drinks_finalized: finalizedFlag, extra_drinks_accepted: extrasFlag, ...data } = input;
+  const { drinks_finalized: finalizedFlag, extra_drinks_accepted: extrasFlag, beer_wine_only: beerWineOnly, ...data } = input;
   const kind = pkgKind(packageType ?? data.package);
   const cardOnly = kind === "dive" && data.dive_menu_card !== true;
   if (kind === "beer_wine" || cardOnly) return { data, notFinalized: false, unconfirmed: [], named: [] };
@@ -326,6 +332,9 @@ export function checkDrinks(input: Record<string, unknown>, packageType: unknown
       Object.assign(data, withTeamNotes(data, [boClassicsNote(g.refused)]));
     }
     drinks = g.drinks;
+    // Serving only beer and wine: no cocktail menu on purpose, so nothing is unfinished.
+    // Kept only while there are no drinks; any classic means they wanted cocktails after all.
+    if (beerWineOnly === true && drinks.length === 0) return { data: { ...data, signature_drinks: [], beer_wine_only: true }, notFinalized: false, unconfirmed: [], named: [] };
   }
   // The concierge never creates a drink: a mocktail not on a loaded mocktail menu
   // becomes a follow up that holds its drink spot (no recipe, no ingredients).
