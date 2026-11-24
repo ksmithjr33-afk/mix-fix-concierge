@@ -166,7 +166,7 @@ export interface SheetHeader {
 export function sheetHeader(ed: EventData): SheetHeader {
   const d = parseEventDate(typeof ed.event_date === "string" ? ed.event_date : null);
   const date = d ? `${d.getMonth() + 1}/${d.getDate()}/${String(d.getFullYear()).slice(-2)}` : String(ed.event_date ?? "Date TBD");
-  const pkg = formatPackageLabel(typeof ed.package === "string" ? ed.package : undefined);
+  const pkg = formatPackageLabel(typeof ed.package === "string" ? ed.package : undefined, ed.pricing_model);
   const hours = calculateHours(ed.bar_service_start as string | undefined, ed.bar_service_end as string | undefined);
   const guests = guestCount(ed.guest_count);
   return {

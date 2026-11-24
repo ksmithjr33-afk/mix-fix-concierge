@@ -2,6 +2,7 @@
 // apply post submission changes as versioned event_updates rows.
 
 import { supabase } from "@/lib/supabase";
+import { withPricingModel } from "@/lib/bartender-only";
 import {
   applyChanges,
   computeDeadlines,
@@ -162,7 +163,8 @@ export async function recordSubmission(sessionId: string, eventData: EventData):
   const stripped = stripLegacyFields(eventData);
   // What GHL booked fills only what the chatbot left blank: its answers win.
   const filled = { ...stripped, ...bookingFill(stripped, (bookedRow ?? {}) as Record<string, unknown>) } as EventData;
-  const clean = withHoursBooked(filled, { hours_booked: bookedRow?.hours_booked ?? null });
+  // The pricing model rides on event_data for the shopping lists (lib/bartender-only.ts).
+  const clean = withPricingModel(withHoursBooked(filled, { hours_booked: bookedRow?.hours_booked ?? null }), bookedRow as { pricing_model?: unknown } | null);
   const nowIso = new Date().toISOString();
 
   const { data, error } = await supabase

@@ -322,4 +322,50 @@ check("Gratuity model engine unchanged: Full 100/4 tip jar $1,749", old.priceEve
   check("Price pending blanks pending_change_service_fee too", src("lib/update-notes.ts").includes('"pending_change_service_fee"'));
 }
 
+// ----- The new Bartender Only shopping list -----
+{
+  const sl = await import("../lib/shopping-list.ts");
+  const os = await import("../lib/order-sheet.ts");
+  const bo = await import("../lib/bartender-only.ts");
+  const base = {
+    package: "Bartender Only",
+    guest_count: 80,
+    bar_service_start: "6:00 PM",
+    bar_service_end: "10:00 PM",
+    event_date: "January 10, 2027",
+    event_type: "Birthday",
+    beer: true,
+    signature_drinks: [
+      { name: "Spicy Margarita", ingredients: ["2 oz tequila", "1 oz lime juice", "0.75 oz agave", "jalapeno"], garnish: "lime wheel" },
+      { name: "Nojito", is_mocktail: true, ingredients: ["mint", "lime juice", "simple syrup", "club soda"], garnish: "mint sprig" },
+    ],
+  };
+  const sfEd = { ...base, pricing_model: "service_fee" };
+  const oldEd = { ...base, pricing_model: "gratuity" };
+  const email = (ed: Record<string, unknown>) => sl.generateClientShoppingListEmail(sl.generateShoppingList(ed as never), ed as never, "Sam");
+  const sfMail = email(sfEd);
+  const oldMail = email(oldEd);
+  const noModelMail = email(base);
+
+  check("New Bartender Only: service fee model with the Bartender Only key", bo.isServiceFeeBartenderOnly(sfEd) && !bo.isServiceFeeBartenderOnly(oldEd) && !bo.isServiceFeeBartenderOnly(base));
+  check("Only the Bartender Only name counts, not Beer and Wine or Tailored", !bo.isServiceFeeBartenderOnly({ package: "Tailored Bar", pricing_model: "service_fee" }) && !bo.isServiceFeeBartenderOnly({ package: "Full Bar", pricing_model: "service_fee" }));
+  check("New Bartender Only list: alcohol for the drinks chosen", /LIQUOR[\s\S]*Tequila — 8 bottles/.test(sfMail) && /BEER & WINE[\s\S]*Beer/.test(sfMail));
+  check("New Bartender Only list: mixers and garnishes for the drinks chosen", /MIXERS AND JUICES[\s\S]*Lime juice[\s\S]*Agave[\s\S]*Club soda/.test(sfMail) && /PRODUCE AND GARNISHES[\s\S]*Limes[\s\S]*Fresh mint/.test(sfMail));
+  check("New Bartender Only list: ice and cups", /- Ice — 8 x 16 lb bags\n/.test(sfMail) && sfMail.includes("- 12 oz Cups — 240 count"));
+  check("New Bartender Only list: says the client buys all of it and we bring bartenders and bar tools only", sfMail.includes(sl.BARTENDER_ONLY_NOTE) && sl.BARTENDER_ONLY_NOTE.includes("alcohol, mixers, garnishes, ice, and cups") && sl.BARTENDER_ONLY_NOTE.includes("We bring your bartenders and our bar tools."));
+  check("New Bartender Only list: promises nothing else (no cooler, no ice from us)", !/cooler/i.test(sfMail) && !/we bring all of it/i.test(sfMail) && !/mixing only/.test(sfMail));
+  check("New Bartender Only: nothing for us to buy (no supply list, no order team email)", sl.generateNatalieSupplyList(sfEd as never) === "" && sl.generateOrderTeamEmail([], sfEd as never) === "");
+  const lines = os.calculatedLines(sfEd);
+  check("Shopping list: every line is marked bought by the client", lines.length > 10 && lines.every((l) => l.clientBuys) && ["liquor", "mixers", "produce", "ice"].every((sec) => lines.some((l) => l.section === sec)));
+  check("Shopping list header names Bartender Only", os.sheetHeader(sfEd).line.includes("(Bartender Only)"));
+
+  check("Legacy Bartender Only (gratuity model) is unchanged: Tailored Bar", os.sheetHeader(oldEd).line.includes("(Tailored Bar)") && os.sheetHeader(base).line.includes("(Tailored Bar)"));
+  check("Legacy Bartender Only list is word for word the same as before", oldMail === noModelMail && oldMail.includes("(estimated for mixing only)") && oldMail.includes("We bring 1 cooler per bartender") && !oldMail.includes(sl.BARTENDER_ONLY_NOTE));
+  check("The same lines on both: only the wording differs", JSON.stringify(sl.generateShoppingList(sfEd as never)) === JSON.stringify(sl.generateShoppingList(oldEd as never)));
+  check("Other service fee packages are untouched by the marker", email({ ...base, package: "Full Bar", pricing_model: "service_fee" }) === email({ ...base, package: "Full Bar" }));
+
+  check("withPricingModel copies the session's model onto event_data", bo.withPricingModel({ a: 1 }, { pricing_model: "service_fee" }).pricing_model === "service_fee" && !("pricing_model" in bo.withPricingModel({ a: 1 }, null)));
+  check("The model reaches event_data on submission, on a model change, and on Price needs a check", src("lib/event-updates.ts").includes("withPricingModel(withHoursBooked(") && src("lib/booking-model-db.ts").includes("update.event_data = withPricingModel(") && src("lib/price-check-db.ts").includes("event_data: withPricingModel(") && src("app/api/webhook/route.ts").includes("withPricingModel(teamEventData(body.eventData), sessionRow)"));
+}
+
 done("service fee");

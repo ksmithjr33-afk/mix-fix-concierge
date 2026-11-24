@@ -1,5 +1,6 @@
 import { parseEventDate } from "@/lib/event-date";
 import { extraSodasOf } from "@/lib/extra-sodas";
+import { isServiceFeeBartenderOnly } from "@/lib/bartender-only";
 
 interface SignatureDrink {
   name: string;
@@ -11,6 +12,7 @@ interface SignatureDrink {
 }
 
 interface EventData {
+  pricing_model?: string; // copied from the session (lib/bartender-only.ts)
   guest_count: number | string;
   drinking_pace: string;
   package: string;
@@ -2200,9 +2202,11 @@ function formatHeaderDate(eventDate: string | undefined): string {
   return `${month}/${day}/${year}`;
 }
 
-export function formatPackageLabel(pkg: string | undefined): string {
+export function formatPackageLabel(pkg: string | undefined, pricingModel?: unknown): string {
   if (!pkg) return "";
   const lower = pkg.toLowerCase();
+  // The new Bartender Only (service fee model) keeps its name. Older ones are the legacy Tailored Bar below.
+  if (isServiceFeeBartenderOnly({ package: pkg, pricing_model: pricingModel })) return "Bartender Only";
   if (isDiveBar(lower)) return "Dive Bar";
   if (isBigDayBar(lower)) return "The Big Day Bar";
   if (lower.includes("essentials")) return "Essentials Bar";
@@ -2213,6 +2217,10 @@ export function formatPackageLabel(pkg: string | undefined): string {
   if (lower.includes("beer") && lower.includes("wine")) return "Beer and Wine";
   return pkg;
 }
+
+/** The new Bartender Only (service fee model): the client buys everything on the list. */
+export const BARTENDER_ONLY_NOTE =
+  "Everything on this list is on your side for this package: the alcohol, mixers, garnishes, ice, and cups. We bring your bartenders and our bar tools. A good ice estimate is about 1 to 1.5 pounds per guest, and we have kept it on your shopping list above.";
 
 const ICE_INCLUDED_NOTE =
   "Good news on ice, we bring all of it for your event, both the ice for mixing drinks and the ice for chilling beer, wine, and sodas. We bring 1 cooler per bartender. If you need an extra cooler for chilling, just provide the cooler and we will provide the ice for it.";
@@ -2371,12 +2379,14 @@ export function generateClientShoppingListEmail(
 
   // ICE & BAR SUPPLIES — ONLY for Bartender Only package
   // Essentials, Full, and Premium packages: The Mix Fix provides supplies, client only buys alcohol
+  // The new Bartender Only: the same lines, all of them the client's, ice for the whole bar.
+  const sfBartenderOnly = isServiceFeeBartenderOnly(eventData);
   if (isBartenderOnly) {
     const iceBags = getIceBags(guestCount);
     const { cups, napkins, straws } = getSupplyCounts(guestCount, hours, pace);
     lines.push("ICE & BAR SUPPLIES");
     lines.push("");
-    lines.push(`- Ice — ${iceBags} x 16 lb bags (estimated for mixing only)`);
+    lines.push(sfBartenderOnly ? `- Ice — ${iceBags} x 16 lb bags` : `- Ice — ${iceBags} x 16 lb bags (estimated for mixing only)`);
     lines.push(`- 12 oz Cups — ${cups} count`);
     lines.push(`- Cocktail Napkins — ${napkins} count`);
     lines.push(`- Straws — ${straws} count`);
@@ -2387,8 +2397,11 @@ export function generateClientShoppingListEmail(
     "You are welcome to substitute any of these brands for others you prefer, as long as it is the same type of spirit. The options listed above are our recommendations based on quality and pricing. We only open what we use during the event, so any unopened bottles can be returned if you wish. You may choose the lesser amount suggested, but to ensure we do not run out of anything, I recommend going with the greater amount."
   );
   lines.push("");
-  if (isBartenderOnly) {
-    // Bartender Only / Tailored Bar: we bring the cooler, the ice is on the client.
+  if (sfBartenderOnly) {
+    // The new Bartender Only: we bring the bartenders and bar tools only. Nothing else is promised.
+    lines.push(BARTENDER_ONLY_NOTE);
+  } else if (isBartenderOnly) {
+    // Legacy Bartender Only / Tailored Bar: we bring the cooler, the ice is on the client.
     lines.push(
       withCoolerCount(
         "Please note that ice is on your side for this package. We bring 1 cooler per bartender, but we do not bring ice, so please plan to provide it yourself. A good estimate is about 1 to 1.5 pounds of ice per guest, and we have kept it on your shopping list above.",

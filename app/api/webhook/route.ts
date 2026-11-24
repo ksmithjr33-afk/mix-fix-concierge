@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { buildEventFields } from "@/lib/ghl-payload";
+import { withPricingModel } from "@/lib/bartender-only";
 import { createNoteByEmail } from "@/lib/ghl-api";
 import { completionFields } from "@/lib/client-list-db";
 import { createdByFields } from "@/lib/update-notes";
@@ -68,7 +69,10 @@ export async function POST(request: Request) {
     const body = await request.json();
     const { conversationTranscript, clientEmail, sessionId } = body;
     // Special requests and team notes together, as GHL has always had them.
-    const eventData = body.eventData ? teamEventData(body.eventData) : body.eventData;
+    // The saved session: the pricing model for the shopping lists, and who added the event.
+    const { data: sessionRow } =
+      typeof sessionId === "string" && sessionId ? await supabase.from("sessions").select("*").eq("id", sessionId).maybeSingle() : { data: null };
+    const eventData = body.eventData ? withPricingModel(teamEventData(body.eventData), sessionRow) : body.eventData;
 
     const webhookUrl = process.env.GHL_WEBHOOK_URL;
     if (!webhookUrl) {
@@ -107,9 +111,6 @@ export async function POST(request: Request) {
         : null;
 
     // An event an admin added by hand and sent the concierge link for says so, so GHL never messages that client on its own.
-    const { data: sessionRow } =
-      typeof sessionId === "string" && sessionId ? await supabase.from("sessions").select("*").eq("id", sessionId).maybeSingle() : { data: null };
-
     const payload: Record<string, unknown> = {
       ...cleanEventData,
       conversation_transcript: conversationTranscript || null,

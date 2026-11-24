@@ -241,6 +241,7 @@ check("The craft menu is read from the concierge's menu text", catalog.craftDrin
   const sf = await manualDb.addManualEvent(admin, form({ booked_on: "2026-11-24", package: "Bartender Only", drinks: [], total: "600" }));
   const sfRow = sf.ok ? session(sf.id) : undefined;
   check("Saved: the session has the service fee model and the booked on date", sfRow?.pricing_model === "service_fee" && sfRow?.booked_on === "2026-11-24", JSON.stringify({ m: sfRow?.pricing_model, b: sfRow?.booked_on }));
+  check("Saved: the model is on event_data for the shopping lists", sfRow?.event_data?.pricing_model === "service_fee");
   check("Saved: the booked price is split on the service fee model", (sfRow?.booked_price as Record<string, unknown>)?.service_fee === 100);
   reset();
   const old = await manualDb.addManualEvent(admin, form({ booked_on: "2026-09-01" }));
@@ -263,7 +264,7 @@ check("The craft menu is read from the concierge's menu text", catalog.craftDrin
   const sameModel = await bm.setBookedOnAndModel(id, { booked_on: "2026-09-02", pricing_model: "gratuity" }, who, today3);
   check("Edit event: a new booked on date saves without changing the model", sameModel.ok && !sameModel.changedModel && session(id)?.booked_on === "2026-09-02" && session(id)?.pricing_model === "gratuity");
   const moved = await bm.setBookedOnAndModel(id, { booked_on: "2026-11-24", pricing_model: "service_fee" }, who, today3);
-  check("Edit event: changing the model saves it", moved.ok && moved.changedModel && session(id)?.pricing_model === "service_fee");
+  check("Edit event: changing the model saves it, on event_data too", moved.ok && moved.changedModel && session(id)?.pricing_model === "service_fee" && session(id)?.event_data?.pricing_model === "service_fee");
   check("Edit event: a future booked on date is refused", !(await bm.setBookedOnAndModel(id, { booked_on: addDays(today3, 2), pricing_model: "gratuity" }, who, today3)).ok);
   check("Edit event: a model is required", !(await bm.setBookedOnAndModel(id, { booked_on: "2026-11-01" }, who, today3)).ok);
   db.sessions!.find((s: Record<string, unknown>) => s.id === id)!.price_check = { reason: "x", at: "y" };

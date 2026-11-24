@@ -11,6 +11,7 @@
 import { supabase } from "@/lib/supabase";
 import type { BookedPrice } from "@/lib/price-change";
 import type { SessionRow } from "@/lib/event-updates";
+import { withPricingModel } from "@/lib/bartender-only";
 import { PRICING_MODEL_LABEL, sessionPricingModel, type PricingModel } from "@/lib/pricing-model";
 import { FEE_BP_STANDARD, feeBp, serviceFeePackage, splitFromCustom } from "@/lib/service-fee";
 
@@ -69,15 +70,22 @@ export async function confirmPriceCheck(
   now: Date = new Date()
 ): Promise<{ ok: true; model: PricingModel } | { ok: false; status: number; error: string }> {
   if (model !== "gratuity" && model !== "service_fee") return { ok: false, status: 400, error: "Pick a pricing model." };
-  const { data, error } = await supabase.from("sessions").select("id, package_type, booked_price, pricing_model, price_check").eq("id", sessionId).maybeSingle();
+  const { data, error } = await supabase.from("sessions").select("id, package_type, booked_price, pricing_model, price_check, event_data").eq("id", sessionId).maybeSingle();
   if (error) return { ok: false, status: 500, error: "Could not read the event. Try again." };
   if (!data) return { ok: false, status: 404, error: "Event not found." };
-  const session = data as Pick<SessionRow, "id" | "package_type" | "booked_price" | "pricing_model" | "price_check">;
+  const session = data as Pick<SessionRow, "id" | "package_type" | "booked_price" | "pricing_model" | "price_check" | "event_data">;
   const next = confirmedBooked(session, model, who, now.toISOString());
   if (!next.ok) return { ok: false, status: 409, error: next.error };
   const { error: upErr } = await supabase
     .from("sessions")
-    .update({ pricing_model: model, price_check: null, price_check_at: null, ...(next.booked ? { booked_price: next.booked } : {}) })
+    .update({
+      pricing_model: model,
+      price_check: null,
+      price_check_at: null,
+      ...(next.booked ? { booked_price: next.booked } : {}),
+      // The shopping lists read the model from event_data (lib/bartender-only.ts).
+      ...(session.event_data ? { event_data: withPricingModel(session.event_data, { pricing_model: model }) } : {}),
+    })
     .eq("id", sessionId);
   if (upErr) return { ok: false, status: 500, error: "Could not save. Try again." };
   console.log(`[price-check] session ${sessionId}: ${who.name} confirmed the ${PRICING_MODEL_LABEL[model]}${session.price_check ? ` (was flagged: ${session.price_check.reason})` : ""}`);

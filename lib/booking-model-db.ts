@@ -13,6 +13,7 @@ import { supabase } from "@/lib/supabase";
 import type { BookedPrice } from "@/lib/price-change";
 import type { SessionRow } from "@/lib/event-updates";
 import { confirmedBooked } from "@/lib/price-check-db";
+import { withPricingModel } from "@/lib/bartender-only";
 import { formDateToEvent } from "@/lib/team/admin-edit";
 import { PRICING_MODEL_LABEL, sessionPricingModel, type PricingModel } from "@/lib/pricing-model";
 
@@ -65,6 +66,8 @@ export async function setBookedOnAndModel(
   if (changedModel) {
     const booked = bookedForModel(session, model, who, now.toISOString());
     if (booked) update.booked_price = booked;
+    // The shopping lists read the model from event_data (lib/bartender-only.ts). A record, not a client update.
+    if (session.event_data) update.event_data = withPricingModel(session.event_data, { pricing_model: model });
   }
   const { error: upErr } = await supabase.from("sessions").update(update).eq("id", sessionId);
   if (upErr && /booked_on/.test(upErr.message ?? "")) {
