@@ -128,7 +128,7 @@ export default function AddEventForm({
     return (
       <section className={card}>
         <h2 className="font-heading text-base font-bold text-[#2C2420]">Booking saved</h2>
-        <p className="text-[15px] text-[#6B5D52]">Nothing was sent to the client. Copy their concierge link and send it yourself. The event shows on the events list once they finish.</p>
+        <p className="text-[15px] text-[#6B5D52]">Nothing was sent to the client. Copy their concierge link and send it yourself. The event is on the events list now, marked Planning not finished, and you can staff it from the Team tab.</p>
         <div className="flex flex-wrap items-center gap-2">
           <code className="min-w-0 flex-1 break-all rounded-lg bg-white border border-[#DDD5CC] px-3 py-2 text-sm text-[#2C2420]">{link}</code>
           <CopyButton text={link} />

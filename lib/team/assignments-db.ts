@@ -14,7 +14,7 @@ import type { SessionRow } from "@/lib/event-updates";
 import { normalizePhone } from "@/lib/team/codes";
 import { bartendersNeeded, firstName, type StaffMember } from "@/lib/team/event-view";
 import { eventTitle } from "@/lib/team/event-list";
-import { alertAdmins, checkSnapshot, getConfirmation, getSubmittedSession, suppliesConfirmation } from "@/lib/team/events";
+import { alertAdmins, checkSnapshot, getConfirmation, getTeamSession, suppliesConfirmation } from "@/lib/team/events";
 import { sendStaffText } from "@/lib/team/sms";
 import type { Supplies } from "@/lib/team/supplies";
 import { isHidden } from "@/lib/team/hidden";
@@ -253,7 +253,7 @@ export async function removeStaff(session: SessionRow, staffId: string): Promise
 
 /** Accept or decline. A decline texts every admin with alerts on. */
 export async function respondToAssignment(sessionId: string, staff: StaffMember, response: Response, origin: string): Promise<ActionResult> {
-  const session = await getSubmittedSession(sessionId);
+  const session = await getTeamSession(sessionId);
   if (!session) return { ok: false, error: "We could not find that event.", status: 404 };
   const { data } = await supabase
     .from("event_assignments")

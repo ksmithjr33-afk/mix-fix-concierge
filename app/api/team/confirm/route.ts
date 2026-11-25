@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getCurrentStaff } from "@/lib/team/auth";
+import { isPlanning, PLANNING_PLACEHOLDER } from "@/lib/planning";
 import { confirmChecklist, openEvent } from "@/lib/team/events";
 
 // "I have everything": saves the confirmed time once every checklist box is checked.
@@ -11,6 +12,7 @@ export async function POST(request: Request) {
     if (typeof sessionId !== "string") return NextResponse.json({ error: "Bad request" }, { status: 400 });
     const access = await openEvent(sessionId, staff);
     if (!access.ok) return NextResponse.json({ error: "You are not assigned to this event." }, { status: 403 });
+    if (isPlanning(access.session)) return NextResponse.json({ error: PLANNING_PLACEHOLDER }, { status: 409 });
     const confirmedAt = await confirmChecklist(access.session, staff);
     if (!confirmedAt) return NextResponse.json({ error: "Check every item first." }, { status: 409 });
     return NextResponse.json({ ok: true, confirmedAt });

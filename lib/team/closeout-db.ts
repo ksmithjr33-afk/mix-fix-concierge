@@ -12,7 +12,7 @@ import { isHonoree, surpriseActive, surpriseLastDay, type SurpriseColumns } from
 import type { SessionRow } from "@/lib/event-updates";
 import { firstName, type StaffMember } from "@/lib/team/event-view";
 import { eventTitle, adminEventTitle, clientEventTitle } from "@/lib/team/event-list";
-import { alertAdmins, getSubmittedSession } from "@/lib/team/events";
+import { alertAdmins, getTeamSession } from "@/lib/team/events";
 import { assignmentRef, claimNotice, punchesFor, siteOrigin } from "@/lib/team/clock-db";
 import { sendStaffText } from "@/lib/team/sms";
 import { eventData, eventTimeZone } from "@/lib/team/markets";
@@ -271,7 +271,7 @@ export async function submitCloseout(opts: {
 }): Promise<Result<{ closeout: CloseoutView; first: boolean }>> {
   const now = opts.now ?? new Date();
   const { staff } = opts;
-  const session = await getSubmittedSession(opts.sessionId);
+  const session = await getTeamSession(opts.sessionId);
   if (!session) return { ok: false, error: "We could not find that event.", status: 404 };
   const a = await assignmentRef(session.id, staff.id);
   if (!a || a.status !== "accepted") return { ok: false, error: "Only a bartender on this event can send its closeout.", status: 403 };
@@ -401,7 +401,7 @@ export async function sendCloseoutReminders(now: Date = new Date()): Promise<num
   for (const p of data as { assignment_id: string; staff_id: string; session_id: string; punched_at: string }[]) {
     if (now.getTime() - new Date(p.punched_at).getTime() < CLOSEOUT_REMINDER_MIN * 60_000) continue;
     if (await closeoutRow(p.session_id, p.staff_id)) continue;
-    const session = await getSubmittedSession(p.session_id);
+    const session = await getTeamSession(p.session_id);
     if (!session) continue;
     if (inQuietHours(now, eventTz(eventData(session)))) continue;
     const a = await assignmentRef(p.session_id, p.staff_id);

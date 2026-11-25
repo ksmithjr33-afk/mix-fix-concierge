@@ -6,7 +6,7 @@ import ShiftCard from "../../shifts/shift-card";
 import OfferButtons from "./offer-buttons";
 import { isAdminRole } from "@/lib/team/roles";
 import { workingAsText } from "@/lib/team/event-roles";
-import { getSubmittedSession } from "@/lib/team/events";
+import { getTeamSession } from "@/lib/team/events";
 import { orderWindowView } from "@/lib/team/order-window-db";
 import OrderWindowCard from "../../e/[id]/order-window-card";
 
@@ -22,7 +22,7 @@ export default async function OfferPage({ params }: { params: Promise<{ id: stri
   // Once they have the shift, the next thing asked is the order window.
   const orderWindow =
     page.state === "got"
-      ? await getSubmittedSession(page.sessionId)
+      ? await getTeamSession(page.sessionId)
           .then((s) => (s ? orderWindowView(s, staff.id) : null))
           .catch(() => null)
       : null;

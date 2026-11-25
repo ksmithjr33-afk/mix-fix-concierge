@@ -1,6 +1,7 @@
 // The /team/events list: one compact row per event, grouped into This week,
 // Next week, and Later, with a date header for each day. Pure, no database.
 
+import { isPlanning } from "@/lib/planning";
 import { firstName, scrub } from "@/lib/team/event-view";
 import { chicagoToday, eventDay, eventSchedule, formatClock, longDate } from "@/lib/team/time";
 import { eventData, marketLabel, sessionMarket, type Market } from "@/lib/team/markets";
@@ -14,6 +15,7 @@ export interface EventRowSource {
   event_data: Record<string, unknown> | null;
   team_market?: string | null;
   calendar_only?: boolean | null;
+  status?: string | null; // "in_progress": the client has not finished planning (lib/planning.ts)
 }
 
 export interface EventListItem {
@@ -39,6 +41,7 @@ export interface EventListItem {
   noIce?: boolean; // admins: inside 48 hours of service start and nobody picking up ice
   repeat?: string; // admins: "Repeat client, 3rd event"
   calendarOnly?: boolean; // admins: added to our calendar only, nothing goes to GHL or the client
+  planning?: boolean; // the client has not finished planning: "Planning not finished"
   team?: TeamLine; // who is on it: every event for admins, only their own for staff (lib/team/team-line.ts)
 }
 
@@ -139,7 +142,7 @@ export function eventListItem(row: EventRowSource, status?: string, opts: { show
   const subtitle = eventSubtitle(ed);
   const times = s.startMin !== null && s.endMin !== null ? `${formatClock(s.startMin)} to ${formatClock(s.endMin)}` : s.startMin !== null ? formatClock(s.startMin) : "";
   const pkg = scrub(ed.package) || scrub(row.package_type);
-  const detail = [opts.showMarket ? marketLabel(market) : "", times, guests(ed, row), pkg, cityFrom(ed.event_address)].filter(Boolean).join(" · ");
+  const detail = [opts.showMarket ? marketLabel(market) : "", times, guests(ed, row), pkg, cityFrom(ed.event_address) || scrub(ed.event_city)].filter(Boolean).join(" · ");
   return {
     id: row.id,
     day: eventDay(ed.event_date),
@@ -147,6 +150,7 @@ export function eventListItem(row: EventRowSource, status?: string, opts: { show
     title,
     ...(subtitle ? { subtitle } : {}),
     ...(opts.admin && row.calendar_only === true ? { calendarOnly: true } : {}),
+    ...(isPlanning(row) ? { planning: true } : {}),
     detail,
     // Search matches the client name (full for admins), the event type and the client's event name.
     search: [title, opts.admin ? scrub(ed.client_name) : firstName(ed.client_name), scrub(ed.event_type), named].join(" ").toLowerCase(),

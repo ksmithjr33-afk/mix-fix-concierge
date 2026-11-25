@@ -7,6 +7,7 @@ import { distanceMeters, type LatLng } from "@/lib/team/clock";
 import { TZ, TZ_KEY } from "@/lib/team/time";
 import { cityFallback } from "@/lib/booking-webhook";
 import { isBlank } from "@/lib/blank";
+import { isPlanning, planningEventData } from "@/lib/planning";
 
 export const MARKETS = ["dallas", "austin", "houston", "los_angeles"] as const;
 export type Market = (typeof MARKETS)[number];
@@ -84,7 +85,9 @@ export function sessionMarket(s: object): Market | null {
  * session when event_data has none, and the market's time zone. Never saved.
  */
 export function eventData(s: { event_date?: string | null; event_data: Record<string, unknown> | null }): Record<string, unknown> {
-  const ed: Record<string, unknown> = { ...(s.event_data ?? {}) };
+  // An unfinished booking read raw (no event_data yet): the details the booking gave (lib/planning.ts).
+  const raw = s as { status?: unknown; id?: string };
+  const ed: Record<string, unknown> = { ...(s.event_data ?? (isPlanning(raw) && raw.id ? planningEventData(s as unknown as Parameters<typeof planningEventData>[0]) : {})) };
   // The text "null" (how GHL sent an empty date) is no date at all.
   if (isBlank(ed.event_date)) delete ed.event_date;
   if (!ed.event_date && !isBlank(s.event_date)) ed.event_date = String(s.event_date).trim();

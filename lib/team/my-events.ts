@@ -1,6 +1,8 @@
 // The events a staff member is on (offered or accepted), as list rows. Server only.
 // Used by their own events list and by an admin's read only "Preview as".
 
+import { teamRows } from "@/lib/team/team-sessions";
+import { asTeamRow, showsOnTeam } from "@/lib/planning";
 import { supabase } from "@/lib/supabase";
 import { eventListItem, type EventListItem, type EventRowSource } from "@/lib/team/event-list";
 import { hiddenEventIds } from "@/lib/team/hidden";
@@ -35,9 +37,10 @@ export async function assignedEventRows(staffId: string): Promise<{ items: Event
   if (error || !data) return { items: [], needs };
   const items = data.flatMap((a) => {
     const s = (Array.isArray(a.session) ? a.session[0] : a.session) as (SessionRow & EventRowSource & { status: string }) | null;
-    if (!s || s.status !== "submitted") return [];
-    needs.set(s.id, needsOf(s));
-    return [eventListItem(s, a.status as string)];
+    if (!s || !showsOnTeam(s)) return [];
+    const row = asTeamRow(s);
+    needs.set(row.id, needsOf(row));
+    return [eventListItem(row, a.status as string)];
   });
   return { items: withoutHidden(items, hidden), needs };
 }
@@ -54,11 +57,11 @@ export async function assignedEventRows(staffId: string): Promise<{ items: Event
 export async function eventsForViewer(staff: StaffMember): Promise<EventListItem[]> {
   if (isAdminRole(staff.role)) {
     const [{ data }, { data: mine }, hidden] = await Promise.all([
-      supabase.from("sessions").select("*").eq("status", "submitted"),
+      supabase.from("sessions").select("*").in("status", ["submitted", "in_progress"]),
       supabase.from("event_assignments").select("session_id, status").eq("staff_id", staff.id),
       hiddenEventIds(),
     ]);
-    const rows = withoutHidden((data as (SessionRow & EventRowSource)[]) ?? [], hidden);
+    const rows = withoutHidden(teamRows((data as SessionRow[]) ?? []) as (SessionRow & EventRowSource)[], hidden);
     const own = new Map(((mine as { session_id: string; status: string }[]) ?? []).map((a) => [a.session_id, a.status]));
     const ids = rows.map((r) => r.id);
     // One query gives both the staffing color and the who is on it line.

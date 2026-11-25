@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getCurrentStaff } from "@/lib/team/auth";
+import { isPlanning, PLANNING_PLACEHOLDER } from "@/lib/planning";
 import { openEvent, saveCheck } from "@/lib/team/events";
 
 export async function POST(request: Request) {
@@ -12,6 +13,7 @@ export async function POST(request: Request) {
     }
     const access = await openEvent(sessionId, staff);
     if (!access.ok) return NextResponse.json({ error: "You are not assigned to this event." }, { status: 403 });
+    if (isPlanning(access.session)) return NextResponse.json({ error: PLANNING_PLACEHOLDER }, { status: 409 });
     const saved = await saveCheck(access.session, staff, list, key, checked === true);
     if (!saved) return NextResponse.json({ error: "That item is no longer on the list. Reload the page." }, { status: 409 });
     return NextResponse.json({ ok: true });

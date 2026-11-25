@@ -81,7 +81,7 @@ function Chip({ e, big, select, marketLabel }: { e: EventListItem; big: boolean;
   const on = !!select?.selected.has(e.id);
   const unread = e.chat?.unread ?? 0;
   const market = marketLabel(e.market);
-  const title = [e.arrival || "Time TBD", e.title, e.subtitle, market, tone.label, e.menu?.text, e.request ? "Change request waiting" : "", e.noMenu ? "No approved menu" : "", e.noIce ? "Ice not assigned" : "", e.calendarOnly ? "Calendar only" : "", e.repeat ?? "", teamLineText(e.team), unread ? `${unread} unread messages` : ""].filter(Boolean).join(" · ");
+  const title = [e.arrival || "Time TBD", e.title, e.subtitle, market, tone.label, e.menu?.text, e.request ? "Change request waiting" : "", e.noMenu ? "No approved menu" : "", e.noIce ? "Ice not assigned" : "", e.calendarOnly ? "Calendar only" : "", e.planning ? "Planning not finished" : "", e.repeat ?? "", teamLineText(e.team), unread ? `${unread} unread messages` : ""].filter(Boolean).join(" · ");
   return (
     <div className={`relative rounded-lg border border-l-4 ${tone.chip} ${on ? "ring-2 ring-[#B5845A]" : ""} hover:brightness-[0.97] transition`}>
       {select && <Pick e={e} select={select} />}
@@ -97,6 +97,7 @@ function Chip({ e, big, select, marketLabel }: { e: EventListItem; big: boolean;
         {e.request && <span className={`block font-semibold text-[#9A5B12] ${big ? "text-sm" : "text-[11px] truncate"}`}>Change request</span>}
         {e.noMenu && <span className={`block font-semibold text-[#A0412D] ${big ? "text-sm" : "text-[11px] truncate"}`}>No approved menu</span>}
         {e.noIce && <span className={`block font-semibold text-[#A0412D] ${big ? "text-sm" : "text-[11px] truncate"}`}>Ice not assigned</span>}
+        {e.planning && <span className={`block font-semibold text-[#8A5A12] ${big ? "text-sm" : "text-[11px] truncate"}`}>Planning not finished</span>}
         {e.calendarOnly && <span className={`block font-semibold text-[#3F5468] ${big ? "text-sm" : "text-[11px] truncate"}`}>Calendar only</span>}
         {e.repeat && <span className={`block font-semibold text-[#5B3F7A] ${big ? "text-sm" : "text-[11px] truncate"}`}>{e.repeat}</span>}
         {big && e.badge && <span className="block text-sm text-[#6B5D52] break-words">{e.badge.text}</span>}

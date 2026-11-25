@@ -225,7 +225,7 @@ export async function addManualEvent(admin: StaffMember, raw: unknown, now: Date
   }
 
   // Exactly as if the client had completed the concierge.
-  if (!(await recordSubmission(id, v.eventData))) return { ok: false, error: "Could not save. Try again.", status: 500 };
+  if (!(await recordSubmission(id, v.eventData, { addedByAdmin: true }))) return { ok: false, error: "Could not save. Try again.", status: 500 };
   const session = await getSession(id);
   if (!session) return { ok: false, error: "Could not save. Try again.", status: 500 };
   await saveEventRow(session.event_data ?? v.eventData);

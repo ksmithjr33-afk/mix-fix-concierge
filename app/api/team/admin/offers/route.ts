@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCurrentStaff } from "@/lib/team/auth";
 import { isAdminRole } from "@/lib/team/roles";
-import { getSubmittedSession } from "@/lib/team/events";
+import { getTeamSession } from "@/lib/team/events";
 import { startOffers } from "@/lib/team/scorecard-offers-db";
 import { confirmHeld, pauseRun, releaseHeld, resumeRun, skipStep, stopRun } from "@/lib/team/offers-db";
 
@@ -20,7 +20,7 @@ export async function POST(request: Request) {
   const reply = (r: { ok: true } | { ok: false; error: string; status: number }) => (r.ok ? NextResponse.json({ ok: true }) : NextResponse.json({ error: r.error }, { status: r.status }));
   try {
     if (body.action === "start") {
-      const session = typeof body.sessionId === "string" ? await getSubmittedSession(body.sessionId) : null;
+      const session = typeof body.sessionId === "string" ? await getTeamSession(body.sessionId) : null;
       if (!session) return NextResponse.json({ error: "We could not find that event." }, { status: 404 });
       return reply(await startOffers(staff, session));
     }

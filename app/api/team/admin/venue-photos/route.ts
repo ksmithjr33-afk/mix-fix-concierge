@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getCurrentStaff } from "@/lib/team/auth";
-import { getSubmittedSession } from "@/lib/team/events";
+import { getTeamSession } from "@/lib/team/events";
 import { isAdminRole } from "@/lib/team/roles";
 import { photoTypeOf } from "@/lib/team/venue-photos";
 import {
@@ -26,7 +26,7 @@ export async function POST(request: Request) {
     const form = await request.formData().catch(() => null);
     const sessionId = form?.get("sessionId");
     if (!form || typeof sessionId !== "string") return NextResponse.json({ error: "Bad request" }, { status: 400 });
-    const session = await getSubmittedSession(sessionId);
+    const session = await getTeamSession(sessionId);
     if (!session) return NextResponse.json({ error: "We could not find that event." }, { status: 404 });
 
     const action = String(form.get("action") ?? "");

@@ -1,7 +1,12 @@
 import Link from "next/link";
 import { timed } from "@/lib/timing";
 import { requireAdmin } from "@/lib/team/auth";
-import { getSubmittedSession, managerEventView, missingReports, teamLists } from "@/lib/team/events";
+import { getTeamSession, managerEventView, missingReports, teamLists } from "@/lib/team/events";
+import { bookedDay, daysSinceBooked, isPlanning } from "@/lib/planning";
+import { PLANNING_EDIT_NOTE, PLANNING_PLACEHOLDER, PLANNING_TAG } from "@/lib/planning-text";
+import { conciergeStarted, finishChangeFor } from "@/lib/planning-db";
+import PlanningCard from "./planning-card";
+import { longDate } from "@/lib/team/time";
 import { assigneeProgress, listStaff } from "@/lib/team/assignments-db";
 import { staffingCounts, staffingLabel } from "@/lib/team/assignments";
 import { bartendersNeeded } from "@/lib/team/event-view";
@@ -113,7 +118,8 @@ async function AdminEventPage({
   // Business is admins only: a manager asking for it gets Details, and its data never loads.
   const tab: ManagerTab = allowedTab(me.role, asked);
   const back = { href: "/team/admin/events", label: "All events" };
-  const session = await getSubmittedSession(id);
+  // Finished events, and bookings the client has not finished planning (lib/planning.ts).
+  const session = await getTeamSession(id);
   if (!session) {
     return (
       <>
@@ -125,7 +131,9 @@ async function AdminEventPage({
 
   // The market from the address (first time, and after an address change) and
   // the Shopping list sync both finish before anything below reads them.
-  await Promise.all([ensureMarket(session), syncOrderSheet(session)]);
+  // Unfinished: no Shopping list yet, so nothing to sync. The market works from the booked city.
+  const planning = isPlanning(session);
+  await Promise.all([ensureMarket(session), planning ? Promise.resolve(0) : syncOrderSheet(session)]);
 
   // Only the open tab's panel is built. Everything a tab count needs loads on
   // every visit; what only one tab shows loads when that tab is open. Each
@@ -203,8 +211,9 @@ async function AdminEventPage({
   const offers = offersP ? await offersP : null;
   // Order windows for everyone on the event: Team and Shopping list tabs only.
   const onEventPeople = people.filter((p) => p.status !== "declined");
+  // Not asked until the client finishes planning.
   const orderWindows =
-    on("team") || on("order")
+    !planning && (on("team") || on("order"))
       ? await orderWindowsFor(session, onEventPeople.map((p) => ({ staffId: p.staffId, name: p.name || p.phone, status: p.status }))).catch((err) => {
           console.error(`[order window] ${id}: could not load:`, err);
           return null;
@@ -272,6 +281,10 @@ async function AdminEventPage({
       : null,
   ]);
   const repeat = repeatLabel(eventNumber);
+  // Details: the Planning card while unfinished, and the date or start time the client changed at finish.
+  const [conciergeBegun, finishChange] = on("details")
+    ? await Promise.all([planning ? conciergeStarted(id) : Promise.resolve(false), planning ? Promise.resolve(null) : finishChangeFor(session).catch(() => null)])
+    : [false, null];
   // Business tab: on a planner held event, the Lead is billed and the host is who it is for.
   const billing = on("business") && business ? await billingFor(session as EventSession).catch(() => null) : null;
   if (tab === "chat") await markThreadRead(id, me.id);
@@ -312,8 +325,9 @@ async function AdminEventPage({
   // The title follows the planner title rule (host's name, "via" the planner) once the partners migration runs.
   const titled = eventData(session);
   // The safety net: the guest count changed with no price change applied or pending.
-  const guestFlag = guestCountFlag(session);
-  const sheetFlags = sheet.sheet.sections.flatMap((s) => s.lines).filter((l) => l.conflict || l.gone).length;
+  const guestFlag = planning ? null : guestCountFlag(session);
+  const sheetFlags = planning ? 0 : sheet.sheet.sections.flatMap((s) => s.lines).filter((l) => l.conflict || l.gone).length;
+  const placeholder = <p className="px-1 py-6 text-center text-[15px] text-[#6B5D52]">{PLANNING_PLACEHOLDER}</p>;
 
   // A surprise event: at the top of every tab (Day of included), first name only.
   const surprise = surpriseBannerText(session, now);
@@ -329,6 +343,7 @@ async function AdminEventPage({
           {[v.date, v.arrival ? `arrive ${v.arrival}` : "", v.serviceStart && v.serviceEnd ? `service ${v.serviceStart} to ${v.serviceEnd}` : ""].filter(Boolean).join(", ")}
         </p>
         <p className="text-[15px] text-[#6B5D52]">{[v.market, v.guestCount ? `${v.guestCount} guests` : "", v.package].filter(Boolean).join(" · ")}</p>
+        {planning && <p className="mt-1 mr-1 inline-block text-[11px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-[#FBF0D9] text-[#8A5A12]">{PLANNING_TAG}</p>}
         {repeat && <p className="mt-1 inline-block text-[11px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-[#EDE3F5] text-[#5B3F7A]">{repeat}</p>}
         {v.timeZone !== "America/Chicago" && <p className="text-sm text-[#9A7049]">Times are Pacific time.</p>}
       </div>
@@ -382,6 +397,26 @@ async function AdminEventPage({
               since={session.price_check_at ? chicagoStamp(session.price_check_at) : null}
             />
           )}
+          {finishChange && (
+            <section role="alert" className="rounded-2xl border-2 border-[#B3261E] bg-[#FDECEA] px-4 py-3 space-y-1" data-finish-change>
+              <h2 className="font-heading font-bold text-[#8C1D18]">The client changed {finishChange.date && finishChange.start ? "the date and start time" : finishChange.date ? "the date" : "the start time"} when they finished planning</h2>
+              <p className="text-sm text-[#2C2420]">
+                {[finishChange.date ? `The date is now ${finishChange.date}.` : "", finishChange.start ? `The start time is now ${finishChange.start}.` : ""].filter(Boolean).join(" ")} Assigned staff were asked to open the event and confirm they can still work it. Nobody was removed.
+              </p>
+            </section>
+          )}
+          {planning && links && (
+            <PlanningCard
+              data={{
+                conciergeUrl: links.conciergeUrl,
+                openConcierge: links.openConcierge,
+                bookedOn: longDate(bookedDay(session)),
+                daysSince: daysSinceBooked(session),
+                started: conciergeBegun,
+                lastOpened: links.lastOpenedAt ? chicagoStamp(links.lastOpenedAt, v.timeZone) : "",
+              }}
+            />
+          )}
           {session.price_pending && (
             <PriceNeededCard sessionId={id} summary={pendingSummary(session.price_pending_info)} blocks={pendingBlocks(session.price_pending_info)} />
           )}
@@ -402,16 +437,20 @@ async function AdminEventPage({
           {addedBy && (
             <p className="px-1 text-sm text-[#6B5D52]">Added by {addedBy}</p>
           )}
-          {links && (
+          {links && !planning && (
             <ClientLinksCard conciergeUrl={links.conciergeUrl} eventUrl={links.eventUrl} openConcierge={links.openConcierge} openEvent={links.openEvent} status={clientStatusLine(links, v.timeZone)} />
           )}
           {booking && <BookingCard sessionId={id} data={booking} barback={{ ...barbackStatus(session), version: session.version }} />}
           {history && <ClientHistoryCard history={history} clientKey={history.matchedOn} />}
           {/* Discount and gratuity amounts: admins and managers only. */}
           {isAdminRole(me.role) && bookingSummary(session) && <BookingSummaryCard summary={bookingSummary(session)!} />}
-          {hidden ? (
+          {hidden || planning ? (
             // Hidden events are not edited: the cards are read only until it is unhidden.
-            <Details v={v} locationExtra={venuePhotos} />
+            // Unfinished: what the booking gave us, read only (edits would be replaced when the client finishes).
+            <div className="space-y-2">
+              <Details v={v} locationExtra={venuePhotos} />
+              {planning && !hidden && <p className="px-1 text-sm text-[#6B5D52]">{PLANNING_EDIT_NOTE}</p>}
+            </div>
           ) : (
             <div className="space-y-3">
               <WhatChanged v={v} />
@@ -421,7 +460,7 @@ async function AdminEventPage({
             </div>
           )}
           <PackageCard packageName={v.package} booking={bookingShortOf(session)} />
-          {!hidden && <EditEvent sessionId={id} version={session.version} initial={editValues} packages={packages} booking={bookingModel} />}
+          {!hidden && !planning && <EditEvent sessionId={id} version={session.version} initial={editValues} packages={packages} booking={bookingModel} />}
           <HideAction sessionId={id} hidden={hidden} />
           {session.calendar_only && <CalendarOnlyCard sessionId={id} />}
         </>
@@ -429,6 +468,7 @@ async function AdminEventPage({
     },
     // The Menu pickup and Ice pickup cards, as they were on Details.
     pickups: () => {
+      if (planning) return placeholder;
       const choices = staff.filter((s) => s.active).map((s) => ({ id: s.id, name: s.name || s.phone, role: s.role }));
       return (
         <>
@@ -484,7 +524,7 @@ async function AdminEventPage({
         </>
       );
     },
-    order: () => (
+    order: () => planning ? placeholder : (
       <>
       <OrderWindowStrip data={orderWindows} />
       <OrderSheet
@@ -494,7 +534,7 @@ async function AdminEventPage({
       />
       </>
     ),
-    client: () => (
+    client: () => planning ? placeholder : (
       <ClientListPanel
         sessionId={id}
         autoSend={autoSend}
@@ -546,7 +586,7 @@ async function AdminEventPage({
       receipts ? (
         <Receipts sessionId={id} mode="admin" initial={receipts.receipts} ready={receipts.ready} canApprove={receipts.canApprove} people={receipts.people} timeZone={v.timeZone} />
       ) : null,
-    business: () => (business ? <BusinessTab view={business} billing={billing} /> : null),
+    business: () => (planning ? placeholder : business ? <BusinessTab view={business} billing={billing} /> : null),
     chat: () => <ManagerChat sessionId={id} initial={messages} unread={chatUnread} timeZone={v.timeZone} muted={muted.has(id)} isAdmin gifSearch={giphyEnabled()} />,
   };
 
@@ -560,13 +600,13 @@ async function AdminEventPage({
         header={header}
         panel={panels[tab]()}
         counts={{
-          details: (session.price_pending ? 1 : 0) + (guestFlag ? 1 : 0) + (session.price_check && isAdminRole(me.role) ? 1 : 0),
+          details: (finishChange ? 1 : 0) + (session.price_pending ? 1 : 0) + (guestFlag ? 1 : 0) + (session.price_check && isAdminRole(me.role) ? 1 : 0),
           // The menu is not picked up (or nobody is assigned) inside 48 hours, no approved menu inside 72 hours, and the ice not done inside 24 hours.
-          pickups: (pickup.outstanding ? 1 : 0) + (menuFile.missing ? 1 : 0) + (ice.outstanding ? 1 : 0),
+          pickups: planning ? 0 : (pickup.outstanding ? 1 : 0) + (menuFile.missing ? 1 : 0) + (ice.outstanding ? 1 : 0),
           team: hidden ? 0 : counts.stillNeeded + otherOpen + handoffs.length + (barbackNeeded && barbackOpen === 0 ? 1 : 0),
           // Changed lines, plus each "I'm out" from staff on a supply line until an admin changes its source or dismisses it.
           order: sheetFlags + (sheet.answers?.badge ?? 0),
-          client: pendingHolds.length,
+          client: planning ? 0 : pendingHolds.length,
           dayof: dayofCount,
           receipts: receiptsWaiting,
           chat: chatUnread,

@@ -10,12 +10,13 @@
 // Everything here loads before the migration runs: a missing table reads as
 // "no offers" and never breaks posting, assigning, or the cron.
 
+import { showsOnTeam } from "@/lib/planning";
 import { supabase } from "@/lib/supabase";
 import { upsertAssignment } from "@/lib/team/event-roles-db";
 import type { SessionRow } from "@/lib/event-updates";
 import { bartendersNeeded, firstName, type StaffMember } from "@/lib/team/event-view";
 import { adminEventTitle } from "@/lib/team/event-list";
-import { alertAdmins, getSubmittedSession } from "@/lib/team/events";
+import { alertAdmins, getTeamSession } from "@/lib/team/events";
 import { siteOrigin } from "@/lib/team/clock-db";
 import { isHidden } from "@/lib/team/hidden";
 import { sendStaffText } from "@/lib/team/sms";
@@ -266,7 +267,7 @@ export async function busyFor(session: SessionRow, staffIds: string[], now: Date
     );
     for (const a of r.rows) {
       const s = Array.isArray(a.session) ? a.session[0] : a.session;
-      if (!s || s.id === session.id || s.status !== "submitted") continue;
+      if (!s || s.id === session.id || !showsOnTeam(s)) continue;
       if (eventDayOf(s) !== day) continue;
       const o = workWindow(eventData(s));
       if (overlaps(w, { from: o.from?.toISOString() ?? null, to: o.to?.toISOString() ?? null })) overlapping.add(a.staff_id);
@@ -387,7 +388,7 @@ async function textAdmins(message: string): Promise<number> {
 
 /** One run: end it when the event is gone, send due offers, then the one alert if nobody is taking it. Returns texts sent. */
 export async function advanceRun(run: RunRow, now: Date = now0()): Promise<number> {
-  const session = await getSubmittedSession(run.session_id);
+  const session = await getTeamSession(run.session_id);
   if (!session || (await isHidden(run.session_id)) || isPast(session, now)) {
     await closeOut(run, session, "stopped", "Event over or removed", now, { text: false });
     return 0;
@@ -469,7 +470,7 @@ export async function offerForStaff(stepId: string, staff: StaffMember, now: Dat
   const step = (await rows<Pick<StepRow, "id" | "run_id" | "staff_id" | "status">>(supabase.from("offer_steps").select("id, run_id, staff_id, status").eq("id", stepId))).rows[0];
   if (!step || step.staff_id !== staff.id || step.status === "planned") return { state: "gone" };
   const run = await runById(step.run_id);
-  const session = run ? await getSubmittedSession(run.session_id) : null;
+  const session = run ? await getTeamSession(run.session_id) : null;
   if (!run || !session) return { state: "gone" };
   if (step.status === "accepted") return { state: "got", sessionId: session.id };
   if (step.status === "held") return { state: "held", date: dateOf(session) };
@@ -494,7 +495,7 @@ export async function respondToOffer(stepId: string, staff: StaffMember, respons
   if (step.status === "declined") return fail("You already passed on this shift.");
   if (step.status !== "sent") return fail("This offer is closed.");
   const run = await runById(step.run_id);
-  const session = run ? await getSubmittedSession(run.session_id) : null;
+  const session = run ? await getTeamSession(run.session_id) : null;
   if (!run || !session || !LIVE.includes(run.status) || isPast(session, now) || (await isHidden(session.id))) return fail("This offer is closed.");
 
   if (response === "decline") {
@@ -582,7 +583,7 @@ export async function stopRun(admin: StaffMember, runId: unknown, now: Date = no
   if (!LIVE.includes(r.run.status)) return fail("These offers already ended.");
   const held = (await stepsOf(r.run.id)).find((s) => s.status === "held");
   if (held) return fail("Someone accepted and is waiting for you. Confirm or release them first.");
-  await closeOut(r.run, await getSubmittedSession(r.run.session_id), "stopped", admin.name, now);
+  await closeOut(r.run, await getTeamSession(r.run.session_id), "stopped", admin.name, now);
   return { ok: true };
 }
 
@@ -596,7 +597,7 @@ export async function skipStep(admin: StaffMember, stepId: unknown): Promise<Res
   if (step.status !== "planned" && step.status !== "sent") return fail("They already answered.");
   await updateStep(step.id, { status: "skipped", skip_reason: "Skipped by admin", skipped_by_name: admin.name });
   if (step.status === "sent") {
-    const session = await getSubmittedSession(run.session_id);
+    const session = await getTeamSession(run.session_id);
     const p = (await staffByIds([step.staff_id])).get(step.staff_id);
     if (p && session) await sendStaffText(p.phone, p.name, offerClosedText({ date: dateOf(session) }));
   }
@@ -608,7 +609,7 @@ async function heldStep(admin: StaffMember, stepId: unknown): Promise<Result<{ s
   const step = typeof stepId === "string" ? await stepById(stepId) : null;
   if (!step || step.status !== "held") return fail("Nobody is waiting on that. Reload the page.", 404);
   const run = await runById(step.run_id);
-  const session = run ? await getSubmittedSession(run.session_id) : null;
+  const session = run ? await getTeamSession(run.session_id) : null;
   const person = (await staffByIds([step.staff_id])).get(step.staff_id);
   if (!run || !session || !person) return fail("Those offers are gone. Reload the page.", 404);
   return { ok: true, step, run, session, person };
@@ -651,7 +652,7 @@ export async function handAssigned(sessionId: string, staffId: string, now: Date
     if (existing) await supabase.from("offer_claims").update({ kind: "hand" }).eq("run_id", run.id).eq("staff_id", staffId);
     else await claimSpot(run, staffId, "hand");
     if (step && step.status !== "accepted") await updateStep(step.id, { status: "closed", skip_reason: "Assigned by hand" });
-    await finishIfFilled(run, await getSubmittedSession(sessionId), now);
+    await finishIfFilled(run, await getTeamSession(sessionId), now);
   } catch (err) {
     console.error("[offers] hand assign bookkeeping failed:", err instanceof Error ? err.message : String(err));
   }

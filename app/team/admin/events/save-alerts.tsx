@@ -11,7 +11,7 @@ function when(iso: string | null): string {
 // not save, and saved events whose date was already past when they booked.
 // Renders nothing when there is nothing to check.
 export default function SaveAlerts({ alerts }: { alerts: Alerts | null }) {
-  if (!alerts || (alerts.unsaved.length === 0 && alerts.pastDate.length === 0 && alerts.stale.length === 0 && alerts.pricePending.length === 0 && (alerts.priceCheck ?? []).length === 0 && (alerts.guestCount ?? []).length === 0 && (alerts.orderWindows ?? []).length === 0)) return null;
+  if (!alerts || (alerts.unsaved.length === 0 && alerts.pastDate.length === 0 && alerts.stale.length === 0 && alerts.pricePending.length === 0 && (alerts.priceCheck ?? []).length === 0 && (alerts.guestCount ?? []).length === 0 && (alerts.orderWindows ?? []).length === 0 && (alerts.waiting ?? []).length === 0)) return null;
   return (
     <div className="space-y-3" role="alert">
       {alerts.unsaved.length > 0 && (
@@ -83,6 +83,23 @@ export default function SaveAlerts({ alerts }: { alerts: Alerts | null }) {
                   {g.name}
                 </Link>{" "}
                 · {g.text}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+      {(alerts.waiting ?? []).length > 0 && (
+        <section className={`rounded-xl p-4 space-y-2 ${alerts.waiting.some((w) => w.red) ? "border-2 border-[#B3261E] bg-[#FDECEA]" : "border border-[#E0B04A] bg-[#FFF8EC]"}`} data-waiting-alert>
+          <h2 className={`font-semibold ${alerts.waiting.some((w) => w.red) ? "text-[#8C1D18]" : "text-[#2C2420]"}`}>Waiting on the client: {alerts.waiting.length}</h2>
+          <p className="text-sm text-[#6B5D52]">Booked, but the client has not finished planning. Events within 14 days are in red. Nothing was sent to them.</p>
+          <ul className="text-sm space-y-1">
+            {alerts.waiting.map((w) => (
+              <li key={w.sessionId} className={w.red ? "text-[#8C1D18]" : ""}>
+                <Link href={`/team/admin/e/${w.sessionId}`} className="text-[#B5845A] underline">
+                  {w.name}
+                </Link>{" "}
+                · {w.eventDay ? longDate(w.eventDay) : "no date"}
+                {w.daysSinceBooked !== null ? ` · booked ${w.daysSinceBooked === 0 ? "today" : `${w.daysSinceBooked} day${w.daysSinceBooked === 1 ? "" : "s"} ago`}` : ""}
               </li>
             ))}
           </ul>

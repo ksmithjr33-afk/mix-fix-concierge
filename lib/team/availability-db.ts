@@ -6,6 +6,7 @@
 // still see everyone and can assign someone who is unavailable after a
 // confirm step.
 
+import { showsOnTeam } from "@/lib/planning";
 import { supabase } from "@/lib/supabase";
 import type { SessionRow } from "@/lib/event-updates";
 import type { StaffMember } from "@/lib/team/event-view";
@@ -120,7 +121,7 @@ async function acceptedInRange(staffId: string, start: string, end: string): Pro
   const out: { sessionId: string; title: string; day: string }[] = [];
   for (const a of (data as { session_id: string; session: SessionRow | SessionRow[] | null }[]) ?? []) {
     const s = Array.isArray(a.session) ? a.session[0] : a.session;
-    if (!s || s.status !== "submitted") continue;
+    if (!s || !showsOnTeam(s)) continue;
     const day = eventDayOf(s);
     if (day && covers({ start_day: start, end_day: end }, day)) out.push({ sessionId: s.id, title: eventTitle(eventData(s)), day });
   }

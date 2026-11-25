@@ -12,7 +12,7 @@
 //   bumps the version so a save in flight from an older read cannot undo it.
 
 import { supabase } from "@/lib/supabase";
-import { getSubmittedSession } from "@/lib/team/events";
+import { getTeamSession } from "@/lib/team/events";
 import { firstName, type StaffMember } from "@/lib/team/event-view";
 import { barbackStatus, BARBACK_INCLUDED, BARBACK_REMOVED } from "@/lib/package-extras";
 import { computeBaseline, withHoursBooked, type BookedPrice } from "@/lib/price-change";
@@ -36,7 +36,7 @@ export async function setBartendersNeeded(sessionId: string, staff: StaffMember,
   if (!canFixStaffing(staff.role)) return ADMINS_ONLY;
   const value = raw === null ? null : cleanBartenders(raw);
   if (raw !== null && value === null) return { ok: false, error: "Pick 1 to 4 bartenders.", status: 400 };
-  const session = await getSubmittedSession(sessionId);
+  const session = await getTeamSession(sessionId);
   if (!session) return NOT_FOUND;
   const extras = bartendersExtras(session, value, firstName(staff.name) || "an admin", new Date().toISOString());
   const { error } = await supabase.from("sessions").update({ package_extras: extras }).eq("id", sessionId);
@@ -52,7 +52,7 @@ export async function setRoleNeeded(sessionId: string, staff: StaffMember, role:
   if (!isOtherRole(role)) return { ok: false, error: "Pick a role.", status: 400 };
   const value = cleanRoleNeeded(raw);
   if (value === null) return { ok: false, error: `Pick 0 to 4 ${EVENT_ROLE_PLURAL[role].toLowerCase()}.`, status: 400 };
-  const session = await getSubmittedSession(sessionId);
+  const session = await getTeamSession(sessionId);
   if (!session) return NOT_FOUND;
   const extras = roleNeededExtras(session, role, value, firstName(staff.name) || "an admin", new Date().toISOString());
   const { error } = await supabase.from("sessions").update({ package_extras: extras }).eq("id", sessionId);
@@ -84,7 +84,7 @@ function bookedWithBarback(session: SessionRow, on: boolean): BookedPrice | null
 export async function setBarbackNotBooked(sessionId: string, staff: StaffMember, notBooked: boolean): Promise<FixResult> {
   if (!canFixStaffing(staff.role)) return ADMINS_ONLY;
   for (let attempt = 0; attempt < 3; attempt++) {
-    const session = await getSubmittedSession(sessionId);
+    const session = await getTeamSession(sessionId);
     if (!session || !session.event_data) return NOT_FOUND;
     const b = barbackStatus(session);
     if (!b.applies) return { ok: false, error: "This event has no barback.", status: 400 };

@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { isPlanning } from "@/lib/planning";
 import { timed } from "@/lib/timing";
 import { requireStaff } from "@/lib/team/auth";
 import { eventLanding } from "@/lib/team/manager-tabs";
@@ -78,6 +79,8 @@ async function TeamEventPage({
   }
 
   const ed = eventData(access.session);
+  // The client has not finished planning: no lists, menu, ice or order window yet (lib/planning.ts).
+  const planning = isPlanning(access.session);
   // What depends on this person's assignment starts as soon as it is read.
   const assignmentP = assignmentRef(id, staff.id);
   // Bar and venue photos, read only here (admins manage them on the manager view):
@@ -104,26 +107,26 @@ async function TeamEventPage({
     threadMessages(id, staff),
     unreadByEvent(staff.id, [id]),
     closeoutState(access.session, staff),
-    myPickupFor(id, staff),
-    staffMenuSection(access.session, staff),
+    planning ? Promise.resolve(null) : myPickupFor(id, staff),
+    planning ? Promise.resolve(null) : staffMenuSection(access.session, staff),
     assignmentP.then((a) => (a ? punchesFor(a.id) : [])),
     // Only the viewer's own estimate, and only on an event they are on.
     assignmentP.then((a) => (a && a.status !== "declined" ? myPayEstimate(staff.id, access.session) : null)),
     assignmentP.then((a) => (a?.status === "accepted" ? Promise.all([myHandoff(id, staff.id), teammateChoices(access.session, staff.id)]) : ([null, []] as [null, never[]]))),
     // The ice pickup card: everyone on the event sees who is picking up and each status.
-    staffIceView(access.session, staff),
+    planning ? Promise.resolve(null) : staffIceView(access.session, staff),
   ]);
   // The Shopping list tab: accepted (any role) or an admin in Bartender view
   // (the switch or the ?as=bartender link). Null for anyone else. A load error
   // is logged and shows the tab with the not ready line, never hides it.
   const listAllowed = canSeeList(assignment?.status, staff);
-  const shoppingListP = staffListFor(access.session, staff, undefined, assignment?.status ?? null).catch((err) => {
+  const shoppingListP = planning ? Promise.resolve(null) : staffListFor(access.session, staff, undefined, assignment?.status ?? null).catch((err) => {
     console.error(`[shopping list] ${id}: could not load, showing not ready:`, err);
     return listAllowed ? notReadyView({ sessionId: id }) : null;
   });
   // Order window: the person's own, once accepted (any role). Never breaks the page.
   const orderWindowP =
-    assignment?.status === "accepted"
+    assignment?.status === "accepted" && !planning
       ? orderWindowView(access.session, staff.id).catch((err) => {
           console.error(`[order window] ${id}: could not load:`, err);
           return null;

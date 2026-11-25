@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { isPlanning } from "@/lib/planning";
+import { teamRows } from "@/lib/team/team-sessions";
 import { timed } from "@/lib/timing";
 import { supabase } from "@/lib/supabase";
 import type { SessionRow } from "@/lib/event-updates";
@@ -62,7 +64,7 @@ async function AdminEventsPage({
       }
       return prefs;
     }),
-    supabase.from("sessions").select("*").eq("status", "submitted"),
+    supabase.from("sessions").select("*").in("status", ["submitted", "in_progress"]),
     hiddenEventIds(),
     view === "hidden" ? null : supabase.from("shift_posts").select("session_id, kind").eq("status", "posted"),
     // Finished but not saved, and booked with a past date. Never breaks the page.
@@ -81,7 +83,7 @@ async function AdminEventsPage({
   ]);
   const layout = pickLayout(params.layout, prefs.staffingLayout);
   const calendar = view === "upcoming" && layout === "calendar";
-  const allSessions = (data as SessionRow[]) ?? [];
+  const allSessions = teamRows((data as SessionRow[]) ?? []);
   const today = chicagoToday();
 
   if (view === "hidden") {
@@ -118,16 +120,18 @@ async function AdminEventsPage({
   };
   // The calendar gets every market and date: it has its own market filter and navigation.
   const sessions = calendar ? visible : (marketFilter ? visible.filter((s) => sessionMarket(s) === marketFilter) : visible).filter(inRange);
+  // Unfinished bookings have no Shopping list, menu or ice yet (lib/planning.ts).
+  const finished = sessions.filter((s) => !isPlanning(s));
   const [counts, unread, availability, orders, heldLists, menus, requests, noMenu, noIce] = await Promise.all([
     staffingByEvent(sessions),
     unreadByEvent(admin.id, sessions.map((s) => s.id)),
     view === "upcoming" ? availableCounts(sessions) : Promise.resolve(new Map<string, number | null>()),
-    orderStatuses(sessions),
+    orderStatuses(finished),
     sessionsWithPendingHolds(sessions.map((s) => s.id)),
     pickupBadges(sessions.map((s) => s.id)),
     sessionsWithPendingRequests(sessions.map((s) => s.id)),
-    menuMissingIds(sessions),
-    iceUnassignedIds(sessions),
+    menuMissingIds(finished),
+    iceUnassignedIds(finished),
   ]);
   const { data: postRows, error: postErr } = postRead ?? { data: null, error: null };
   const posted = new Set(postErr ? [] : ((postRows as { session_id: string; kind: string }[]) ?? []).filter((p) => p.kind === "open").map((p) => p.session_id));

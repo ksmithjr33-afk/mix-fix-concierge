@@ -21,6 +21,7 @@ import type { SheetRecipe } from "@/lib/order-sheet";
 import { withDrinkEdits } from "@/lib/team/event-view";
 import { isAdminRole } from "@/lib/team/roles";
 import { eventRoleOf, nameWithRole, workingAsText } from "@/lib/team/event-roles";
+import { getTeamSession } from "@/lib/team/team-sessions";
 
 /** The staff member's assignment to an event. Null when there is none, or before the assignments table exists. */
 export async function getAssignment(sessionId: string, staffId: string): Promise<AssignmentLike | null> {
@@ -58,6 +59,9 @@ async function teammates(sessionId: string, staffId: string, people?: { id: stri
   return (people ?? (await onEventRoles(sessionId))).filter((s) => s.id !== staffId && !!firstName(s.name)).map((s) => nameWithRole(firstName(s.name), s.role));
 }
 
+export { getTeamSession };
+
+/** A submitted event only: for what waits on the client finishing (lists, menu, order window). */
 export async function getSubmittedSession(sessionId: string): Promise<SessionRow | null> {
   const { data, error } = await supabase.from("sessions").select("*").eq("id", sessionId).maybeSingle();
   if (error || !data) return null;
@@ -82,8 +86,9 @@ export type EventAccess =
   | { ok: false; reason: "not_found" | "not_assigned" }
   | { ok: true; session: SessionRow };
 
+/** Staff and admins open finished events and unfinished bookings that show on the team side (lib/planning.ts). */
 export async function openEvent(sessionId: string, staff: StaffMember): Promise<EventAccess> {
-  const session = await getSubmittedSession(sessionId);
+  const session = await getTeamSession(sessionId);
   if (!session) return { ok: false, reason: "not_found" };
   const assignment = isAdminRole(staff.role) ? null : await getAssignment(sessionId, staff.id);
   return canOpenEvent(staff, assignment) ? { ok: true, session } : { ok: false, reason: "not_assigned" };

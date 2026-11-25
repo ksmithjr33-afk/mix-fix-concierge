@@ -80,6 +80,8 @@ export interface StaffEventView {
   serviceStart: string;
   serviceEnd: string;
   address: string;
+  city: string; // "Dallas, TX" from the booking, only while there is no address
+  planning: boolean; // the client has not finished planning: what the booking gave us, with a banner
   mapsUrl: string | null;
   venueType: string;
   barSetting: string;
@@ -123,6 +125,7 @@ export interface SessionLike {
   booked_price?: { bartenders?: number | null; source?: string | null; tip_jar?: boolean | null } | null;
   team_market?: string | null;
   pricing_model?: string | null;
+  status?: string | null; // "in_progress": the client has not finished planning (lib/planning.ts)
   tip_jar?: boolean | null; // the booking's tip_jar, as sent
 
   package_extras?: unknown; // the Team tab's bartenders needed (lib/team/staffing-fix.ts)
@@ -286,6 +289,8 @@ export function buildStaffEventView(
     serviceStart: s.startMin === null ? text(ed.bar_service_start) : formatClock(s.startMin),
     serviceEnd: s.endMin === null ? text(ed.bar_service_end) : formatClock(s.endMin),
     address,
+    city: address ? "" : scrub(ed.event_city),
+    planning: session.status === "in_progress",
     mapsUrl: address ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}` : null,
     venueType: venueLabel(ed.venue_type),
     barSetting: scrub(ed.indoor_outdoor),

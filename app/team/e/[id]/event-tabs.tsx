@@ -1,5 +1,6 @@
 "use client";
 
+import { PLANNING_PLACEHOLDER } from "@/lib/planning-text";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { StaffEventView } from "@/lib/team/event-view";
 import { CHECKLIST_INTRO, CHECKLIST_TITLE, CONFIRM_LABEL, type ResolvedGroup } from "@/lib/team/checklist-config";
@@ -630,9 +631,9 @@ export default function EventTabs({
         <ClockCard sessionId={view.sessionId} initial={clock} renderedAt={renderedAt} wrapUp={closeout && !wrapped ? () => setTab("wrapup") : undefined} />
       )}
 
-      {orderWindow && <OrderWindowCard initial={orderWindow} justAccepted={justAccepted} />}
+      {!view.planning && orderWindow && <OrderWindowCard initial={orderWindow} justAccepted={justAccepted} />}
 
-      <PrepStrip tools={!!toolsAt} supplies={!!suppliesAt} onOpen={setTab} />
+      {!view.planning && <PrepStrip tools={!!toolsAt} supplies={!!suppliesAt} onOpen={setTab} />}
 
       {runningLow && <RunningLowButton sessionId={view.sessionId} items={runningLow.items} />}
 
@@ -678,6 +679,9 @@ export default function EventTabs({
       </div>
       <div hidden={tab !== "checklist"} className="space-y-4">
         {barReady.show && <BarReadyCard sessionId={view.sessionId} {...barReady} reminder={photoReminder ?? undefined} />}
+        {view.planning ? (
+          <p className="px-1 py-6 text-center text-[15px] text-[#6B5D52]">{PLANNING_PLACEHOLDER}</p>
+        ) : (
         <Checklist
           sessionId={view.sessionId}
           groups={checklist}
@@ -687,8 +691,13 @@ export default function EventTabs({
           timeZone={view.timeZone}
           onConfirmed={setToolsAt}
         />
+        )}
       </div>
       <div hidden={tab !== "shopping"} className="space-y-4">
+        {view.planning ? (
+          <p className="px-1 py-6 text-center text-[15px] text-[#6B5D52]">{PLANNING_PLACEHOLDER}</p>
+        ) : (
+        <>
         {shoppingList && <ListMovedCard onOpen={() => setTab("list")} />}
         <Supplies
           sessionId={view.sessionId}
@@ -700,6 +709,8 @@ export default function EventTabs({
           onConfirmed={setSuppliesAt}
           timeZone={view.timeZone}
         />
+        </>
+        )}
       </div>
       {shoppingList && (
         <div hidden={tab !== "list"}>

@@ -14,7 +14,7 @@ import { firstName, type StaffMember } from "@/lib/team/event-view";
 import { adminEventTitle } from "@/lib/team/event-list";
 import { eventData } from "@/lib/team/markets";
 import { eventSchedule } from "@/lib/team/time";
-import { getSubmittedSession } from "@/lib/team/events";
+import { getTeamSession } from "@/lib/team/events";
 import { pickupStamp } from "@/lib/team/menu-pickup";
 import { confirmUpload, shortLink, signedUploadUrl } from "@/lib/team/direct-upload";
 import { downloadName, typeLabel } from "@/lib/team/approved-menu";
@@ -85,9 +85,9 @@ export async function clientAgreements(sessionIds: string[], viewer: { role: unk
   if (!canSeeAgreements(viewer)) return null;
   const rows = await rowsFor(sessionIds);
   const out: ClientAgreementView[] = [];
-  const sessions = new Map<string, Awaited<ReturnType<typeof getSubmittedSession>>>();
+  const sessions = new Map<string, Awaited<ReturnType<typeof getTeamSession>>>();
   for (const r of rows) {
-    if (!sessions.has(r.session_id)) sessions.set(r.session_id, await getSubmittedSession(r.session_id));
+    if (!sessions.has(r.session_id)) sessions.set(r.session_id, await getTeamSession(r.session_id));
     const s = sessions.get(r.session_id);
     const ed = s ? eventData(s) : {};
     out.push({ ...toView(r, eventSchedule(ed).tz), sessionId: r.session_id, eventTitle: s ? adminEventTitle(ed) : "Event", eventHref: `/team/admin/e/${encodeURIComponent(r.session_id)}?tab=agreement` });
@@ -104,7 +104,7 @@ export async function startAgreementUpload(
   now: Date = new Date()
 ): Promise<Result<{ id: string; uploadUrl: string }>> {
   if (!canSeeAgreements(admin)) return ADMINS_ONLY;
-  const session = await getSubmittedSession(sessionId);
+  const session = await getTeamSession(sessionId);
   if (!session) return { ok: false, error: "We could not find that event.", status: 404 };
   const bad = agreementFileError(file);
   if (bad) return { ok: false, error: bad, status: 400 };
@@ -145,7 +145,7 @@ export async function finishAgreementUpload(admin: StaffMember, fileId: string, 
   const { data } = await supabase.from("event_agreements").select("*").eq("id", fileId).maybeSingle();
   const row = data as AgreementRow | null;
   if (!row || row.status !== "pending") return { ok: false, error: "We could not find that upload. Try again.", status: 404 };
-  const session = await getSubmittedSession(row.session_id);
+  const session = await getTeamSession(row.session_id);
   if (!session) return { ok: false, error: "We could not find that event.", status: 404 };
   const stored = await confirmUpload(AGREEMENT_BUCKET, row.file_path, { types: AGREEMENT_FILE_TYPES, maxBytes: AGREEMENT_MAX_BYTES });
   if (!stored.ok) {
@@ -185,7 +185,7 @@ export async function agreementLink(viewer: { role: unknown }, fileId: string, d
   const { data } = await supabase.from("event_agreements").select("*").eq("id", fileId).maybeSingle();
   const row = data as AgreementRow | null;
   if (!row || row.status !== "current") return null;
-  const session = download ? await getSubmittedSession(row.session_id) : null;
+  const session = download ? await getTeamSession(row.session_id) : null;
   const name = download ? downloadName(`${row.label || "Agreement"} ${session ? adminEventTitle(eventData(session)) : ""}`.trim(), row.file_type) : undefined;
   return shortLink(AGREEMENT_BUCKET, row.file_path, AGREEMENT_LINK_SECONDS, name);
 }

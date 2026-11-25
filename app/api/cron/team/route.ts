@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { teamRows } from "@/lib/team/team-sessions";
 import { sendClockOutReminders, sendLateSetupAlerts } from "@/lib/team/clock-db";
 import { deliverShiftNotices, sendShortShiftAlerts } from "@/lib/team/shifts-db";
 import { ensureMarkets } from "@/lib/team/markets-db";
@@ -18,13 +19,14 @@ import { advanceOffers } from "@/lib/team/offers-db";
 import { autoStartOffers } from "@/lib/team/scorecard-offers-db";
 import { sendOrderWindowReminders } from "@/lib/team/order-window-db";
 import { sendHeldReminders } from "@/lib/team/held-changes-db";
+import { deliverDetailsIn } from "@/lib/planning-db";
 import { supabase } from "@/lib/supabase";
 import type { SessionRow } from "@/lib/event-updates";
 
 /** Work out markets for new events and events whose address changed, a few per run. */
 async function fillMarkets(): Promise<number> {
-  const { data } = await supabase.from("sessions").select("*").eq("status", "submitted");
-  return ensureMarkets((data as SessionRow[]) ?? [], 10);
+  const { data } = await supabase.from("sessions").select("*").in("status", ["submitted", "in_progress"]);
+  return ensureMarkets(teamRows((data as SessionRow[]) ?? []), 10);
 }
 
 export const maxDuration = 60; // up to 10 address lookups a run, one a second on OpenStreetMap
@@ -43,7 +45,7 @@ export async function GET(request: Request) {
   // Shift offers: Automatic markets start offers first, then every live run sends what is due.
   const offerStarts = await Promise.allSettled([autoStartOffers(now)]);
   const offerTexts = await Promise.allSettled([advanceOffers(now)]);
-  const [reminders, alerts, short, shiftTexts, announcementTexts, chatTexts, closeoutTexts, certTexts, supplyTexts, menuTexts, requestTexts, iceTexts, prepTexts, kitSummary, partnerTexts, listReadyTexts, orderWindowTexts, heldTexts] = await Promise.allSettled([
+  const [reminders, alerts, short, shiftTexts, announcementTexts, chatTexts, closeoutTexts, certTexts, supplyTexts, menuTexts, requestTexts, iceTexts, prepTexts, kitSummary, partnerTexts, listReadyTexts, orderWindowTexts, detailsInTexts, heldTexts] = await Promise.allSettled([
     sendClockOutReminders(now),
     sendLateSetupAlerts(now),
     sendShortShiftAlerts(now),
@@ -61,6 +63,7 @@ export async function GET(request: Request) {
     sendHeldPartnerTexts(now), // planner, host and client texts about planners held for quiet hours
     sendListReadyTexts(now), // "the shopping list is ready": once per person per event, held for quiet hours
     sendOrderWindowReminders(now), // order window: one text 24 hours after accepting if still open, one more inside 5 days of the event, never in quiet hours
+    deliverDetailsIn(now), // "Details are in": once per person when the client finishes planning, held for quiet hours
     sendHeldReminders(now), // admin edits not sent to the team: one reminder to the editor after 2 hours, or inside 48 hours of the event; never texts staff
   ]);
   const result = (r: PromiseSettledResult<number>) => (r.status === "fulfilled" ? r.value : `failed: ${String(r.reason)}`);
@@ -85,6 +88,7 @@ export async function GET(request: Request) {
     partnerTexts: result(partnerTexts),
     listReadyTexts: result(listReadyTexts),
     orderWindowTexts: result(orderWindowTexts),
+    detailsInTexts: result(detailsInTexts),
     heldChangeReminders: result(heldTexts),
   };
   console.log("[team-cron]", JSON.stringify(out));

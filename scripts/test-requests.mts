@@ -224,7 +224,7 @@ check("The events list shows a request marker", eventsPage.includes('"change req
 const cal = src("app/team/calendar-view.tsx");
 check("The calendar shows a request marker and explains it", cal.includes("e.request &&") && cal.includes("Change request"));
 const managerPage = src("app/team/admin/e/[id]/page.tsx");
-check("The Client list tab has a count of requests waiting", managerPage.includes("client: pendingHolds.length"));
+check("The Client list tab has a count of requests waiting", managerPage.includes("client: planning ? 0 : pendingHolds.length"));
 const panel = src("app/team/admin/e/[id]/client-list-panel.tsx");
 check("The Client list tab shows the full before and after and the price difference, with Approve and Decline", panel.includes("h.blocks") && panel.includes("Price difference") && panel.includes('act("approve"') && panel.includes('act("decline"') && managerPage.includes("changeBlocks("));
 check("Approve and Decline are admin only on the server", src("app/api/team/admin/client-list/route.ts").includes('!isAdminRole(staff.role)') && src("lib/client-list-actions.ts").includes('!isAdminRole(admin.role)'));

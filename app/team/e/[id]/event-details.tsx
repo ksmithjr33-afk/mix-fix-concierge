@@ -2,6 +2,7 @@
 // No "use client": it has no state, so the manager view renders it on the
 // server and sends no JavaScript for it.
 
+import { PLANNING_BANNER, PLANNING_PLACEHOLDER } from "@/lib/planning-text";
 import type { StaffEventView } from "@/lib/team/event-view";
 
 export const card = "bg-[#F5F0EB] rounded-2xl border border-[#DDD5CC] px-4 py-3 sm:px-5 sm:py-4";
@@ -33,6 +34,11 @@ export function telHref(phone: string): string {
 export function Details({ v, locationExtra }: { v: StaffEventView; locationExtra?: React.ReactNode }) {
   return (
     <div className="space-y-3">
+      {v.planning && (
+        <p className="rounded-2xl border-2 border-[#E0B04A] bg-[#FFF8EC] px-4 py-3 text-[15px] font-medium text-[#8A5A12]" data-planning-banner>
+          {PLANNING_BANNER}
+        </p>
+      )}
       <WhatChanged v={v} />
 
       {v.workingAs && (
@@ -66,6 +72,7 @@ export function Details({ v, locationExtra }: { v: StaffEventView; locationExtra
             )}
           </Row>
         )}
+        <Row label="City" value={v.city} />
         <Row label="Venue type" value={v.venueType} />
         <Row label="Bar setting" value={v.barSetting} />
         <Row label="Bar on site" value={v.barOnSite} />
@@ -131,6 +138,14 @@ export function WhatChanged({ v }: { v: StaffEventView }) {
 
 /** Signature drinks (or the Dive Bar set menu) and the classics. Read only on both views. */
 export function DrinkSections({ v }: { v: StaffEventView }) {
+  if (v.planning) {
+    return (
+      <section className={card}>
+        <h3 className="font-heading text-base font-bold text-[#2C2420] mb-1">Drinks and recipes</h3>
+        <p className="text-sm text-[#6B5D52]">{PLANNING_PLACEHOLDER}</p>
+      </section>
+    );
+  }
   return (
     <>
       {v.drinks.length > 0 && (

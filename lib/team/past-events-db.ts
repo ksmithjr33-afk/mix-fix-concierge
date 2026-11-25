@@ -8,6 +8,8 @@
 // Search runs here, over every past event the person can see, not just the
 // rows already loaded.
 
+import type { SessionRow } from "@/lib/event-updates";
+import { teamRows } from "@/lib/team/team-sessions";
 import { supabase } from "@/lib/supabase";
 import { eventListItem, type EventListItem, type EventRowSource } from "@/lib/team/event-list";
 import { hiddenEventIds } from "@/lib/team/hidden";
@@ -44,11 +46,11 @@ async function allPastFor(staff: StaffMember, today: string): Promise<{ items: E
   let needs = new Map<string, TeamNeeds>();
   if (admin) {
     const [{ data }, { data: mine }, hidden] = await Promise.all([
-      supabase.from("sessions").select("*").eq("status", "submitted"),
+      supabase.from("sessions").select("*").in("status", ["submitted", "in_progress"]),
       supabase.from("event_assignments").select("session_id, status").eq("staff_id", staff.id),
       hiddenEventIds(),
     ]);
-    const rows = withoutHidden((data as EventRowSource[]) ?? [], hidden);
+    const rows = withoutHidden(teamRows((data as SessionRow[]) ?? []) as unknown as EventRowSource[], hidden);
     const own = new Map(((mine as { session_id: string; status: string }[]) ?? []).map((a) => [a.session_id, a.status]));
     items = rows.map((r) => ({ ...eventListItem(r, own.get(r.id), { admin: true }), href: `/team/admin/e/${r.id}` }));
     needs = new Map(rows.map((r) => [r.id, needsOf(r)]));

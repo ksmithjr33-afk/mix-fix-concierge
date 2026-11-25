@@ -304,7 +304,9 @@ export async function sendOrderWindowReminders(now: Date = new Date()): Promise<
     const s = staff.get(i.assignment.staff_id);
     if (!s?.phone) continue;
     const keys = { first: noticeKey("first", i.session.id, s.id), urgent: noticeKey("urgent", i.session.id, s.id) };
-    const due = reminderDue({ respondedAt: i.assignment.responded_at, eventYmd: i.day, now, sent: { first: sentKeys.has(keys.first), urgent: sentKeys.has(keys.urgent) } });
+    // Asked from when they accepted, or from when the client finished planning if they accepted before that.
+    const asked = [i.assignment.responded_at, i.session.submitted_at].filter((x): x is string => !!x).sort().at(-1) ?? null;
+    const due = reminderDue({ respondedAt: asked, eventYmd: i.day, now, sent: { first: sentKeys.has(keys.first), urgent: sentKeys.has(keys.urgent) } });
     if (!due) continue;
     if (inQuietHours(now, marketTz(staffMarketsOf(s)[0] ?? null))) continue;
     if (!(await claimNotice(keys[due], "order_window"))) continue;

@@ -521,5 +521,5 @@ export function cityFallback(session: Record<string, unknown>): string {
 export function priceCheckAlertText(b: Booking, sessionId: string, reason: string, link: string): string {
   const who = [b.name ?? b.email, b.eventDate, b.packageType].filter(Boolean).join(", ");
   const model = b.pricingModel === "service_fee" ? "service fee model" : "gratuity model";
-  return `Price needs a check on a new booking: ${who || `session ${sessionId}`}. Saved on the ${model}. ${reason} The event page opens once the client finishes the concierge: ${link}`;
+  return `Price needs a check on a new booking: ${who || `session ${sessionId}`}. Saved on the ${model}. ${reason} Event page: ${link}`;
 }

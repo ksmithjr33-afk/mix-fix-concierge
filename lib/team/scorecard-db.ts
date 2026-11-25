@@ -9,6 +9,8 @@
 // Before the migration runs every read comes back empty (ready: false) and
 // every write says to run it. No staff page, text or export imports this file.
 
+import { showsOnTeam } from "@/lib/planning";
+import { teamRows } from "@/lib/team/team-sessions";
 import { supabase } from "@/lib/supabase";
 import type { SessionRow } from "@/lib/event-updates";
 import type { StaffMember } from "@/lib/team/event-view";
@@ -312,7 +314,7 @@ async function workedLines(viewer: StaffMember, staffIds?: string[]) {
   const [{ rows: asg }, hidden] = await Promise.all([rows<AsgWithSession>(q), hiddenEventIds()]);
   return asg.flatMap((a) => {
     const s = one(a.session);
-    if (!s || s.status !== "submitted" || hidden.has(a.session_id) || a.staff_id === viewer.id) return [];
+    if (!s || !showsOnTeam(s) || hidden.has(a.session_id) || a.staff_id === viewer.id) return [];
     const sch = eventSchedule(eventData(s));
     const end = sch.end ?? sch.start;
     return end ? [{ assignmentId: a.id, sessionId: a.session_id, staffId: a.staff_id, end, session: s }] : [];
@@ -413,7 +415,7 @@ async function workedOn(sessionId: string, staffId: string): Promise<{ session: 
     rows<{ id: string; status: string }>(supabase.from("event_assignments").select("id, status").eq("session_id", sessionId).eq("staff_id", staffId)),
   ]);
   const session = s[0];
-  if (!session || session.status !== "submitted" || a[0]?.status !== "accepted") return null;
+  if (!session || !showsOnTeam(session) || a[0]?.status !== "accepted") return null;
   const sch = eventSchedule(eventData(session));
   return { session, end: sch.end ?? sch.start, assignmentId: a[0].id };
 }
@@ -608,8 +610,8 @@ export async function callsView(viewer: StaffMember, now: Date = new Date()): Pr
   if (!canScore(viewer)) return null;
   const today = chicagoToday(now);
   const end = new Date(Date.UTC(+today.slice(0, 4), +today.slice(5, 7) - 1, +today.slice(8, 10) + CALL_DAYS - 1)).toISOString().slice(0, 10);
-  const [{ rows: sessions }, hidden, staff] = await Promise.all([rows<SessionRow>(supabase.from("sessions").select("*").eq("status", "submitted")), hiddenEventIds(), listStaff()]);
-  const upcoming = sessions
+  const [{ rows: sessions }, hidden, staff] = await Promise.all([rows<SessionRow>(supabase.from("sessions").select("*").in("status", ["submitted", "in_progress"])), hiddenEventIds(), listStaff()]);
+  const upcoming = teamRows(sessions)
     .filter((s) => !hidden.has(s.id))
     .map((s) => ({ s, day: dayOf(s) }))
     .filter((x) => x.day && x.day >= today && x.day <= end)

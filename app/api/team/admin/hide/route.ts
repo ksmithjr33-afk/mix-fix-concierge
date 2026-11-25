@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getCurrentStaff } from "@/lib/team/auth";
-import { getSubmittedSession } from "@/lib/team/events";
+import { getTeamSession } from "@/lib/team/events";
 import { hideEvent, unhideEvent } from "@/lib/team/hidden";
 import { isAdminRole } from "@/lib/team/roles";
 
@@ -10,7 +10,7 @@ async function setup(request: Request) {
   if (!isAdminRole(staff.role)) return { error: NextResponse.json({ error: "Admins only." }, { status: 403 }) };
   const { sessionId } = await request.json().catch(() => ({}));
   if (typeof sessionId !== "string") return { error: NextResponse.json({ error: "Bad request" }, { status: 400 }) };
-  const session = await getSubmittedSession(sessionId);
+  const session = await getTeamSession(sessionId);
   if (!session) return { error: NextResponse.json({ error: "We could not find that event." }, { status: 404 }) };
   return { staff, sessionId };
 }

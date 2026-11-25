@@ -102,7 +102,7 @@ export function shiftSummary(session: SessionLike, post: Pick<PostRow, "id" | "k
     arrival: s.arrivalMin === null ? "" : formatClock(s.arrivalMin),
     serviceStart: s.startMin === null ? "" : formatClock(s.startMin),
     serviceEnd: s.endMin === null ? "" : formatClock(s.endMin),
-    city: cityFrom(ed.event_address) || marketLabel(post.market),
+    city: cityFrom(ed.event_address) || scrub(ed.event_city).split(",")[0].trim() || marketLabel(post.market),
     market: marketLabel(post.market),
     eventType: scrub(ed.event_type) || "Event",
     guestCount: guestCount(ed, session),

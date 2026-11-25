@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getCurrentStaff } from "@/lib/team/auth";
-import { getSubmittedSession } from "@/lib/team/events";
+import { getTeamSession } from "@/lib/team/events";
 import { assignmentRef } from "@/lib/team/clock-db";
 import { photoTypeOf } from "@/lib/team/venue-photos";
 import { canManageReceipts } from "@/lib/team/receipts";
@@ -22,7 +22,7 @@ export async function POST(request: Request) {
     const body = multipart ? null : ((await request.json().catch(() => null)) as Record<string, unknown> | null);
     const sessionId = form ? form.get("sessionId") : body?.sessionId;
     if (typeof sessionId !== "string" || !sessionId) return NextResponse.json({ error: "Bad request" }, { status: 400 });
-    const session = await getSubmittedSession(sessionId);
+    const session = await getTeamSession(sessionId);
     if (!session) return NextResponse.json({ error: "We could not find that event." }, { status: 404 });
     const assignment = await assignmentRef(sessionId, staff.id);
 

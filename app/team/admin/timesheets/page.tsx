@@ -8,7 +8,7 @@ import TeamHeader from "../../team-header";
 import TimesheetWeek from "./timesheet-week";
 import { rowRates } from "@/lib/team/pay-db";
 import { payoutFrom } from "@/lib/team/payout-db";
-import { getSubmittedSession } from "@/lib/team/events";
+import { getTeamSession } from "@/lib/team/events";
 import PayoutCard from "../payout-card";
 
 export const dynamic = "force-dynamic";
@@ -27,7 +27,7 @@ export default async function TimesheetsPage({
   const all = await timesheetRows(week.from, week.to);
   // From the manager view's Time clock card: just that event, with the same rows the week shows.
   const rows = eventId ? all.filter((r) => r.sessionId === eventId) : all;
-  const [rates, session] = await Promise.all([Object.fromEntries(await rowRates(me, rows)), eventId ? getSubmittedSession(eventId) : null]);
+  const [rates, session] = await Promise.all([Object.fromEntries(await rowRates(me, rows)), eventId ? getTeamSession(eventId) : null]);
   // The Payout card for one event, from the same rows. Admins and managers.
   const payout = session ? await payoutFrom(me, session, rows) : null;
 

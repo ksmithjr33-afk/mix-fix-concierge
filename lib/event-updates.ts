@@ -157,7 +157,7 @@ export function stripLegacyFields(eventData: EventData): EventData {
  * write the version 1 history row. Does nothing if the session row does not
  * exist (chats started without a /s link) or was already submitted.
  */
-export async function recordSubmission(sessionId: string, eventData: EventData): Promise<boolean> {
+export async function recordSubmission(sessionId: string, eventData: EventData, opts: { addedByAdmin?: boolean } = {}): Promise<boolean> {
   // select("*"): the booking columns from 20261215 may not exist yet.
   const { data: bookedRow } = await supabase.from("sessions").select("*").eq("id", sessionId).maybeSingle();
   const stripped = stripLegacyFields(eventData);
@@ -191,6 +191,12 @@ export async function recordSubmission(sessionId: string, eventData: EventData):
     applied: true,
   });
   if (insertError) console.error("event_updates version 1 insert error:", insertError);
+  // A booking that was showing as "Planning not finished": tell the assigned staff, work out mileage (lib/planning-db.ts).
+  // Not for an event an admin adds as confirmed, which was never shown unfinished.
+  if (!opts.addedByAdmin && bookedRow && (bookedRow as { status?: unknown }).status === "in_progress") {
+    const { afterPlanningFinished } = await import("@/lib/planning-db");
+    await afterPlanningFinished(bookedRow as Record<string, unknown> & { id: string }, clean);
+  }
   return true;
 }
 

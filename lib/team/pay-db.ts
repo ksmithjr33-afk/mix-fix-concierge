@@ -4,6 +4,7 @@
 // no staff list, chat, or teammate lookup can carry them. Bartender pages only
 // ever call the functions here with the signed in person's own id.
 
+import { isPlanning } from "@/lib/planning";
 import { supabase } from "@/lib/supabase";
 import type { StaffMember } from "@/lib/team/event-view";
 import { eventData } from "@/lib/team/markets";
@@ -423,6 +424,10 @@ function toInput(stored: MileageRow | undefined, live: { miles: number | null; r
 /** Mileage input for each person on an event: stored when they accepted, else live. */
 async function mileageInputs(session: SessionRow, staffIds: string[]): Promise<Map<string, MilesInput>> {
   const stored = await mileageRows(session.id);
+  if (isPlanning(session)) {
+    // No address until the client finishes planning: nothing live from the booked city (lib/planning.ts).
+    return new Map(staffIds.map((id) => [id, { ...toInput(stored.get(id), undefined, true), ...(stored.get(id)?.locked_at ? {} : { reason: "awaiting_address" as const }) }]));
+  }
   const needLive = staffIds.filter((id) => !stored.get(id)?.locked_at);
   const live = needLive.length ? await homeMiles(session, needLive) : { event: true, byStaff: new Map() };
   return new Map(staffIds.map((id) => [id, toInput(stored.get(id), live.byStaff.get(id), live.event)]));
@@ -467,7 +472,8 @@ export async function lockMileage(sessionId: string, staffId: string, now: Date 
     const { data: existing } = await supabase.from("assignment_mileage").select("assignment_id, locked_at").eq("assignment_id", asg.id).maybeSingle();
     if ((existing as { locked_at: string | null } | null)?.locked_at) return;
     const { data: s } = await supabase.from("sessions").select("*").eq("id", sessionId).maybeSingle();
-    if (!s) return;
+    // The client has not finished planning: no address yet, so mileage waits for it (lib/planning-db.ts).
+    if (!s || isPlanning(s as SessionRow)) return;
     const miles = await milesToStore(s as SessionRow, staffId);
     await supabase.from("assignment_mileage").upsert({ assignment_id: asg.id, session_id: sessionId, staff_id: staffId, ...miles, locked_at: now.toISOString() }, { onConflict: "assignment_id" });
   } catch (err) {

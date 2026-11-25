@@ -6,6 +6,7 @@
 // accepted. Clock times are the corrected ones the Time page and payroll use
 // (an admin correction there changes the counts here).
 
+import { asTeamRow, showsOnTeam } from "@/lib/planning";
 import { supabase } from "@/lib/supabase";
 import type { SessionRow } from "@/lib/event-updates";
 import { eventData } from "@/lib/team/markets";
@@ -79,8 +80,8 @@ export async function recordFacts(staffIds: string[], now: Date = new Date()): P
     }
     if (a.status !== "accepted" || hidden.has(a.session_id)) continue;
     const s = Array.isArray(a.session) ? a.session[0] : a.session;
-    if (!s || s.status !== "submitted") continue;
-    const when = eventOver(s);
+    if (!s || !showsOnTeam(s)) continue;
+    const when = eventOver(asTeamRow(s));
     if (!when || when.end.getTime() > now.getTime()) continue; // not worked yet
     const k = key(a.staff_id, a.session_id);
     const e: WorkedEvent = { sessionId: a.session_id, ...when, clockIn: clockIns.get(k) ?? null, clockOut: clockOuts.get(k) ?? null, barReadyAt: firstBar.get(k) ?? null, closeout: closed.has(k) };

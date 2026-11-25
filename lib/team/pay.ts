@@ -343,12 +343,13 @@ export type MileageLine =
   | { state: "paid"; oneWayMiles: number; paidMiles: number; cents: number; source: MilesSource; california: boolean; locked: boolean; adjustedBy: string | null; note: string | null }
   | { state: "no_address" } // no home address on file
   | { state: "not_found" } // an address, but it could not be found on the map
-  | { state: "no_event_location" };
+  | { state: "no_event_location" }
+  | { state: "awaiting_address" }; // the client has not finished planning: worked out once the address arrives
 
 /** A stored or live distance, with any admin adjustment applied. */
 export interface MilesInput {
   oneWayMiles: number | null; // null: no home address (or no event location, see reason)
-  reason?: "no_address" | "not_found" | "no_event_location";
+  reason?: "no_address" | "not_found" | "no_event_location" | "awaiting_address";
   source: MilesSource;
   locked: boolean; // stored when the person accepted
   overrideMiles?: number | null; // one way miles an admin or manager set
@@ -380,6 +381,9 @@ export function mileageLine(m: MilesInput, s: MileageSettings, california: boole
   };
 }
 
+/** The client has not finished planning, so there is no address yet (lib/planning.ts). */
+export const AWAITING_ADDRESS_TEXT = "Mileage is worked out once the address arrives.";
+
 /** Miles worked out live (an open shift, an offer): straight line, not yet driving miles. */
 export const APPROXIMATE = "approximate";
 
@@ -388,6 +392,7 @@ export function mileageText(l: MileageLine): string {
   if (l.state === "no_address") return NO_ADDRESS_TEXT;
   if (l.state === "not_found") return "We could not find your home address on the map. Check it on your profile.";
   if (l.state === "no_event_location") return "Mileage not available yet";
+  if (l.state === "awaiting_address") return AWAITING_ADDRESS_TEXT;
   const paid = `${l.paidMiles} paid ${l.paidMiles === 1 ? "mile" : "miles"}`;
   const parts = [`${l.oneWayMiles} one way`, MILES_SOURCE_LABEL[l.source]];
   if (!l.locked && l.source === "straight_line") parts.push(APPROXIMATE); // not on the event yet: no driving call made

@@ -6,6 +6,7 @@
 // client_id), and nobody can edit or approve their own time (check
 // constraints on time_edits and time_approvals).
 
+import { teamRows } from "@/lib/team/team-sessions";
 import { supabase } from "@/lib/supabase";
 import type { SessionRow } from "@/lib/event-updates";
 import { firstName, type StaffMember } from "@/lib/team/event-view";
@@ -247,13 +248,14 @@ export async function sendLateSetupAlerts(now: Date = new Date()): Promise<numbe
   const ids = [...new Set((rows as { session_id: string }[]).map((r) => r.session_id))];
   if (ids.length === 0) return 0;
   const hidden = await hiddenEventIds();
-  const { data: sessions } = await supabase.from("sessions").select("*").in("id", ids).eq("status", "submitted");
+  const { data: sessionRows } = await supabase.from("sessions").select("*").in("id", ids);
+  const sessions = teamRows((sessionRows as SessionRow[]) ?? []);
   const { data: ready } = await supabase.from("bar_ready_reports").select("session_id").in("session_id", ids);
   const hasReady = new Set(((ready as { session_id: string }[]) ?? []).map((r) => r.session_id));
   const today = chicagoToday(now);
 
   let sent = 0;
-  for (const s of (sessions as SessionRow[]) ?? []) {
+  for (const s of sessions) {
     if (hidden.has(s.id)) continue;
     const ed = eventData(s);
     if (!lateSetupDue(ed, now, { hasStaff: true, hasBarReady: hasReady.has(s.id) })) continue;

@@ -2,6 +2,7 @@
 // Looks back 30 days. Reads each conversation's messages to see whether the
 // closing line went out anywhere in it, not only as the last message.
 
+import { waitingOnClient, type WaitingOnClient } from "@/lib/planning";
 import { supabase } from "@/lib/supabase";
 import { hiddenEventIds } from "@/lib/team/hidden";
 import { allClientRows } from "@/lib/client-history-db";
@@ -23,6 +24,7 @@ export interface SaveAlerts {
   priceCheck: PriceCheckAlert[]; // bookings saved with "Price needs a check"
   guestCount: GuestCountAlert[]; // guest count differs from the booking with no price change applied or pending
   orderWindows: OrderWindowAlert[]; // upcoming events with someone's order window still needed
+  waiting: WaitingOnClient[]; // upcoming bookings the client has not finished planning (lib/planning.ts)
 }
 
 export interface GuestCountAlert {
@@ -34,7 +36,7 @@ export interface GuestCountAlert {
 /** `sharedRows` lets the Staffing page share its one read of every session with the repeat client tags. */
 export async function saveAlerts(now: Date = new Date(), sharedRows?: Promise<ClientRow[]>): Promise<SaveAlerts> {
   const since = new Date(now.getTime() - LOOKBACK_DAYS * 86_400_000).toISOString();
-  const [logsRes, submittedRes, hidden, clientRows, pricePending, priceCheck, orderWindows] = await Promise.all([
+  const [logsRes, submittedRes, hidden, clientRows, pricePending, priceCheck, orderWindows, planningRes] = await Promise.all([
     supabase.from("conversation_logs").select("session_id, client_name, status, updated_at, messages").gte("updated_at", since),
     supabase.from("sessions").select("id, name, status, event_data, event_date, submitted_at, created_at, guest_count, price_pending").eq("status", "submitted").gte("submitted_at", since),
     hiddenEventIds(),
@@ -45,6 +47,7 @@ export async function saveAlerts(now: Date = new Date(), sharedRows?: Promise<Cl
       console.error("[order window] alerts failed:", err);
       return [] as OrderWindowAlert[];
     }),
+    supabase.from("sessions").select("id, name, email, status, event_date, created_at, booked_on").eq("status", "in_progress"),
   ]);
   if (logsRes.error) throw new Error(`conversation_logs read failed: ${logsRes.error.message}`);
   if (submittedRes.error) throw new Error(`sessions read failed: ${submittedRes.error.message}`);
@@ -74,5 +77,6 @@ export async function saveAlerts(now: Date = new Date(), sharedRows?: Promise<Cl
         return flag ? [{ sessionId: s.id, name: String(s.event_data?.client_name ?? s.name ?? "Unknown client"), text: flag.text }] : [];
       }),
     orderWindows,
+    waiting: planningRes.error ? [] : waitingOnClient((planningRes.data as { id: string }[]) ?? [], hidden, now),
   };
 }

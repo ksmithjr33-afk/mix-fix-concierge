@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getCurrentStaff } from "@/lib/team/auth";
-import { getSubmittedSession } from "@/lib/team/events";
+import { getTeamSession } from "@/lib/team/events";
 import { cancelHandoff, respondHandoff, startHandoff } from "@/lib/team/shifts-db";
 
 // Shift handoffs, bartender side.
@@ -14,7 +14,7 @@ export async function POST(request: Request) {
     const body = await request.json().catch(() => ({}));
     if (body.action === "start") {
       if (typeof body.sessionId !== "string") return NextResponse.json({ error: "Bad request" }, { status: 400 });
-      const session = await getSubmittedSession(body.sessionId);
+      const session = await getTeamSession(body.sessionId);
       if (!session) return NextResponse.json({ error: "We could not find that event." }, { status: 404 });
       const r = await startHandoff(session, staff, { mode: body.mode, reason: body.reason, teammateId: body.teammateId });
       if (!r.ok) return NextResponse.json({ error: r.error }, { status: r.status });

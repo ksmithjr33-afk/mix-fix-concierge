@@ -353,8 +353,10 @@ check("Card: a gratuity event reads Gratuity model with no split", (() => { cons
 resetSf();
 await post(JSON.stringify(base));
 const flaggedId = String(sess().id);
+// The database defaults the in-memory one does not have: status in_progress, created_at now.
+Object.assign(sess(), { status: "in_progress", created_at: new Date().toISOString() });
 const listed = await pcdb.priceCheckList();
-check("Flagged bookings are listed for the admins, not yet openable before the concierge", listed.length === 1 && listed[0].sessionId === flaggedId && listed[0].submitted === false && listed[0].reason === pm.NO_MODEL_CHECK);
+check("Flagged bookings are listed for the admins, and open right away as Planning not finished", listed.length === 1 && listed[0].sessionId === flaggedId && listed[0].submitted === true && listed[0].reason === pm.NO_MODEL_CHECK);
 const kept = await pcdb.confirmPriceCheck(flaggedId, "gratuity", { id: "a1", name: "Owner" });
 s = sess();
 check("Confirm the gratuity model: flag cleared, money unchanged, who confirmed recorded", kept.ok && s.price_check === null && s.price_check_at === null && s.booked_price.total === 1749 && s.booked_price.gratuity === 164 && (s.booked_price.price_confirmed as Record<string, unknown>).by === "Owner");

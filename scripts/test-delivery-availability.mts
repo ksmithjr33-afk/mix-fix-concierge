@@ -141,8 +141,8 @@ check("Not accepted yet is not counted as needed", !team.people.find((p) => p.st
 check("Red inside 5 days", (await owDb.orderWindowsFor(S("near"), [{ staffId: "b1", name: "Taylor", status: "accepted" }], WED)).people[0].urgent);
 check("Hidden on events where we buy nothing", !(await owDb.orderWindowsFor(S("bo"), people, WED)).asks);
 const page = src("app/team/admin/e/[id]/page.tsx");
-const teamPanel = page.slice(page.indexOf("    team: () => {"), page.indexOf("    order: () => ("));
-const orderPanel = page.slice(page.indexOf("    order: () => ("), page.indexOf("    client: () => ("));
+const teamPanel = page.slice(page.indexOf("    team: () => {"), page.indexOf("    order: () => "));
+const orderPanel = page.slice(page.indexOf("    order: () => "), page.indexOf("    client: () => "));
 check("On the Team tab, above the assign panel", teamPanel.includes("<OrderWindowStrip data={orderWindows} />") && teamPanel.indexOf("<OrderWindowStrip") < teamPanel.indexOf("<AssignPanel"));
 check("At the top of the Shopping list tab, above the order sheet", orderPanel.includes("<OrderWindowStrip data={orderWindows} />") && orderPanel.indexOf("<OrderWindowStrip") < orderPanel.indexOf("<OrderSheet"));
 const strip = src("app/team/admin/e/[id]/order-window-strip.tsx");

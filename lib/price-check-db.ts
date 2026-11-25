@@ -8,6 +8,7 @@
 //     is kept; set a gratuity with Edit price if the booking has one.
 // Either way the reason it was flagged stays on booked_price.price_check.
 
+import { showsOnTeam } from "@/lib/planning";
 import { supabase } from "@/lib/supabase";
 import type { BookedPrice } from "@/lib/price-change";
 import type { SessionRow } from "@/lib/event-updates";
@@ -104,7 +105,7 @@ export interface PriceCheckAlert {
 export async function priceCheckList(): Promise<PriceCheckAlert[]> {
   const { data, error } = await supabase
     .from("sessions")
-    .select("id, name, email, status, event_data, price_check, price_check_at")
+    .select("id, name, email, status, event_data, event_date, created_at, price_check, price_check_at")
     .gt("price_check_at", "2000-01-01T00:00:00Z");
   if (error) return [];
   return ((data as (Pick<SessionRow, "id" | "name" | "email" | "status" | "event_data" | "price_check" | "price_check_at">)[]) ?? [])
@@ -114,7 +115,7 @@ export async function priceCheckList(): Promise<PriceCheckAlert[]> {
       name: String(s.event_data?.client_name ?? s.name ?? s.email ?? "Unknown client"),
       reason: s.price_check?.reason ?? "",
       since: s.price_check_at ?? null,
-      submitted: s.status === "submitted",
+      submitted: s.status === "submitted" || showsOnTeam(s as unknown as { id: string; status: string }),
     }))
     .sort((a, b) => String(a.since).localeCompare(String(b.since)));
 }

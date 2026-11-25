@@ -72,7 +72,7 @@ export async function setEventMarket(sessionId: string, market: unknown, admin: 
     .from("sessions")
     .update({ team_market: market, team_market_source: "admin", team_market_set_by: admin.id, team_market_set_at: new Date().toISOString() })
     .eq("id", sessionId)
-    .eq("status", "submitted")
+    .in("status", ["submitted", "in_progress"])
     .select("id");
   if (error) throw new Error(`market save failed: ${error.message}`);
   if (!data || (data as unknown[]).length === 0) return { ok: false, error: "We could not find that event.", status: 404 };

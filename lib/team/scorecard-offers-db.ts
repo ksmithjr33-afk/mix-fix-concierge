@@ -4,6 +4,7 @@
 // page, route, text or export imports this file. Once a run is planned,
 // lib/team/offers-db.ts sends it and never reads the order tables.
 
+import { teamRows } from "@/lib/team/team-sessions";
 import { supabase } from "@/lib/supabase";
 import type { SessionRow } from "@/lib/event-updates";
 import type { StaffMember } from "@/lib/team/event-view";
@@ -134,10 +135,10 @@ export async function autoStartOffers(now: Date = new Date()): Promise<number> {
   const settings = await offerSettings();
   const auto = (Object.entries(settings.modes) as [Market, Mode][]).filter(([m, mode]) => mode === "automatic" && settings.reviewed[m]).map(([m]) => m);
   if (auto.length === 0) return 0;
-  const { data } = await supabase.from("sessions").select("*").eq("status", "submitted");
+  const { data } = await supabase.from("sessions").select("*").in("status", ["submitted", "in_progress"]);
   const hidden = await hiddenEventIds();
   let started = 0;
-  for (const s of (data as SessionRow[]) ?? []) {
+  for (const s of teamRows((data as SessionRow[]) ?? [])) {
     try {
       const market = sessionMarket(s);
       if (!market || !auto.includes(market) || hidden.has(s.id)) continue;

@@ -7,10 +7,11 @@
 // event loses the thread and its texts at once; someone added sees the whole
 // history.
 
+import { teamRows } from "@/lib/team/team-sessions";
 import { supabase } from "@/lib/supabase";
 import type { SessionRow } from "@/lib/event-updates";
 import { firstName, type StaffMember } from "@/lib/team/event-view";
-import { getAssignment, getSubmittedSession } from "@/lib/team/events";
+import { getAssignment, getTeamSession } from "@/lib/team/events";
 import { eventTitle, titleFor } from "@/lib/team/event-list";
 import { eventData } from "@/lib/team/markets";
 import { sendStaffText } from "@/lib/team/sms";
@@ -57,7 +58,7 @@ export function threadLink(sessionId: string): string {
 
 /** Admins, and staff assigned to the event and not declined. */
 export async function threadAccess(sessionId: string, staff: StaffMember): Promise<ThreadAccess> {
-  const session = await getSubmittedSession(sessionId);
+  const session = await getTeamSession(sessionId);
   if (!session) return { ok: false, reason: "not_found" };
   const status = isAdminRole(staff.role) ? null : ((await getAssignment(sessionId, staff.id))?.status ?? null);
   return canUseThread(staff, status) ? { ok: true, session } : { ok: false, reason: "not_assigned" };
@@ -277,7 +278,7 @@ export async function mutedChats(staffId: string): Promise<Set<string>> {
 /** Admins only: mute or unmute an event's chat for themselves. */
 export async function setChatMuted(sessionId: string, staff: StaffMember, muted: boolean): Promise<Result<{ muted: boolean }>> {
   if (!isAdminRole(staff.role)) return { ok: false, error: "Only admins can mute a chat.", status: 403 };
-  if (!(await getSubmittedSession(sessionId))) return { ok: false, error: "We could not find that event.", status: 404 };
+  if (!(await getTeamSession(sessionId))) return { ok: false, error: "We could not find that event.", status: 404 };
   const { error } = muted
     ? await supabase.from("event_chat_mutes").upsert({ session_id: sessionId, staff_id: staff.id }, { onConflict: "session_id,staff_id", ignoreDuplicates: true })
     : await supabase.from("event_chat_mutes").delete().eq("session_id", sessionId).eq("staff_id", staff.id);
@@ -324,10 +325,10 @@ export async function chatInbox(staff: StaffMember, now: Date = new Date()): Pro
   if (entries.length === 0) return empty;
   const ids = entries.map((e) => e.sessionId);
   const [{ data: sessions }, people] = await Promise.all([
-    supabase.from("sessions").select("id, status, event_date, event_data").in("id", ids),
+    supabase.from("sessions").select("*").in("id", ids),
     staffMap([...new Set(entries.map((e) => e.latest.staff_id).filter((x): x is string => !!x))]),
   ]);
-  const byId = new Map(((sessions as (SessionRow & { status: string })[]) ?? []).filter((s) => s.status === "submitted").map((s) => [s.id, s]));
+  const byId = new Map(teamRows((sessions as SessionRow[]) ?? []).map((s) => [s.id, s]));
   const chats: InboxChat[] = [];
   for (const e of entries) {
     const s = byId.get(e.sessionId);

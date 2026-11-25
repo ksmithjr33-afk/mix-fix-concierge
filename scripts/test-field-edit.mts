@@ -241,7 +241,7 @@ const page = src("app/team/admin/e/[id]/page.tsx");
 const ui = src("app/team/admin/e/[id]/editable-details.tsx");
 const bulk = src("app/team/admin/e/[id]/edit-event.tsx");
 check("Admins and managers only: the page checks admin first, the route checks again", page.indexOf("await requireAdmin(") > 0 && page.indexOf("await requireAdmin(") < page.indexOf("<EditableDetails") && src("app/api/team/admin/event-edit/route.ts").includes("isAdminRole("));
-check("Hidden events are not edited in place", page.includes("{hidden ? (") && page.indexOf("<Details v={v} />") < page.indexOf("<EditableDetails"));
+check("Hidden events are not edited in place", page.includes("{hidden || planning ? (") && page.indexOf("<Details v={v} />") < page.indexOf("<EditableDetails"));
 check("Each save posts one field to the same route as Edit everything", ui.includes('fetch("/api/team/admin/event-edit"') && ui.includes("changes: { [field]: value }") && ui.includes("version: ver") && bulk.includes('fetch("/api/team/admin/event-edit"'));
 check("Only one field is open at a time", ui.includes("useState<AdminEditField | null>(null)") && ui.includes("if (dirty && open !== row.field && !window.confirm(LEAVE_MESSAGE)) return;"));
 check("Leaving the page with an unsaved field asks first", ui.includes('addEventListener("beforeunload"') && ui.includes('closest?.("a[href]")') && ui.includes("window.confirm(LEAVE_MESSAGE)"));

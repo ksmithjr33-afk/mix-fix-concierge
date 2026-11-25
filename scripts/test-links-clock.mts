@@ -54,7 +54,7 @@ check("The event page has the event details anchor", src("app/s/update-mode.tsx"
 const page = src("app/team/admin/e/[id]/page.tsx");
 const card = src("app/team/admin/e/[id]/client-links-card.tsx");
 check("The Details tab shows the Client links card with Copy and Open", page.includes("<ClientLinksCard") && card.includes("Client links") && card.includes("<CopyButton") && card.includes(">\n          Open\n"));
-check("The card is fed only by clientLinks with the signed in admin", page.includes("clientLinks(session, me)") && page.includes("{links && ("));
+check("The card is fed only by clientLinks with the signed in admin", page.includes("clientLinks(session, me)") && page.includes("{links && !planning && ("));
 check("The manager view checks admin before anything", page.indexOf("await requireAdmin(") > 0 && page.indexOf("await requireAdmin(") < page.indexOf("clientLinks(session, me)"));
 const importsOf = (p: string) => [...src(p).matchAll(/from "([^"]+)"/g)].map((m) => m[1]);
 const bartenderFiles = ["app/team/e/[id]/page.tsx", "app/team/e/[id]/event-tabs.tsx", "lib/team/event-view.ts", "lib/team/events.ts"];

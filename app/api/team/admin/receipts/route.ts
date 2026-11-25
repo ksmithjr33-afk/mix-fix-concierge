@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getCurrentStaff } from "@/lib/team/auth";
-import { getSubmittedSession } from "@/lib/team/events";
+import { getTeamSession } from "@/lib/team/events";
 import { canApproveReceipts, MANAGERS_CANNOT_APPROVE } from "@/lib/team/receipts";
 import { isFullAdmin } from "@/lib/team/roles";
 import { adminReceiptsView, reviewReceipt } from "@/lib/team/receipts-db";
@@ -18,7 +18,7 @@ export async function POST(request: Request) {
     const body = ((await request.json().catch(() => null)) ?? {}) as Record<string, unknown>;
     const r = await reviewReceipt(staff, body);
     if (!r.ok) return NextResponse.json({ error: r.error }, { status: r.status });
-    const session = typeof body.sessionId === "string" ? await getSubmittedSession(body.sessionId) : null;
+    const session = typeof body.sessionId === "string" ? await getTeamSession(body.sessionId) : null;
     const receipts = session ? (await adminReceiptsView(session, staff, []))?.receipts : undefined;
     return NextResponse.json({ ok: true, ...(receipts ? { receipts } : {}) });
   } catch (err) {

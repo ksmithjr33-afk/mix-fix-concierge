@@ -4,6 +4,8 @@
 // blocks or undoes the action that sent it. Bartenders only ever see a posted
 // shift in one of their markets, built by shiftSummary() from an allowlist.
 
+import { teamRows } from "@/lib/team/team-sessions";
+import { showsOnTeam } from "@/lib/planning";
 import { supabase } from "@/lib/supabase";
 import { bartenderRows, type EventRole } from "@/lib/team/event-roles";
 import { assignmentsWithRoles, upsertAssignment } from "@/lib/team/event-roles-db";
@@ -11,7 +13,7 @@ import { lockMileage } from "@/lib/team/pay-db";
 import type { SessionRow } from "@/lib/event-updates";
 import { bartendersNeeded, firstName, type StaffMember } from "@/lib/team/event-view";
 import { eventTitle, adminEventTitle, eventSubtitle } from "@/lib/team/event-list";
-import { alertAdmins, getSubmittedSession } from "@/lib/team/events";
+import { alertAdmins, getTeamSession } from "@/lib/team/events";
 import { claimNotice, hasPunches, siteOrigin } from "@/lib/team/clock-db";
 import { hiddenEventIds, isHidden } from "@/lib/team/hidden";
 import { sendStaffText } from "@/lib/team/sms";
@@ -255,7 +257,7 @@ export async function deliverShiftNotices(now: Date = new Date(), only: { market
   const postInfo = async (id: string) => {
     if (!posts.has(id)) {
       const post = await postById(id);
-      const session = post ? await getSubmittedSession(post.session_id) : null;
+      const session = post ? await getTeamSession(post.session_id) : null;
       const rows = session ? await assignmentsOf(session.id) : [];
       posts.set(id, {
         post,
@@ -398,11 +400,11 @@ export async function postAllUnstaffed(
   market: Market | null = null,
   now: Date = new Date()
 ): Promise<{ posted: number; texted: number; held: number; noMarket: number }> {
-  const { data } = await supabase.from("sessions").select("*").eq("status", "submitted");
+  const { data } = await supabase.from("sessions").select("*").in("status", ["submitted", "in_progress"]);
   const hidden = await hiddenEventIds();
   const out = { posted: 0, texted: 0, held: 0, noMarket: 0 };
   const markets = new Set<Market>();
-  for (const s of (data as SessionRow[]) ?? []) {
+  for (const s of teamRows((data as SessionRow[]) ?? [])) {
     if (hidden.has(s.id) || isPast(s, now) || !eventSchedule(eventData(s)).day) continue;
     if (market && (await ensureMarket(s)) !== market) continue;
     if ((await spotsOpen(s)) <= 0 || (await activeOpenPost(s.id))) continue;
@@ -435,8 +437,8 @@ export async function postSelected(admin: StaffMember, raw: unknown, now: Date =
   const ids = Array.isArray(raw) ? [...new Set(raw.filter((x): x is string => typeof x === "string" && x.length > 0 && x.length < 200))] : [];
   if (ids.length === 0) return fail("Pick at least one event.", 400);
   if (ids.length > SELECT_MAX) return fail(`Pick at most ${SELECT_MAX} events at a time.`, 400);
-  const { data } = await supabase.from("sessions").select("*").in("id", ids).eq("status", "submitted");
-  const byId = new Map(((data as SessionRow[]) ?? []).map((s) => [s.id, s]));
+  const { data } = await supabase.from("sessions").select("*").in("id", ids);
+  const byId = new Map(teamRows((data as SessionRow[]) ?? []).map((s) => [s.id, s]));
   const hidden = await hiddenEventIds();
   const out: SelectedResult = { posted: 0, texted: 0, held: 0, skipped: [] };
   const markets = new Set<Market>();
@@ -481,7 +483,7 @@ export async function unpostShift(postId: string, admin: StaffMember): Promise<R
   const post = await postById(postId);
   if (!post || post.status !== "posted") return fail("This shift is not posted.", 404);
   if (post.kind === "cover") return fail("This is a cover request. Approve or decline the handoff instead.");
-  const session = await getSubmittedSession(post.session_id);
+  const session = await getTeamSession(post.session_id);
   if (!session) return fail("We could not find that event.", 404);
   await closePost(post, session, "unposted", admin.id, "none");
   return { ok: true };
@@ -516,7 +518,7 @@ async function sameDayEvents(staffId: string, shift: ShiftSummary): Promise<Same
   const out: SameDayEvent[] = [];
   for (const a of (data as { session_id: string; session: SessionRow | SessionRow[] | null }[]) ?? []) {
     const s = Array.isArray(a.session) ? a.session[0] : a.session;
-    if (!s || s.id === shift.sessionId || s.status !== "submitted") continue;
+    if (!s || s.id === shift.sessionId || !showsOnTeam(s)) continue;
     const ed = eventData(s);
     const sch = eventSchedule(ed);
     if (sch.day !== shift.day) continue;
@@ -538,7 +540,7 @@ async function sameDayEvents(staffId: string, shift: ShiftSummary): Promise<Same
 async function visiblePost(post: PostRow, staff: StaffFull): Promise<{ session: SessionRow; spots: number } | null> {
   const markets = await staffMarkets(staff.id);
   if (!canSeePost({ ...staff, markets }, post)) return null;
-  const session = await getSubmittedSession(post.session_id);
+  const session = await getTeamSession(post.session_id);
   if (!session || (await isHidden(session.id)) || isPast(session)) return null;
   // Someone who marked the day unavailable does not see the shift.
   if (await isUnavailable(staff.id, eventDayOf(session))) return null;
@@ -740,7 +742,7 @@ export async function approveRequest(admin: StaffMember, postId: string, staffId
   if (!post || post.status !== "posted") return fail("This shift is not posted any more.", 404);
   const req = await myRequestStatus(postId, staffId);
   if (req !== "requested") return fail("That person has not requested this shift.", 404);
-  const session = await getSubmittedSession(post.session_id);
+  const session = await getTeamSession(post.session_id);
   if (!session) return fail("We could not find that event.", 404);
   if (post.kind === "cover") {
     const h = post.handoff_id ? await handoffById(post.handoff_id) : null;
@@ -883,7 +885,7 @@ export async function handoffForTeammate(
 ): Promise<{ handoff: HandoffRow; shift: ShiftSummary; fromName: string; sameDay: SameDayEvent[] } | null> {
   const h = await handoffById(handoffId);
   if (!h || h.mode !== "teammate" || h.to_staff_id !== staff.id || !staff.active) return null;
-  const session = await getSubmittedSession(h.session_id);
+  const session = await getTeamSession(h.session_id);
   if (!session || !sessionMarket(session)) return null;
   const from = await staffById(h.from_staff_id);
   const shift = shiftSummary(session, { id: h.id, kind: "cover", market: sessionMarket(session)! }, 1);
@@ -896,7 +898,7 @@ export async function respondHandoff(handoffId: string, staff: StaffMember, resp
   const h = await handoffById(handoffId);
   if (!h || h.mode !== "teammate" || h.to_staff_id !== staff.id) return fail("This request is not for you.", 403);
   if (h.status !== "asked") return fail("This request was already answered or cancelled.");
-  const session = await getSubmittedSession(h.session_id);
+  const session = await getTeamSession(h.session_id);
   if (!session) return fail("We could not find that event.", 404);
   const from = await staffById(h.from_staff_id);
   const f = facts(session);
@@ -930,7 +932,7 @@ export async function cancelHandoff(handoffId: string, staff: StaffMember): Prom
   const h = await handoffById(handoffId);
   if (!h || h.from_staff_id !== staff.id) return fail("This is not your request.", 403);
   if (!ACTIVE_HANDOFF.includes(h.status)) return fail(h.status === "approved" ? "This handoff was already approved." : "This request is already closed.");
-  await closeHandoff(h, await getSubmittedSession(h.session_id), "cancelled", null);
+  await closeHandoff(h, await getTeamSession(h.session_id), "cancelled", null);
   return { ok: true };
 }
 
@@ -938,7 +940,7 @@ export async function cancelHandoff(handoffId: string, staff: StaffMember): Prom
 export async function declineHandoff(handoffId: string, admin: StaffMember): Promise<Result> {
   const h = await handoffById(handoffId);
   if (!h || !ACTIVE_HANDOFF.includes(h.status)) return fail("This handoff is not open.", 404);
-  const session = await getSubmittedSession(h.session_id);
+  const session = await getTeamSession(h.session_id);
   await closeHandoff(h, session, "admin_declined", admin.id);
   const from = await staffById(h.from_staff_id);
   if (from && session) await sendStaffText(from.phone, from.name, stillOnShiftText({ from: from.name, date: facts(session).date }));
@@ -961,7 +963,7 @@ export async function approveHandoff(handoffId: string, admin: StaffMember, opts
  * no checklist progress, and gets the event page link.
  */
 async function completeHandoff(h: HandoffRow, replacementId: string, admin: StaffMember, opts: { confirmUnavailable?: boolean } = {}): Promise<Result> {
-  const session = await getSubmittedSession(h.session_id);
+  const session = await getTeamSession(h.session_id);
   if (!session) return fail("We could not find that event.", 404);
   const rows = await assignmentsOf(session.id);
   const original = rows.find((a) => a.staff_id === h.from_staff_id);
@@ -1006,7 +1008,7 @@ async function completeHandoff(h: HandoffRow, replacementId: string, admin: Staf
 /** When a bartender declines or is removed, any handoff they had open closes quietly. */
 export async function cancelHandoffsFor(sessionId: string, staffId: string): Promise<void> {
   const h = await activeHandoffRow(sessionId, staffId);
-  if (h) await closeHandoff(h, await getSubmittedSession(sessionId), "cancelled", null);
+  if (h) await closeHandoff(h, await getTeamSession(sessionId), "cancelled", null);
 }
 
 // ----- Cron: posted shifts still short 5 days out -----
@@ -1018,7 +1020,7 @@ export async function sendShortShiftAlerts(now: Date = new Date()): Promise<numb
   let sent = 0;
   for (const post of data as PostRow[]) {
     if (hidden.has(post.session_id)) continue;
-    const session = await getSubmittedSession(post.session_id);
+    const session = await getTeamSession(post.session_id);
     if (!session) continue;
     const short = await spotsOpen(session);
     if (!shortAlertDue(eventData(session), now, short)) continue;

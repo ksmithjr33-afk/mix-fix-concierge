@@ -6,6 +6,8 @@
 // an approval can only be removed by reopen_timesheet_row() (which logs the
 // reopen first), and staff_id always comes from the assignment.
 
+import type { SessionRow } from "@/lib/event-updates";
+import { teamRows } from "@/lib/team/team-sessions";
 import { supabase } from "@/lib/supabase";
 import { eventRoleOf } from "@/lib/team/event-roles";
 import type { StaffMember } from "@/lib/team/event-view";
@@ -99,9 +101,9 @@ async function buildRows(filter: { from: string; to: string } | { assignmentIds:
     const { data: s } = ids.length ? await supabase.from("sessions").select("*").in("id", ids) : { data: [] };
     sessions = (s as SessionLite[]) ?? [];
   } else {
-    const { data: s, error } = await supabase.from("sessions").select("*").eq("status", "submitted");
+    const { data: s, error } = await supabase.from("sessions").select("*").in("status", ["submitted", "in_progress"]);
     if (error) throw new Error(`sessions lookup failed: ${error.message}`);
-    sessions = ((s as SessionLite[]) ?? []).filter((x) => {
+    sessions = (teamRows((s as SessionRow[]) ?? []) as unknown as SessionLite[]).filter((x) => {
       const day = eventDay(edOf(x).event_date);
       return !!day && day >= filter.from && day <= filter.to;
     });
