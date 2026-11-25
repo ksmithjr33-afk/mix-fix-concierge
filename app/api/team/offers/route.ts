@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { getCurrentStaff } from "@/lib/team/auth";
 import { respondToOffer } from "@/lib/team/offers-db";
 
-// A staff member answers a shift offer sent to them: POST { stepId, response: "accept" | "decline" }.
+// A staff member answers a shift offer sent to them: POST { stepId, response: "accept" | "decline" | "withdraw" }.
+// "accept" requests the shift: it waits for an admin or manager to approve.
 // The answer says only what happened to them, never anything about other people.
 export async function POST(request: Request) {
   const staff = await getCurrentStaff();

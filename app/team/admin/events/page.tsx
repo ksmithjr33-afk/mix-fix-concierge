@@ -34,6 +34,8 @@ import { saveAlerts } from "@/lib/unsaved-sessions-db";
 import { allClientRows, eventNumbersFor } from "@/lib/client-history-db";
 import { repeatLabel } from "@/lib/client-history";
 import SaveAlerts from "./save-alerts";
+import RequestsWaiting from "./requests-waiting";
+import { requestsWaiting, type RequestWaiting } from "@/lib/team/offers-db";
 
 export const dynamic = "force-dynamic";
 
@@ -56,6 +58,14 @@ async function AdminEventsPage({
   // One light read of every session, shared by the stale booking alert and the repeat client tags.
   const clientRowsP = view === "hidden" ? null : allClientRows();
   clientRowsP?.catch(() => {});
+  // Shift requests waiting for approval, read alongside the rest. Never breaks the page.
+  const requestsP: Promise<RequestWaiting[]> =
+    view === "hidden"
+      ? Promise.resolve([])
+      : requestsWaiting(admin).catch((err) => {
+          console.error("[offers] requests waiting could not load:", err);
+          return [];
+        });
   // List or calendar: the address bar, else what this admin used last. Read with the events and hidden list.
   const [prefs, { data }, hidden, postRead, alerts, numbers] = await Promise.all([
     getPrefs(admin.id).then(async (prefs) => {
@@ -226,6 +236,7 @@ async function AdminEventsPage({
                 : "Every upcoming event is covered"}
           </p>
         </div>
+        <RequestsWaiting requests={await requestsP} />
         <SaveAlerts alerts={alerts} />
         {!calendar && (
         <nav className="flex flex-wrap gap-1.5 px-1" aria-label="Market">

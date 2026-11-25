@@ -2,7 +2,9 @@
 //
 // An event's open spots are offered to people one at a time, in an order an
 // admin set: by group, then by place in the group, with a head start between
-// places. The first to accept gets the spot. When a group's window ends with
+// places. Taking an offer is a request: it holds one spot until an admin or
+// manager approves it (they are on the event) or passes (the spot opens and
+// offers carry on). Nobody is placed from an offer without approval. When a group's window ends with
 // the spot still open, the next group starts the same way. While two or more
 // spots are open, the first two groups go out together from the start.
 //
@@ -36,8 +38,7 @@ export interface Reviewed {
 export interface OfferSettings {
   headStartMin: number; // daytime minutes between places
   windowMin: number; // daytime minutes per group
-  assignOnAccept: boolean; // weddings and events over holdOverGuests always wait for an admin
-  holdOverGuests: number;
+  holdOverGuests: number; // over this many guests is noted on the request
   startDaysBefore: number; // Automatic starts offers this many days before the event
   modes: Record<Market, Mode>;
   reviewed: Partial<Record<Market, Reviewed>>; // "Order reviewed", needed before Automatic
@@ -46,7 +47,6 @@ export interface OfferSettings {
 export const OFFER_DEFAULTS: OfferSettings = {
   headStartMin: 30,
   windowMin: 180,
-  assignOnAccept: true,
   holdOverGuests: 150,
   startDaysBefore: 30,
   modes: Object.fromEntries(MARKETS.map((m) => [m, "suggest"])) as Record<Market, Mode>,
@@ -78,7 +78,6 @@ export function readOfferSettings(v: unknown): OfferSettings {
   return {
     headStartMin: int(o.headStartMin, 0, 600) ?? OFFER_DEFAULTS.headStartMin,
     windowMin: int(o.windowMin, 15, 1440) ?? OFFER_DEFAULTS.windowMin,
-    assignOnAccept: typeof o.assignOnAccept === "boolean" ? o.assignOnAccept : OFFER_DEFAULTS.assignOnAccept,
     holdOverGuests: int(o.holdOverGuests, 1, 5000) ?? OFFER_DEFAULTS.holdOverGuests,
     startDaysBefore: int(o.startDaysBefore, 1, 365) ?? OFFER_DEFAULTS.startDaysBefore,
     modes,
@@ -97,7 +96,6 @@ export function validateOfferSettings(raw: Record<string, unknown>, current: Off
   if (windowMin === null) return { ok: false, error: "Window per tier: 15 to 1440 daytime minutes." };
   const startDaysBefore = int(raw.startDaysBefore, 1, 365);
   if (startDaysBefore === null) return { ok: false, error: "Start offers: 1 to 365 days before the event." };
-  if (typeof raw.assignOnAccept !== "boolean") return { ok: false, error: "Pick whether to assign on accept." };
   const modesRaw = raw.modes && typeof raw.modes === "object" ? (raw.modes as Record<string, unknown>) : {};
   const modes = { ...current.modes };
   for (const m of MARKETS) {
@@ -106,7 +104,7 @@ export function validateOfferSettings(raw: Record<string, unknown>, current: Off
     if (modesRaw[m] === "automatic" && !current.reviewed[m]) return { ok: false, error: `Review the ${MARKET_NAMES[m]} order and tap "Order reviewed" before switching it to Automatic.` };
     modes[m] = modesRaw[m] as Mode;
   }
-  return { ok: true, value: { ...current, headStartMin, windowMin, startDaysBefore, assignOnAccept: raw.assignOnAccept, modes } };
+  return { ok: true, value: { ...current, headStartMin, windowMin, startDaysBefore, modes } };
 }
 
 const MARKET_NAMES: Record<Market, string> = { dallas: "Dallas", austin: "Austin", houston: "Houston", los_angeles: "Los Angeles" };
@@ -333,10 +331,14 @@ export function shiftForPause(due: string, pausedDaytimeMin: number, tz: string)
   return addDaytime(new Date(due), pausedDaytimeMin, tz).toISOString();
 }
 
-// ----- When someone accepts -----
+// ----- When someone requests the shift -----
+
+/** Approve or pass texts admins once more after 2 daytime hours unanswered. */
+export const REQUEST_REMIND_MIN = 120;
+/** A request waiting more than 4 daytime hours shows in red. */
+export const REQUEST_RED_MIN = 240;
 
 export interface AcceptFacts {
-  assignOnAccept: boolean;
   wedding: boolean;
   guests: number | null;
   holdOverGuests: number;
@@ -348,20 +350,18 @@ export interface AcceptFacts {
 }
 
 /**
- * Assign right away, or hold the spot as "waiting for admin". Weddings, events
- * over the guest limit, and Assign on accept switched off always wait. On an
- * event with two or more bartenders, an accept that would leave every spot
- * filled by Developing bartenders waits too.
+ * Every request waits for approval. These are noted on it so admins know why
+ * to look closer: a wedding, an event over the guest limit, and, on an event
+ * with two or more bartenders, a request that would leave every spot to
+ * Developing bartenders. Admins and managers only.
  */
-export function acceptDecision(f: AcceptFacts): { hold: false } | { hold: true; reason: string } {
-  if (!f.assignOnAccept) return { hold: true, reason: "Assign on accept is off" };
-  if (f.wedding) return { hold: true, reason: "Wedding" };
-  if (f.guests !== null && f.guests > f.holdOverGuests) return { hold: true, reason: `Over ${f.holdOverGuests} guests` };
+export function requestNotes(f: AcceptFacts): string[] {
+  const notes: string[] = [];
+  if (f.wedding) notes.push("Wedding");
+  if (f.guests !== null && f.guests > f.holdOverGuests) notes.push(`Over ${f.holdOverGuests} guests`);
   const lastSpot = f.claims.length + 1 >= f.spots;
-  if ((f.bartenders ?? 1) >= 2 && lastSpot && f.developing && !f.teamApproved && f.claims.every((c) => c.developing)) {
-    return { hold: true, reason: "Every spot would be Developing" };
-  }
-  return { hold: false };
+  if ((f.bartenders ?? 1) >= 2 && lastSpot && f.developing && !f.teamApproved && f.claims.every((c) => c.developing)) notes.push("Every spot would be Developing");
+  return notes;
 }
 
 /** Spots still open in a run. */
@@ -386,11 +386,23 @@ export function nobodyReason(o: { open: number; planned: number; daysOut: number
 // ----- Texts. Nothing about order, groups, places, or who else was offered. -----
 
 export function offerText(o: { shortDate: string; city: string; arrive: string; service: string; link: string }): string {
-  return `Mix Fix shift offer: ${o.shortDate}, ${o.city}, arrive ${o.arrive}, service ${o.service}. Accept or pass: ${o.link}`;
+  return `Mix Fix shift offer: ${o.shortDate}, ${o.city}, arrive ${o.arrive}, service ${o.service}. Request it or pass: ${o.link}`;
 }
 
-export function heldText(o: { date: string }): string {
-  return `Thanks for accepting the Mix Fix shift on ${o.date}. An admin will confirm it and text you.`;
+/** What someone sees right after requesting a shift. */
+export const REQUEST_SENT = "Request sent. We will confirm with you.";
+
+/** The one text when an admin or manager passes on a request. Never who else asked, or why. */
+export const REQUEST_PASSED_TEXT = "This shift has been filled. Thank you for requesting it.";
+
+/** To admins and managers with alerts on, when a request comes in. */
+export function requestText(o: { name: string; title: string; date: string; notes: string[]; link: string }): string {
+  return `Shift request: ${o.name} requested ${o.title} on ${o.date}.${o.notes.length ? ` Look closer: ${o.notes.join(", ")}.` : ""} Approve or pass: ${o.link}`;
+}
+
+/** Once more, after 2 daytime hours with no answer. */
+export function requestReminderText(o: { name: string; title: string; date: string; link: string }): string {
+  return `Still waiting: ${o.name} requested ${o.title} on ${o.date} and nobody has approved or passed yet. Offers for that spot are paused until you answer: ${o.link}`;
 }
 
 export function offerFilledText(o: { date: string }): string {
@@ -415,9 +427,9 @@ export type StepStatus = "planned" | "sent" | "accepted" | "held" | "released" |
 export const STEP_LABEL: Record<StepStatus, string> = {
   planned: "Planned",
   sent: "Offered, no reply yet",
-  accepted: "Accepted",
-  held: "Accepted, waiting for admin",
-  released: "Released by admin",
+  accepted: "Approved",
+  held: "Requested, waiting for approval",
+  released: "Passed",
   declined: "Declined",
   no_response: "No response",
   skipped: "Skipped",

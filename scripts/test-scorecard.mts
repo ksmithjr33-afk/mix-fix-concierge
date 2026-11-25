@@ -397,9 +397,9 @@ const plannerUsers = [...walk("lib"), ...walk("app")].filter((p) => p !== "lib/t
 check("The planner is used only by the admin Team tab, the admin offers route and the cron", plannerUsers.every((p) => p.startsWith("lib/team/scorecard") || p.startsWith("app/team/admin/") || p.startsWith("app/api/team/admin/") || p === "app/api/cron/team/route.ts"), plannerUsers.join(", "));
 const odbSrc = src("lib/team/offers-db.ts");
 const staffSide = odbSrc.slice(odbSrc.indexOf("export async function offerForStaff"), odbSrc.indexOf("export async function respondToOffer"));
-check("The offer page reads only the offer's id, run, person and status (never its tier or rank)", staffSide.includes('select("id, run_id, staff_id, status")') && !/grp|rank/.test(staffSide.replace(/\/\/.*$/gm, "")));
+check("The offer page reads only the offer's id, run, person, status and withdraw note (never its tier or rank)", staffSide.includes('select("id, run_id, staff_id, status, skip_reason")') && !/grp|rank/.test(staffSide.replace(/\/\/.*$/gm, "")));
 const ofx = await import("../lib/team/offers.ts");
-const offerTexts = [ofx.offerText({ shortDate: "Sat, Dec 12", city: "Dallas", arrive: "5:00 PM", service: "6:00 PM to 10:00 PM", link: "https://x" }), ofx.heldText({ date: "Sat, Dec 12" }), ofx.offerFilledText({ date: "Sat, Dec 12" }), ofx.offerClosedText({ date: "Sat, Dec 12" })];
+const offerTexts = [ofx.offerText({ shortDate: "Sat, Dec 12", city: "Dallas", arrive: "5:00 PM", service: "6:00 PM to 10:00 PM", link: "https://x" }), ofx.REQUEST_SENT, ofx.REQUEST_PASSED_TEXT, ofx.offerFilledText({ date: "Sat, Dec 12" }), ofx.offerClosedText({ date: "Sat, Dec 12" })];
 check("No offer text a staff member gets says anything about order, tiers or ranks", offerTexts.every((t) => !ofx.ORDER_WORDS.test(t)));
 check("A decline and no response never change a rank: the offer code never writes the rank tables", !/staff_rank/.test(odbSrc) && !/from\("staff_rank/.test(src("lib/team/scorecard-offers-db.ts")));
 check("No text went to anyone while scoring", texts.length === 0);

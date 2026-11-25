@@ -2,8 +2,12 @@
 // planned. Server only.
 //
 // A run is created by the planning side (admins and the cron), which holds
-// the order. This file never reads the order tables: it sends what is due, takes accepts
-// and declines, and gives admins their controls. Staff facing functions
+// the order. This file never reads the order tables: it sends what is due,
+// takes requests and passes, and gives admins their controls. Taking an offer
+// is a request that holds one spot: an admin or manager approves it (the
+// person is on the event) or passes (one neutral text, the spot opens, offers
+// carry on). Nobody is placed from an offer without approval. While open
+// requests cover every open spot, no further offers go out. Staff facing functions
 // (offerForStaff, respondToOffer) never return a group, a place, the order, or
 // who else was offered.
 //
@@ -23,7 +27,8 @@ import { sendStaffText } from "@/lib/team/sms";
 import { eventData, marketLabel, marketTz, sessionMarket, staffMarketsOf, type Market } from "@/lib/team/markets";
 import { datesOffOn, eventDayOf } from "@/lib/team/availability-db";
 import { certIssues, certsEnforced } from "@/lib/team/certs-db";
-import { lockMileage } from "@/lib/team/pay-db";
+import { lockMileage, rateForRequest } from "@/lib/team/pay-db";
+import { claimNotice } from "@/lib/team/clock-db";
 import { eventSchedule, isWeddingEvent, shortDate, todayIn } from "@/lib/team/time";
 import { gotShiftText, inQuietHours, overlaps, shiftSummary, workWindow, type ShiftSummary } from "@/lib/team/shifts";
 import { isAdminRole, isFullAdmin } from "@/lib/team/roles";
@@ -32,11 +37,16 @@ import {
   GROUP_LABEL,
   OFFER_DEFAULTS,
   SETTINGS_KEY,
+  REQUEST_PASSED_TEXT,
+  REQUEST_RED_MIN,
+  REQUEST_REMIND_MIN,
   STEP_LABEL,
-  acceptDecision,
   daysUntil,
   daytimeBetween,
-  heldText,
+  inDaytime,
+  requestNotes,
+  requestReminderText,
+  requestText,
   nextUp,
   nobodyReason,
   nobodyText,
@@ -95,6 +105,7 @@ export interface StepRow {
   responded_at: string | null;
   skip_reason: string | null;
   skipped_by_name: string | null;
+  requested_rate_cents?: number | null; // the service fee rate when they requested (20270108_offer_requests.sql)
 }
 
 interface ClaimRow {
@@ -320,7 +331,7 @@ export async function createRun(
   return { ok: true, run };
 }
 
-// ----- Claims: first to accept gets the spot -----
+// ----- Claims: a request holds a spot until approved or passed -----
 
 /**
  * Take a spot in the run. The claims table's primary key (run, spot) makes
@@ -345,10 +356,15 @@ async function claimSpot(run: RunRow, staffId: string, kind: ClaimRow["kind"]): 
 }
 
 /** Put someone on the event as accepted (an offer they took). */
-async function assignAccepted(run: RunRow, session: SessionRow, staff: StaffFull, now: Date): Promise<void> {
+async function assignAccepted(run: RunRow, session: SessionRow, staff: StaffFull, now: Date, requestedRate: number | null = null, approvedBy: string | null = null): Promise<void> {
   // Ranked offers fill Bartender spots only.
-  const { error } = await upsertAssignment({ session_id: session.id, staff_id: staff.id, status: "accepted", assigned_at: now.toISOString(), responded_at: now.toISOString(), assigned_by: run.started_by, role: "bartender" });
+  const { error } = await upsertAssignment({ session_id: session.id, staff_id: staff.id, status: "accepted", assigned_at: now.toISOString(), responded_at: now.toISOString(), assigned_by: approvedBy ?? run.started_by, role: "bartender" });
   if (error) throw new Error(`assign failed: ${error.message}`);
+  // The pay floor is the rate when they requested the shift, kept ahead of lockMileage (which keeps a stored rate).
+  if (requestedRate !== null) {
+    const { error: rateErr } = await supabase.from("event_assignments").update({ accepted_rate_cents: requestedRate }).eq("session_id", session.id).eq("staff_id", staff.id);
+    if (rateErr) console.error("[offers] storing the requested rate failed:", rateErr.message);
+  }
   await lockMileage(session.id, staff.id).catch((err) => console.error("[offers] mileage lock failed:", err));
   await sendStaffText(staff.phone, staff.name, gotShiftText({ date: dateOf(session), link: eventLink(session.id) }));
 }
@@ -422,6 +438,7 @@ export async function advanceRun(run: RunRow, now: Date = now0()): Promise<numbe
       steps = await stepsOf(run.id);
     }
   }
+  sent += await remindRequests(run, session, steps, now);
   const reason = nobodyReason({
     open,
     planned: steps.filter((s) => s.status === "planned").length,
@@ -434,6 +451,20 @@ export async function advanceRun(run: RunRow, now: Date = now0()): Promise<numbe
     sent += await textAdmins(
       nobodyText({ title: adminEventTitle(eventData(session)), date: dateOf(session), market: marketLabel(run.market), open: Math.min(open, needed), needed, reason, link: adminLink(session.id) })
     );
+  }
+  return sent;
+}
+
+/** Requests unanswered after 2 daytime hours: one more text to admins and managers with alerts on, in daytime only. */
+async function remindRequests(run: RunRow, session: SessionRow, steps: StepRow[], now: Date): Promise<number> {
+  const tz = marketTz(run.market);
+  if (!inDaytime(now, tz)) return 0;
+  let sent = 0;
+  for (const s of steps.filter((x) => x.status === "held" && x.responded_at)) {
+    if (daytimeBetween(new Date(s.responded_at!), now, tz) < REQUEST_REMIND_MIN) continue;
+    if (!(await claimNotice(`offer_request_reminder:${s.id}`, "offer_request"))) continue;
+    const p = (await staffByIds([s.staff_id])).get(s.staff_id);
+    sent += await textAdmins(requestReminderText({ name: p?.name ?? "A bartender", title: adminEventTitle(eventData(session)), date: dateOf(session), link: adminLink(session.id) }));
   }
   return sent;
 }
@@ -460,21 +491,23 @@ export async function advanceOffers(now: Date = now0()): Promise<number> {
 
 export type OfferPage =
   | { state: "open"; stepId: string; shift: ShiftSummary }
-  | { state: "held"; date: string }
+  | { state: "held"; stepId: string; date: string }
   | { state: "got"; sessionId: string }
   | { state: "passed"; date: string }
+  | { state: "withdrawn"; date: string }
   | { state: "gone" };
 
 /** The offer page for the person it was sent to. Anyone else, or an offer not sent yet, sees nothing. */
 export async function offerForStaff(stepId: string, staff: StaffMember, now: Date = now0()): Promise<OfferPage> {
-  const step = (await rows<Pick<StepRow, "id" | "run_id" | "staff_id" | "status">>(supabase.from("offer_steps").select("id, run_id, staff_id, status").eq("id", stepId))).rows[0];
+  const step = (await rows<Pick<StepRow, "id" | "run_id" | "staff_id" | "status" | "skip_reason">>(supabase.from("offer_steps").select("id, run_id, staff_id, status, skip_reason").eq("id", stepId))).rows[0];
   if (!step || step.staff_id !== staff.id || step.status === "planned") return { state: "gone" };
   const run = await runById(step.run_id);
   const session = run ? await getTeamSession(run.session_id) : null;
   if (!run || !session) return { state: "gone" };
   if (step.status === "accepted") return { state: "got", sessionId: session.id };
-  if (step.status === "held") return { state: "held", date: dateOf(session) };
+  if (step.status === "held") return { state: "held", stepId: step.id, date: dateOf(session) };
   if (step.status === "declined") return { state: "passed", date: dateOf(session) };
+  if (step.status === "released" && step.skip_reason === WITHDREW) return { state: "withdrawn", date: dateOf(session) };
   if (step.status !== "sent" || !LIVE.includes(run.status) || isPast(session, now) || (await isHidden(session.id))) return { state: "gone" };
   const open = openSpots(run, (await claimsOf(run.id)).length);
   if (open <= 0) return { state: "gone" };
@@ -482,16 +515,19 @@ export async function offerForStaff(stepId: string, staff: StaffMember, now: Dat
 }
 
 /**
- * Accept or pass. The first to accept gets the spot. Weddings, big events,
- * Assign on accept switched off, and an all Developing team wait for an admin
- * to confirm. A pass is recorded for admins and changes nothing else.
+ * Request the shift, pass, or withdraw a request. A request holds one spot and
+ * waits for an admin or manager to approve or pass; nobody is placed from an
+ * offer without approval. Admins and managers are texted with a link to
+ * approve. A pass is recorded for admins and changes nothing else. Withdrawing
+ * a request works like a pass from an admin: the spot opens and offers carry on.
  */
 export async function respondToOffer(stepId: string, staff: StaffMember, response: unknown, now: Date = now0()): Promise<Result<{ state: "got" | "held" | "passed" }>> {
-  if (response !== "accept" && response !== "decline") return fail("Bad request", 400);
+  if (response !== "accept" && response !== "decline" && response !== "withdraw") return fail("Bad request", 400);
   const step = await stepById(stepId);
   if (!step || step.staff_id !== staff.id || step.status === "planned") return fail("We could not find that offer.", 404);
+  if (response === "withdraw") return withdrawRequest(step, staff, now);
   if (step.status === "accepted") return fail("You already have this shift.");
-  if (step.status === "held") return fail("You already accepted. An admin will confirm it and text you.");
+  if (step.status === "held") return fail("You already requested this shift. We will confirm with you.");
   if (step.status === "declined") return fail("You already passed on this shift.");
   if (step.status !== "sent") return fail("This offer is closed.");
   const run = await runById(step.run_id);
@@ -511,8 +547,7 @@ export async function respondToOffer(stepId: string, staff: StaffMember, respons
   const steps = await stepsOf(run.id);
   const claims = await claimsOf(run.id);
   const groupOf = new Map(steps.map((s) => [s.staff_id, s.grp]));
-  const decision = acceptDecision({
-    assignOnAccept: settings.assignOnAccept,
+  const notes = requestNotes({
     wedding: isWeddingEvent(eventData(session)),
     guests: guestsOf(session),
     holdOverGuests: settings.holdOverGuests,
@@ -522,23 +557,36 @@ export async function respondToOffer(stepId: string, staff: StaffMember, respons
     teamApproved: run.team_approved,
     developing: step.grp === 2,
   });
-  const spot = await claimSpot(run, staff.id, decision.hold ? "held" : "accept");
+  // Every request holds a spot as "held" until an admin or manager answers.
+  const spot = await claimSpot(run, staff.id, "held");
   if (spot === null) {
     await updateStep(step.id, { status: "closed", responded_at: now.toISOString() });
     return fail("Sorry, this shift was just filled. Thanks for answering.");
   }
   const people = await staffByIds([staff.id]);
   const me = people.get(staff.id) ?? (staff as StaffFull);
-  if (decision.hold) {
-    await updateStep(step.id, { status: "held", responded_at: now.toISOString(), skip_reason: decision.reason });
-    await sendStaffText(me.phone, me.name, heldText({ date: dateOf(session) }));
-    await textAdmins(`${firstName(me.name) || "A bartender"} accepted the shift offer for ${adminEventTitle(eventData(session))} on ${dateOf(session)}. Confirm or release (${decision.reason}): ${adminLink(session.id)}`);
-    return { ok: true, state: "held" };
+  await updateStep(step.id, { status: "held", responded_at: now.toISOString(), skip_reason: notes.join(", ") || null });
+  // The pay floor is the rate when they requested (stored once the migration has run; approving uses it).
+  const rate = await rateForRequest(session.id, staff.id);
+  if (rate !== null) {
+    const { error } = await supabase.from("offer_steps").update({ requested_rate_cents: rate }).eq("id", step.id);
+    if (error) console.error("[offers] storing the requested rate failed (run 20270108_offer_requests.sql):", error.message);
   }
-  await updateStep(step.id, { status: "accepted", responded_at: now.toISOString() });
-  await assignAccepted(run, session, me, now);
-  await finishIfFilled(run, session, now);
-  return { ok: true, state: "got" };
+  await textAdmins(requestText({ name: me.name || "A bartender", title: adminEventTitle(eventData(session)), date: dateOf(session), notes, link: adminLink(session.id) }));
+  return { ok: true, state: "held" };
+}
+
+const WITHDREW = "Withdrew their request";
+
+/** The person takes their request back: like a pass from an admin, the spot opens and offers carry on. */
+async function withdrawRequest(step: StepRow, staff: StaffMember, now: Date): Promise<Result<{ state: "passed" }>> {
+  if (step.status !== "held") return fail(step.status === "accepted" ? "You already have this shift. Use Give up shift on the event page." : "There is no request to withdraw.");
+  const run = await runById(step.run_id);
+  if (!run) return fail("This offer is closed.");
+  await supabase.from("offer_claims").delete().eq("run_id", run.id).eq("staff_id", staff.id);
+  await updateStep(step.id, { status: "released", skip_reason: WITHDREW, skipped_by_name: firstName(staff.name) || staff.name, responded_at: now.toISOString() });
+  if (run.status === "running") await advanceRun(run, now);
+  return { ok: true, state: "passed" };
 }
 
 // ----- Admin controls -----
@@ -582,7 +630,7 @@ export async function stopRun(admin: StaffMember, runId: unknown, now: Date = no
   if (!r.ok) return r;
   if (!LIVE.includes(r.run.status)) return fail("These offers already ended.");
   const held = (await stepsOf(r.run.id)).find((s) => s.status === "held");
-  if (held) return fail("Someone accepted and is waiting for you. Confirm or release them first.");
+  if (held) return fail("Someone requested this shift and is waiting. Approve or pass first.");
   await closeOut(r.run, await getTeamSession(r.run.session_id), "stopped", admin.name, now);
   return { ok: true };
 }
@@ -608,6 +656,8 @@ async function heldStep(admin: StaffMember, stepId: unknown): Promise<Result<{ s
   if (!isAdminRole(admin.role)) return FORBIDDEN;
   const step = typeof stepId === "string" ? await stepById(stepId) : null;
   if (!step || step.status !== "held") return fail("Nobody is waiting on that. Reload the page.", 404);
+  // Your own request is answered by someone else, like your own Scorecard record.
+  if (step.staff_id === admin.id) return fail("Someone else approves or passes your own request.", 403);
   const run = await runById(step.run_id);
   const session = run ? await getTeamSession(run.session_id) : null;
   const person = (await staffByIds([step.staff_id])).get(step.staff_id);
@@ -615,25 +665,25 @@ async function heldStep(admin: StaffMember, stepId: unknown): Promise<Result<{ s
   return { ok: true, step, run, session, person };
 }
 
-/** Confirm someone who accepted and was held: they are on the event. */
+/** Approve a request: they are on the event as accepted and get the usual "you got the shift" text. */
 export async function confirmHeld(admin: StaffMember, stepId: unknown, now: Date = now0()): Promise<Result> {
   const h = await heldStep(admin, stepId);
   if (!h.ok) return h;
   const { error } = await supabase.from("offer_claims").update({ kind: "accept" }).eq("run_id", h.run.id).eq("staff_id", h.person.id);
   if (error) throw new Error(`offer claim update failed: ${error.message}`);
-  await updateStep(h.step.id, { status: "accepted" });
-  await assignAccepted(h.run, h.session, h.person, now);
+  await updateStep(h.step.id, { status: "accepted", skipped_by_name: firstName(admin.name) || admin.name });
+  await assignAccepted(h.run, h.session, h.person, now, h.step.requested_rate_cents ?? null, admin.id);
   await finishIfFilled(h.run, h.session, now);
   return { ok: true };
 }
 
-/** Release someone who accepted and was held: the spot opens again and offers carry on. */
+/** Pass on a request: one neutral text, the spot opens again and offers carry on to the next person. */
 export async function releaseHeld(admin: StaffMember, stepId: unknown, now: Date = now0()): Promise<Result> {
   const h = await heldStep(admin, stepId);
   if (!h.ok) return h;
   await supabase.from("offer_claims").delete().eq("run_id", h.run.id).eq("staff_id", h.person.id);
-  await updateStep(h.step.id, { status: "released", skipped_by_name: admin.name });
-  await sendStaffText(h.person.phone, h.person.name, offerClosedText({ date: dateOf(h.session) }));
+  await updateStep(h.step.id, { status: "released", skip_reason: null, skipped_by_name: firstName(admin.name) || admin.name });
+  await sendStaffText(h.person.phone, h.person.name, REQUEST_PASSED_TEXT);
   if (h.run.status === "running") await advanceRun(h.run, now);
   return { ok: true };
 }
@@ -672,6 +722,7 @@ export interface StepView {
   sentAt: string | null;
   respondedAt: string | null;
   note: string;
+  waitingRed: boolean; // a request waiting more than 4 daytime hours
 }
 
 export interface RunView {
@@ -708,6 +759,7 @@ export async function runView(viewer: StaffMember, sessionId: string, now: Date 
         sentAt: s.sent_at,
         respondedAt: s.responded_at,
         note: s.skip_reason ?? "",
+        waitingRed: s.status === "held" && !!s.responded_at && daytimeBetween(new Date(s.responded_at), now, tz) > REQUEST_RED_MIN,
       };
     });
   const n = LIVE.includes(run.status) && run.status === "running" ? nextUp(steps, open, tz, now) : null;
@@ -718,6 +770,60 @@ export async function runView(viewer: StaffMember, sessionId: string, now: Date 
     next: n ? { name: people.get(n.step.staff_id)?.name ?? "", at: n.at.toISOString() } : null,
     held: views.filter((v) => v.status === "held"),
   };
+}
+
+// ----- Requests waiting, for the top of the admin events list -----
+
+export interface RequestWaiting {
+  stepId: string;
+  sessionId: string;
+  name: string;
+  self: boolean; // the viewer's own request: no tier or rank, and someone else answers it
+  group: string; // tier, admins and managers only
+  rank: number | null;
+  event: string;
+  date: string;
+  requestedAt: string;
+  notes: string;
+  red: boolean;
+}
+
+/** Every request waiting for approval, oldest first. Admins and managers only. */
+export async function requestsWaiting(viewer: StaffMember, now: Date = now0()): Promise<RequestWaiting[]> {
+  if (!isAdminRole(viewer.role)) return [];
+  const held = (await rows<StepRow>(supabase.from("offer_steps").select("*").eq("status", "held"))).rows;
+  if (held.length === 0) return [];
+  const runs = new Map<string, RunRow>();
+  for (const id of new Set(held.map((h) => h.run_id))) {
+    const run = await runById(id);
+    if (run && LIVE.includes(run.status)) runs.set(id, run);
+  }
+  const people = await staffByIds(held.map((h) => h.staff_id));
+  const sessions = new Map<string, SessionRow | null>();
+  const out: RequestWaiting[] = [];
+  for (const h of held.sort((a, b) => (a.responded_at ?? "").localeCompare(b.responded_at ?? ""))) {
+    const run = runs.get(h.run_id);
+    if (!run) continue;
+    if (!sessions.has(run.session_id)) sessions.set(run.session_id, await getTeamSession(run.session_id));
+    const session = sessions.get(run.session_id);
+    if (!session || (await isHidden(session.id))) continue;
+    const self = h.staff_id === viewer.id;
+    const tz = marketTz(run.market);
+    out.push({
+      stepId: h.id,
+      sessionId: session.id,
+      name: people.get(h.staff_id)?.name ?? "Former staff",
+      self,
+      group: self ? "" : GROUP_LABEL[h.grp],
+      rank: self ? null : h.rank,
+      event: adminEventTitle(eventData(session)),
+      date: dateOf(session),
+      requestedAt: whenIn(h.responded_at, run.market),
+      notes: h.skip_reason ?? "",
+      red: !!h.responded_at && daytimeBetween(new Date(h.responded_at), now, tz) > REQUEST_RED_MIN,
+    });
+  }
+  return out;
 }
 
 /** "Sat, Dec 12, 3:30 PM" in the market, for the Team tab. */

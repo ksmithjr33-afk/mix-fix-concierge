@@ -12,7 +12,7 @@ import { markOrderReviewed, saveOfferSettings } from "@/lib/team/offers-db";
 //   edit { staffId, solo, weddings, note }
 //   include { staffId, on }                     an admin or manager who bartends
 //   reviewed { market }                         "Order reviewed", needed before Automatic
-//   settings { headStartMin, windowMin, assignOnAccept, startDaysBefore, modes }
+//   settings { headStartMin, windowMin, startDaysBefore, modes }
 //   history { staffId }                         admins and managers may read
 export async function POST(request: Request) {
   const staff = await getCurrentStaff();

@@ -24,7 +24,7 @@ const RUN_LABEL: Record<string, string> = { running: "Running", paused: "Paused"
 /**
  * Shift offers on the Team tab: the planned order before anything is sent,
  * then who was offered and when, who is next and at what time, who declined,
- * who did not respond, and who accepted. Assign by hand above always works and
+ * who did not respond, who requested (approve or pass), and who was approved. Assign by hand above always works and
  * ends the offers for that spot.
  */
 export default function OffersPanel({ sessionId, data }: { sessionId: string; data: Data }) {
@@ -82,21 +82,30 @@ export default function OffersPanel({ sessionId, data }: { sessionId: string; da
               Next: <strong>{run.next.name}</strong> at {run.nextAt}
             </p>
           )}
-          {run.held.map((h) => (
-            <div key={h.id} className="rounded-xl bg-[#FFF3DF] px-3 py-2 space-y-2">
-              <p className="text-[15px] text-[#2C2420]">
-                <strong>{h.name}</strong> accepted and is waiting for you{h.note ? ` (${h.note})` : ""}.
-              </p>
-              <div className="flex gap-2">
-                <button type="button" disabled={!!busy} onClick={() => act(`c-${h.id}`, { action: "confirm", stepId: h.id })} className={`${btn} !bg-[#55684A] !text-white !border-[#55684A]`}>
-                  {busy === `c-${h.id}` ? "Confirming..." : "Confirm"}
-                </button>
-                <button type="button" disabled={!!busy} onClick={() => act(`r-${h.id}`, { action: "release", stepId: h.id })} className={btn}>
-                  Release
-                </button>
+          {run.held.map((h, i) => {
+            const at = run.lines[run.steps.findIndex((x) => x.id === h.id)]?.responded ?? "";
+            return (
+              <div key={h.id} className={`rounded-xl px-3 py-2 space-y-2 ${h.waitingRed ? "bg-[#F6E3DC] border border-[#A0412D]" : "bg-[#FFF3DF]"}`} data-request={i}>
+                <p className="text-[15px] text-[#2C2420]">
+                  <strong>{h.name}</strong> requested this shift{h.self ? "" : ` (${h.group} ${h.rank})`}.{at ? ` Requested ${at}.` : ""}
+                </p>
+                {h.note && <p className="text-sm text-[#9A7049]">Look closer: {h.note}</p>}
+                {h.waitingRed && <p className="text-sm font-medium text-[#A0412D]">Waiting more than 4 daytime hours.</p>}
+                {h.self ? (
+                  <p className="text-sm text-[#6B5D52]">This is your request. Someone else approves or passes it.</p>
+                ) : (
+                  <div className="flex gap-2">
+                    <button type="button" disabled={!!busy} onClick={() => act(`c-${h.id}`, { action: "confirm", stepId: h.id })} className={`${btn} !bg-[#55684A] !text-white !border-[#55684A]`}>
+                      {busy === `c-${h.id}` ? "Approving..." : "Approve"}
+                    </button>
+                    <button type="button" disabled={!!busy} onClick={() => act(`r-${h.id}`, { action: "release", stepId: h.id })} className={btn}>
+                      {busy === `r-${h.id}` ? "Passing..." : "Pass"}
+                    </button>
+                  </div>
+                )}
               </div>
-            </div>
-          ))}
+            );
+          })}
           <ol className="divide-y divide-[#DDD5CC]">
             {run.steps.map((s, i) => {
               const l = run.lines[i];
@@ -142,7 +151,7 @@ export default function OffersPanel({ sessionId, data }: { sessionId: string; da
           ) : (
             <>
               <p className="text-sm text-[#6B5D52]">
-                Planned order for {data.plan.spots} open {data.plan.spots === 1 ? "spot" : "spots"} if sent now. The first to accept gets a spot.
+                Planned order for {data.plan.spots} open {data.plan.spots === 1 ? "spot" : "spots"} if sent now. Each request holds a spot until you approve or pass.
               </p>
               <ol className="divide-y divide-[#DDD5CC]">
                 {data.plan.order.map((o) => (

@@ -3,7 +3,8 @@ import { requireStaff } from "@/lib/team/auth";
 import { offerForStaff } from "@/lib/team/offers-db";
 import TeamHeader from "../../team-header";
 import ShiftCard from "../../shifts/shift-card";
-import OfferButtons from "./offer-buttons";
+import OfferButtons, { WithdrawButton } from "./offer-buttons";
+import { REQUEST_SENT } from "@/lib/team/offers";
 import { isAdminRole } from "@/lib/team/roles";
 import { workingAsText } from "@/lib/team/event-roles";
 import { getTeamSession } from "@/lib/team/events";
@@ -31,8 +32,15 @@ export default async function OfferPage({ params }: { params: Promise<{ id: stri
       <TeamHeader signedIn admin={isAdminRole(staff.role)} back={{ href: "/team/events", label: "Events" }} />
       <main className="max-w-md mx-auto px-4 py-6 space-y-4">
         {page.state === "gone" && <p className="text-[15px] text-[#6B5D52] text-center py-6">This offer is closed. No action needed.</p>}
+        {page.state === "withdrawn" && <p className="text-[15px] text-[#6B5D52] text-center py-6">You withdrew your request for the shift on {page.date}. Thanks for letting us know.</p>}
         {page.state === "passed" && <p className="text-[15px] text-[#6B5D52] text-center py-6">You passed on the shift on {page.date}. Thanks for letting us know.</p>}
-        {page.state === "held" && <p className="text-[15px] text-[#2C2420] text-center py-6">You accepted the shift on {page.date}. An admin will confirm it and text you.</p>}
+        {page.state === "held" && (
+          <div className="text-center py-6 space-y-3" data-request-sent>
+            <p className="text-[15px] text-[#2C2420]">{REQUEST_SENT}</p>
+            <p className="text-sm text-[#6B5D52]">You requested the shift on {page.date}.</p>
+            <WithdrawButton stepId={page.stepId} />
+          </div>
+        )}
         {page.state === "got" && (
           <div className="text-center py-6 space-y-2">
             <p className="text-[15px] text-[#2C2420]">You have this shift.</p>

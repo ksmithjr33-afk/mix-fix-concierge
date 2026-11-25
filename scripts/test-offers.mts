@@ -1,9 +1,11 @@
 // Ranked shift offers: the daytime clock across quiet hours, nights, weekends,
 // time zones and a clock change; who is eligible and why someone is skipped;
 // the order (tier, then rank, the head start, tier windows, one tier wider on
-// multi bartender events); first to accept gets the spot, two accepting at
-// once; assign on accept and every hold (wedding, over 150 guests, setting
-// off, an all Developing team); assign by hand; skip, pause, resume, stop; no
+// multi bartender events); taking an offer is a request that holds a spot
+// until an admin or manager approves or passes (two requesting at once,
+// withdraw, the 2 hour reminder, red after 4 daytime hours, the requested
+// rate as the pay floor, the notes for a wedding, over 150 guests and an all
+// Developing team); assign by hand; skip, pause, resume, stop; no
 // response recorded apart from declines; the one "nobody took it" text to
 // every admin and manager with alerts on; Automatic (Order reviewed, the start
 // days, no count on file); the posted shift way kept; the offer order on the
@@ -92,24 +94,24 @@ const night = of.planTimes([R("t1", 0, 1), R("t2", 0, 2)], at(MON, 22), 1, S, CT
 check("Started in quiet hours: the first offer waits for 9:00 AM", local(due(night, "t1").dueAt) === "Tue 09:00" && local(due(night, "t2").dueAt) === "Tue 09:30");
 check("Every planned time is daytime, so never in quiet hours", [...one, ...two, ...big, ...late, ...night].every((p) => of.inDaytime(p.dueAt, CT) && (!p.dueWideAt || of.inDaytime(p.dueWideAt, CT))));
 
-// ===== 4. Accept decisions (pure) =====
-const base = { assignOnAccept: true, wedding: false, guests: 100, holdOverGuests: 150, bartenders: 1, spots: 1, claims: [], teamApproved: false, developing: false };
-check("Assign on accept by default", of.acceptDecision(base).hold === false);
-check("Weddings wait for an admin", JSON.stringify(of.acceptDecision({ ...base, wedding: true })) === JSON.stringify({ hold: true, reason: "Wedding" }));
-check("Over 150 guests waits; exactly 150 does not", of.acceptDecision({ ...base, guests: 151 }).hold === true && of.acceptDecision({ ...base, guests: 150 }).hold === false);
-check("Assign on accept off: everyone waits", of.acceptDecision({ ...base, assignOnAccept: false }).hold === true);
-check("Two bartenders, the last spot, all Developing: waits", of.acceptDecision({ ...base, bartenders: 2, spots: 2, claims: [{ developing: true }], developing: true }).hold === true);
-check("...not when someone outside Developing took a spot, was on before, or it is not the last spot", of.acceptDecision({ ...base, bartenders: 2, spots: 2, claims: [{ developing: false }], developing: true }).hold === false && of.acceptDecision({ ...base, bartenders: 2, spots: 2, claims: [{ developing: true }], developing: true, teamApproved: true }).hold === false && of.acceptDecision({ ...base, bartenders: 2, spots: 2, claims: [], developing: true }).hold === false);
-check("One bartender events never trip the Developing guard", of.acceptDecision({ ...base, developing: true }).hold === false);
+// ===== 4. Request notes (pure) =====
+const base = { wedding: false, guests: 100, holdOverGuests: 150, bartenders: 1, spots: 1, claims: [], teamApproved: false, developing: false };
+check("No notes on an ordinary request", of.requestNotes(base).length === 0);
+check("A wedding is noted", of.requestNotes({ ...base, wedding: true }).join() === "Wedding");
+check("Over 150 guests is noted; exactly 150 is not", of.requestNotes({ ...base, guests: 151 }).join() === "Over 150 guests" && of.requestNotes({ ...base, guests: 150 }).length === 0);
+check("Two bartenders, the last spot, all Developing: noted", of.requestNotes({ ...base, bartenders: 2, spots: 2, claims: [{ developing: true }], developing: true }).join() === "Every spot would be Developing");
+check("...not when someone outside Developing took a spot, was on before, or it is not the last spot", of.requestNotes({ ...base, bartenders: 2, spots: 2, claims: [{ developing: false }], developing: true }).length === 0 && of.requestNotes({ ...base, bartenders: 2, spots: 2, claims: [{ developing: true }], developing: true, teamApproved: true }).length === 0 && of.requestNotes({ ...base, bartenders: 2, spots: 2, claims: [], developing: true }).length === 0);
+check("Several notes together", of.requestNotes({ ...base, wedding: true, guests: 200 }).join(", ") === "Wedding, Over 150 guests");
+check("The assign on accept setting is gone: approval is always required", !("assignOnAccept" in of.readOfferSettings({ assignOnAccept: true })) && !("assignOnAccept" in of.OFFER_DEFAULTS));
 
 // ===== 5. Settings =====
 const defaults = of.readOfferSettings(null);
-check("Defaults: 30 minute head start, 3 hour window, assign on accept, 150 guests, 30 days, every market Suggest", defaults.headStartMin === 30 && defaults.windowMin === 180 && defaults.assignOnAccept && defaults.holdOverGuests === 150 && defaults.startDaysBefore === 30 && Object.values(defaults.modes).every((m) => m === "suggest"));
+check("Defaults: 30 minute head start, 3 hour window, 150 guests, 30 days, every market Suggest", defaults.headStartMin === 30 && defaults.windowMin === 180 && defaults.holdOverGuests === 150 && defaults.startDaysBefore === 30 && Object.values(defaults.modes).every((m) => m === "suggest"));
 check("Automatic without Order reviewed reads as Suggest", of.readOfferSettings({ modes: { dallas: "automatic" } }).modes.dallas === "suggest");
-const noAuto = of.validateOfferSettings({ headStartMin: 30, windowMin: 180, startDaysBefore: 30, assignOnAccept: true, modes: { dallas: "automatic" } }, defaults);
+const noAuto = of.validateOfferSettings({ headStartMin: 30, windowMin: 180, startDaysBefore: 30, modes: { dallas: "automatic" } }, defaults);
 check("A market cannot be switched to Automatic until its order is reviewed", !noAuto.ok && noAuto.error.includes("Order reviewed"));
 const reviewed = { ...defaults, reviewed: { dallas: { by: "Kenneth Smith", at: "2027-04-01T15:00:00Z" } } };
-const yesAuto = of.validateOfferSettings({ headStartMin: 30, windowMin: 180, startDaysBefore: 30, assignOnAccept: true, modes: { dallas: "automatic" } }, reviewed);
+const yesAuto = of.validateOfferSettings({ headStartMin: 30, windowMin: 180, startDaysBefore: 30, modes: { dallas: "automatic" } }, reviewed);
 check("...and can once it is", yesAuto.ok && yesAuto.value.modes.dallas === "automatic" && yesAuto.value.modes.austin === "suggest");
 
 // ===== The database =====
@@ -191,26 +193,41 @@ db.team_settings.length = 0;
 plan = await sodb.planFor(sess("e0"), asStaff(admin), T0);
 check("Certifications not enforced: nobody skipped for it", !plan.skipped.some((x) => /TABC/.test(x.reason)) && plan.order.some((o) => o.staffId === "t1"));
 
-// ===== 7. Sending, first to accept, no response =====
+// ===== 7. Sending, requests, approval, no response =====
 reset([ev("e1", DAY0)]);
 const rank0 = rankSnapshot();
 const started = await sodb.startOffers(asStaff(admin), sess("e1"), T0);
 check("Suggest: an admin sends offers with one tap; rank 1 of Top is texted right away", started.ok && textsTo(t1).length === 1 && textsTo(t2).length === 0 && stepFor("e1", "t1").status === "sent");
 const offerMsg = textsTo(t1)[0]?.message ?? "";
-check("The offer text: date, city, times, a link. Nothing about order, tiers or who else", offerMsg.startsWith("Mix Fix shift offer: ") && offerMsg.includes("/team/offer/") && !of.ORDER_WORDS.test(offerMsg) && !/Justin|Reyes|Main St/.test(offerMsg));
+check("The offer text: date, city, times, a link to request it. Nothing about order, tiers or who else", offerMsg.startsWith("Mix Fix shift offer: ") && offerMsg.includes("Request it or pass") && offerMsg.includes("/team/offer/") && !of.ORDER_WORDS.test(offerMsg) && !/Justin|Reyes|Main St/.test(offerMsg));
 await odb.advanceOffers(new Date(T0.getTime() + 29 * M));
 check("29 minutes in: nobody else yet", textsTo(t2).length === 0);
 await odb.advanceOffers(new Date(T0.getTime() + 30 * M));
 check("30 daytime minutes in: rank 2 is texted", textsTo(t2).length === 1 && stepFor("e1", "t2").status === "sent");
-const accepted = await odb.respondToOffer(stepFor("e1", "t2").id as string, asStaff(t2), "accept", new Date(T0.getTime() + 40 * M));
-check("The first to accept gets the spot (rank 2 before rank 1 answered)", accepted.ok && accepted.state === "got" && asg("e1", "t2")?.status === "accepted");
+texts.length = 0;
+const requested = await odb.respondToOffer(stepFor("e1", "t2").id as string, asStaff(t2), "accept", new Date(T0.getTime() + 40 * M));
+check("Taking an offer is a request: held, not on the event", requested.ok && requested.state === "held" && stepFor("e1", "t2").status === "held" && !asg("e1", "t2"));
+check("...the request holds the spot", db.offer_claims.length === 1 && db.offer_claims[0].kind === "held");
+check("...the person gets no text (the page says Request sent)", textsTo(t2).length === 0 && of.REQUEST_SENT === "Request sent. We will confirm with you.");
+const reqText = textsTo(admin)[0]?.message ?? "";
+check("...every admin and manager with alerts on is texted the person, the event and an approve link", textsTo(admin).length === 1 && textsTo(mgr).length === 1 && textsTo(admin2).length === 0 && textsTo(mgrQuiet).length === 0 && reqText.includes("Toby Top") && reqText.includes("Approve or pass") && reqText.includes("/team/admin/e/e1?tab=team"));
+const page0 = await odb.offerForStaff(stepFor("e1", "t2").id as string, asStaff(t2), new Date(T0.getTime() + 41 * M));
+check("The offer page shows the request sent, with nothing about anyone else", page0.state === "held" && Object.keys(page0).sort().join(",") === "date,state,stepId");
+const again = await odb.respondToOffer(stepFor("e1", "t2").id as string, asStaff(t2), "accept", new Date(T0.getTime() + 42 * M));
+check("Requesting twice says it is already requested", !again.ok && again.error.includes("already requested"));
+await odb.advanceOffers(at(MON, 13, 30));
+check("While the request covers the only open spot, no further offers go out", textsTo(c1).length === 0 && stepFor("e1", "c1").status === "planned");
+const ownAnswer = await odb.confirmHeld(asStaff(t2), stepFor("e1", "t2").id, new Date(T0.getTime() + 45 * M));
+check("Staff cannot approve", !ownAnswer.ok);
+const approved = await odb.confirmHeld(asStaff(mgr), stepFor("e1", "t2").id, new Date(T0.getTime() + 50 * M));
+check("Approve (a manager, one tap): on the event as accepted, the usual you got the shift text", approved.ok && asg("e1", "t2")?.status === "accepted" && asg("e1", "t2")?.role === "bartender" && textsTo(t2).some((t) => t.message.startsWith("You got the shift")) && stepFor("e1", "t2").status === "accepted");
 check("Filled: rank 1 never answered and is recorded as No response, told it is filled", stepFor("e1", "t1").status === "no_response" && textsTo(t1).some((t) => t.message.includes("has been filled")) && run("e1").status === "filled");
 check("Offers not sent yet are closed, and nobody else is texted", stepFor("e1", "c1").status === "closed" && textsTo(c1).length === 0);
 check("No response never changes a rank", rankSnapshot() === rank0 && db.staff_rank_history.length === 0);
-const late1 = await odb.respondToOffer(stepFor("e1", "t1").id as string, asStaff(t1), "accept", new Date(T0.getTime() + 50 * M));
+const late1 = await odb.respondToOffer(stepFor("e1", "t1").id as string, asStaff(t1), "accept", new Date(T0.getTime() + 60 * M));
 check("Answering after it closed says so", !late1.ok && late1.error === "This offer is closed.");
 
-// Two accept at the same moment.
+// Two request at the same moment, one spot.
 reset([ev("e2", DAY0)]);
 await sodb.startOffers(asStaff(admin), sess("e2"), T0);
 await odb.advanceOffers(new Date(T0.getTime() + 30 * M));
@@ -219,9 +236,65 @@ const [r1, r2] = await Promise.all([
   odb.respondToOffer(stepFor("e2", "t2").id as string, asStaff(t2), "accept", new Date(T0.getTime() + 31 * M)),
 ]);
 const winners = [r1, r2].filter((r) => r.ok).length;
-check("Two accept at once: exactly one gets the spot", winners === 1 && db.event_assignments.filter((a) => a.session_id === "e2" && a.status === "accepted").length === 1 && db.offer_claims.length === 1);
+check("Two request at once: exactly one holds the spot, nobody is placed", winners === 1 && db.offer_claims.length === 1 && db.event_assignments.filter((a) => a.session_id === "e2").length === 0);
 const loser = [r1, r2].find((r) => !r.ok) as { ok: false; error: string };
 check("...the other is told it was just filled, without saying who or why", loser.error.startsWith("Sorry, this shift was just filled") && !of.ORDER_WORDS.test(loser.error));
+
+// Pass: one neutral text, offers carry on to the next person.
+reset([ev("e4", DAY0)]);
+await sodb.startOffers(asStaff(admin), sess("e4"), T0);
+await odb.respondToOffer(stepFor("e4", "t1").id as string, asStaff(t1), "accept", new Date(T0.getTime() + 5 * M));
+texts.length = 0;
+const passed = await odb.releaseHeld(asStaff(admin), stepFor("e4", "t1").id, new Date(T0.getTime() + 40 * M));
+check("Pass: the spot opens again, the request is recorded as Passed", passed.ok && stepFor("e4", "t1").status === "released" && of.STEP_LABEL.released === "Passed" && db.offer_claims.length === 0 && !asg("e4", "t1"));
+check("...one neutral text, never who else asked or why", textsTo(t1).length === 1 && textsTo(t1)[0].message === "This shift has been filled. Thank you for requesting it." && !of.ORDER_WORDS.test(textsTo(t1)[0].message));
+check("...offers carry on to the next person", stepFor("e4", "t2").status === "sent" && textsTo(t2).length === 1);
+
+// Withdraw: like a pass.
+reset([ev("e5", DAY0)]);
+await sodb.startOffers(asStaff(admin), sess("e5"), T0);
+await odb.respondToOffer(stepFor("e5", "t1").id as string, asStaff(t1), "accept", new Date(T0.getTime() + 5 * M));
+texts.length = 0;
+const withdrew = await odb.respondToOffer(stepFor("e5", "t1").id as string, asStaff(t1), "withdraw", new Date(T0.getTime() + 40 * M));
+check("Withdraw: the spot opens, offers carry on, no pass text", withdrew.ok && stepFor("e5", "t1").status === "released" && db.offer_claims.length === 0 && stepFor("e5", "t2").status === "sent" && textsTo(t1).length === 0);
+check("...the page says they withdrew", (await odb.offerForStaff(stepFor("e5", "t1").id as string, asStaff(t1), new Date(T0.getTime() + 41 * M))).state === "withdrawn");
+check("...an admin can no longer approve it", !(await odb.confirmHeld(asStaff(admin), stepFor("e5", "t1").id, new Date(T0.getTime() + 42 * M))).ok);
+check("Withdraw with no request is refused", !(await odb.respondToOffer(stepFor("e5", "t2").id as string, asStaff(t2), "withdraw", new Date(T0.getTime() + 43 * M))).ok);
+
+// Reminder after 2 daytime hours, red after 4, the Applications waiting list.
+reset([ev("e6", DAY0)]);
+await sodb.startOffers(asStaff(admin), sess("e6"), T0);
+await odb.respondToOffer(stepFor("e6", "t1").id as string, asStaff(t1), "accept", new Date(T0.getTime() + 5 * M));
+texts.length = 0;
+await odb.advanceOffers(new Date(T0.getTime() + 124 * M));
+check("No reminder before 2 daytime hours", textsTo(admin).length === 0);
+await odb.advanceOffers(new Date(T0.getTime() + 126 * M));
+check("One reminder after 2 daytime hours to admins and managers with alerts on", textsTo(admin).length === 1 && textsTo(mgr).length === 1 && textsTo(admin).every((t) => t.message.startsWith("Still waiting:")));
+await odb.advanceOffers(new Date(T0.getTime() + 200 * M));
+check("...only once", textsTo(admin).length === 1);
+let waiting = await odb.requestsWaiting(asStaff(admin), new Date(T0.getTime() + 200 * M));
+check("Applications waiting: the person, the event, tier and rank for admins", waiting.length === 1 && waiting[0].name === "Tara Top" && waiting[0].group === "Top" && waiting[0].rank === 1 && waiting[0].sessionId === "e6" && !waiting[0].red);
+waiting = await odb.requestsWaiting(asStaff(admin), new Date(T0.getTime() + 250 * M));
+check("...red after 4 daytime hours, on the list and the Team tab", waiting[0].red && (await odb.runView(asStaff(admin), "e6", new Date(T0.getTime() + 250 * M)))!.held[0].waitingRed);
+check("...nothing for staff", (await odb.requestsWaiting(asStaff(t2))).length === 0);
+const ownList = await odb.requestsWaiting(asStaff({ ...t1, role: "manager" }), new Date(T0.getTime() + 250 * M));
+check("...your own request shows without tier or rank, and you cannot approve it", ownList[0].self && ownList[0].group === "" && ownList[0].rank === null && !(await odb.confirmHeld(asStaff({ ...t1, role: "manager" }), stepFor("e6", "t1").id)).ok);
+const night6 = await odb.advanceOffers(at(MON, 22));
+check("Reminders never go out in quiet hours", night6 === 0);
+
+// Pay floor: the rate when they requested.
+reset([ev("e7", DAY0, {}, { pricing_model: "service_fee" })]);
+await sodb.startOffers(asStaff(admin), sess("e7"), T0);
+await odb.respondToOffer(stepFor("e7", "t1").id as string, asStaff(t1), "accept", new Date(T0.getTime() + 5 * M));
+const reqRate = stepFor("e7", "t1").requested_rate_cents as number | null;
+check("The service fee rate is stored with the request", typeof reqRate === "number" && reqRate > 0);
+stepFor("e7", "t1").requested_rate_cents = 4500;
+await odb.confirmHeld(asStaff(admin), stepFor("e7", "t1").id, new Date(T0.getTime() + 60 * M));
+check("Approving stores the rate when they requested as the pay floor", asg("e7", "t1")?.accepted_rate_cents === 4500);
+reset([ev("e8", DAY0)]);
+await sodb.startOffers(asStaff(admin), sess("e8"), T0);
+await odb.respondToOffer(stepFor("e8", "t1").id as string, asStaff(t1), "accept", new Date(T0.getTime() + 5 * M));
+check("Gratuity events store no requested rate", stepFor("e8", "t1").requested_rate_cents == null);
 
 // Decline.
 reset([ev("e3", DAY0)]);
@@ -236,32 +309,24 @@ check("Team tab: who was offered and when, who declined, who is next and at what
 check("Team tab: tier and rank shown to admins", view!.steps[0].group === "Top" && view!.steps[0].rank === 1);
 check("Team tab: nothing for staff", (await odb.runView(asStaff(t1), "e3")) === null && (await sodb.offersPanel(asStaff(t1), sess("e3"))) === null);
 
-// ===== 8. Holds: wedding, over 150, setting off, all Developing =====
+// ===== 8. Notes on the request: wedding, over 150, all Developing; every tier needs approval =====
 reset([ev("w1", DAY0, { event_type: "Wedding" })]);
 await sodb.startOffers(asStaff(admin), sess("w1"), T0);
 texts.length = 0;
 const held = await odb.respondToOffer(stepFor("w1", "t1").id as string, asStaff(t1), "accept", new Date(T0.getTime() + 5 * M));
-check("Wedding: an accept waits for an admin, not assigned yet", held.ok && held.state === "held" && !asg("w1", "t1") && stepFor("w1", "t1").status === "held");
-check("...the person is told an admin will confirm; admins and managers with alerts on are texted", textsTo(t1).some((t) => t.message.includes("An admin will confirm")) && textsTo(admin).some((t) => t.message.includes("Confirm or release (Wedding)")) && textsTo(mgr).length === 1 && textsTo(mgrQuiet).length === 0);
+check("Wedding: a Top request waits for approval like any other, not assigned yet", held.ok && held.state === "held" && !asg("w1", "t1") && stepFor("w1", "t1").status === "held");
+check("...the wedding is noted on the request and in the admin text", stepFor("w1", "t1").skip_reason === "Wedding" && textsTo(admin).some((t) => t.message.includes("Look closer: Wedding")));
 await odb.advanceOffers(new Date(T0.getTime() + 60 * M));
-check("While held, the spot is taken: nobody else is offered", textsTo(t2).length === 0);
+check("While requested, the spot is taken: nobody else is offered", textsTo(t2).length === 0);
 const stopHeld = await odb.stopRun(asStaff(admin), run("w1").id, new Date(T0.getTime() + 61 * M));
-check("Stop refuses while someone is waiting for a confirm", !stopHeld.ok);
+check("Stop refuses while a request is waiting", !stopHeld.ok);
 const conf = await odb.confirmHeld(asStaff(admin), stepFor("w1", "t1").id, new Date(T0.getTime() + 62 * M));
-check("Confirm: assigned as accepted, told they got it, offers end", conf.ok && asg("w1", "t1")?.status === "accepted" && textsTo(t1).some((t) => t.message.startsWith("You got the shift")) && run("w1").status === "filled");
+check("Approve: assigned as accepted, told they got it, offers end", conf.ok && asg("w1", "t1")?.status === "accepted" && textsTo(t1).some((t) => t.message.startsWith("You got the shift")) && run("w1").status === "filled");
 
 reset([ev("g1", DAY0, { guest_count: 200 })]);
 await sodb.startOffers(asStaff(admin), sess("g1"), T0);
 const big1 = await odb.respondToOffer(stepFor("g1", "t1").id as string, asStaff(t1), "accept", new Date(T0.getTime() + 5 * M));
-check("Over 150 guests: waits for an admin", big1.ok && big1.state === "held" && stepFor("g1", "t1").skip_reason === "Over 150 guests");
-await odb.releaseHeld(asStaff(admin), stepFor("g1", "t1").id, new Date(T0.getTime() + 40 * M));
-check("Release: the spot opens again, they are told it is closed, offers carry on", stepFor("g1", "t1").status === "released" && db.offer_claims.length === 0 && textsTo(t1).some((t) => t.message.includes("is closed")) && stepFor("g1", "t2").status === "sent");
-
-reset([ev("n1", DAY0)]);
-await odb.saveOfferSettings(asStaff(admin), { headStartMin: 30, windowMin: 180, startDaysBefore: 30, assignOnAccept: false });
-await sodb.startOffers(asStaff(admin), sess("n1"), T0);
-const off1 = await odb.respondToOffer(stepFor("n1", "t1").id as string, asStaff(t1), "accept", new Date(T0.getTime() + 5 * M));
-check("Assign on accept switched off: every accept waits", off1.ok && off1.state === "held" && stepFor("n1", "t1").skip_reason === "Assign on accept is off");
+check("Over 150 guests: noted on the request", big1.ok && big1.state === "held" && stepFor("g1", "t1").skip_reason === "Over 150 guests");
 
 reset([ev("dv", DAY0, { bartenders: 2 })]);
 for (const p of ["t1", "t2", "c1", "c2", "m2", "a2"]) db.staff_unavailability.push({ id: `u-${p}`, staff_id: p, start_day: DAY0, end_day: DAY0, note: null });
@@ -269,8 +334,9 @@ await sodb.startOffers(asStaff(admin), sess("dv"), T0);
 const dv1 = await odb.respondToOffer(stepFor("dv", "d1").id as string, asStaff(d1), "accept", new Date(T0.getTime() + 5 * M));
 await odb.advanceOffers(new Date(T0.getTime() + 30 * M));
 const dv2 = await odb.respondToOffer(stepFor("dv", "d2").id as string, asStaff(d2), "accept", new Date(T0.getTime() + 35 * M));
-check("Two bartenders: the first Developing accept is assigned", dv1.ok && dv1.state === "got" && asg("dv", "d1")?.status === "accepted");
-check("...an accept that would make the whole team Developing waits for an admin", dv2.ok && dv2.state === "held" && stepFor("dv", "d2").skip_reason === "Every spot would be Developing" && !asg("dv", "d2"));
+check("Two spots, two requests: both wait, nobody is placed", dv1.ok && dv1.state === "held" && dv2.ok && dv2.state === "held" && !asg("dv", "d1") && !asg("dv", "d2"));
+check("...the request that would make the whole team Developing is noted", stepFor("dv", "d2").skip_reason === "Every spot would be Developing" && !stepFor("dv", "d1").skip_reason);
+check("...with both spots covered by requests, no further offers go out", (await odb.advanceOffers(new Date(T0.getTime() + 200 * M))) >= 0 && db.offer_steps.filter((s) => s.run_id === run("dv").id && s.status === "sent").length === 0);
 
 // ===== 9. Assign by hand, skip, pause, resume, stop =====
 reset([ev("h1", DAY0)]);
@@ -330,11 +396,11 @@ reset([
   ev("austin", dayN(3), {}, { team_market: "austin" }),
 ]);
 db.shift_posts.push({ id: "post1", session_id: "posted", market: "dallas", kind: "open", status: "posted", posted_at: T0.toISOString() });
-const tryAuto = await odb.saveOfferSettings(asStaff(admin), { headStartMin: 30, windowMin: 180, startDaysBefore: 30, assignOnAccept: true, modes: { dallas: "automatic" } });
+const tryAuto = await odb.saveOfferSettings(asStaff(admin), { headStartMin: 30, windowMin: 180, startDaysBefore: 30, modes: { dallas: "automatic" } });
 check("Automatic is refused until the order is reviewed", !tryAuto.ok && /Order reviewed/.test(tryAuto.error));
 check("A manager cannot change settings or mark the order reviewed", !(await odb.markOrderReviewed(asStaff(mgr), "dallas")).ok && !(await odb.saveOfferSettings(asStaff(mgr), {})).ok);
 await odb.markOrderReviewed(asStaff(admin), "dallas", T0);
-const okAuto = await odb.saveOfferSettings(asStaff(admin), { headStartMin: 30, windowMin: 180, startDaysBefore: 30, assignOnAccept: true, modes: { dallas: "automatic" } });
+const okAuto = await odb.saveOfferSettings(asStaff(admin), { headStartMin: 30, windowMin: 180, startDaysBefore: 30, modes: { dallas: "automatic" } });
 check("...and allowed once an admin tapped Order reviewed", okAuto.ok && (await odb.offerSettings()).modes.dallas === "automatic" && (await odb.offerSettings()).reviewed.dallas?.by === "Kenneth Smith");
 const n = await sodb.autoStartOffers(T0);
 check("Automatic starts offers on its own for an event that needs staff within 30 days", n === 1 && !!run("auto") && textsTo(t1).length === 1);
@@ -344,7 +410,7 @@ check("No count on file is flagged on the Team tab", !!panel && panel.noCount &&
 check("Automatic does not start the same event twice", (await sodb.autoStartOffers(new Date(T0.getTime() + 5 * M))) === 0);
 await odb.stopRun(asStaff(admin), run("auto").id, new Date(T0.getTime() + 6 * M));
 check("...and never restarts offers an admin stopped", (await sodb.autoStartOffers(new Date(T0.getTime() + 10 * M))) === 0);
-const startDays = await odb.saveOfferSettings(asStaff(admin), { headStartMin: 30, windowMin: 180, startDaysBefore: 60, assignOnAccept: true });
+const startDays = await odb.saveOfferSettings(asStaff(admin), { headStartMin: 30, windowMin: 180, startDaysBefore: 60 });
 check("Start days is a setting: at 60, the far event starts", startDays.ok && (await sodb.autoStartOffers(new Date(T0.getTime() + 15 * M))) === 1 && !!run("far"));
 
 // ===== 13. The posted shift way stays =====
@@ -369,7 +435,7 @@ const page = await odb.offerForStaff(stepFor("v1", "t1").id as string, asStaff(t
 check("The offer page: the shift summary only, no tier, rank or order", page.state === "open" && Object.keys(page).sort().join(",") === "shift,state,stepId" && !/"grp"|"rank"|"tier"|Top|Core|Developing/.test(JSON.stringify(page)));
 check("An offer not sent yet does not exist for its person", (await odb.offerForStaff(stepFor("v1", "t2").id as string, asStaff(t2), T0)).state === "gone");
 check("Someone else's offer: nothing", (await odb.offerForStaff(stepFor("v1", "t1").id as string, asStaff(c1), T0)).state === "gone" && !(await odb.respondToOffer(stepFor("v1", "t1").id as string, asStaff(c1), "accept", T0)).ok);
-const staffTexts = [of.offerText({ shortDate: "Sat, Apr 17", city: "Dallas", arrive: "5:00 PM", service: "6:00 PM to 10:00 PM", link: "x" }), of.heldText({ date: "Sat, Apr 17" }), of.offerFilledText({ date: "Sat, Apr 17" }), of.offerClosedText({ date: "Sat, Apr 17" })];
+const staffTexts = [of.offerText({ shortDate: "Sat, Apr 17", city: "Dallas", arrive: "5:00 PM", service: "6:00 PM to 10:00 PM", link: "x" }), of.REQUEST_SENT, of.REQUEST_PASSED_TEXT, of.offerFilledText({ date: "Sat, Apr 17" }), of.offerClosedText({ date: "Sat, Apr 17" })];
 check("No text a staff member can get mentions order, tiers, ranks or anyone else", staffTexts.every((t) => !of.ORDER_WORDS.test(t)));
 check("Every text that went to staff in this run is clean too", texts.filter((t) => ![admin, mgr].some((p) => p.phone === t.phone)).every((t) => !of.ORDER_WORDS.test(t.message)));
 

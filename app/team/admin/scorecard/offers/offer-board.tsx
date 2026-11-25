@@ -42,7 +42,6 @@ export default function OfferBoard({ board }: { board: Board }) {
       headStartMin: board.settings.headStartMin,
       windowMin: board.settings.windowMin,
       startDaysBefore: board.settings.startDaysBefore,
-      assignOnAccept: board.settings.assignOnAccept,
       modes: { [market]: mode },
     });
 
@@ -297,7 +296,6 @@ function Settings({ board, canEdit }: { board: Board; canEdit: boolean }) {
   const [headStartMin, setHead] = useState(String(s.headStartMin));
   const [windowHours, setWindow] = useState(String(s.windowMin / 60));
   const [startDaysBefore, setDays] = useState(String(s.startDaysBefore));
-  const [assignOnAccept, setAssign] = useState(s.assignOnAccept);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
 
@@ -305,7 +303,7 @@ function Settings({ board, canEdit }: { board: Board; canEdit: boolean }) {
     setBusy(true);
     setMsg("");
     try {
-      await post({ action: "settings", headStartMin: Number(headStartMin), windowMin: Math.round(Number(windowHours) * 60), startDaysBefore: Number(startDaysBefore), assignOnAccept });
+      await post({ action: "settings", headStartMin: Number(headStartMin), windowMin: Math.round(Number(windowHours) * 60), startDaysBefore: Number(startDaysBefore) });
       setMsg("Saved.");
       router.refresh();
     } catch (err) {
@@ -333,17 +331,8 @@ function Settings({ board, canEdit }: { board: Board; canEdit: boolean }) {
           <input inputMode="numeric" disabled={!canEdit} value={startDaysBefore} onChange={(e) => setDays(e.target.value)} className={input} />
         </label>
       </div>
-      <div className="flex flex-wrap items-center gap-2 mt-3">
-        <span className="text-sm text-[#6B5D52]">Assign on accept</span>
-        <button type="button" disabled={!canEdit} onClick={() => setAssign(true)} className={`${btn} ${assignOnAccept ? "!bg-[#55684A] !text-white" : ""}`}>
-          Yes
-        </button>
-        <button type="button" disabled={!canEdit} onClick={() => setAssign(false)} className={`${btn} ${!assignOnAccept ? "!bg-[#A0412D] !text-white" : ""}`}>
-          No
-        </button>
-      </div>
-      <p className="text-xs text-[#A39585] mt-1">
-        Weddings, events over {s.holdOverGuests} guests, and a team that would be all Developing always wait for an admin to confirm.
+      <p className="text-sm text-[#6B5D52] mt-3" data-approval-note>
+        Every offer someone takes is a request an admin or manager approves or passes, in Suggest and Automatic. Weddings, events over {s.holdOverGuests} guests, and a team that would be all Developing are noted on the request.
       </p>
       {canEdit && (
         <div className="flex items-center gap-3 mt-3">

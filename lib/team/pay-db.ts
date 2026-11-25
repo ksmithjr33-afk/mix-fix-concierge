@@ -181,6 +181,21 @@ async function rateNow(sessionId: string, staffId: string, opts: { accepted?: bo
 }
 
 /**
+ * The service fee rate that applies to someone right now, for a shift request
+ * (lib/team/offers-db.ts): approving stores it as their floor, so the rate is
+ * the one when they asked. Null on a gratuity event. Never throws.
+ */
+export async function rateForRequest(sessionId: string, staffId: string): Promise<number | null> {
+  try {
+    const now = await rateNow(sessionId, staffId, { accepted: false, stored: false });
+    return now && sessionPricingModel(now.session) === "service_fee" ? now.rate.cents : null;
+  } catch (err) {
+    console.error("[offers] rate for request failed:", err instanceof Error ? err.message : String(err));
+    return null;
+  }
+}
+
+/**
  * Store the rate that applies to someone when they accept a service fee event
  * (event_assignments.accepted_rate_cents), so a later tier drop never lowers
  * pay on it. Keeps the first number. Gratuity events store nothing. Never
